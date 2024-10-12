@@ -12,7 +12,7 @@ namespace ftxui {
 
 // TODO: Render only visible items. Dir can contain thousands of items but <90 are diplayed.
 // TODO: - Use reflect decorator to determine the size of rendered table https://github.com/ArthurSonzogni/FTXUI/discussions/423
-Component GridMenu(std::vector<DirItem>* entries, int* selected);
+Component FileList(std::vector<DirItem>* entries, int* selected);
 
 }
 

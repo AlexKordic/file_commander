@@ -1,5 +1,5 @@
 
-#include "menu_grid.hpp"
+#include "file_panel.hpp"
 #include <ftxui/dom/direction.hpp>  // for Direction, Direction::Down, Direction::Left, Direction::Right, Direction::Up
 #include <ftxui/dom/elements.hpp>
 #include <functional>               // for function
@@ -16,7 +16,7 @@ namespace ftxui {
 
 /// @brief Option for the Menu component.
 /// @ingroup component
-struct GridMenuOption {
+struct FileListOption {
   std::vector<DirItem>* entries;  ///> The list of entries.
   Ref<int> selected = 0;       ///> The index of the selected entry.
 
@@ -86,9 +86,9 @@ bool IsHorizontal(Direction direction) {
 
 /// @brief A list of items. The user can navigate through them.
 /// @ingroup component
-class GridMenu : public ComponentBase, public GridMenuOption {
+class FileList : public ComponentBase, public FileListOption {
  public:
-  explicit GridMenu(std::vector<DirItem>* entries, int* selected) {
+  explicit FileList(std::vector<DirItem>* entries, int* selected) {
     this->entries = entries;
     this->selected = Ref<int>(selected);
   }
@@ -166,10 +166,10 @@ class GridMenu : public ComponentBase, public GridMenuOption {
       };
       elements.push_back(hbox({
         wrap(data.path.filename().native()) | xflex_grow,
-        wrap(std::to_string(data.size)) | xflex_shrink,
+        wrap(std::to_string(data.size)),
         separatorLight(),
-        wrap(data.get_time()) | xflex_shrink
-      }) | xflex_grow);
+        wrap(data.get_time())
+      }));
       // , wrap(std::to_string(data.size)), wrap(data.get_time())});
     }
 
@@ -517,6 +517,6 @@ class GridMenu : public ComponentBase, public GridMenuOption {
   std::vector<float> animation_foreground_;
 };
 
-Component ftxui::GridMenu(std::vector<DirItem>* entries, int* selected) {
-  return std::make_shared<::GridMenu>(entries, selected);
+Component ftxui::FileList(std::vector<DirItem>* entries, int* selected) {
+  return std::make_shared<::FileList>(entries, selected);
 }

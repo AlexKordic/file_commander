@@ -7,7 +7,7 @@
 
 #include <ftxui-grid-container/grid-container.hpp>
 
-#include "menu_grid.hpp"
+#include "file_panel.hpp"
 
 #include "commander.h"
 #include "log.hpp"
@@ -30,7 +30,7 @@ int main() {
     l.w(item.type == DirItem::Type::directory_file ? "dir" : "file", item.path.filename().native(), {{"t", item.w_time}, {"size", item.size}});
   }
   // https://github.com/ArthurSonzogni/FTXUI/discussions/212
-  Component menu = GridMenu(&dir.items, &dir.cursor_pos);
+  Component menu = FileList(&dir.items, &dir.cursor_pos);
   
   auto screen = ScreenInteractive::Fullscreen();
   Component renderer = Renderer(menu, [&]() {

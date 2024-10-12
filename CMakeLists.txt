@@ -33,7 +33,7 @@ FetchContent_Declare(
 FetchContent_MakeAvailable(ftxui)
 FetchContent_MakeAvailable(ftxui-grid-container)
 FetchContent_MakeAvailable(Boost)
-add_executable(fc main.cpp log.cpp err.cpp commander.cpp menu_grid.cpp)
+add_executable(fc main.cpp log.cpp err.cpp commander.cpp file_panel.cpp)
 target_link_libraries(fc
   PRIVATE ftxui-grid-container Boost::filesystem
 )
