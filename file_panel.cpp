@@ -2,13 +2,15 @@
 #include "file_panel.hpp"
 #include <ftxui/dom/direction.hpp>  // for Direction, Direction::Down, Direction::Left, Direction::Right, Direction::Up
 #include <ftxui/dom/elements.hpp>
-#include <functional>               // for function
-#include <string>                   // for operator+, string
-#include <utility>                  // for move
-#include <vector>                   // for vector, __alloc_traits<>::value_type
+#include <functional>  // for function
+#include <string>      // for operator+, string
+#include <utility>     // for move
+#include <vector>      // for vector, __alloc_traits<>::value_type
 
 #include <ftxui/component/event.hpp>  // for Event, Event::ArrowDown, Event::ArrowLeft, Event::ArrowRight, Event::ArrowUp, Event::End, Event::Home, Event::PageDown, Event::PageUp, Event::Return, Event::Tab, Event::TabReverse
-#include <ftxui/dom/table.hpp>      // for Table, TableSelection
+#include <ftxui/dom/table.hpp>        // for Table, TableSelection
+
+#include "theme.hpp"
 
 using namespace ftxui;
 
@@ -17,13 +19,13 @@ namespace ftxui {
 /// @brief Option for the Menu component.
 /// @ingroup component
 struct FileListOption {
-  std::vector<DirItem>* entries;  ///> The list of entries.
-  Ref<int> selected = 0;       ///> The index of the selected entry.
+  std::vector<DirItem>* entries;       ///> The list of entries.
+  Ref<int>              selected = 0;  ///> The index of the selected entry.
 
   // Style:
-  UnderlineOption underline;
-  MenuEntryOption entries_option;
-  Direction direction = Direction::Down;
+  UnderlineOption          underline;
+  MenuEntryOption          entries_option;
+  Direction                direction = Direction::Down;
   std::function<Element()> elements_prefix;
   std::function<Element()> elements_infix;
   std::function<Element()> elements_postfix;
@@ -31,9 +33,8 @@ struct FileListOption {
   // Observers:
   std::function<void()> on_change;  ///> Called when the selected entry changes.
   std::function<void()> on_enter;   ///> Called when the user presses enter.
-  Ref<int> focused_entry = 0;
+  Ref<int>              focused_entry = 0;
 };
-
 
 namespace {
 
@@ -46,7 +47,7 @@ constexpr const T& clamp(const T& v, const T& lo, const T& hi) {
 
 Element DefaultOptionTransform(const EntryState& state) {
   std::string label = (state.active ? "> " : "  ") + state.label;  // NOLINT
-  Element e = text(std::move(label));
+  Element     e     = text(std::move(label));
   if (state.focused) {
     e = e | inverted;
   }
@@ -58,24 +59,24 @@ Element DefaultOptionTransform(const EntryState& state) {
 
 bool IsInverted(Direction direction) {
   switch (direction) {
-    case Direction::Up:
-    case Direction::Left:
-      return true;
-    case Direction::Down:
-    case Direction::Right:
-      return false;
+  case Direction::Up:
+  case Direction::Left:
+    return true;
+  case Direction::Down:
+  case Direction::Right:
+    return false;
   }
   return false;  // NOT_REACHED()
 }
 
 bool IsHorizontal(Direction direction) {
   switch (direction) {
-    case Direction::Left:
-    case Direction::Right:
-      return true;
-    case Direction::Down:
-    case Direction::Up:
-      return false;
+  case Direction::Left:
+  case Direction::Right:
+    return true;
+  case Direction::Down:
+  case Direction::Up:
+    return false;
   }
   return false;  // NOT_REACHED()
 }
@@ -89,7 +90,7 @@ bool IsHorizontal(Direction direction) {
 class FileList : public ComponentBase, public FileListOption {
  public:
   explicit FileList(std::vector<DirItem>* entries, int* selected) {
-    this->entries = entries;
+    this->entries  = entries;
     this->selected = Ref<int>(selected);
   }
 
@@ -111,10 +112,10 @@ class FileList : public ComponentBase, public FileListOption {
       SelectedTakeFocus();
     }
     boxes_.resize(size());
-    selected() = ftxui::clamp(selected(), 0, size() - 1);
+    selected()         = ftxui::clamp(selected(), 0, size() - 1);
     selected_previous_ = ftxui::clamp(selected_previous_, 0, size() - 1);
-    selected_focus_ = ftxui::clamp(selected_focus_, 0, size() - 1);
-    focused_entry() = ftxui::clamp(focused_entry(), 0, size() - 1);
+    selected_focus_    = ftxui::clamp(selected_focus_, 0, size() - 1);
+    focused_entry()    = ftxui::clamp(focused_entry(), 0, size() - 1);
   }
 
   void OnAnimation(animation::Params& params) override {
@@ -132,7 +133,7 @@ class FileList : public ComponentBase, public FileListOption {
     Clamp();
     UpdateAnimationTarget();
 
-    Elements elements;
+    Elements   elements;
     const bool is_menu_focused = Focused();
     if (elements_prefix) {
       elements.push_back(elements_prefix());
@@ -143,11 +144,11 @@ class FileList : public ComponentBase, public FileListOption {
       Element e = text(state.label);
       if (state.focused) {
         // Changes on mouse move and up/down
-        e = e | inverted | bold;
+        e = e | theme().files_focused;
       }
       if (state.active) {
         // Changes on scroll and up/down
-        e = e | color(Color::Gold1);
+        e = e | theme().files_selected;
       }
       return e;
     };
@@ -157,19 +158,19 @@ class FileList : public ComponentBase, public FileListOption {
       if (i != 0 && elements_infix) {
         elements.push_back(elements_infix());
       }
-      const bool is_focused = (focused_entry() == i) && is_menu_focused;
-      const bool is_selected = (selected() == i);
-      const auto& data = entries->at(i);
-      auto focus_management = (selected_focus_ != i) ? ftxui::nothing : is_menu_focused ? ftxui::focus : ftxui::select;
-      auto wrap = [&](std::string x)->Element {
-        return transform(EntryState{std::move(x), false, is_selected, is_focused}) | AnimatedColorStyle(i) | reflect(boxes_[i]) | focus_management;
+      const auto& data             = entries->at(i);
+      const bool  is_focused       = (focused_entry() == i) && is_menu_focused;
+      const bool  is_selected      = data.selected;
+      auto        focus_management = (selected_focus_ != i) ? ftxui::nothing : is_menu_focused ? ftxui::focus
+                                                                                               : ftxui::select;
+      auto        wrap             = [&](std::string x) -> Element {
+        return transform(EntryState{std::move(x), false, is_selected, is_focused}) | AnimatedColorStyle(i) | theme().file_type(data.type);
       };
-      elements.push_back(hbox({
-        wrap(data.path.filename().native()) | xflex_grow,
-        wrap(std::to_string(data.size)),
-        separatorLight(),
-        wrap(data.get_time())
-      }));
+      elements.push_back(hbox({wrap(data.path.filename().native()) | xflex_grow,
+                               wrap(std::to_string(data.size)),
+                               separatorLight(),
+                               wrap(data.get_time())})
+                         | focus_management | reflect(boxes_[i]));
       // , wrap(std::to_string(data.size)), wrap(data.get_time())});
     }
 
@@ -181,8 +182,7 @@ class FileList : public ComponentBase, public FileListOption {
       std::reverse(elements.begin(), elements.end());
     }
 
-    const Element bar =
-        IsHorizontal() ? hbox(std::move(elements)) : vbox(std::move(elements));
+    const Element bar = IsHorizontal() ? hbox(std::move(elements)) : vbox(std::move(elements));
 
     if (!underline.enabled) {
       return bar | reflect(box_);
@@ -190,81 +190,81 @@ class FileList : public ComponentBase, public FileListOption {
 
     if (IsHorizontal()) {
       return vbox({
-                 bar | xflex,
-                 separatorHSelector(first_, second_,  //
-                                    underline.color_active,
-                                    underline.color_inactive),
-             }) |
-             reflect(box_);
+               bar | xflex,
+               separatorHSelector(first_, second_,  //
+                                  underline.color_active,
+                                  underline.color_inactive),
+             })
+        | reflect(box_);
     } else {
       return hbox({
-                 separatorVSelector(first_, second_,  //
-                                    underline.color_active,
-                                    underline.color_inactive),
-                 bar | yflex,
-             }) |
-             reflect(box_);
+               separatorVSelector(first_, second_,  //
+                                  underline.color_active,
+                                  underline.color_inactive),
+               bar | yflex,
+             })
+        | reflect(box_);
     }
   }
 
   void SelectedTakeFocus() {
     selected_previous_ = selected();
-    selected_focus_ = selected();
+    selected_focus_    = selected();
   }
 
   void OnUp() {
     switch (direction) {
-      case Direction::Up:
-        selected()++;
-        break;
-      case Direction::Down:
-        selected()--;
-        break;
-      case Direction::Left:
-      case Direction::Right:
-        break;
+    case Direction::Up:
+      selected()++;
+      break;
+    case Direction::Down:
+      selected()--;
+      break;
+    case Direction::Left:
+    case Direction::Right:
+      break;
     }
   }
 
   void OnDown() {
     switch (direction) {
-      case Direction::Up:
-        selected()--;
-        break;
-      case Direction::Down:
-        selected()++;
-        break;
-      case Direction::Left:
-      case Direction::Right:
-        break;
+    case Direction::Up:
+      selected()--;
+      break;
+    case Direction::Down:
+      selected()++;
+      break;
+    case Direction::Left:
+    case Direction::Right:
+      break;
     }
   }
 
   void OnLeft() {
     switch (direction) {
-      case Direction::Left:
-        selected()++;
-        break;
-      case Direction::Right:
-        selected()--;
-        break;
-      case Direction::Down:
-      case Direction::Up:
-        break;
+    case Direction::Left:
+      selected()++;
+      break;
+    case Direction::Right:
+      selected()--;
+      break;
+    case Direction::Down:
+    case Direction::Up:
+      break;
     }
   }
 
   void OnRight() {
     switch (direction) {
-      case Direction::Left:
-        selected()--;
-        break;
-      case Direction::Right:
-        selected()++;
-        break;
-      case Direction::Down:
-      case Direction::Up:
-        break;
+    case Direction::Left:
+      selected()--;
+      break;
+    case Direction::Right:
+      selected()++;
+      break;
+    case Direction::Down:
+    case Direction::Up:
+      break;
     }
   }
 
@@ -331,13 +331,11 @@ class FileList : public ComponentBase, public FileListOption {
   }
 
   bool OnMouseEvent(Event event) {
-    if (event.mouse().button == Mouse::WheelDown ||
-        event.mouse().button == Mouse::WheelUp) {
+    if (event.mouse().button == Mouse::WheelDown || event.mouse().button == Mouse::WheelUp) {
       return OnMouseWheel(event);
     }
 
-    if (event.mouse().button != Mouse::None &&
-        event.mouse().button != Mouse::Left) {
+    if (event.mouse().button != Mouse::None && event.mouse().button != Mouse::Left) {
       return false;
     }
     if (!CaptureMouse(event)) {
@@ -350,16 +348,20 @@ class FileList : public ComponentBase, public FileListOption {
 
       TakeFocus();
       focused_entry() = i;
-
-      if (event.mouse().button == Mouse::Left &&
-          event.mouse().motion == Mouse::Pressed) {
-        if (selected() != i) {
-          selected() = i;
-          selected_previous_ = selected();
-          OnChange();
-        }
-        return true;
+      if (selected() != i) {
+        selected()         = i;
+        selected_previous_ = selected();
+        OnChange();
       }
+      // if (event.mouse().button == Mouse::Left &&
+      //     event.mouse().motion == Mouse::Pressed) {
+      //   if (selected() != i) {
+      //     selected() = i;
+      //     selected_previous_ = selected();
+      //     OnChange();
+      //   }
+      //   return true;
+      // }
     }
     return false;
   }
@@ -378,11 +380,17 @@ class FileList : public ComponentBase, public FileListOption {
     }
 
     selected() = ftxui::clamp(selected(), 0, size() - 1);
-
-    if (selected() != old_selected) {
+    if (selected() != selected_previous_) {
+      selected_previous_ = selected();
       SelectedTakeFocus();
       OnChange();
     }
+    focused_entry() = selected();
+
+    // if (selected() != old_selected) {
+    //   SelectedTakeFocus();
+    //   OnChange();
+    // }
     return true;
   }
 
@@ -415,19 +423,19 @@ class FileList : public ComponentBase, public FileListOption {
 
     const bool is_menu_focused = Focused();
     for (int i = 0; i < size(); ++i) {
-      const bool is_focused = (focused_entry() == i) && is_menu_focused;
+      const bool is_focused  = (focused_entry() == i) && is_menu_focused;
       const bool is_selected = (selected() == i);
-      float target = is_selected ? 1.F : is_focused ? 0.5F
-                                                    : 0.F;  // NOLINT
+      float      target      = is_selected ? 1.F : is_focused ? 0.5F
+                                                              : 0.F;  // NOLINT
       if (animator_background_[i].to() != target) {
         animator_background_[i] = animation::Animator(
-            &animation_background_[i], target,
-            entries_option.animated_colors.background.duration,
-            entries_option.animated_colors.background.function);
+          &animation_background_[i], target,
+          entries_option.animated_colors.background.duration,
+          entries_option.animated_colors.background.function);
         animator_foreground_[i] = animation::Animator(
-            &animation_foreground_[i], target,
-            entries_option.animated_colors.foreground.duration,
-            entries_option.animated_colors.foreground.function);
+          &animation_foreground_[i], target,
+          entries_option.animated_colors.foreground.duration,
+          entries_option.animated_colors.foreground.function);
       }
     }
   }
@@ -435,17 +443,11 @@ class FileList : public ComponentBase, public FileListOption {
   Decorator AnimatedColorStyle(int i) {
     Decorator style = nothing;
     if (entries_option.animated_colors.foreground.enabled) {
-      style = style | color(Color::Interpolate(
-                          animation_foreground_[i],
-                          entries_option.animated_colors.foreground.inactive,
-                          entries_option.animated_colors.foreground.active));
+      style = style | color(Color::Interpolate(animation_foreground_[i], entries_option.animated_colors.foreground.inactive, entries_option.animated_colors.foreground.active));
     }
 
     if (entries_option.animated_colors.background.enabled) {
-      style = style | bgcolor(Color::Interpolate(
-                          animation_background_[i],
-                          entries_option.animated_colors.background.inactive,
-                          entries_option.animated_colors.background.active));
+      style = style | bgcolor(Color::Interpolate(animation_background_[i], entries_option.animated_colors.background.inactive, entries_option.animated_colors.background.active));
     }
     return style;
   }
@@ -455,32 +457,31 @@ class FileList : public ComponentBase, public FileListOption {
       return;
     }
 
-    if (FirstTarget() == animator_first_.to() &&
-        SecondTarget() == animator_second_.to()) {
+    if (FirstTarget() == animator_first_.to() && SecondTarget() == animator_second_.to()) {
       return;
     }
 
     if (FirstTarget() >= animator_first_.to()) {
       animator_first_ = animation::Animator(
-          &first_, FirstTarget(), underline.follower_duration,
-          underline.follower_function, underline.follower_delay);
+        &first_, FirstTarget(), underline.follower_duration,
+        underline.follower_function, underline.follower_delay);
 
       animator_second_ = animation::Animator(
-          &second_, SecondTarget(), underline.leader_duration,
-          underline.leader_function, underline.leader_delay);
+        &second_, SecondTarget(), underline.leader_duration,
+        underline.leader_function, underline.leader_delay);
     } else {
       animator_first_ = animation::Animator(
-          &first_, FirstTarget(), underline.leader_duration,
-          underline.leader_function, underline.leader_delay);
+        &first_, FirstTarget(), underline.leader_duration,
+        underline.leader_function, underline.leader_delay);
 
       animator_second_ = animation::Animator(
-          &second_, SecondTarget(), underline.follower_duration,
-          underline.follower_function, underline.follower_delay);
+        &second_, SecondTarget(), underline.follower_duration,
+        underline.follower_function, underline.follower_delay);
     }
   }
 
-  bool Focusable() const final { return entries->size(); }
-  int size() const { return int(entries->size()); }
+  bool  Focusable() const final { return entries->size(); }
+  int   size() const { return int(entries->size()); }
   float FirstTarget() {
     if (boxes_.empty()) {
       return 0.F;
@@ -500,21 +501,21 @@ class FileList : public ComponentBase, public FileListOption {
 
  protected:
   int selected_previous_ = selected();
-  int selected_focus_ = selected();
+  int selected_focus_    = selected();
 
   // Mouse click support:
   std::vector<Box> boxes_;
-  Box box_;
+  Box              box_;
 
   // Animation support:
-  float first_ = 0.F;
-  float second_ = 0.F;
-  animation::Animator animator_first_ = animation::Animator(&first_, 0.F);
-  animation::Animator animator_second_ = animation::Animator(&second_, 0.F);
+  float                            first_           = 0.F;
+  float                            second_          = 0.F;
+  animation::Animator              animator_first_  = animation::Animator(&first_, 0.F);
+  animation::Animator              animator_second_ = animation::Animator(&second_, 0.F);
   std::vector<animation::Animator> animator_background_;
   std::vector<animation::Animator> animator_foreground_;
-  std::vector<float> animation_background_;
-  std::vector<float> animation_foreground_;
+  std::vector<float>               animation_background_;
+  std::vector<float>               animation_foreground_;
 };
 
 Component ftxui::FileList(std::vector<DirItem>* entries, int* selected) {

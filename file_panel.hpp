@@ -3,6 +3,7 @@
 #define _PERUN_FC_GRID_IN_MENU_
 
 #include <ftxui/component/component.hpp>
+#include <ftxui/component/screen_interactive.hpp>
 
 #include "commander.h"
 

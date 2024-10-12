@@ -1,0 +1,37 @@
+
+#ifndef _PERUN_FC_THEME_
+#define _PERUN_FC_THEME_
+
+#include <ftxui/dom/elements.hpp>
+#include "boost/filesystem/file_status.hpp"
+//#include <ftxui/dom/node.hpp>
+
+struct Theme {
+  Theme();
+  
+  ftxui::Decorator 
+    files_border,
+    files_selected,
+    files_focused,
+    fileskind_dir,
+
+    file_status_error,
+    file_file_not_found,
+    file_regular_file,
+    file_directory_file,
+    file_symlink_file,
+    file_block_file,
+    file_character_file,
+    file_fifo_file,
+    file_socket_file,
+    file_reparse_file,
+    file_type_unknown,
+
+    unused;
+  
+  ftxui::Decorator file_type(boost::filesystem::file_type t);
+};
+
+Theme& theme();
+
+#endif // _PERUN_FC_THEME_

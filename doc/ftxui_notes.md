@@ -2,8 +2,15 @@
 # Concepts
 
 Svaki primer `ScreenInteractive`a ima 2 faze:
-- Skup interaktivnih komponenti
+- Skup interaktivnih komponenti povezanih u parent<>child veze
 - Funckiju koja dodaje elemente kako bi napravio finalni render komponenti
+
+Pogledaj `flexbox_gallery.cpp`. Postoji `main_container` i `main_renderer`. 
+- main_container definise strukturu navigacije. Ko je desno od koga itd.
+- main_renderer uzima root kontejner i definise funkciju koja ce da renderuje elemente.
+
+> Da li treba Component da sklapa elemente???
+???
 
 ----
 
