@@ -1,6 +1,7 @@
 
 #include "menu_grid.hpp"
 #include <ftxui/dom/direction.hpp>  // for Direction, Direction::Down, Direction::Left, Direction::Right, Direction::Up
+#include <ftxui/dom/elements.hpp>
 #include <functional>               // for function
 #include <string>                   // for operator+, string
 #include <utility>                  // for move
@@ -136,27 +137,25 @@ class GridMenu : public ComponentBase, public GridMenuOption {
     if (elements_prefix) {
       elements.push_back(elements_prefix());
     }
-    // // // elements.reserve(size());
+    elements.reserve(size());
 
     auto default_transform = [](const EntryState& state) -> Element {
       Element e = text(state.label);
       if (state.focused) {
-        e = e | inverted;
+        // Changes on mouse move and up/down
+        e = e | inverted | bold;
       }
       if (state.active) {
-        e = e | bold;
+        // Changes on scroll and up/down
+        e = e | color(Color::Gold1);
       }
       return e;
     };
     auto transform = entries_option.transform ? entries_option.transform : default_transform;
-
-    // Construct table
-    std::vector<std::vector<Element>> rows;
-    rows.reserve(size() + 1);
-    rows.push_back({text("Name"), text("Size"), text("MTime")});
+    // rows.push_back({text("Name"), text("Size"), text("MTime")});
     for (int i = 0; i < size(); ++i) {
       if (i != 0 && elements_infix) {
-        rows.push_back({elements_infix()});
+        elements.push_back(elements_infix());
       }
       const bool is_focused = (focused_entry() == i) && is_menu_focused;
       const bool is_selected = (selected() == i);
@@ -165,27 +164,14 @@ class GridMenu : public ComponentBase, public GridMenuOption {
       auto wrap = [&](std::string x)->Element {
         return transform(EntryState{std::move(x), false, is_selected, is_focused}) | AnimatedColorStyle(i) | reflect(boxes_[i]) | focus_management;
       };
-      rows.push_back({wrap(data.path.filename().native()), wrap(std::to_string(data.size)), wrap(data.get_time())});
+      elements.push_back(hbox({
+        wrap(data.path.filename().native()) | xflex_grow,
+        wrap(std::to_string(data.size)) | xflex_shrink,
+        separatorLight(),
+        wrap(data.get_time()) | xflex_shrink
+      }) | xflex_grow);
+      // , wrap(std::to_string(data.size)), wrap(data.get_time())});
     }
-    Table table(rows);
-    table.SelectRow(0).Decorate(xflex_grow);
-    // table.SelectAll().Border(LIGHT);
-    // Add border around the first column.
-    // table.SelectColumn(0).Border(LIGHT);
-    // Make first row bold with a double border.
-    table.SelectRow(0).Decorate(bold);
-    table.SelectRow(0).SeparatorVertical(LIGHT);
-    // table.SelectRow(0).Border(DOUBLE);
-    // Select row from the second to the last.
-    auto content = table.SelectRows(1, -1);
-    // Alternate in between 3 colors.
-    content.DecorateCellsAlternateRow(color(Color::Blue), 3, 0);
-    content.DecorateCellsAlternateRow(color(Color::Cyan), 3, 1);
-    content.DecorateCellsAlternateRow(color(Color::White), 3, 2);
-    // Align right
-    table.SelectColumn(1).DecorateCells(align_right);
-    table.SelectColumn(2).DecorateCells(align_right);
-    elements.push_back(table.Render());
 
     if (elements_postfix) {
       elements.push_back(elements_postfix());
