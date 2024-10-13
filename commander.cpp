@@ -2,6 +2,7 @@
 #include "commander.h"
 #include "boost/filesystem/file_status.hpp"
 
+#include <algorithm>
 #include <boost/filesystem.hpp>
 using namespace boost::filesystem;
 using namespace boost::system;
@@ -61,4 +62,18 @@ Err Dir::refresh(DirItem::P& p) {
     }
   });
   return Err();
+}
+
+Dir::Stats Dir::calculate() {
+  Dir::Stats s;
+  s.items_total = items.size();
+  for(DirItem& item : items) {
+    if(item.selected) {
+      s.items_selected += 1;
+      s.bytes_selected += item.size;
+    }
+    s.bytes_total += item.size;
+    s.largest_item_bytes = std::max(s.largest_item_bytes, item.size);
+  }
+  return s;
 }

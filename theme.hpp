@@ -2,14 +2,18 @@
 #ifndef _PERUN_FC_THEME_
 #define _PERUN_FC_THEME_
 
+#include <ftxui/component/event.hpp>
 #include <ftxui/dom/elements.hpp>
 #include "boost/filesystem/file_status.hpp"
 //#include <ftxui/dom/node.hpp>
 
 struct Theme {
   Theme();
+
+  ftxui::Event key_files_select;
   
   ftxui::Decorator 
+    files_path,
     files_border,
     files_selected,
     files_focused,

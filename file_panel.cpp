@@ -167,7 +167,7 @@ class FileList : public ComponentBase, public FileListOption {
         return transform(EntryState{std::move(x), false, is_selected, is_focused}) | AnimatedColorStyle(i) | theme().file_type(data.type);
       };
       elements.push_back(hbox({wrap(data.path.filename().native()) | xflex_grow,
-                               wrap(std::to_string(data.size)),
+                               (data.is_dir() ? text("") : wrap(std::to_string(data.size))),
                                separatorLight(),
                                wrap(data.get_time())})
                          | focus_management | reflect(boxes_[i]));
@@ -305,11 +305,17 @@ class FileList : public ComponentBase, public FileListOption {
       if (event == Event::End) {
         selected() = size() - 1;
       }
-      if (event == Event::Tab && size()) {
-        selected() = (selected() + 1) % size();
-      }
-      if (event == Event::TabReverse && size()) {
-        selected() = (selected() + size() - 1) % size();
+
+      // Skip tab actions
+      // if (event == Event::Tab && size()) {
+      //   selected() = (selected() + 1) % size();
+      // }
+      // if (event == Event::TabReverse && size()) {
+      //   selected() = (selected() + size() - 1) % size();
+      // }
+      if (event == theme().key_files_select) {
+        entries->at(focused_entry()).selected = !entries->at(focused_entry()).selected;
+        OnDown();
       }
 
       selected() = ftxui::clamp(selected(), 0, size() - 1);

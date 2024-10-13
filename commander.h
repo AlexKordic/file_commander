@@ -36,6 +36,7 @@ struct DirItem {
   DirItem(P p, Type type, Perms perms);
   std::string to_string() const;
   std::string get_time() const;
+  bool is_dir() const { return type == Type::directory_file; }
 };
 
 struct Dir {
@@ -44,6 +45,11 @@ struct Dir {
   std::vector<DirItem> items;
   Orderby order_by = Orderby::NAME_ASC;
   int cursor_pos = 0;
+
+  struct Stats {
+    int64_t items_selected=0, items_total=0, bytes_selected=0, bytes_total=0, largest_item_bytes=0;
+  };
+  Stats calculate();
 
   Err refresh(DirItem::P& path);
 };

@@ -5,6 +5,7 @@
 #include <ftxui/dom/table.hpp>
 
 #include <ftxui-grid-container/grid-container.hpp>
+#include <string>
 
 #include "file_panel.hpp"
 #include "theme.hpp"
@@ -29,14 +30,18 @@ struct Panel {
   }
 
   Element render_header() {
-    return text(dir.path.native()) | color(Color::LightGoldenrod2Ter);
+    return text(dir.path.native()) | theme().files_path;
   }
   Element render_files() {
-    return files->Render() | vscroll_indicator | frame | theme().files_border;
+    return files->Render() | vscroll_indicator | yframe | theme().files_border;
+  }
+  Element render_selection() {
+    auto s = dir.calculate();
+    return text("sel " + std::to_string(s.items_selected) + "/" + std::to_string(s.items_total) + " bytes " + std::to_string(s.bytes_selected) + "/" + std::to_string(s.bytes_total));
   }
   Element render() {
     // return Renderer(files, [&]() {
-      return vbox({render_header(), render_files()});
+      return vbox({render_header(), render_selection(), render_files()});
     // });
   }
 };

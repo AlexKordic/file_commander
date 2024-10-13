@@ -6,6 +6,9 @@
 using namespace ftxui;
 
 Theme::Theme() {
+  key_files_select = Event::Character(' ');
+
+  files_path = color(Color::LightGoldenrod2Ter);
   files_border = borderStyled(Color::DarkOliveGreen3Ter);
   files_selected = bgcolor(Color::Gold1);
   files_focused = color(Color::DarkOliveGreen2) | inverted | bold;

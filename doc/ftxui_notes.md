@@ -25,4 +25,25 @@ A `Component` is a shared pointer to a `ComponentBase`. The latter defines:
 
 `Component` are used to render dynamic user interface, producing multiple frame, and updating its state on events.
 
+# Interested people
+
+I made it as a subcomponent for a directory browser widget that I'm currently working on. 
+  - https://github.com/ArthurSonzogni/FTXUI/discussions/593#discussioncomment-6632945
+  - https://github.com/mr-mocap/cli-6502-playground/blob/master/app/ui/components/list.hpp
+
+# How to
+
+Change focus https://github.com/ArthurSonzogni/FTXUI/discussions/895
+
+Scrollable requirements https://github.com/ArthurSonzogni/FTXUI/discussions/757
+
+Termina app example https://github.com/ArthurSonzogni/FTXUI/discussions/886
+
+?? https://github.com/cosargozukirmizi/tui-prevth
+
+there is hyperlink element decorator
+
+File open dialog https://github.com/mr-mocap/cli-6502-playground/blob/master/app/ui/components/directorybrowser.cpp
+
+
 
