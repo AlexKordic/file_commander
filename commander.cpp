@@ -47,11 +47,9 @@ Err Dir::refresh(DirItem::P& p) {
   this->path = p;
   // Sort
   std::sort(items.begin(), items.end(), [&](DirItem const& a, DirItem const& b) -> int {
-    if(a.type == DirItem::Type::directory_file && b.type == DirItem::Type::directory_file) {
-      return a.path.filename() < b.path.filename();
-    }
-    if(a.type == DirItem::Type::directory_file && b.type != DirItem::Type::directory_file) return true;
-    if(a.type != DirItem::Type::directory_file && b.type == DirItem::Type::directory_file) return false;
+    const bool a_is_dir = a.type == DirItem::Type::directory_file;
+    const bool b_is_dir = b.type == DirItem::Type::directory_file;
+    if(a_is_dir != b_is_dir) return a_is_dir;
     // file to file
     switch(order_by) {
       case Orderby::NAME_ASC: return a.path.filename() < b.path.filename();
