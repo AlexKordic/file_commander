@@ -37,7 +37,10 @@ struct Panel {
   }
   Element render_selection() {
     auto s = dir.calculate();
-    return text("sel " + std::to_string(s.items_selected) + "/" + std::to_string(s.items_total) + " bytes " + std::to_string(s.bytes_selected) + "/" + std::to_string(s.bytes_total));
+    return hbox({
+      text("sel " + std::to_string(s.items_selected) + "/" + std::to_string(s.items_total)),
+      text(" bytes "), coloredInt(s.bytes_selected), text("/"), coloredInt(s.bytes_total * 3141516.141516)
+    });
   }
   Element render() {
     // return Renderer(files, [&]() {

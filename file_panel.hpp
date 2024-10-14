@@ -7,6 +7,7 @@
 
 #include "commander.h"
 
+#include <cstdint>
 #include <vector>
 
 namespace ftxui {
@@ -14,6 +15,8 @@ namespace ftxui {
 // TODO: Render only visible items. Dir can contain thousands of items but <90 are diplayed.
 // TODO: - Use reflect decorator to determine the size of rendered table https://github.com/ArthurSonzogni/FTXUI/discussions/423
 Component FileList(std::vector<DirItem>* entries, int* selected);
+
+Element coloredInt(int64_t n);
 
 }
 

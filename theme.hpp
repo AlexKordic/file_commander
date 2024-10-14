@@ -11,6 +11,8 @@ struct Theme {
   Theme();
 
   ftxui::Event key_files_select;
+
+  std::vector<ftxui::Color> filesize_colors;
   
   ftxui::Decorator 
     files_path,

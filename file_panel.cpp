@@ -1,16 +1,20 @@
 
 #include "file_panel.hpp"
+#include "theme.hpp"
+
+#include <ftxui/component/component.hpp>
 #include <ftxui/dom/direction.hpp>  // for Direction, Direction::Down, Direction::Left, Direction::Right, Direction::Up
 #include <ftxui/dom/elements.hpp>
-#include <functional>  // for function
-#include <string>      // for operator+, string
-#include <utility>     // for move
-#include <vector>      // for vector, __alloc_traits<>::value_type
 
 #include <ftxui/component/event.hpp>  // for Event, Event::ArrowDown, Event::ArrowLeft, Event::ArrowRight, Event::ArrowUp, Event::End, Event::Home, Event::PageDown, Event::PageUp, Event::Return, Event::Tab, Event::TabReverse
 #include <ftxui/dom/table.hpp>        // for Table, TableSelection
 
-#include "theme.hpp"
+#include <algorithm>
+#include <cstdint>
+#include <functional>  // for function
+#include <string>      // for operator+, string
+#include <utility>     // for move
+#include <vector>      // for vector, __alloc_traits<>::value_type
 
 using namespace ftxui;
 
@@ -55,18 +59,6 @@ Element DefaultOptionTransform(const EntryState& state) {
     e = e | bold;
   }
   return e;
-}
-
-bool IsInverted(Direction direction) {
-  switch (direction) {
-  case Direction::Up:
-  case Direction::Left:
-    return true;
-  case Direction::Down:
-  case Direction::Right:
-    return false;
-  }
-  return false;  // NOT_REACHED()
 }
 
 bool IsHorizontal(Direction direction) {
@@ -167,20 +159,19 @@ class FileList : public ComponentBase, public FileListOption {
         return transform(EntryState{std::move(x), false, is_selected, is_focused}) | AnimatedColorStyle(i) | theme().file_type(data.type);
       };
       elements.push_back(hbox({wrap(data.path.filename().native()) | xflex_grow,
-                               (data.is_dir() ? text("") : wrap(std::to_string(data.size))),
+                               (data.is_dir() ? text("") : coloredInt(data.size)),
                                separatorLight(),
                                wrap(data.get_time())})
                          | focus_management | reflect(boxes_[i]));
-      // , wrap(std::to_string(data.size)), wrap(data.get_time())});
     }
 
     if (elements_postfix) {
       elements.push_back(elements_postfix());
     }
 
-    if (IsInverted(direction)) {
-      std::reverse(elements.begin(), elements.end());
-    }
+    // if (IsInverted(direction)) {
+    //   std::reverse(elements.begin(), elements.end());
+    // }
 
     const Element bar = IsHorizontal() ? hbox(std::move(elements)) : vbox(std::move(elements));
 
@@ -526,4 +517,63 @@ class FileList : public ComponentBase, public FileListOption {
 
 Component ftxui::FileList(std::vector<DirItem>* entries, int* selected) {
   return std::make_shared<::FileList>(entries, selected);
+}
+
+class ColoredInt : public Node {
+ public:
+  explicit ColoredInt(int64_t n, std::vector<Color> colors = {Color::White, Color::White, Color::Yellow, Color::Red, Color::Plum3})
+      : text_(std::to_string(n)), colors_(std::move(colors)) {
+    // This handle NAN correctly:
+    if (!(progress_ > 0.F)) {
+      progress_ = 0.F;
+    }
+    if (!(progress_ < 1.F)) {
+      progress_ = 1.F;
+    }
+  }
+
+  void ComputeRequirement() override {
+    requirement_.min_x = string_width(text_);
+    requirement_.min_y = 1;
+  }
+
+  void Render(Screen& screen) override {
+    int       x = box_.x_min;
+    const int y = box_.y_min;
+    if (y > box_.y_max) {
+      return;
+    }
+
+    int index = 0;
+    for (const auto& cell : Utf8ToGlyphs(text_)) {
+      if (x > box_.x_max) {
+        return;
+      }
+      if (cell == "\n") {
+        continue;
+      }
+      screen.PixelAt(x, y).character = cell;
+      const int   digit_index        = text_.size() - index - 1;
+      const int   color_index        = std::clamp(digit_index / group_size, 0, (int)colors_.size() - 1);
+      const Color c                  = colors_[color_index];
+      if (c.IsOpaque()) {
+        screen.PixelAt(x, y).foreground_color = c;
+      } else {
+        Color& color = screen.PixelAt(x, y).foreground_color;
+        color        = Color::Blend(color, c);
+      }
+      ++x;
+      ++index;
+    }
+  }
+
+ private:
+  int const          group_size = 3;
+  std::vector<Color> colors_;
+  std::string        text_;
+  float              progress_;
+};
+
+Element ftxui::coloredInt(int64_t n) {
+  return std::make_shared<ColoredInt>(n, theme().filesize_colors);
 }

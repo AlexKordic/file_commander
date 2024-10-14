@@ -8,6 +8,8 @@ using namespace ftxui;
 Theme::Theme() {
   key_files_select = Event::Character(' ');
 
+  filesize_colors = {Color::White, Color::White, Color::Yellow, Color::Red, Color::Plum3};
+
   files_path = color(Color::LightGoldenrod2Ter);
   files_border = borderStyled(Color::DarkOliveGreen3Ter);
   files_selected = bgcolor(Color::Gold1);
