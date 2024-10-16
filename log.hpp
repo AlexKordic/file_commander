@@ -9,13 +9,12 @@
 #define _PERUN_LOG_HPP_
 
 #include <condition_variable>
+#include <functional>
 #include <mutex>
 #include <sstream>
 #include <string>
 #include <utility>
 #include <vector>
-
-extern void printLogRecord(std::string const& txt, const char level);
 
 namespace Perun {
 
@@ -77,6 +76,10 @@ private:
 public:
   void record_vector(const char* level, const char* TAG, std::string& event, const LogParamsVector& params);
   void output(const std::string& event, LogParams& params);
+
+  std::function<void(std::string const& txt, const char level)> produce;
+
+  Logger();
 
 public:
   void e(const char* TAG, std::string event, LogParams params) { record("E", TAG, event, params); }

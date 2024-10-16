@@ -50,8 +50,13 @@ struct Dir {
     int64_t items_selected=0, items_total=0, bytes_selected=0, bytes_total=0, largest_item_bytes=0;
   };
   Stats calculate();
+  void sort_toggle_name_direction();
+  void sort_toggle_size_direction();
+  void sort_toggle_time_direction();
 
   Err refresh(DirItem::P& path);
+
+  void _sort();
 };
 
 struct DirCollection {

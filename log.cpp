@@ -27,7 +27,7 @@ double now_ms() {
 }
 
 static void _record(std::stringstream& ss, bool use_time_prefix, const char* level, const char* TAG, std::string& event) {
-  if(use_time_prefix) {
+  if (use_time_prefix) {
     const double ts                 = Perun::now();
     const int    millis             = (int)((ts - ((int64_t)ts)) * 1000);
     std::time_t  seconds_from_epoch = (time_t)ts;
@@ -35,11 +35,11 @@ static void _record(std::stringstream& ss, bool use_time_prefix, const char* lev
     struct tm gmtime_result;
 #ifdef _WIN32
     auto gmtime_status = gmtime_s(&gmtime_result, &seconds_from_epoch);
-    if(gmtime_status == 0) {
-#else  // ^ _WIN32, >> linux
+    if (gmtime_status == 0) {
+#else   // ^ _WIN32, >> linux
     auto gmtime_status = gmtime_r(&seconds_from_epoch, &gmtime_result);
-    if(gmtime_status != nullptr) {
-#endif // _WIN32
+    if (gmtime_status != nullptr) {
+#endif  // _WIN32
       ss << std::put_time(&gmtime_result, "%y/%m/%d %H:%M:%S.") << std::setw(3) << std::setfill('0') << millis << std::setw(0) << std::setfill(' ') << " ";
     } else {
       ss << "e/r/r o:r:!." << millis << " ";
@@ -51,31 +51,31 @@ static void _record(std::stringstream& ss, bool use_time_prefix, const char* lev
 void Logger::record(const char* level, const char* TAG, std::string& event, LogParams& params) {
   std::stringstream ss(std::ios_base::out);
   _record(ss, _use_time_prefix, level, TAG, event);
-  for(LogPair const& pair: params) {
+  for (LogPair const& pair : params) {
     ss << " " << pair.encoded;
   }
   ss << "  \n";
-  printLogRecord(ss.str(), level[0]);
+  produce(ss.str(), level[0]);
 }
 
 void Logger::record_vector(const char* level, const char* TAG, std::string& event, const LogParamsVector& params) {
   std::stringstream ss(std::ios_base::out);
   _record(ss, _use_time_prefix, level, TAG, event);
-  for(LogPair const& pair: params) {
+  for (LogPair const& pair : params) {
     ss << " " << pair.encoded;
   }
   ss << "\n";
-  printLogRecord(ss.str(), level[0]);
+  produce(ss.str(), level[0]);
 }
 
 void Logger::output(const std::string& event, LogParams& params) {
   std::stringstream ss(std::ios_base::out);
   ss << event;
-  for(LogPair const& pair: params) {
+  for (LogPair const& pair : params) {
     ss << " " << pair.encoded;
   }
   // ss << "\n";
-  // printLogRecord(ss.str(), 'D');
+  // produce(ss.str(), 'D');
   std::cout << ss.str();
 }
 
@@ -94,45 +94,47 @@ std::string _trace(char const* function, char const* file, long line, char const
   return buf;
 }
 
-} // namespace Perun
+}  // namespace Perun
 
 #ifdef _WIN32
 #include <Windows.h>
 #else
-#include <iostream>
 #include <unistd.h>
+#include <iostream>
 #endif
 
-extern void printLogRecord(std::string const& txt, const char level) {
-  // the following are UBUNTU/LINUX, and MacOS ONLY terminal color codes.
-  //  RESET   "\033[0m"
-  //  BLACK   "\033[30m"      /* Black */
-  //  RED     "\033[31m"      /* Red */
-  //  GREEN   "\033[32m"      /* Green */
-  //  YELLOW  "\033[33m"      /* Yellow */
-  //  BLUE    "\033[34m"      /* Blue */
-  //  MAGENTA "\033[35m"      /* Magenta */
-  //  CYAN    "\033[36m"      /* Cyan */
-  //  WHITE   "\033[37m"      /* White */
-  //  BOLDBLACK   "\033[1m\033[30m"      /* Bold Black */
-  //  BOLDRED     "\033[1m\033[31m"      /* Bold Red */
-  //  BOLDGREEN   "\033[1m\033[32m"      /* Bold Green */
-  //  BOLDYELLOW  "\033[1m\033[33m"      /* Bold Yellow */
-  //  BOLDBLUE    "\033[1m\033[34m"      /* Bold Blue */
-  //  BOLDMAGENTA "\033[1m\033[35m"      /* Bold Magenta */
-  //  BOLDCYAN    "\033[1m\033[36m"      /* Bold Cyan */
-  //  BOLDWHITE   "\033[1m\033[37m"      /* Bold White */
-  static std::map<char, std::string> _colors = {
-    {'E', "\033[1m\033[31m"},
-    {'W', "\033[1m\033[33m"},
-    {'I', "\033[1m\033[32m"},
-    // {'D', "\033[36m"},
-    {'D', ""},
-  };
-  static std::string _reset("\033[0m");
-  static bool        is_tty = isatty(fileno(stdout)) == 1;
+Perun::Logger::Logger() {
+  produce = [this](std::string const& txt, const char level) {
+    // the following are UBUNTU/LINUX, and MacOS ONLY terminal color codes.
+    //  RESET   "\033[0m"
+    //  BLACK   "\033[30m"      /* Black */
+    //  RED     "\033[31m"      /* Red */
+    //  GREEN   "\033[32m"      /* Green */
+    //  YELLOW  "\033[33m"      /* Yellow */
+    //  BLUE    "\033[34m"      /* Blue */
+    //  MAGENTA "\033[35m"      /* Magenta */
+    //  CYAN    "\033[36m"      /* Cyan */
+    //  WHITE   "\033[37m"      /* White */
+    //  BOLDBLACK   "\033[1m\033[30m"      /* Bold Black */
+    //  BOLDRED     "\033[1m\033[31m"      /* Bold Red */
+    //  BOLDGREEN   "\033[1m\033[32m"      /* Bold Green */
+    //  BOLDYELLOW  "\033[1m\033[33m"      /* Bold Yellow */
+    //  BOLDBLUE    "\033[1m\033[34m"      /* Bold Blue */
+    //  BOLDMAGENTA "\033[1m\033[35m"      /* Bold Magenta */
+    //  BOLDCYAN    "\033[1m\033[36m"      /* Bold Cyan */
+    //  BOLDWHITE   "\033[1m\033[37m"      /* Bold White */
+    static std::map<char, std::string> _colors = {
+      {'E', "\033[1m\033[31m"},
+      {'W', "\033[1m\033[33m"},
+      {'I', "\033[1m\033[32m"},
+      // {'D', "\033[36m"},
+      {'D', ""},
+    };
+    static std::string _reset("\033[0m");
+    static bool        is_tty = isatty(fileno(stdout)) == 1;
 
-  if(is_tty) std::cout << _colors[level];
-  std::cout << txt;
-  if(is_tty) std::cout << _reset;
+    if (is_tty) std::cout << _colors[level];
+    std::cout << txt;
+    if (is_tty) std::cout << _reset;
+  };
 }

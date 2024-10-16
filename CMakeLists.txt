@@ -24,7 +24,7 @@ message(STATUS "Downloading and extracting boost library sources. This will take
 Set(FETCHCONTENT_QUIET FALSE) # Needed to print downloading progress
 FetchContent_Declare(
     Boost
-    URL https://github.com/boostorg/boost/releases/download/boost-1.84.0/boost-1.84.0.7z # downloading a zip release speeds up the download
+    URL https://github.com/boostorg/boost/releases/download/boost-1.84.0/boost-1.84.0.tar.gz # downloading a zip release speeds up the download
     USES_TERMINAL_DOWNLOAD TRUE 
     GIT_PROGRESS TRUE   
     DOWNLOAD_NO_EXTRACT FALSE

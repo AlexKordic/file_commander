@@ -4,7 +4,7 @@
 An orthodox file manager. Exploring directories to run commands on selected files.
 
 Initial Features:
-- Left and Right panel
++ Left and Right panel
 - Panel having multiple tabs
 - tab contains file list allowing selection with undo-selection-action
 - If no item selected then item under the cursor is considered selected

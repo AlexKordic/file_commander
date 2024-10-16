@@ -47,6 +47,11 @@ Err Dir::refresh(DirItem::P& p) {
   if(dir_ec) return Err("dir iterate: " + dir_ec.message());
   this->path = p;
   // Sort
+  _sort();
+  return Err();
+}
+
+void Dir::_sort() {
   std::sort(items.begin(), items.end(), [&](DirItem const& a, DirItem const& b) -> int {
     const bool a_is_dir = a.type == DirItem::Type::directory_file;
     const bool b_is_dir = b.type == DirItem::Type::directory_file;
@@ -61,7 +66,6 @@ Err Dir::refresh(DirItem::P& p) {
       case Orderby::TIME_DESC: return b.w_time < a.w_time;
     }
   });
-  return Err();
 }
 
 Dir::Stats Dir::calculate() {
@@ -76,4 +80,56 @@ Dir::Stats Dir::calculate() {
     s.largest_item_bytes = std::max(s.largest_item_bytes, item.size);
   }
   return s;
+}
+
+void Dir::sort_toggle_name_direction() {
+  switch(order_by) {
+    case Orderby::NAME_ASC:
+      order_by = Orderby::NAME_DESC;
+      break;
+    case Orderby::NAME_DESC:
+      order_by = Orderby::NAME_ASC;
+      break;
+    case Orderby::SIZE_ASC:
+    case Orderby::SIZE_DESC:
+    case Orderby::TIME_ASC:
+    case Orderby::TIME_DESC:
+      order_by = Orderby::NAME_ASC;
+      break;
+  }
+  _sort();
+}
+void Dir::sort_toggle_size_direction() {
+  switch(order_by) {
+    case Orderby::SIZE_ASC:
+      order_by = Orderby::SIZE_DESC;
+      break;
+    case Orderby::SIZE_DESC:
+      order_by = Orderby::SIZE_ASC;
+      break;
+    case Orderby::NAME_ASC:
+    case Orderby::NAME_DESC:
+    case Orderby::TIME_ASC:
+    case Orderby::TIME_DESC:
+      order_by = Orderby::SIZE_DESC;
+      break;
+  }
+  _sort();
+}
+void Dir::sort_toggle_time_direction() {
+  switch(order_by) {
+    case Orderby::TIME_ASC:
+      order_by = Orderby::TIME_DESC;
+      break;
+    case Orderby::TIME_DESC:
+      order_by = Orderby::TIME_ASC;
+      break;
+    case Orderby::SIZE_ASC:
+    case Orderby::SIZE_DESC:
+    case Orderby::NAME_ASC:
+    case Orderby::NAME_DESC:
+      order_by = Orderby::TIME_DESC;
+      break;
+  }
+  _sort();
 }
