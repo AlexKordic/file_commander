@@ -80,7 +80,8 @@ class FileList : public ComponentBase {
         Element e = text(x);
         if (is_focused) e |= theme().files_focused;
         if (is_selected) e |= theme().files_selected;
-        return e | theme().file_type(data.type());
+        if(!is_focused && !is_selected) e |= theme().file_type(data.type());
+        return e;
       };
       elements.push_back(
         hbox({

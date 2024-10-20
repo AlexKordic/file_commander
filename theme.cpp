@@ -32,6 +32,9 @@ Theme::Theme() {
   file_socket_file    = color(Color::MistyRose3);
   file_reparse_file   = color(Color::DarkKhaki);
   file_type_unknown   = color(Color::Red);
+
+  sort_button        = bgcolor(Color::Wheat4);
+  sort_button_active = bgcolor(Color::Wheat4) | color(Color::Salmon1);
 }
 
 ftxui::Decorator Theme::file_type(boost::filesystem::file_type t) {

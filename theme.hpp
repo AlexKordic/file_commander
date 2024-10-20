@@ -40,6 +40,9 @@ struct Theme {
     file_reparse_file,
     file_type_unknown,
 
+    sort_button,
+    sort_button_active,
+
     unused;
   
   ftxui::Decorator file_type(boost::filesystem::file_type t);

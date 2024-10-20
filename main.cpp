@@ -29,26 +29,31 @@ class Panel {
   Component container;
 
   Panel() {
-    auto opt      = InputOption::Default();
-    opt.multiline = false;
-    opt.transform = [](InputState state) {
+    auto input_opt      = InputOption::Default();
+    input_opt.multiline = false;
+    input_opt.transform = [](InputState state) {
       if (state.is_placeholder) {
         return state.element | theme().files_path;
       } else {
         return state.element | theme().files_filter_search;
       }
     };
-    filter    = Input(&filter_txt, &dir.path_txt, opt);
+    ButtonOption ascii_button;
+    ascii_button.transform = [](const EntryState& s) {
+      const std::string t = s.focused ? "[" + s.label + "]" : " " + s.label + " ";
+      if(s.focused) return text(t) | theme().sort_button_active;
+      return text(t) | theme().sort_button;
+    };
+
+    filter    = Input(&filter_txt, &dir.path_txt, input_opt);
     files     = FileList(&dir, filter, &filter_txt);
-    sort_name = Button("Name", [&] { dir.sort_toggle_name_direction(); }, ButtonOption::Ascii());
-    sort_size = Button("Size", [&] { dir.sort_toggle_size_direction(); }, ButtonOption::Ascii());
-    sort_time = Button("Date", [&] { dir.sort_toggle_time_direction(); }, ButtonOption::Ascii());
+    sort_name = Button("Name", [&] { dir.sort_toggle_name_direction(); }, ascii_button);
+    sort_size = Button("Size", [&] { dir.sort_toggle_size_direction(); }, ascii_button);
+    sort_time = Button("Date", [&] { dir.sort_toggle_time_direction(); }, ascii_button);
     container = Container::Vertical({Container::Horizontal({sort_name, sort_size, sort_time}), files});
     files->TakeFocus();
   }
-  void move_to(DirItem::P& where) {
-    dir.move_to(where);
-  }
+  void    move_to(DirItem::P& where) { dir.move_to(where); }
   Element render() { return vbox({render_header(), render_selection(), render_files()}); }
 
  private:
