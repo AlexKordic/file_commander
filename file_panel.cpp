@@ -71,14 +71,14 @@ class FileList : public ComponentBase {
       auto       focus_management = (selected != index) ? ftxui::nothing : is_menu_focused ? ftxui::focus : ftxui::select;
       // clang-format off
       auto wrap = [&](const std::string& x) -> Element { 
-        Element e = text(x) | bgGaugeLeft(float(data.size()) / max_size, theme().size_gauge_full, theme().size_gauge_empty);
+        Element e = text(x);
         if (is_focused) e |= theme().files_focused;
         if (is_selected) e |= theme().files_selected;
         return e | theme().file_type(data.type());
       };
       elements.push_back(
         hbox({
-          wrap(data.filename_ref()) | xflex_grow, 
+          wrap(data.filename_ref()) | xflex_grow | bgGaugeLeft(float(data.size()) / max_size, theme().size_gauge_full, theme().size_gauge_empty), 
           (data.is_dir() ? text("") : coloredInt(data.size())), 
           separatorLight(), 
           wrap(data.get_time())

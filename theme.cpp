@@ -10,7 +10,7 @@ Theme::Theme() {
   key_clear_selection = Event::Escape;
 
   filesize_colors  = {Color::White, Color::White, Color::Yellow, Color::Red, Color::Plum3};
-  size_gauge_full  = Color::Orange4Bis;
+  size_gauge_full  = Color::MediumPurple4;
   size_gauge_empty = Color::Grey0;
 
   files_path          = color(Color::LightGoldenrod2Ter) | bgcolor(Color::GrayDark);
