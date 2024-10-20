@@ -38,7 +38,7 @@ class Panel {
         return state.element | theme().files_filter_search;
       }
     };
-    filter    = Input(&filter_txt, &dir_path, opt);
+    filter    = Input(&filter_txt, &dir.path_txt, opt);
     files     = FileList(&dir, filter, &filter_txt);
     sort_name = Button("Name", [&] { dir.sort_toggle_name_direction(); }, ButtonOption::Ascii());
     sort_size = Button("Size", [&] { dir.sort_toggle_size_direction(); }, ButtonOption::Ascii());
@@ -48,14 +48,13 @@ class Panel {
   }
   void move_to(DirItem::P& where) {
     dir.move_to(where);
-    dir_path = dir.path.native();
   }
   Element render() { return vbox({render_header(), render_selection(), render_files()}); }
 
  private:
   Component   files;
   Component   filter;
-  std::string dir_path, filter_txt;
+  std::string filter_txt;
   Component   sort_name, sort_size, sort_time;
 
   // rendering

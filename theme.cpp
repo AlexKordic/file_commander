@@ -8,6 +8,8 @@ using namespace ftxui;
 Theme::Theme() {
   key_files_select    = Event::Character(' ');
   key_clear_selection = Event::Escape;
+  key_enter_dir       = Event::Return;
+  key_leave_dir       = Event::Character("?");
 
   filesize_colors  = {Color::White, Color::White, Color::Yellow, Color::Red, Color::Plum3};
   size_gauge_full  = Color::MediumPurple4;

@@ -32,7 +32,13 @@ DirItem::DirItem(DirItem::P p, DirItem::Type type, DirItem::Perms perms) : _path
   if (ec.failed()) _size = -1;
 }
 
-Err Dir::move_to(DirItem::P& p) {
+Err Dir::leave_dir() {
+  auto parent_dir = path.parent_path();
+  if (parent_dir == path) { return Err("leave_dir() on root"); }
+  return move_to(parent_dir);
+}
+
+Err Dir::move_to(const DirItem::P p) {
   if (false == exists(p)) return Err("don't exists path=" + p.native());
   if (false == is_directory(p)) return Err("must be dir path=" + p.native());
   items.clear();
@@ -46,8 +52,9 @@ Err Dir::move_to(DirItem::P& p) {
     }
     items.emplace_back(item.path(), fs.type(), fs.permissions());
   }
-  if (dir_ec) return Err("dir iterate: " + dir_ec.message());
-  this->path = p;
+  if (dir_ec) return Err("dir iterate: " + p.native() + "; " + dir_ec.message());
+  this->path     = p;
+  this->path_txt = this->path.native();
   _sort();
   _calculate();
   return Err();
@@ -103,7 +110,18 @@ void Dir::clear_selection() {
   _calculated.bytes_selected = 0;
 }
 
+std::string to_lower(const std::string& str) {
+  std::string result = str;
+  std::transform(result.begin(), result.end(), result.begin(), [](unsigned char c) { return std::tolower(c); });
+  return result;
+}
+size_t filter_match(const std::string& str, const std::string& substr) {
+  std::string lower_str = to_lower(str);
+  return lower_str.find(substr) != std::string::npos;
+}
+
 void Dir::apply_filter(std::string must_contain) {
+  must_contain = to_lower(must_contain);
   if (must_contain == filter.phrase) return;
   _calculated.items_visible = 0;
   filter.phrase             = must_contain;
@@ -113,11 +131,11 @@ void Dir::apply_filter(std::string must_contain) {
     return;
   }
   for (DirItem& item : items) {
-    if (item._filename.find(must_contain) == std::string::npos) {
-      item._visible = false;
-    } else {
+    if (filter_match(item._filename, must_contain)) {
       item._visible = true;
       _calculated.items_visible += 1;
+    } else {
+      item._visible = false;
     }
   }
 }

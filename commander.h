@@ -34,6 +34,7 @@ class DirItem {
   std::string get_time() const;
 
   const std::string& filename_ref() const { return _filename; }
+  const P&           path_ref() const { return _path; }
 
   bool    is_dir() const { return _type == Type::directory_file; }
   bool    visible() const { return _visible; }
@@ -60,6 +61,7 @@ class Dir {
  public:
   // selection
   DirItem::P           path;
+  std::string          path_txt;
   std::vector<DirItem> items;
   Orderby              order_by   = Orderby::NAME_ASC;
   int                  cursor_pos = 0;
@@ -72,7 +74,8 @@ class Dir {
     int64_t bytes_total        = 0;
     int64_t largest_item_bytes = 0;
   };
-  Err   move_to(DirItem::P& path);
+  Err   move_to(const DirItem::P path);
+  Err   leave_dir();
   void  sort_toggle_name_direction();
   void  sort_toggle_size_direction();
   void  sort_toggle_time_direction();

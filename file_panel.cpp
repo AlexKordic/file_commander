@@ -1,5 +1,7 @@
 
 #include "file_panel.hpp"
+#include "commander.h"
+#include "log.hpp"
 #include "theme.hpp"
 
 #include <cmath>
@@ -59,7 +61,7 @@ class FileList : public ComponentBase {
 
     Elements   elements;
     const bool is_menu_focused = Focused();
-    elements.push_back(text("Render count == " + std::to_string(_itteration)));
+    // elements.push_back(text("Render count == " + std::to_string(_itteration)));
     float max_size = dir->stats().largest_item_bytes;
 
     const int item_count = dir->items.size();
@@ -95,6 +97,18 @@ class FileList : public ComponentBase {
     return vbox(std::move(elements)) | yflex | reflect(box_);
   }
 
+  std::string string_to_hex(const std::string& input) {
+    static const char hex_digits[] = "0123456789ABCDEF";
+
+    std::string output;
+    output.reserve(input.length() * 2);
+    for (unsigned char c : input) {
+      output.push_back(hex_digits[c >> 4]);
+      output.push_back(hex_digits[c & 15]);
+    }
+    return output;
+  }
+
   // NOLINTNEXTLINE(readability-function-cognitive-complexity)
   bool OnEvent(Event event) override {
     Clamp();
@@ -103,6 +117,7 @@ class FileList : public ComponentBase {
     if (event.is_mouse()) { return OnMouseEvent(event); }
 
     if (Focused()) {
+      // Perun::l.d("OnEvent", "", {{"_", string_to_hex(event.input())}, {"dbg", event.DebugString()}, {";", "\n"}});
       const int old_selected = selected;
       const int page_lines   = box_.y_max - box_.y_min;
       if (event == Event::ArrowUp || event == Event::Character('k')) { selected = dir->prev_visible(selected); }
@@ -114,24 +129,47 @@ class FileList : public ComponentBase {
       if (event == Event::Home) { selected = dir->offset_vissible(0, 0); }
       if (event == Event::End) { selected = dir->offset_vissible(dir->items.size(), 0); }
 
-      // Skip tab actions
-      // if (event == Event::Tab && size()) {
-      //   selected() = (selected() + 1) % size();
-      // }
-      // if (event == Event::TabReverse && size()) {
-      //   selected() = (selected() + size() - 1) % size();
-      // }
       if (event == theme().key_files_select) {
         dir->item_toggle_select(selected);
         selected = dir->next_visible(selected);
-        ;
       }
       if (event == theme().key_clear_selection) {
         dir->clear_selection();
         return true;
       }
-
-      // selected = ftxui::clamp(selected, 0, (int)dir->items.size() - 1);
+      if (event == theme().key_leave_dir) {
+        const DirItem::P old_path = dir->path;
+        Err e = dir->leave_dir();
+        if (!e.ok()) {
+          Perun::l.e("dir->leave_dir()", e.steps.front());
+          return false;
+        }
+        selected = 0;
+        filter_text->clear();
+        // find our old_path and set it as focused
+        for(int i=0; i<dir->items.size(); i++) {
+          const DirItem& item = dir->items.at(i);
+          if(item.path_ref() == old_path) {
+            selected = i;
+            break;
+          }
+        }
+        return true;
+      }
+      if (event == theme().key_enter_dir) {
+        DirItem& where = dir->items.at(selected);
+        if (where.is_dir()) {
+          DirItem::P p = where.path_ref();
+          Err        e = dir->move_to(p);
+          if (e.ok()) {
+            selected = 0;
+            filter_text->clear();
+            return true;
+          }
+          Perun::l.e("dir->move_to()", e.steps.front());
+        }
+        return false;
+      }
 
       if (selected != old_selected) { return true; }
       // let the filter handle key events

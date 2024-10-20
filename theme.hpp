@@ -12,7 +12,9 @@ struct Theme {
 
   ftxui::Event 
     key_files_select,
-    key_clear_selection;
+    key_clear_selection,
+    key_enter_dir,
+    key_leave_dir;
 
   std::vector<ftxui::Color> filesize_colors;
   ftxui::Color size_gauge_full;

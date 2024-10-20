@@ -20,7 +20,7 @@ struct Err {
   }
 
   bool ok() { return steps.empty(); }
-  void print();
+  // void print();
 };
 
 #define Chk(...)                   \
