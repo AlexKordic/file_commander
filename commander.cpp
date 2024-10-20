@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <boost/filesystem.hpp>
+#include <functional>
 using namespace boost::filesystem;
 using namespace boost::system;
 
@@ -118,6 +119,50 @@ void Dir::apply_filter(std::string must_contain) {
       item._visible = true;
       _calculated.items_visible += 1;
     }
+  }
+}
+
+int Dir::next_visible(int index) { return offset_vissible(index, 1); }
+int Dir::prev_visible(int index) { return offset_vissible(index, -1); }
+int Dir::offset_vissible(int curr, int offset) {
+  using Cont         = std::function<bool(int)>;
+  int  increment     = 1;
+  auto f_inc         = [&](int i) -> bool { return i < items.size(); };
+  auto f_dec         = [&](int i) -> bool { return i >= 0; };
+  Cont there_is_more = f_inc;
+  auto reverse       = [&]() {
+    if (increment > 0) {
+      increment     = -1;
+      there_is_more = f_dec;
+      return;
+    }
+    increment     = 1;
+    there_is_more = f_inc;
+  };
+  auto find_visible = [&](int start) -> int {
+    for (int i = start; there_is_more(i); i += increment) {
+      if (items[i].visible()) return i;
+    }
+    return -1;
+  };
+
+  curr = std::max(0, std::min(int(items.size()), curr));
+  if (offset < 0) reverse();
+  // find starting visible item
+  int start = find_visible(curr);
+  if (-1 == start) {
+    // No more items in this direction
+    reverse();
+    start = find_visible(curr);
+    if (-1 == start) return 0;  // no item is visible !
+    return start;
+  }
+  for (;;) {
+    if (offset == 0) return start;
+    int next = find_visible(start + increment);
+    if (next == -1) return start;
+    start = next;
+    offset -= increment;
   }
 }
 

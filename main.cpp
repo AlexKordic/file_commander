@@ -49,7 +49,6 @@ class Panel {
   void move_to(DirItem::P& where) {
     dir.move_to(where);
     dir_path = dir.path.native();
-    // TODO: trigger render
   }
   Element render() { return vbox({render_header(), render_selection(), render_files()}); }
 

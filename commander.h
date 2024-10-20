@@ -85,6 +85,9 @@ class Dir {
     int         cursor_position = 0;
     std::string phrase;
   };
+  int next_visible(int index);
+  int prev_visible(int index);
+  int offset_vissible(int curr, int offset);
 
   Filter filter;
   Stats  _calculated;

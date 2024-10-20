@@ -7,7 +7,7 @@
 #include <ftxui/component/event.hpp>  // for Event, Event::ArrowDown, Event::ArrowLeft, Event::ArrowRight, Event::ArrowUp, Event::End, Event::Home, Event::PageDown, Event::PageUp, Event::Return, Event::Tab, Event::TabReverse
 #include <ftxui/dom/direction.hpp>    // for Direction, Direction::Down, Direction::Left, Direction::Right, Direction::Up
 #include <ftxui/dom/elements.hpp>
-#include <ftxui/dom/table.hpp>           // for Table, TableSelection
+#include <ftxui/dom/table.hpp>  // for Table, TableSelection
 
 #include <algorithm>
 #include <cstdint>
@@ -47,7 +47,7 @@ class FileList : public ComponentBase {
   void Clamp() {
     int s = dir->items.size();
     boxes_.resize(s);
-    selected = ftxui::clamp(selected, 0, s - 1);
+    selected = dir->offset_vissible(selected, 0);
   }
 
   void OnAnimation(animation::Params& params) override { filter->OnAnimation(params); }
@@ -65,6 +65,10 @@ class FileList : public ComponentBase {
     const int item_count = dir->items.size();
     for (int index = 0; index < item_count; ++index) {
       const DirItem& data = dir->items.at(index);
+      if (false == data.visible()) {
+        boxes_[index] = Box();
+        continue;
+      }
 
       const bool is_focused       = (selected == index) && is_menu_focused;
       const bool is_selected      = data.selected();
@@ -100,14 +104,15 @@ class FileList : public ComponentBase {
 
     if (Focused()) {
       const int old_selected = selected;
-      if (event == Event::ArrowUp || event == Event::Character('k')) { selected--; }
-      if (event == Event::ArrowDown || event == Event::Character('j')) { selected++; }
+      const int page_lines   = box_.y_max - box_.y_min;
+      if (event == Event::ArrowUp || event == Event::Character('k')) { selected = dir->prev_visible(selected); }
+      if (event == Event::ArrowDown || event == Event::Character('j')) { selected = dir->next_visible(selected); }
       // if (event == Event::ArrowLeft || event == Event::Character('h')) { OnLeft(); }
       // if (event == Event::ArrowRight || event == Event::Character('l')) { OnRight(); }
-      if (event == Event::PageUp) { selected -= box_.y_max - box_.y_min; }
-      if (event == Event::PageDown) { selected += box_.y_max - box_.y_min; }
-      if (event == Event::Home) { selected = 0; }
-      if (event == Event::End) { selected = size() - 1; }
+      if (event == Event::PageUp) { selected = dir->offset_vissible(selected, -page_lines); }
+      if (event == Event::PageDown) { selected = dir->offset_vissible(selected, page_lines); }
+      if (event == Event::Home) { selected = dir->offset_vissible(0, 0); }
+      if (event == Event::End) { selected = dir->offset_vissible(dir->items.size(), 0); }
 
       // Skip tab actions
       // if (event == Event::Tab && size()) {
@@ -118,18 +123,21 @@ class FileList : public ComponentBase {
       // }
       if (event == theme().key_files_select) {
         dir->item_toggle_select(selected);
-        selected++;
+        selected = dir->next_visible(selected);
+        ;
       }
       if (event == theme().key_clear_selection) {
         dir->clear_selection();
         return true;
       }
 
-      selected = ftxui::clamp(selected, 0, size() - 1);
+      // selected = ftxui::clamp(selected, 0, (int)dir->items.size() - 1);
 
       if (selected != old_selected) { return true; }
       // let the filter handle key events
-      return filter->OnEvent(event);
+      const bool filter_changed = filter->OnEvent(event);
+      if (filter_changed) { dir->apply_filter(filter_text()); }
+      return filter_changed;
     }
 
     if (event == Event::Return) {
@@ -146,12 +154,12 @@ class FileList : public ComponentBase {
     // no mouse move handling // if (event.mouse().button != Mouse::None && event.mouse().button != Mouse::Left) { return false; }
     if (event.mouse().button != Mouse::Left) { return false; }
     if (!CaptureMouse(event)) { return false; }
-    for (int i = 0; i < size(); ++i) {
+    for (int i = 0; i < dir->items.size(); ++i) {
       if (!boxes_[i].Contain(event.mouse().x, event.mouse().y)) { continue; }
 
       TakeFocus();
       if (selected != i) {
-        selected = i;
+        selected = dir->next_visible(selected);
         // OnChange();
       }
       // if (event.mouse().button == Mouse::Left &&
@@ -171,10 +179,10 @@ class FileList : public ComponentBase {
     if (!box_.Contain(event.mouse().x, event.mouse().y)) { return false; }
     const int old_selected = selected;
 
-    if (event.mouse().button == Mouse::WheelUp) { selected--; }
-    if (event.mouse().button == Mouse::WheelDown) { selected++; }
+    if (event.mouse().button == Mouse::WheelUp) { selected = dir->prev_visible(selected); }
+    if (event.mouse().button == Mouse::WheelDown) { selected = dir->next_visible(selected); }
 
-    selected = ftxui::clamp(selected, 0, size() - 1);
+    // selected = ftxui::clamp(selected, 0, size() - 1);
     // if (selected() != old_selected) {
     //   SelectedTakeFocus();
     //   OnChange();
@@ -182,19 +190,9 @@ class FileList : public ComponentBase {
     return true;
   }
 
-  bool  Focusable() const final { return dir->items.size(); }
-  int   size() const { return dir->stats().items_visible; }
+  bool Focusable() const final { return dir->items.size(); }
+  // int   size() const { return dir->stats().items_visible; }
   // int   size() const { return entries->size(); }
-  float FirstTarget() {
-    if (boxes_.empty()) { return 0.F; }
-    const int value = boxes_[selected].y_min - box_.y_min;
-    return float(value);
-  }
-  float SecondTarget() {
-    if (boxes_.empty()) { return 0.F; }
-    const int value = boxes_[selected].y_max - box_.y_min;
-    return float(value);
-  }
 
  protected:
   // Mouse click support:
@@ -269,7 +267,7 @@ class BgGaugeLeft : public NodeDecorator {
   BgGaugeLeft(Element child, float fraction, Color full, Color empty) : NodeDecorator(std::move(child)), _full(full), _empty(empty) { _fraction = std::min(1.0f, std::max(0.0f, fraction)); }
 
   void Render(Screen& screen) override {
-    int border = std::lround(box_.x_min + ((box_.x_max - box_.x_min +1) * _fraction));
+    int border = std::lround(box_.x_min + ((box_.x_max - box_.x_min + 1) * _fraction));
     if (_full.IsOpaque()) {
       for (int y = box_.y_min; y <= box_.y_max; ++y) {
         for (int x = box_.x_min; x < border; ++x) { screen.PixelAt(x, y).background_color = _full; }
