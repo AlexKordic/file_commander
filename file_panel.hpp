@@ -18,6 +18,10 @@ Component FileList(Dir* dir, Component filter, StringRef filter_text);
 
 Element coloredInt(int64_t n);
 
+Element bgGaugeLeft(float fraction, Color full, Color empty, Element child);
+
+Decorator bgGaugeLeft(float fraction, Color full, Color empty);
+
 }
 
 #endif // _PERUN_FC_GRID_IN_MENU_

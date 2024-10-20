@@ -15,6 +15,8 @@ struct Theme {
     key_clear_selection;
 
   std::vector<ftxui::Color> filesize_colors;
+  ftxui::Color size_gauge_full;
+  ftxui::Color size_gauge_empty;
   
   ftxui::Decorator 
     files_path,

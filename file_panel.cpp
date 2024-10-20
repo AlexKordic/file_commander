@@ -2,12 +2,12 @@
 #include "file_panel.hpp"
 #include "theme.hpp"
 
+#include <cmath>
 #include <ftxui/component/component.hpp>
-#include <ftxui/dom/direction.hpp>  // for Direction, Direction::Down, Direction::Left, Direction::Right, Direction::Up
-#include <ftxui/dom/elements.hpp>
-
 #include <ftxui/component/event.hpp>  // for Event, Event::ArrowDown, Event::ArrowLeft, Event::ArrowRight, Event::ArrowUp, Event::End, Event::Home, Event::PageDown, Event::PageUp, Event::Return, Event::Tab, Event::TabReverse
-#include <ftxui/dom/table.hpp>        // for Table, TableSelection
+#include <ftxui/dom/direction.hpp>    // for Direction, Direction::Down, Direction::Left, Direction::Right, Direction::Up
+#include <ftxui/dom/elements.hpp>
+#include <ftxui/dom/table.hpp>           // for Table, TableSelection
 
 #include <algorithm>
 #include <cstdint>
@@ -60,6 +60,7 @@ class FileList : public ComponentBase {
     Elements   elements;
     const bool is_menu_focused = Focused();
     elements.push_back(text("Render count == " + std::to_string(_itteration)));
+    float max_size = dir->stats().largest_item_bytes;
 
     const int item_count = dir->items.size();
     for (int index = 0; index < item_count; ++index) {
@@ -70,7 +71,7 @@ class FileList : public ComponentBase {
       auto       focus_management = (selected != index) ? ftxui::nothing : is_menu_focused ? ftxui::focus : ftxui::select;
       // clang-format off
       auto wrap = [&](const std::string& x) -> Element { 
-        Element e = text(x);
+        Element e = text(x) | bgGaugeLeft(float(data.size()) / max_size, theme().size_gauge_full, theme().size_gauge_empty);
         if (is_focused) e |= theme().files_focused;
         if (is_selected) e |= theme().files_selected;
         return e | theme().file_type(data.type());
@@ -142,7 +143,8 @@ class FileList : public ComponentBase {
   bool OnMouseEvent(Event event) {
     if (event.mouse().button == Mouse::WheelDown || event.mouse().button == Mouse::WheelUp) { return OnMouseWheel(event); }
 
-    if (event.mouse().button != Mouse::None && event.mouse().button != Mouse::Left) { return false; }
+    // no mouse move handling // if (event.mouse().button != Mouse::None && event.mouse().button != Mouse::Left) { return false; }
+    if (event.mouse().button != Mouse::Left) { return false; }
     if (!CaptureMouse(event)) { return false; }
     for (int i = 0; i < size(); ++i) {
       if (!boxes_[i].Contain(event.mouse().x, event.mouse().y)) { continue; }
@@ -247,3 +249,61 @@ class ColoredInt : public Node {
 };
 
 Element ftxui::coloredInt(int64_t n) { return std::make_shared<ColoredInt>(n, theme().filesize_colors); }
+
+// Helper class.
+class NodeDecorator : public Node {
+ public:
+  explicit NodeDecorator(Element child) : Node({std::move(child)}) {}
+  void ComputeRequirement() override {
+    Node::ComputeRequirement();
+    requirement_ = children_[0]->requirement();
+  }
+  void SetBox(Box box) override {
+    Node::SetBox(box);
+    children_[0]->SetBox(box);
+  }
+};
+
+class BgGaugeLeft : public NodeDecorator {
+ public:
+  BgGaugeLeft(Element child, float fraction, Color full, Color empty) : NodeDecorator(std::move(child)), _full(full), _empty(empty) { _fraction = std::min(1.0f, std::max(0.0f, fraction)); }
+
+  void Render(Screen& screen) override {
+    int border = std::lround(box_.x_min + ((box_.x_max - box_.x_min +1) * _fraction));
+    if (_full.IsOpaque()) {
+      for (int y = box_.y_min; y <= box_.y_max; ++y) {
+        for (int x = box_.x_min; x < border; ++x) { screen.PixelAt(x, y).background_color = _full; }
+      }
+    } else {
+      for (int y = box_.y_min; y <= box_.y_max; ++y) {
+        for (int x = box_.x_min; x < border; ++x) {
+          Color& color = screen.PixelAt(x, y).background_color;
+          color        = Color::Blend(color, _full);
+        }
+      }
+    }
+    if (_empty.IsOpaque()) {
+      for (int y = box_.y_min; y <= box_.y_max; ++y) {
+        for (int x = border; x <= box_.x_max; ++x) { screen.PixelAt(x, y).background_color = _empty; }
+      }
+    } else {
+      for (int y = box_.y_min; y <= box_.y_max; ++y) {
+        for (int x = border; x <= box_.x_max; ++x) {
+          Color& color = screen.PixelAt(x, y).background_color;
+          color        = Color::Blend(color, _empty);
+        }
+      }
+    }
+    NodeDecorator::Render(screen);
+  }
+
+  float _fraction;
+  Color _full;
+  Color _empty;
+};
+
+Element ftxui::bgGaugeLeft(float fraction, Color full, Color empty, Element child) { return std::make_shared<BgGaugeLeft>(std::move(child), fraction, full, empty); }
+
+Decorator ftxui::bgGaugeLeft(float fraction, Color full, Color empty) {
+  return [fraction, full, empty](Element child) { return bgGaugeLeft(fraction, full, empty, std::move(child)); };
+}

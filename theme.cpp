@@ -9,12 +9,14 @@ Theme::Theme() {
   key_files_select    = Event::Character(' ');
   key_clear_selection = Event::Escape;
 
-  filesize_colors = {Color::White, Color::White, Color::Yellow, Color::Red, Color::Plum3};
+  filesize_colors  = {Color::White, Color::White, Color::Yellow, Color::Red, Color::Plum3};
+  size_gauge_full  = Color::Orange4Bis;
+  size_gauge_empty = Color::Grey0;
 
   files_path          = color(Color::LightGoldenrod2Ter) | bgcolor(Color::GrayDark);
   files_filter_search = color(Color::Plum2) | bgcolor(Color::GrayDark);
   files_border        = borderStyled(Color::DarkOliveGreen3Ter);
-  files_selected      = bgcolor(Color::Gold1);
+  files_selected      = color(Color::Gold1) | bold;
   files_focused       = color(Color::DarkOliveGreen2) | inverted | bold;
 
   file_status_error   = color(Color::Red);
