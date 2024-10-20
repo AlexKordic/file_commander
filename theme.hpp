@@ -10,12 +10,15 @@
 struct Theme {
   Theme();
 
-  ftxui::Event key_files_select;
+  ftxui::Event 
+    key_files_select,
+    key_clear_selection;
 
   std::vector<ftxui::Color> filesize_colors;
   
   ftxui::Decorator 
     files_path,
+    files_filter_search,
     files_border,
     files_selected,
     files_focused,

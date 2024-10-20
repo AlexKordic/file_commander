@@ -3,8 +3,8 @@
 #define FC_COMMANDER_H_
 
 #include <boost/filesystem.hpp>
-#include <boost/filesystem/path.hpp>
 #include <boost/filesystem/file_status.hpp>
+#include <boost/filesystem/path.hpp>
 
 #include "err.hpp"
 #include "log.hpp"
@@ -21,47 +21,81 @@ enum class Orderby {
   TIME_DESC,
 };
 
-struct DirItem {
-  using P = boost::filesystem::path;
-  using Type = boost::filesystem::file_type;
-  using Perms = boost::filesystem::perms;
+class Dir;
 
-  P path;
-  Type type = Type::type_unknown;
-  Perms perms = Perms::no_perms;
-  int64_t size = 0;
-  std::time_t w_time = 0;
-  bool selected = false;
+class DirItem {
+ public:
+  using P     = boost::filesystem::path;
+  using Type  = boost::filesystem::file_type;
+  using Perms = boost::filesystem::perms;
 
   DirItem(P p, Type type, Perms perms);
   std::string to_string() const;
   std::string get_time() const;
-  bool is_dir() const { return type == Type::directory_file; }
+
+  const std::string& filename_ref() const { return _filename; }
+
+  bool    is_dir() const { return _type == Type::directory_file; }
+  bool    visible() const { return _visible; }
+  bool    selected() const { return _selected; }
+  Type    type() const { return _type; }
+  int64_t size() const { return _size; }
+
+ private:
+  P           _path;
+  Type        _type     = Type::type_unknown;
+  Perms       _perms    = Perms::no_perms;
+  int64_t     _size     = 0;
+  std::time_t _w_time   = 0;
+  bool        _selected = false;
+
+  bool _visible = true;
+
+  std::string _filename;
+
+  friend class Dir;
 };
 
-struct Dir {
+class Dir {
+ public:
   // selection
-  DirItem::P path;
+  DirItem::P           path;
   std::vector<DirItem> items;
-  Orderby order_by = Orderby::NAME_ASC;
-  int cursor_pos = 0;
+  Orderby              order_by   = Orderby::NAME_ASC;
+  int                  cursor_pos = 0;
 
   struct Stats {
-    int64_t items_selected=0, items_total=0, bytes_selected=0, bytes_total=0, largest_item_bytes=0;
+    int64_t items_selected     = 0;
+    int64_t items_visible      = 0;
+    int64_t items_total        = 0;
+    int64_t bytes_selected     = 0;
+    int64_t bytes_total        = 0;
+    int64_t largest_item_bytes = 0;
   };
-  Stats calculate();
-  void sort_toggle_name_direction();
-  void sort_toggle_size_direction();
-  void sort_toggle_time_direction();
+  Err   move_to(DirItem::P& path);
+  void  sort_toggle_name_direction();
+  void  sort_toggle_size_direction();
+  void  sort_toggle_time_direction();
+  void  apply_filter(std::string must_contain);
+  void  clear_selection();
+  void  item_toggle_select(int index);
+  Stats stats() { return _calculated; }
 
-  Err refresh(DirItem::P& path);
+  struct Filter {
+    int         cursor_position = 0;
+    std::string phrase;
+  };
+
+  Filter filter;
+  Stats  _calculated;
+  void   _calculate();
 
   void _sort();
 };
 
 struct DirCollection {
   std::vector<Dir> tabs;
-  int selected_tab = 0;
+  int              selected_tab = 0;
 };
 
 struct Commander {

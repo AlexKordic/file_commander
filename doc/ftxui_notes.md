@@ -12,6 +12,22 @@ Pogledaj `flexbox_gallery.cpp`. Postoji `main_container` i `main_renderer`.
 > Da li treba Component da sklapa elemente???
 ???
 
+## Element Nesting using shared pointers
+
+`Element` is shared_ptr of `Node`.
+
+When constructing nodes `Element` is always returned erasing actual type.
+
+Elements are composed easily in parent-child tree.
+
+Only factory functions are exposed. If an interface is needed separate object is defined and passed to factory function.
+
+## Decorators
+
+????
+
+
+
 ----
 
 A `ScreenInteractive` defines a main loop that renders a component.
@@ -45,5 +61,6 @@ there is hyperlink element decorator
 
 File open dialog https://github.com/mr-mocap/cli-6502-playground/blob/master/app/ui/components/directorybrowser.cpp
 
+`screen_interactive.PostEvent(Event::Custom);` // Cause a new frame to be drawn.
 
 
