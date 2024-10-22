@@ -104,10 +104,28 @@ void Dir::item_toggle_select(int index) {
   }
 }
 
+void Dir::select_all() {
+  for (DirItem& x : items) {
+    if(x._visible && x._selected == false) {
+      x._selected = true;
+      _calculated.bytes_selected += x.size();
+      _calculated.items_selected += 1;
+    }
+  }
+}
 void Dir::clear_selection() {
   for (DirItem& x : items) { x._selected = false; }
   _calculated.items_selected = 0;
   _calculated.bytes_selected = 0;
+}
+
+CommandArgs::P Dir::take_selected() {
+  CommandArgs::P s = std::make_shared<CommandArgs>();
+  s->selected.reserve(_calculated.items_selected);
+  for (DirItem& x : items) {
+    s->selected.push_back(x._path);
+  }
+  return s;
 }
 
 std::string to_lower(const std::string& str) {

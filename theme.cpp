@@ -10,6 +10,7 @@ Theme::Theme() {
   key_clear_selection = Event::Escape;
   key_enter_dir       = Event::Return;
   key_leave_dir       = Event::Character("?");
+  key_select_all      = Event::CtrlA;
 
   filesize_colors  = {Color::White, Color::White, Color::Yellow, Color::Red, Color::Plum3};
   size_gauge_full  = Color::MediumPurple4;
@@ -35,6 +36,15 @@ Theme::Theme() {
 
   sort_button        = bgcolor(Color::Wheat4);
   sort_button_active = bgcolor(Color::Wheat4) | color(Color::Salmon1);
+
+  key_copy               = Event::F5;
+  key_move               = Event::F6;
+  key_mkdir              = Event::F7;
+  key_delete             = Event::F8;
+  key_rename             = Event::F2;
+  key_names_to_clipboard = Event::CtrlN;
+  key_paths_to_clipboard = Event::CtrlP;
+  key_find               = Event::F3;
 }
 
 ftxui::Decorator Theme::file_type(boost::filesystem::file_type t) {

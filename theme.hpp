@@ -4,8 +4,7 @@
 
 #include <ftxui/component/event.hpp>
 #include <ftxui/dom/elements.hpp>
-#include "boost/filesystem/file_status.hpp"
-//#include <ftxui/dom/node.hpp>
+#include <boost/filesystem/file_status.hpp>
 
 struct Theme {
   Theme();
@@ -13,8 +12,11 @@ struct Theme {
   ftxui::Event 
     key_files_select,
     key_clear_selection,
+    key_select_all,
     key_enter_dir,
     key_leave_dir;
+
+  ftxui::Event key_mkdir, key_copy, key_move, key_delete, key_rename, key_names_to_clipboard, key_paths_to_clipboard, key_find;
 
   std::vector<ftxui::Color> filesize_colors;
   ftxui::Color size_gauge_full;

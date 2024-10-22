@@ -4,11 +4,12 @@
 An orthodox file manager. Exploring directories to run commands on selected files.
 
 Initial Features:
+- monitor dir changes and real-time updates
 + Left and Right panel
 - Panel having multiple tabs
 + tab contains file list allowing selection ?with undo-selection-action?
 + esc clears selection
-- If no item selected then item under the cursor is considered selected
++ If no item selected then item under the cursor is considered selected
 + List can be sorted on any column ASC/DESC
 - Target for the command is always other-panel-selected-tab. Some commands ignore target dir and files.
 - Command search like vscode-F1 with option to update key-shorcut on the spot

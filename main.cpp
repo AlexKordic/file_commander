@@ -1,149 +1,175 @@
 
-#include <condition_variable>
 #include <ftxui-grid-container/grid-container.hpp>
 #include <ftxui/component/component.hpp>
 #include <ftxui/component/component_base.hpp>
 #include <ftxui/component/component_options.hpp>
-#include <ftxui/dom/elements.hpp>  // vbox, hbox
+#include <ftxui/component/screen_interactive.hpp>
+#include <ftxui/dom/elements.hpp>
 #include <ftxui/dom/table.hpp>
 
-#include <iostream>
+#include <functional>
 #include <memory>
-#include <mutex>
 #include <string>
-
-#include "file_panel.hpp"
-#include "theme.hpp"
+#include <utility>
 
 #include "commander.h"
+#include "dialogs.hpp"
 #include "log.hpp"
+
+#include <boost/filesystem.hpp>
 
 using namespace ftxui;
 using namespace Perun;
 
-#include <boost/filesystem.hpp>
+class Panel;
 
-class Panel {
+using TargetFunc = std::function<DirItem::P(Panel*)>;
+
+class DialogOverlay {
  public:
-  Dir       dir;
   Component container;
+  int       _active_dialog = 0;  // Popup::None;
 
-  Panel() {
-    auto input_opt      = InputOption::Default();
-    input_opt.multiline = false;
-    input_opt.transform = [](InputState state) {
-      if (state.is_placeholder) {
-        return state.element | theme().files_path;
-      } else {
-        return state.element | theme().files_filter_search;
-      }
-    };
-    ButtonOption ascii_button;
-    ascii_button.transform = [](const EntryState& s) {
-      const std::string t = s.focused ? "[" + s.label + "]" : " " + s.label + " ";
-      if(s.focused) return text(t) | theme().sort_button_active;
-      return text(t) | theme().sort_button;
-    };
+ protected:
+  ftxui::Dialog::P                        _main_document;     // always rendered, always first child of Panel::container
+  Component                               _overlay_renderer;  // selected renderer from _overlay_dialogs, always second child of Panel::container
+  std::map<std::string, ftxui::Dialog::P> _overlay_dialogs;
 
-    filter    = Input(&filter_txt, &dir.path_txt, input_opt);
-    files     = FileList(&dir, filter, &filter_txt);
-    sort_name = Button("Name", [&] { dir.sort_toggle_name_direction(); }, ascii_button);
-    sort_size = Button("Size", [&] { dir.sort_toggle_size_direction(); }, ascii_button);
-    sort_time = Button("Date", [&] { dir.sort_toggle_time_direction(); }, ascii_button);
-    container = Container::Vertical({Container::Horizontal({sort_name, sort_size, sort_time}), files});
-    files->TakeFocus();
+  void close_dialog() {
+    // Move navigation to main document
+    _active_dialog = 0;
+    _overlay_renderer.reset();
+    // Remove all dialogs, child index > 0
+    while (container->ChildCount() > 1) { container->ChildAt(container->ChildCount() - 1)->Detach(); }
   }
-  void    move_to(DirItem::P& where) { dir.move_to(where); }
-  Element render() { return vbox({render_header(), render_selection(), render_files()}); }
-
- private:
-  Component   files;
-  Component   filter;
-  std::string filter_txt;
-  Component   sort_name, sort_size, sort_time;
-
-  // rendering
-  Element render_header() { return filter->Render() | ftxui::focus | ftxui::select; }
-  Element render_files() { return files->Render() | vscroll_indicator | yframe | theme().files_border; }
-  Element render_selection() {
-    std::string prefixes[3] = {"  ", "  ", "  "};
-    switch (dir.order_by) {
-    case Orderby::NAME_ASC: prefixes[0] = "↑↑"; break;
-    case Orderby::NAME_DESC: prefixes[0] = "↓↓"; break;
-    case Orderby::SIZE_ASC: prefixes[1] = "↑↑"; break;
-    case Orderby::SIZE_DESC: prefixes[1] = "↓↓"; break;
-    case Orderby::TIME_ASC: prefixes[2] = "↑↑"; break;
-    case Orderby::TIME_DESC: prefixes[2] = "↓↓"; break;
+  void show_dialog(std::string name, CommandArgs::P data) {
+    if (!_overlay_dialogs.contains(name)) {
+      Perun::l.e("show_dialog() name not registered", name);
+      return;
     }
-    auto     s        = dir.stats();
-    Elements children = {
-      text("sel " + std::to_string(s.items_selected) + "/" + std::to_string(s.items_total)), text(" bytes "), coloredInt(s.bytes_selected), text("/"), coloredInt(s.bytes_total), text(" | "), text(prefixes[0]), sort_name->Render(), text(prefixes[1]), sort_size->Render(), text(prefixes[2]), sort_time->Render(),
-    };
-    return hbox(std::move(children));
+    _active_dialog = 1;
+    // Remove all dialogs, child index > 0
+    while (container->ChildCount() > 1) { container->ChildAt(container->ChildCount() - 1)->Detach(); }
+    // Add proper dialog
+    auto dialog = _overlay_dialogs.at(name);
+    container->Add(dialog->container);
+    // dialog->container->TakeFocus();
+    _overlay_renderer = dialog->renderer;
+    // init dialog with input data
+    dialog->OnShow(data);
   }
 };
 
-#include <ftxui/screen/terminal.hpp>
+class Panel : public DialogOverlay {
+ public:
+  Dir        dir;
+  TargetFunc get_target;
+
+  explicit Panel(DirItem::P location, TargetFunc get_target) : get_target(get_target) {
+    dir.move_to(location);
+    state                      = std::make_shared<PanelSharedState>(&dir);
+    container                  = Container::Tab({}, &_active_dialog);
+    state->action.close_dialog = [this]() { close_dialog(); };
+    state->action.show_dialog  = [this]() {
+      state->action.arguments->target = this->get_target(this);
+      show_dialog(state->action.dialog, state->action.arguments);
+    };
+    auto files = std::make_shared<ftxui::Files>();
+    files->init(state);
+    _main_document = std::dynamic_pointer_cast<ftxui::Dialog>(files);
+    container->Add(_main_document->container);
+    // register dialogs
+    _overlay_dialogs["Mkdir"]           = std::make_shared<Nyi>(state);
+    _overlay_dialogs["Rename"]          = std::make_shared<Nyi>(state);
+    _overlay_dialogs["Copy"]            = std::make_shared<Nyi>(state);
+    _overlay_dialogs["Move"]            = std::make_shared<Nyi>(state);
+    _overlay_dialogs["Delete"]          = std::make_shared<Nyi>(state);
+    _overlay_dialogs["Find"]            = std::make_shared<Nyi>(state);
+    _overlay_dialogs["NameToClipboard"] = std::make_shared<Nyi>(state);
+    _overlay_dialogs["PathToClipboard"] = std::make_shared<Nyi>(state);
+  }
+  void    move_to(DirItem::P& where) { dir.move_to(where); }
+  Element render() {
+    // Panel is always shown
+    Element document = _main_document->renderer->Render();
+    // Overwrite with active dialog
+    if (!_overlay_renderer) return document;
+    return dbox({
+      document,
+      _overlay_renderer->Render() | clear_under | center,
+    });
+  }
+
+ private:
+  PanelSharedState::P state;
+};
+
+class FileCommander {
+ protected:
+  Panel left, right;
+
+ public:
+  Component container;
+  Component renderer;
+  FileCommander(DirItem::P location) : left(location, get_target()), right(location, get_target()) {
+    container = Container::Horizontal({left.container, right.container});
+    renderer  = Renderer(container, [&]() -> Element {
+      // Two panels side by side
+      return hbox({left.render() | xflex_grow, separatorLight(), right.render() | xflex_grow});
+    });
+  }
+  // returns
+  TargetFunc get_target() {
+    return [this](Panel* self) -> DirItem::P {
+      // self is origin pannel, return target panel's path
+      if (self == &left) return right.dir.path;
+      if (self == &right) return left.dir.path;
+      l.e("FileCommander::get_target", "unknown self");
+      return left.dir.path;
+    };
+  }
+};
+
+// cache logs issued in current screen loop, and flush them at the end of screen loop
+class LogAdapter {
+ public:
+  explicit LogAdapter(ScreenInteractive& screen) {
+    print_log  = l.produce;
+    flush_logs = screen.WithRestoredIO([&] {
+      printing = false;
+      for (const auto& x : log_queue) { print_log(x.first, x.second); }
+      log_queue.clear();
+    });
+    l.produce  = [this, &screen](std::string const& txt, const char level) {
+      log_queue.push_back(std::make_pair(txt, level));
+      if (printing == false) {
+        printing = true;
+        screen.Post(flush_logs);
+      }
+    };
+  }
+  ~LogAdapter() {
+    l.produce = print_log;
+    for (const auto& x : log_queue) { print_log(x.first, x.second); }
+  }
+
+ protected:
+  bool printing = false;
+
+  std::vector<std::pair<std::string, char>>                     log_queue;
+  std::function<void(std::string const& txt, const char level)> print_log;
+  std::function<void()>                                         flush_logs;
+};
 
 int main() {
-  auto  cwd = boost::filesystem::current_path();
-  Panel left, right;
-  left.move_to(cwd);
-  right.move_to(cwd);
-  // Event linkage
-  Component both_pannels = Container::Horizontal({left.container, right.container});
+  auto          cwd = boost::filesystem::current_path();
+  FileCommander app(cwd);
 
-  auto screen = ScreenInteractive::Fullscreen();
+  auto       screen = ScreenInteractive::Fullscreen();
+  LogAdapter adapt_logs(screen);
 
-  // std::mutex               log_m;
-  // std::condition_variable  log_cond;
-  std::vector<std::string> log_queue;
-  // volatile bool            log_thread_running = true;
-  // std::thread t([&] {
-  //   while (log_thread_running) {
-  //     {
-  //       std::unique_lock l(log_m);
-  //       if (log_queue.empty()) {
-  //         log_cond.wait(l);
-  //         continue;
-  //       }
-  //     }
-  //     std::this_thread::sleep_for(std::chrono::milliseconds(60));
-  //     std::vector<std::string> to_print;
-  //     {
-  //       std::lock_guard l(log_m);
-  //       to_print = std::move(log_queue);
-  //       log_queue.clear();
-  //     }
-  //     screen.WithRestoredIO(Closure);
-  //     for(const std::string& s : to_print) {
-
-  //     }
-  //   }
-  // });
-
-  bool notified   = false;
-  auto print_log  = l.produce;
-  auto flush_logs = screen.WithRestoredIO([&] {
-    auto terminal = Terminal::Size();
-    notified      = false;
-    // screen.ResetCursorPosition();
-    // screen.SetCursorPosition();
-    for (const std::string& s : log_queue) { print_log(s, 'd'); }
-    // std::cout << std::endl;
-    // std::this_thread::sleep_for(std::chrono::milliseconds(1000));
-    log_queue.clear();
-    // screen.PostEvent(Event::Custom);
-  });
-  l.produce       = [&](std::string const& txt, const char level) {
-    log_queue.push_back(txt);
-    if (notified == false) {
-      notified = true;
-      screen.Post(flush_logs);
-    }
-  };
   // screen.TrackMouse(false);
-  screen.Loop(Renderer(both_pannels, [&]() -> Element { return hbox({left.render() | xflex_grow, separatorLight(), right.render() | xflex_grow}); }));
+  screen.Loop(app.renderer);
 
   return 0;
 }

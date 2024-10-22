@@ -5,16 +5,15 @@
 #include <ftxui/component/component.hpp>
 #include <ftxui/component/screen_interactive.hpp>
 
-#include "commander.h"
+#include "shared_state.hpp"
 
 #include <cstdint>
-#include <vector>
 
 namespace ftxui {
 
 // TODO: Render only visible items. Dir can contain thousands of items but <90 are diplayed.
 // TODO: - Use reflect decorator to determine the size of rendered table https://github.com/ArthurSonzogni/FTXUI/discussions/423
-Component FileList(Dir* dir, Component filter, StringRef filter_text);
+Component FileList(PanelSharedState::P panel);
 
 Element coloredInt(int64_t n);
 
@@ -22,6 +21,6 @@ Element bgGaugeLeft(float fraction, Color full, Color empty, Element child);
 
 Decorator bgGaugeLeft(float fraction, Color full, Color empty);
 
-}
+}  // namespace ftxui
 
-#endif // _PERUN_FC_GRID_IN_MENU_
+#endif  // _PERUN_FC_GRID_IN_MENU_

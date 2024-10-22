@@ -1,6 +1,7 @@
 
 #include "file_panel.hpp"
 #include "commander.h"
+#include "dialogs.hpp"
 #include "log.hpp"
 #include "theme.hpp"
 
@@ -13,10 +14,10 @@
 
 #include <algorithm>
 #include <cstdint>
-#include <functional>  // for function
-#include <string>      // for operator+, string
-#include <utility>     // for move
-#include <vector>      // for vector, __alloc_traits<>::value_type
+#include <memory>
+#include <string>   // for operator+, string
+#include <utility>  // for move
+#include <vector>   // for vector, __alloc_traits<>::value_type
 
 using namespace ftxui;
 
@@ -34,16 +35,18 @@ template <class T> constexpr const T& clamp(const T& v, const T& lo, const T& hi
 /// @brief A list of file items. The user can navigate through them.
 class FileList : public ComponentBase {
  public:
-  int       selected = 0;
-  Component filter;
-  StringRef filter_text;
-  Dir*      dir;
+  int                 selected = 0;
+  Component           filter;
+  StringRef           filter_text;
+  Dir*                dir;
+  PanelSharedState::P app;
   // std::vector<int> items_shown;
 
-  FileList(Dir* dir, Component filter, StringRef filter_text) {
-    this->dir         = dir;
-    this->filter      = filter;
-    this->filter_text = filter_text;
+  explicit FileList(PanelSharedState::P panel) {
+    this->dir         = panel->dir;
+    this->filter      = panel->filter;
+    this->filter_text = panel->filter_text;
+    app               = std::move(panel);
   }
 
   void Clamp() {
@@ -94,7 +97,6 @@ class FileList : public ComponentBase {
       // clang-format on
       // items_shown.push_back(ei);
     }
-
     return vbox(std::move(elements)) | yflex | reflect(box_);
   }
 
@@ -138,9 +140,13 @@ class FileList : public ComponentBase {
         dir->clear_selection();
         return true;
       }
+      if (event == theme().key_select_all) {
+        dir->select_all();
+        return true;
+      }
       if (event == theme().key_leave_dir) {
         const DirItem::P old_path = dir->path;
-        Err e = dir->leave_dir();
+        Err              e        = dir->leave_dir();
         if (!e.ok()) {
           Perun::l.e("dir->leave_dir()", e.steps.front());
           return false;
@@ -148,9 +154,9 @@ class FileList : public ComponentBase {
         selected = 0;
         filter_text->clear();
         // find our old_path and set it as focused
-        for(int i=0; i<dir->items.size(); i++) {
+        for (int i = 0; i < dir->items.size(); i++) {
           const DirItem& item = dir->items.at(i);
-          if(item.path_ref() == old_path) {
+          if (item.path_ref() == old_path) {
             selected = i;
             break;
           }
@@ -170,6 +176,23 @@ class FileList : public ComponentBase {
           Perun::l.e("dir->move_to()", e.steps.front());
         }
         return false;
+      }
+
+      // check for registered actions
+      for (const auto& action : commands().available) {
+        if (event == action.key) {
+          app->action.dialog            = action.dialog;
+          app->action.arguments         = dir->take_selected();
+          app->action.arguments->origin = dir->path;
+          const bool no_items           = dir->items.empty();
+          if (no_items) {
+            app->action.arguments->focused = DirItem::P();
+          } else {
+            app->action.arguments->focused = dir->items.at(selected).path_ref();
+          }
+          app->action.show_dialog();
+          return true;
+        }
       }
 
       if (selected != old_selected) { return true; }
@@ -239,7 +262,7 @@ class FileList : public ComponentBase {
   Box              box_;
 };
 
-Component ftxui::FileList(Dir* dir, Component filter, StringRef filter_text) { return std::make_shared<::FileList>(dir, filter, filter_text); }
+Component ftxui::FileList(PanelSharedState::P panel) { return std::make_shared<::FileList>(std::move(panel)); }
 
 class ColoredInt : public Node {
  public:
@@ -344,3 +367,31 @@ Element ftxui::bgGaugeLeft(float fraction, Color full, Color empty, Element chil
 Decorator ftxui::bgGaugeLeft(float fraction, Color full, Color empty) {
   return [fraction, full, empty](Element child) { return bgGaugeLeft(fraction, full, empty, std::move(child)); };
 }
+
+// Popup ftxui::int_to_popup(int id) {
+//   switch (id) {
+//   case (int)Popup::Mkdir: return Popup::Mkdir;
+//   case (int)Popup::Rename: return Popup::Rename;
+//   case (int)Popup::Copy: return Popup::Copy;
+//   case (int)Popup::Move: return Popup::Move;
+//   case (int)Popup::Delete: return Popup::Delete;
+//   case (int)Popup::Find: return Popup::Find;
+//   case (int)Popup::NameToClipboard: return Popup::NameToClipboard;
+//   case (int)Popup::PathToClipboard: return Popup::PathToClipboard;
+//   default: return Popup::None;
+//   }
+// }
+
+// std::string ftxui::to_popup_string(int id) {
+//   switch (id) {
+//   case (int)Popup::Mkdir: return "Popup::Mkdir";
+//   case (int)Popup::Rename: return "Popup::Rename";
+//   case (int)Popup::Copy: return "Popup::Copy";
+//   case (int)Popup::Move: return "Popup::Move";
+//   case (int)Popup::Delete: return "Popup::Delete";
+//   case (int)Popup::Find: return "Popup::Find";
+//   case (int)Popup::NameToClipboard: return "Popup::NameToClipboard";
+//   case (int)Popup::PathToClipboard: return "Popup::PathToClipboard";
+//   default: return "Popup::None";
+//   }
+// }
