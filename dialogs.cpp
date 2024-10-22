@@ -60,8 +60,8 @@ Err Files::init(PanelSharedState::P s_) {
     return hbox(std::move(children));
   };
 
-  container = Container::Vertical({Container::Horizontal({sort_name, sort_size, sort_time}), files});
-  renderer  = Renderer(container, [filter = state->filter, render_selection = render_selection, files = files]() -> Element {
+  navigation = Container::Vertical({Container::Horizontal({sort_name, sort_size, sort_time}), files});
+  renderer  = Renderer(navigation, [filter = state->filter, render_selection = render_selection, files = files]() -> Element {
     return vbox({
       filter->Render() | ftxui::focus | ftxui::select,
       render_selection(),
@@ -75,8 +75,8 @@ Err Files::init(PanelSharedState::P s_) {
 Nyi::Nyi(PanelSharedState::P s) {
   Component nyi_textbox      = Input("", "Dummy text - Not used at all ...");
   Component nyi_button_close = Button("OK", [s] { s->action.close_dialog(); });
-  container                  = Container::Vertical({nyi_textbox, nyi_button_close});
-  renderer                   = Renderer(container, [nyi_textbox, nyi_button_close, s]() -> Element {
+  navigation                  = Container::Vertical({nyi_textbox, nyi_button_close});
+  renderer                   = Renderer(navigation, [nyi_textbox, nyi_button_close, s]() -> Element {
     return vbox({
              text(s->action.dialog + " dialog example"),
              separator(),

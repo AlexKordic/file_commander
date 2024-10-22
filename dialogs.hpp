@@ -28,10 +28,10 @@ Commands& commands();
 struct Dialog {
   using P = std::shared_ptr<Dialog>;
 
-  Component container;
+  Component navigation;
   Component renderer;
 
-  Dialog(Component c, Component r) : container(std::move(c)), renderer(std::move(r)) {}
+  Dialog(Component c, Component r) : navigation(std::move(c)), renderer(std::move(r)) {}
   Dialog() = default;
 
   virtual void OnShow(std::shared_ptr<CommandArgs> data) = 0;

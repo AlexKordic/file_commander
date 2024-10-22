@@ -27,8 +27,8 @@ using TargetFunc = std::function<DirItem::P(Panel*)>;
 
 class DialogOverlay {
  public:
-  Component container;
-  int       _active_dialog = 0;  // Popup::None;
+  Component navigation;
+  int       _active_dialog = 0;
 
  protected:
   ftxui::Dialog::P                        _main_document;     // always rendered, always first child of Panel::container
@@ -40,7 +40,7 @@ class DialogOverlay {
     _active_dialog = 0;
     _overlay_renderer.reset();
     // Remove all dialogs, child index > 0
-    while (container->ChildCount() > 1) { container->ChildAt(container->ChildCount() - 1)->Detach(); }
+    while (navigation->ChildCount() > 1) { navigation->ChildAt(navigation->ChildCount() - 1)->Detach(); }
   }
   void show_dialog(std::string name, CommandArgs::P data) {
     if (!_overlay_dialogs.contains(name)) {
@@ -49,10 +49,10 @@ class DialogOverlay {
     }
     _active_dialog = 1;
     // Remove all dialogs, child index > 0
-    while (container->ChildCount() > 1) { container->ChildAt(container->ChildCount() - 1)->Detach(); }
+    while (navigation->ChildCount() > 1) { navigation->ChildAt(navigation->ChildCount() - 1)->Detach(); }
     // Add proper dialog
     auto dialog = _overlay_dialogs.at(name);
-    container->Add(dialog->container);
+    navigation->Add(dialog->navigation);
     // dialog->container->TakeFocus();
     _overlay_renderer = dialog->renderer;
     // init dialog with input data
@@ -68,7 +68,7 @@ class Panel : public DialogOverlay {
   explicit Panel(DirItem::P location, TargetFunc get_target) : get_target(get_target) {
     dir.move_to(location);
     state                      = std::make_shared<PanelSharedState>(&dir);
-    container                  = Container::Tab({}, &_active_dialog);
+    navigation                  = Container::Tab({}, &_active_dialog);
     state->action.close_dialog = [this]() { close_dialog(); };
     state->action.show_dialog  = [this]() {
       state->action.arguments->target = this->get_target(this);
@@ -77,7 +77,7 @@ class Panel : public DialogOverlay {
     auto files = std::make_shared<ftxui::Files>();
     files->init(state);
     _main_document = std::dynamic_pointer_cast<ftxui::Dialog>(files);
-    container->Add(_main_document->container);
+    navigation->Add(_main_document->navigation);
     // register dialogs
     _overlay_dialogs["Mkdir"]           = std::make_shared<Nyi>(state);
     _overlay_dialogs["Rename"]          = std::make_shared<Nyi>(state);
@@ -109,11 +109,11 @@ class FileCommander {
   Panel left, right;
 
  public:
-  Component container;
+  Component navigation;
   Component renderer;
   FileCommander(DirItem::P location) : left(location, get_target()), right(location, get_target()) {
-    container = Container::Horizontal({left.container, right.container});
-    renderer  = Renderer(container, [&]() -> Element {
+    navigation = Container::Horizontal({left.navigation, right.navigation});
+    renderer  = Renderer(navigation, [&]() -> Element {
       // Two panels side by side
       return hbox({left.render() | xflex_grow, separatorLight(), right.render() | xflex_grow});
     });
