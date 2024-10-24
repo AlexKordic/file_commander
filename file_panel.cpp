@@ -252,9 +252,7 @@ class FileList : public ComponentBase {
     return true;
   }
 
-  bool Focusable() const final { return dir->items.size(); }
-  // int   size() const { return dir->stats().items_visible; }
-  // int   size() const { return entries->size(); }
+  bool Focusable() const final { return true; }
 
  protected:
   // Mouse click support:
