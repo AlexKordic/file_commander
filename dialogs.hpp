@@ -34,7 +34,7 @@ struct Dialog {
   Dialog(Component c, Component r) : navigation(std::move(c)), renderer(std::move(r)) {}
   Dialog() = default;
 
-  virtual void OnShow(std::shared_ptr<CommandArgs> data) = 0;
+  virtual void OnShow() = 0;
 };
 
 struct Files : Dialog {
@@ -45,7 +45,7 @@ struct Files : Dialog {
   PanelSharedState::P state;
 
   Err  init(PanelSharedState::P s);
-  void OnShow(std::shared_ptr<CommandArgs> data) override {}
+  void OnShow() override {}
 };
 
 struct MkdirDialog : Dialog {
@@ -58,16 +58,37 @@ struct MkdirDialog : Dialog {
   Component button_close;
 
   MkdirDialog(PanelSharedState::P s);
-  void OnShow(std::shared_ptr<CommandArgs> data) override;
+  void OnShow() override;
 
   void    ok();
   void    cancel();
   Element render();
 };
 
+struct RenameDialog : Dialog {
+  PanelSharedState::P app;
+
+  RenameDialog(PanelSharedState::P data);
+  void OnShow() override;
+
+  struct Item {
+    std::string content;
+    int         cursor_position = 0;
+  };
+  std::vector<Item> rows;
+
+  int       selected = 0;
+  Component menu;
+  Component button_ok;
+  Component button_close;
+
+  void ok();
+  void cancel();
+};
+
 struct Nyi : Dialog {
   Nyi(PanelSharedState::P s);
-  void OnShow(std::shared_ptr<CommandArgs> data) override {}
+  void OnShow() override {}
 };
 
 }  // namespace ftxui

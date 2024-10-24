@@ -186,6 +186,7 @@ class FileList : public ComponentBase {
           app->action.arguments->origin = dir->path;
           const bool no_items           = dir->items.empty();
           if (no_items) {
+            // no items for selected to point to
             app->action.arguments->focused = DirItem::P();
           } else {
             app->action.arguments->focused = dir->items.at(selected).path_ref();
@@ -366,30 +367,30 @@ Decorator ftxui::bgGaugeLeft(float fraction, Color full, Color empty) {
   return [fraction, full, empty](Element child) { return bgGaugeLeft(fraction, full, empty, std::move(child)); };
 }
 
-// Popup ftxui::int_to_popup(int id) {
-//   switch (id) {
-//   case (int)Popup::Mkdir: return Popup::Mkdir;
-//   case (int)Popup::Rename: return Popup::Rename;
-//   case (int)Popup::Copy: return Popup::Copy;
-//   case (int)Popup::Move: return Popup::Move;
-//   case (int)Popup::Delete: return Popup::Delete;
-//   case (int)Popup::Find: return Popup::Find;
-//   case (int)Popup::NameToClipboard: return Popup::NameToClipboard;
-//   case (int)Popup::PathToClipboard: return Popup::PathToClipboard;
-//   default: return Popup::None;
-//   }
-// }
+class ShowInputCursor : public NodeDecorator {
+ public:
+  ShowInputCursor(Element child, Ref<int> cursor_position) : NodeDecorator(std::move(child)), _cursor_position(cursor_position) { }
 
-// std::string ftxui::to_popup_string(int id) {
-//   switch (id) {
-//   case (int)Popup::Mkdir: return "Popup::Mkdir";
-//   case (int)Popup::Rename: return "Popup::Rename";
-//   case (int)Popup::Copy: return "Popup::Copy";
-//   case (int)Popup::Move: return "Popup::Move";
-//   case (int)Popup::Delete: return "Popup::Delete";
-//   case (int)Popup::Find: return "Popup::Find";
-//   case (int)Popup::NameToClipboard: return "Popup::NameToClipboard";
-//   case (int)Popup::PathToClipboard: return "Popup::PathToClipboard";
-//   default: return "Popup::None";
-//   }
-// }
+  void Render(Screen& screen) override {
+    const bool draw_cursor = true;
+    // TODO: animate blinking by toggling draw_cursor
+    if(draw_cursor) {
+      int x = std::max(box_.x_min, std::min(box_.x_max, box_.x_min + _cursor_position()));
+      for (int y = box_.y_min; y <= box_.y_max; ++y) {
+        screen.PixelAt(x, y).inverted = !screen.PixelAt(x, y).inverted;
+      }
+    }
+    NodeDecorator::Render(screen);
+  }
+
+  Ref<int> _cursor_position;
+};
+
+Element ftxui::showInputCursor(Element child, Ref<int> cursor_position) {
+  return std::make_shared<ShowInputCursor>(std::move(child), cursor_position);
+}
+Decorator ftxui::showInputCursor(Ref<int> cursor_position) {
+  return [cursor_position](Element child)-> Element{
+    return showInputCursor(std::move(child), cursor_position);
+  };
+}

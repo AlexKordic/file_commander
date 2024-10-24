@@ -42,7 +42,7 @@ class DialogOverlay {
     // Remove all dialogs, child index > 0
     while (navigation->ChildCount() > 1) { navigation->ChildAt(navigation->ChildCount() - 1)->Detach(); }
   }
-  void show_dialog(std::string name, CommandArgs::P data) {
+  void show_dialog(std::string name) {
     if (!_overlay_dialogs.contains(name)) {
       Perun::l.e("show_dialog() name not registered", name);
       return;
@@ -56,7 +56,7 @@ class DialogOverlay {
     // dialog->container->TakeFocus();
     _overlay_renderer = dialog->renderer;
     // init dialog with input data
-    dialog->OnShow(data);
+    dialog->OnShow();
   }
 };
 
@@ -72,7 +72,7 @@ class Panel : public DialogOverlay {
     state->action.close_dialog = [this]() { close_dialog(); };
     state->action.show_dialog  = [this]() {
       state->action.arguments->target = this->get_target(this);
-      show_dialog(state->action.dialog, state->action.arguments);
+      show_dialog(state->action.dialog);
     };
     auto files = std::make_shared<ftxui::Files>();
     files->init(state);
@@ -80,7 +80,7 @@ class Panel : public DialogOverlay {
     navigation->Add(_main_document->navigation);
     // register dialogs
     _overlay_dialogs["Mkdir"]           = std::make_shared<MkdirDialog>(state);
-    _overlay_dialogs["Rename"]          = std::make_shared<Nyi>(state);
+    _overlay_dialogs["Rename"]          = std::make_shared<RenameDialog>(state);
     _overlay_dialogs["Copy"]            = std::make_shared<Nyi>(state);
     _overlay_dialogs["Move"]            = std::make_shared<Nyi>(state);
     _overlay_dialogs["Delete"]          = std::make_shared<Nyi>(state);

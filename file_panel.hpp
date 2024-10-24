@@ -21,6 +21,10 @@ Element bgGaugeLeft(float fraction, Color full, Color empty, Element child);
 
 Decorator bgGaugeLeft(float fraction, Color full, Color empty);
 
+Element showInputCursor(Element child, Ref<int> cursor_position);
+
+Decorator showInputCursor(Ref<int> cursor_position);
+
 }  // namespace ftxui
 
 #endif  // _PERUN_FC_GRID_IN_MENU_

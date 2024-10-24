@@ -127,7 +127,7 @@ CommandArgs::P Dir::take_selected() {
   CommandArgs::P s = std::make_shared<CommandArgs>();
   s->selected.reserve(_calculated.items_selected);
   for (DirItem& x : items) {
-    s->selected.push_back(x._path);
+    if(x._selected) s->selected.push_back(x._path);
   }
   return s;
 }

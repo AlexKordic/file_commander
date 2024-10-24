@@ -64,7 +64,7 @@ struct CommandArgs {
   DirItem::P              origin, target;
 
   void use_focused_as_alternative() {
-    if (selected.size() == 0) { selected.push_back(focused); }
+    if (selected.size() == 0 && focused.empty() == false) { selected.push_back(focused); }
   }
 };
 

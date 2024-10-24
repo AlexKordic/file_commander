@@ -37,3 +37,6 @@ add_executable(fc main.cpp log.cpp err.cpp commander.cpp theme.cpp file_panel.cp
 target_link_libraries(fc
   PRIVATE ftxui-grid-container Boost::filesystem
 )
+
+add_executable(playground playground.cpp)
+target_link_libraries(playground ftxui::component)

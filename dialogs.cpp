@@ -1,5 +1,6 @@
 
 #include "dialogs.hpp"
+#include <ftxui/component/component.hpp>
 #include <ftxui/dom/elements.hpp>
 
 #include "commander.h"
@@ -7,6 +8,10 @@
 #include "theme.hpp"
 
 namespace ftxui {
+
+//
+// Files
+//
 
 Err Files::init(PanelSharedState::P s_) {
   state                 = std::move(s_);
@@ -73,6 +78,10 @@ Err Files::init(PanelSharedState::P s_) {
   return Err();
 }
 
+//
+// Mkdir
+//
+
 MkdirDialog::MkdirDialog(PanelSharedState::P s) : app(std::move(s)) {
   InputOption textbox_opt;
   textbox_opt.on_change = [this]() { this->error.clear(); };
@@ -90,7 +99,7 @@ MkdirDialog::MkdirDialog(PanelSharedState::P s) : app(std::move(s)) {
   renderer   = Renderer(navigation, [this]() -> Element { return this->render(); });
 }
 
-void MkdirDialog::OnShow(std::shared_ptr<CommandArgs> data) {
+void MkdirDialog::OnShow() {
   new_dir_name.clear();
   error.clear();
 }
@@ -124,6 +133,110 @@ void MkdirDialog::ok() {
 }
 
 void MkdirDialog::cancel() { app->action.close_dialog(); }
+
+//
+// Rename
+//
+
+RenameDialog::RenameDialog(PanelSharedState::P data) : app(std::move(data)) {
+  ButtonOption ascii_button;
+  ascii_button.transform = [](const EntryState& s) {
+    const std::string t = s.focused ? "[" + s.label + "]" : " " + s.label + " ";
+    if (s.focused) return text(t) | theme().sort_button_active;
+    return text(t) | theme().sort_button;
+  };
+  button_ok    = Button("Rename", [this] { this->ok(); }, ascii_button);
+  button_close = Button("Cancel", [this] { this->cancel(); }, ascii_button);
+  menu         = Container::Vertical({}, &selected);
+
+  auto menu_event_filter = [this, menu = menu, button_ok=button_ok](Event event) -> bool {
+    int& selected = this->selected;
+    // UP/DOWN act like home/end for Input, but we want to scroll our menu
+    if (event == Event::ArrowUp || (event.is_mouse() && event.mouse().button == Mouse::WheelUp)) {
+      if(selected == 0) {
+        button_ok->TakeFocus();
+        return true;
+      }
+      selected = std::max(0, selected - 1);
+      return true;
+    }
+    if (event == Event::ArrowDown || (event.is_mouse() && event.mouse().button == Mouse::WheelDown)) {
+      selected = std::min((int)menu->ChildCount() - 1, selected + 1);
+      return true;
+    }
+    if (event == Event::Return) {
+      if (menu->ChildCount() == 1) {
+        // Single file rename allows enter to trigger ok
+        this->ok();
+      }
+      return true;
+    }
+    if (event == Event::Escape) {
+      this->cancel();
+      return true;
+    }
+    // Instead of passing event to active child we pass same event to all children.
+    bool any = false;
+    int  c   = menu->ChildCount();
+    for (int i = 0; i < c; i++) { any |= menu->ChildAt(i)->OnEvent(event); }
+    return any;
+  };
+  navigation = Container::Vertical({
+    // First child are buttons
+    Container::Horizontal({button_ok, button_close}),
+    // Following children are path items to rename
+    CatchEvent(menu, menu_event_filter),
+  });
+  renderer   = Renderer(navigation, [&] {
+    // simple
+    return vbox({
+             hbox({
+               button_ok->Render(),
+               separator(),
+               button_close->Render(),
+             }),
+             separator(),
+             menu->Render() | vscroll_indicator | yframe,
+           })
+      | border;
+  });
+}
+
+void RenameDialog::OnShow() {
+  // remove old data
+  menu->DetachAllChildren();
+  rows.clear();
+  selected = 0;
+  //
+  app->action.arguments->use_focused_as_alternative();
+  // create items
+  int selected_count = app->action.arguments->selected.size();
+  if(selected_count == 0) {
+    cancel();
+    return;
+  }
+  rows.resize(selected_count);
+  for (int i = 0; i < selected_count; i++) {
+    // int& cursor_position = rows[i].cursor_position;
+    rows[i].content         = app->action.arguments->selected.at(i).filename().native();
+    rows[i].cursor_position = 0;
+    InputOption style;
+    style.content         = &(rows.at(i).content);
+    style.placeholder     = "";
+    style.cursor_position = &(rows[i].cursor_position);
+    Component txt         = Input(style);
+    menu->Add(txt | showInputCursor(&(rows.at(i).cursor_position)));
+  }
+  menu->TakeFocus();
+}
+
+void RenameDialog::ok() { app->action.close_dialog(); }
+
+void RenameDialog::cancel() { app->action.close_dialog(); }
+
+//
+// NYI
+//
 
 Nyi::Nyi(PanelSharedState::P s) {
   Component nyi_textbox      = Input("", "Dummy text - Not used at all ...");
