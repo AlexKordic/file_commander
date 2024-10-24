@@ -1,5 +1,6 @@
 
 #include "dialogs.hpp"
+#include <ftxui/dom/elements.hpp>
 
 #include "commander.h"
 #include "file_panel.hpp"
@@ -61,7 +62,7 @@ Err Files::init(PanelSharedState::P s_) {
   };
 
   navigation = Container::Vertical({Container::Horizontal({sort_name, sort_size, sort_time}), files});
-  renderer  = Renderer(navigation, [filter = state->filter, render_selection = render_selection, files = files]() -> Element {
+  renderer   = Renderer(navigation, [filter = state->filter, render_selection = render_selection, files = files]() -> Element {
     return vbox({
       filter->Render() | ftxui::focus | ftxui::select,
       render_selection(),
@@ -72,10 +73,62 @@ Err Files::init(PanelSharedState::P s_) {
   return Err();
 }
 
+MkdirDialog::MkdirDialog(PanelSharedState::P s) : app(std::move(s)) {
+  InputOption textbox_opt;
+  textbox_opt.on_change = [this]() { this->error.clear(); };
+  textbox_opt.on_enter  = [this]() { this->ok(); };
+  textbox               = Input(&new_dir_name, "Name for new directory", textbox_opt);
+
+  button_ok    = Button("OK", [this] { this->ok(); });
+  button_close = Button("Cancel", [this] { this->cancel(); });
+
+  navigation = Container::Vertical({
+    textbox,
+    button_ok,
+    button_close,
+  });
+  renderer   = Renderer(navigation, [this]() -> Element { return this->render(); });
+}
+
+void MkdirDialog::OnShow(std::shared_ptr<CommandArgs> data) {
+  new_dir_name.clear();
+  error.clear();
+}
+
+Element MkdirDialog::render() {
+  Elements e = {
+    paragraphAlignCenter("Create Dir in " + app->action.arguments->origin.native()),
+    separator(),
+    textbox->Render(),
+  };
+  if (!error.empty()) { e.push_back(text(error) | theme().mkdir_errortxt); }
+  e.push_back(filler());
+  e.push_back(button_ok->Render());
+  e.push_back(button_close->Render());
+  return vbox(std::move(e)) | border | size(HEIGHT, GREATER_THAN, 18) | center;
+}
+
+void MkdirDialog::ok() {
+  // Create dir
+  auto dir_path = app->action.arguments->origin;
+  dir_path /= new_dir_name;
+  if (boost::filesystem::exists(dir_path)) {
+    // Display error
+    error = "Name conflict";
+    return;
+  }
+  boost::filesystem::create_directory(dir_path);
+  // Close dialog
+  app->dir->refresh();
+  app->action.close_dialog();
+}
+
+void MkdirDialog::cancel() { app->action.close_dialog(); }
+
 Nyi::Nyi(PanelSharedState::P s) {
   Component nyi_textbox      = Input("", "Dummy text - Not used at all ...");
   Component nyi_button_close = Button("OK", [s] { s->action.close_dialog(); });
-  navigation                  = Container::Vertical({nyi_textbox, nyi_button_close});
+  navigation                 = Container::Vertical({nyi_textbox, nyi_button_close});
   renderer                   = Renderer(navigation, [nyi_textbox, nyi_button_close, s]() -> Element {
     return vbox({
              text(s->action.dialog + " dialog example"),

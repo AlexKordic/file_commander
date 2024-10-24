@@ -79,7 +79,7 @@ class Panel : public DialogOverlay {
     _main_document = std::dynamic_pointer_cast<ftxui::Dialog>(files);
     navigation->Add(_main_document->navigation);
     // register dialogs
-    _overlay_dialogs["Mkdir"]           = std::make_shared<Nyi>(state);
+    _overlay_dialogs["Mkdir"]           = std::make_shared<MkdirDialog>(state);
     _overlay_dialogs["Rename"]          = std::make_shared<Nyi>(state);
     _overlay_dialogs["Copy"]            = std::make_shared<Nyi>(state);
     _overlay_dialogs["Move"]            = std::make_shared<Nyi>(state);

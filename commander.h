@@ -85,16 +85,19 @@ class Dir {
     int64_t bytes_total        = 0;
     int64_t largest_item_bytes = 0;
   };
-  Err            move_to(const DirItem::P path);
-  Err            leave_dir();
-  void           sort_toggle_name_direction();
-  void           sort_toggle_size_direction();
-  void           sort_toggle_time_direction();
-  void           apply_filter(std::string must_contain);
-  void           clear_selection();
-  void           select_all();
-  void           item_toggle_select(int index);
-  Stats          stats() { return _calculated; }
+
+  Err   move_to(const DirItem::P path);
+  Err   refresh(); // TODO: add system notifications for current dir
+  Err   leave_dir();
+  void  sort_toggle_name_direction();
+  void  sort_toggle_size_direction();
+  void  sort_toggle_time_direction();
+  void  apply_filter(std::string must_contain);
+  void  clear_selection();
+  void  select_all();
+  void  item_toggle_select(int index);
+  Stats stats() { return _calculated; }
+
   CommandArgs::P take_selected();
 
   struct Filter {

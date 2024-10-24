@@ -37,6 +37,8 @@ Theme::Theme() {
   sort_button        = bgcolor(Color::Wheat4);
   sort_button_active = bgcolor(Color::Wheat4) | color(Color::Salmon1);
 
+  mkdir_errortxt = color(Color::Red);
+
   key_copy               = Event::F5;
   key_move               = Event::F6;
   key_mkdir              = Event::F7;

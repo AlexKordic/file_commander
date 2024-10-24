@@ -48,6 +48,23 @@ struct Files : Dialog {
   void OnShow(std::shared_ptr<CommandArgs> data) override {}
 };
 
+struct MkdirDialog : Dialog {
+  std::string         new_dir_name;
+  PanelSharedState::P app;
+  std::string         error;
+
+  Component textbox;
+  Component button_ok;
+  Component button_close;
+
+  MkdirDialog(PanelSharedState::P s);
+  void OnShow(std::shared_ptr<CommandArgs> data) override;
+
+  void    ok();
+  void    cancel();
+  Element render();
+};
+
 struct Nyi : Dialog {
   Nyi(PanelSharedState::P s);
   void OnShow(std::shared_ptr<CommandArgs> data) override {}

@@ -38,6 +38,10 @@ Err Dir::leave_dir() {
   return move_to(parent_dir);
 }
 
+Err Dir::refresh() {
+  return move_to(path);
+}
+
 Err Dir::move_to(const DirItem::P p) {
   if (false == exists(p)) return Err("don't exists path=" + p.native());
   if (false == is_directory(p)) return Err("must be dir path=" + p.native());

@@ -45,6 +45,8 @@ struct Theme {
     sort_button,
     sort_button_active,
 
+    mkdir_errortxt,
+
     unused;
   
   ftxui::Decorator file_type(boost::filesystem::file_type t);
