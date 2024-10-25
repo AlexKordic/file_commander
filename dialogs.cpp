@@ -3,9 +3,13 @@
 #include <ftxui/component/component.hpp>
 #include <ftxui/dom/elements.hpp>
 
+#include "boost/filesystem/operations.hpp"
 #include "commander.h"
 #include "file_panel.hpp"
+#include "log.hpp"
 #include "theme.hpp"
+
+using boost::system::error_code;
 
 namespace ftxui {
 
@@ -86,6 +90,7 @@ MkdirDialog::MkdirDialog(PanelSharedState::P s) : app(std::move(s)) {
   InputOption textbox_opt;
   textbox_opt.on_change = [this]() { this->error.clear(); };
   textbox_opt.on_enter  = [this]() { this->ok(); };
+  textbox_opt.multiline = false;  // otherwise new_dir_name contains `\n` at the end
   textbox               = Input(&new_dir_name, "Name for new directory", textbox_opt);
 
   button_ok    = Button("OK", [this] { this->ok(); });
@@ -121,6 +126,7 @@ void MkdirDialog::ok() {
   // Create dir
   auto dir_path = app->action.arguments->origin;
   dir_path /= new_dir_name;
+  // Perun::l.d("mkdir::ok", dir_path.native(), {{"base", app->action.arguments->origin.native()}, {"new_dir_name", new_dir_name}});
   if (boost::filesystem::exists(dir_path)) {
     // Display error
     error = "Name conflict";
@@ -149,11 +155,11 @@ RenameDialog::RenameDialog(PanelSharedState::P data) : app(std::move(data)) {
   button_close = Button("Cancel", [this] { this->cancel(); }, ascii_button);
   menu         = Container::Vertical({}, &selected);
 
-  auto menu_event_filter = [this, menu = menu, button_ok=button_ok](Event event) -> bool {
+  auto menu_event_filter = [this, menu = menu, button_ok = button_ok, button_close = button_close](Event event) -> bool {
     int& selected = this->selected;
     // UP/DOWN act like home/end for Input, but we want to scroll our menu
     if (event == Event::ArrowUp || (event.is_mouse() && event.mouse().button == Mouse::WheelUp)) {
-      if(selected == 0) {
+      if (selected == 0) {
         button_ok->TakeFocus();
         return true;
       }
@@ -168,6 +174,8 @@ RenameDialog::RenameDialog(PanelSharedState::P data) : app(std::move(data)) {
       if (menu->ChildCount() == 1) {
         // Single file rename allows enter to trigger ok
         this->ok();
+      } else {
+        button_close->TakeFocus();
       }
       return true;
     }
@@ -211,26 +219,55 @@ void RenameDialog::OnShow() {
   app->action.arguments->use_focused_as_alternative();
   // create items
   int selected_count = app->action.arguments->selected.size();
-  if(selected_count == 0) {
+  if (selected_count == 0) {
     cancel();
     return;
   }
+  const bool same_dir = app->action.arguments->selected_share_same_dir();
   rows.resize(selected_count);
   for (int i = 0; i < selected_count; i++) {
-    // int& cursor_position = rows[i].cursor_position;
-    rows[i].content         = app->action.arguments->selected.at(i).filename().native();
+    auto& data              = app->action.arguments->selected.at(i);
+    rows[i].content         = data.filename().native();
     rows[i].cursor_position = 0;
     InputOption style;
-    style.content         = &(rows.at(i).content);
-    style.placeholder     = "";
-    style.cursor_position = &(rows[i].cursor_position);
-    Component txt         = Input(style);
-    menu->Add(txt | showInputCursor(&(rows.at(i).cursor_position)));
+    style.multiline           = false;
+    style.content             = &(rows.at(i).content);
+    style.placeholder         = "";
+    style.cursor_position     = &(rows[i].cursor_position);
+    Component input_field     = Input(style) | showInputCursor(&(rows.at(i).cursor_position));
+    Component old_to_new_item = Renderer(input_field, [input_field, same_dir = same_dir, data = data]() -> Element {
+      return vbox({
+        text(same_dir ? data.filename().native() : data.native()) | dim,
+        input_field->Render(),
+      });
+    });
+    menu->Add(old_to_new_item);
   }
   menu->TakeFocus();
 }
 
-void RenameDialog::ok() { app->action.close_dialog(); }
+void RenameDialog::ok() {
+  int selected_count = app->action.arguments->selected.size();
+  for (int i = selected_count - 1; i >= 0; --i) {
+    error_code ec;
+    auto       original = app->action.arguments->selected.at(i);
+    auto       new_path = original.parent_path() / rows.at(i).content;
+    boost::filesystem::rename(original, new_path, ec);
+    if (ec.failed()) {
+      Perun::l.e("Rename failed", ec.to_string(), {{"original", original.native()}, {"new", new_path.native()}});
+      continue;
+    }
+    rows.erase(rows.begin() + i);
+    app->action.arguments->selected.erase(app->action.arguments->selected.begin() + i);
+    menu->ChildAt(i)->Detach();
+  }
+  if (app->action.arguments->selected.empty()) {
+    app->dir->refresh();
+    app->action.close_dialog();
+    return;
+  }
+  menu->TakeFocus();
+}
 
 void RenameDialog::cancel() { app->action.close_dialog(); }
 

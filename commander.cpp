@@ -239,3 +239,18 @@ void Dir::sort_toggle_time_direction() {
   }
   _sort();
 }
+
+
+bool CommandArgs::selected_share_same_dir() {
+  if(selected.empty()) return false;
+  bool share = true;
+  auto dir = selected.at(0).parent_path();
+  for(int i=1; i<selected.size(); i++) {
+    if(selected.at(i).parent_path() != dir) {
+      share = false;
+      break;
+    }
+  }
+  return share;
+}
+

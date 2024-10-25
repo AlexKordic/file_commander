@@ -66,6 +66,7 @@ struct CommandArgs {
   void use_focused_as_alternative() {
     if (selected.size() == 0 && focused.empty() == false) { selected.push_back(focused); }
   }
+  bool selected_share_same_dir();
 };
 
 class Dir {

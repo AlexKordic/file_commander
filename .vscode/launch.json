@@ -12,8 +12,8 @@
       "stopAtEntry": false,
       "args": [],
       "environment": [],
-      "cwd": "${workspaceFolder}",
-      "externalConsole": false,
+      "cwd": "/tmp",
+      "externalConsole": true,
       "MIMode": "lldb"
     }
   ]
