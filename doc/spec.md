@@ -16,7 +16,7 @@ Initial Features:
 + esc clears selection
 + If no item selected then item under the cursor is considered selected
 + List can be sorted on any column ASC/DESC
-- Target for the command is always other-panel-selected-tab. Some commands ignore target dir and files.
++ Target for the command is always other-panel-selected-tab. Some commands ignore target dir and files.
 - Command search like vscode-F1 with option to update key-shorcut on the spot
 - Easily add new commands 
 - When width is small show single panel only with visible other panel path
@@ -31,8 +31,8 @@ Initial commands:
 - delete & confirm popup
 + rename
 + multi-rename
-- names to clipboard
-- paths to clipboard
++ names to clipboard
++ paths to clipboard
 - Find files, breadth-first-search, creates new tab for results
 - allow defining custom command
   - 7z compress & extract
