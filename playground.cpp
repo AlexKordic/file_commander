@@ -1,17 +1,15 @@
-// Copyright 2020 Arthur Sonzogni. All rights reserved.
-// Use of this source code is governed by the MIT license that can be found in
-// the LICENSE file.
-#include <ftxui/dom/linear_gradient.hpp>  // for LinearGradient
-#include <ftxui/screen/color.hpp>         // for Color, Color::White, Color::Red, Color::Blue, Color::Black, Color::GrayDark, ftxui
-#include <functional>                     // for function
-#include <string>                         // for allocator, string
-#include <utility>                        // for move
+#include <ftxui/dom/linear_gradient.hpp>
+#include <ftxui/screen/color.hpp>
 
-#include "ftxui/component/component.hpp"           // for Input, Horizontal, Vertical, operator|
-#include "ftxui/component/component_base.hpp"      // for Component
-#include "ftxui/component/component_options.hpp"   // for InputState, InputOption
-#include "ftxui/component/screen_interactive.hpp"  // for ScreenInteractive
-#include "ftxui/dom/elements.hpp"                  // for operator|=, Element, bgcolor, operator|, separatorEmpty, color, borderEmpty, separator, text, center, dim, hbox, vbox, border, borderDouble, borderRounded
+#include "ftxui/component/component.hpp"
+#include "ftxui/component/component_base.hpp"
+#include "ftxui/component/component_options.hpp"
+#include "ftxui/component/screen_interactive.hpp"
+#include "ftxui/dom/elements.hpp"
+
+#include <functional>
+#include <string>
+#include <utility>
 
 namespace ftxui {
 
@@ -31,15 +29,15 @@ class NodeDecorator : public Node {
 
 class ShowInputCursor : public NodeDecorator {
  public:
-  ShowInputCursor(Element child, Ref<int> cursor_position) : NodeDecorator(std::move(child)), _cursor_position(cursor_position) { }
+  ShowInputCursor(Element child, Ref<int> cursor_position) : NodeDecorator(std::move(child)), _cursor_position(cursor_position) {}
 
   void Render(Screen& screen) override {
     const bool draw_cursor = true;
     // TODO: animate blinking by toggling draw_cursor
     if(draw_cursor) {
-      int x = std::max(1, std::min(box_.x_max, _cursor_position() +1));
+      int x = std::max(box_.x_min, std::min(box_.x_max, box_.x_min + _cursor_position()));
       for (int y = box_.y_min; y <= box_.y_max; ++y) {
-        screen.PixelAt(x, y).inverted = true; 
+        screen.PixelAt(x, y).inverted = !screen.PixelAt(x, y).inverted;
       }
     }
     NodeDecorator::Render(screen);
@@ -48,27 +46,23 @@ class ShowInputCursor : public NodeDecorator {
   Ref<int> _cursor_position;
 };
 
-Element showInputCursor(Element child, Ref<int> cursor_position) {
-  return std::make_shared<ShowInputCursor>(std::move(child), cursor_position);
-}
+Element   showInputCursor(Element child, Ref<int> cursor_position) { return std::make_shared<ShowInputCursor>(std::move(child), cursor_position); }
 Decorator showInputCursor(Ref<int> cursor_position) {
-  return [cursor_position](Element child)-> Element{
-    return showInputCursor(std::move(child), cursor_position);
-  };
+  return [cursor_position](Element child) -> Element { return showInputCursor(std::move(child), cursor_position); };
 }
 
-}
+}  // namespace ftxui
 
 using namespace ftxui;
 
-struct Item{
+struct Item {
   std::string content;
   int         cursor_position = 0;
 
-  Item(const char * s) : content(s) {}
+  Item(const char* s) : content(s) {}
 };
 
-int main() { 
+int main() {
   // Lines we want to display, each in its own Input
   std::vector<Item> lines = {
     R"(#include ftxui/component/captured_mouse.hpp"  // for ftxui)",
@@ -79,39 +73,38 @@ int main() {
     R"(#include ftxui/dom/flexbox_config.hpp"  // for FlexboxConfig, FlexboxConfig::AlignContent, FlexboxConfig::JustifyContent, FlexboxConfig::AlignContent::Center, FlexboxConfig::AlignItems, FlexboxConfig::Direction, FlexboxConfig::JustifyContent::Center, FlexboxConfig::Wrap)",
     R"(#include ftxui/screen/color.hpp"        // for Color, Color::Black)",
   };
-  int selected = 0;
-  auto menu = Container::Vertical({}, &selected);
-  auto menu_event_filter = [&selected, menu](Event event)-> bool{
-    if(event == Event::ArrowUp || (event.is_mouse() && event.mouse().button == Mouse::WheelUp)) {
+  int  selected          = 0;
+  auto menu              = Container::Vertical({}, &selected);
+  auto menu_event_filter = [&selected, menu](Event event) -> bool {
+    if (event == Event::ArrowUp || (event.is_mouse() && event.mouse().button == Mouse::WheelUp)) {
       selected = std::max(0, selected - 1);
       return true;
     }
-    if(event == Event::ArrowDown || (event.is_mouse() && event.mouse().button == Mouse::WheelDown)) {
+    if (event == Event::ArrowDown || (event.is_mouse() && event.mouse().button == Mouse::WheelDown)) {
       selected = std::min((int)menu->ChildCount() - 1, selected + 1);
       return true;
     }
     bool any = false;
-    int c = menu->ChildCount();
-    for(int i=0; i<c; i++) {
-      any |= menu->ChildAt(i)->OnEvent(event);
-    }
+    int  c   = menu->ChildCount();
+    for (int i = 0; i < c; i++) { any |= menu->ChildAt(i)->OnEvent(event); }
     return any;
   };
-  for(int i=0; i<lines.size(); i++) {
+  for (int i = 0; i < lines.size(); i++) {
     InputOption style;
-    style.content = &(lines.at(i).content);
-    style.placeholder = "";
+    style.content         = &(lines.at(i).content);
+    style.multiline       = false;
+    style.placeholder     = "";
     style.cursor_position = &(lines.at(i).cursor_position);
-    Component txt = Input(style) | showInputCursor(&(lines.at(i).cursor_position));
+    Component txt         = Input(style) | showInputCursor(&(lines.at(i).cursor_position));
     menu->Add(txt);
   }
   auto renderer = Renderer(CatchEvent(menu, menu_event_filter), [&] {
     return vbox({
-               menu->Render() | frame | size(HEIGHT, LESS_THAN, 5),
-           }) |
-           border;
+             menu->Render() | frame | size(HEIGHT, LESS_THAN, 5),
+           })
+      | border;
   });
-  auto screen = ScreenInteractive::TerminalOutput(); 
+  auto screen   = ScreenInteractive::TerminalOutput();
   screen.Loop(renderer);
   return 0;
 }

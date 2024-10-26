@@ -45,6 +45,13 @@ Initial commands:
   - tar/gz extract
   - open in installed editor app
 
+## Extra
+
+Clipboard support
++ text paste works good
+- text copy is not possible when mouse is captured
+- https://stackoverflow.com/questions/65840288/monitor-clipboard-changes-c-for-all-applications-windows
+
 # Design
 
                                                                                         

@@ -8,11 +8,34 @@
 using namespace boost::filesystem;
 using namespace boost::system;
 
+inline std::tm localtime__(std::time_t timer) {
+  std::tm bt{};
+#if defined(__unix__)
+  localtime_r(&timer, &bt);
+#elif defined(_MSC_VER)
+  localtime_s(&bt, &timer);
+#else
+  static std::mutex           mtx;
+  std::lock_guard<std::mutex> lock(mtx);
+  bt = *std::localtime(&timer);
+#endif
+  return bt;
+}
+
 std::string DirItem::get_time() const {
-  std::tm* ptm = std::localtime(&_w_time);
-  char     buffer[32];
-  size_t   len = std::strftime(buffer, 32, "%b %e %H:%M", ptm);
-  return std::string(buffer, len);
+  static std::time_t program_start_time = std::time(nullptr);
+  static std::time_t nine_months_ago    = program_start_time - (60 * 60 * 24 * 30 * 9);
+  static std::time_t three_months_after = program_start_time + (60 * 60 * 24 * 30 * 3);
+
+  std::tm ltm  = localtime__(_w_time);
+  char    buffer[64];
+  if (_w_time < nine_months_ago) {
+    return std::string(buffer, std::strftime(buffer, 64, "- %Y/%m/%d", &ltm));
+  } else if(_w_time > three_months_after) {
+    return std::string(buffer, std::strftime(buffer, 64, "+ %Y/%m/%d", &ltm));
+  } else {
+    return std::string(buffer, std::strftime(buffer, 64, "%b %e %H:%M", &ltm));
+  }
 }
 
 std::string DirItem::to_string() const {
@@ -38,9 +61,7 @@ Err Dir::leave_dir() {
   return move_to(parent_dir);
 }
 
-Err Dir::refresh() {
-  return move_to(path);
-}
+Err Dir::refresh() { return move_to(path); }
 
 Err Dir::move_to(const DirItem::P p) {
   if (false == exists(p)) return Err("don't exists path=" + p.native());
@@ -110,7 +131,7 @@ void Dir::item_toggle_select(int index) {
 
 void Dir::select_all() {
   for (DirItem& x : items) {
-    if(x._visible && x._selected == false) {
+    if (x._visible && x._selected == false) {
       x._selected = true;
       _calculated.bytes_selected += x.size();
       _calculated.items_selected += 1;
@@ -127,7 +148,7 @@ CommandArgs::P Dir::take_selected() {
   CommandArgs::P s = std::make_shared<CommandArgs>();
   s->selected.reserve(_calculated.items_selected);
   for (DirItem& x : items) {
-    if(x._selected) s->selected.push_back(x._path);
+    if (x._selected) s->selected.push_back(x._path);
   }
   return s;
 }
@@ -240,17 +261,15 @@ void Dir::sort_toggle_time_direction() {
   _sort();
 }
 
-
 bool CommandArgs::selected_share_same_dir() {
-  if(selected.empty()) return false;
+  if (selected.empty()) return false;
   bool share = true;
-  auto dir = selected.at(0).parent_path();
-  for(int i=1; i<selected.size(); i++) {
-    if(selected.at(i).parent_path() != dir) {
+  auto dir   = selected.at(0).parent_path();
+  for (int i = 1; i < selected.size(); i++) {
+    if (selected.at(i).parent_path() != dir) {
       share = false;
       break;
     }
   }
   return share;
 }
-
