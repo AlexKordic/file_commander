@@ -28,11 +28,12 @@ Commands& commands();
 struct Dialog {
   using P = std::shared_ptr<Dialog>;
 
-  Component navigation;
-  Component renderer;
+  PanelSharedState::P app;
+  Component           navigation;
+  Component           renderer;
 
-  Dialog(Component c, Component r) : navigation(std::move(c)), renderer(std::move(r)) {}
-  Dialog() = default;
+  // Dialog(Component c, Component r) : navigation(std::move(c)), renderer(std::move(r)) {}
+  explicit Dialog(PanelSharedState::P app);
 
   virtual void OnShow() = 0;
 };
@@ -42,16 +43,13 @@ struct Files : Dialog {
   std::string filter_txt;
   Component   sort_name, sort_size, sort_time;
 
-  PanelSharedState::P state;
-
-  Err  init(PanelSharedState::P s);
+  explicit Files(PanelSharedState::P s);
   void OnShow() override {}
 };
 
 struct MkdirDialog : Dialog {
-  std::string         new_dir_name;
-  PanelSharedState::P app;
-  std::string         error;
+  std::string new_dir_name;
+  std::string error;
 
   Component textbox;
   Component button_ok;
@@ -66,8 +64,6 @@ struct MkdirDialog : Dialog {
 };
 
 struct RenameDialog : Dialog {
-  PanelSharedState::P app;
-
   RenameDialog(PanelSharedState::P data);
   void OnShow() override;
 
@@ -87,15 +83,15 @@ struct RenameDialog : Dialog {
 };
 
 struct ToClipboardDialog : Dialog {
-  PanelSharedState::P app;
-  int                 items_copied = 0;
-
   ToClipboardDialog(PanelSharedState::P data);
   void OnShow() override;
 
+  int       items_copied = 0;
   Component button_close;
   Element   render();
 };
+
+struct CopyDialog : Dialog {};
 
 struct Nyi : Dialog {
   Nyi(PanelSharedState::P s);

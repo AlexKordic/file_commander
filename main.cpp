@@ -74,8 +74,7 @@ class Panel : public DialogOverlay {
       state->action.arguments->target = this->get_target(this);
       show_dialog(state->action.dialog);
     };
-    auto files = std::make_shared<ftxui::Files>();
-    files->init(state);
+    auto files = std::make_shared<ftxui::Files>(state);
     _main_document = std::dynamic_pointer_cast<ftxui::Dialog>(files);
     navigation->Add(_main_document->navigation);
     // register dialogs

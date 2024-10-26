@@ -14,12 +14,13 @@ using boost::system::error_code;
 
 namespace ftxui {
 
+Dialog::Dialog(PanelSharedState::P app) : app(app) {}
+
 //
 // Files
 //
 
-Err Files::init(PanelSharedState::P s_) {
-  state                 = std::move(s_);
+Files::Files(PanelSharedState::P s) : Dialog(std::move(s)) {
   InputOption input_opt = InputOption::Default();
   input_opt.multiline   = false;
   input_opt.transform   = [](InputState state) {
@@ -36,13 +37,13 @@ Err Files::init(PanelSharedState::P s_) {
     return text(t) | theme().sort_button;
   };
 
-  state->filter = Input(&filter_txt, &(state->dir->path_txt), input_opt);
-  files         = FileList(state, &filter_txt);
-  sort_name     = Button("Name", [dir = state->dir] { dir->sort_toggle_name_direction(); }, ascii_button);
-  sort_size     = Button("Size", [dir = state->dir] { dir->sort_toggle_size_direction(); }, ascii_button);
-  sort_time     = Button("Date", [dir = state->dir] { dir->sort_toggle_time_direction(); }, ascii_button);
+  app->filter = Input(&filter_txt, &(app->dir->path_txt), input_opt);
+  files         = FileList(app, &filter_txt);
+  sort_name     = Button("Name", [dir = app->dir] { dir->sort_toggle_name_direction(); }, ascii_button);
+  sort_size     = Button("Size", [dir = app->dir] { dir->sort_toggle_size_direction(); }, ascii_button);
+  sort_time     = Button("Date", [dir = app->dir] { dir->sort_toggle_time_direction(); }, ascii_button);
 
-  auto render_selection = [state = state, sort_name = sort_name, sort_size = sort_size, sort_time = sort_time]() -> Element {
+  auto render_selection = [state = app, sort_name = sort_name, sort_size = sort_size, sort_time = sort_time]() -> Element {
     std::string prefixes[3] = {"  ", "  ", "  "};
     switch (state->dir->order_by) {
     case Orderby::NAME_ASC: prefixes[0] = "↑↑"; break;
@@ -71,7 +72,7 @@ Err Files::init(PanelSharedState::P s_) {
   };
 
   navigation = Container::Vertical({Container::Horizontal({sort_name, sort_size, sort_time}), files});
-  renderer   = Renderer(navigation, [filter = state->filter, render_selection = render_selection, files = files]() -> Element {
+  renderer   = Renderer(navigation, [filter = app->filter, render_selection = render_selection, files = files]() -> Element {
     return vbox({
       filter->Render() | ftxui::focus | ftxui::select,
       render_selection(),
@@ -79,14 +80,13 @@ Err Files::init(PanelSharedState::P s_) {
     });
   });
   files->TakeFocus();
-  return Err();
 }
 
 //
 // Mkdir
 //
 
-MkdirDialog::MkdirDialog(PanelSharedState::P s) : app(std::move(s)) {
+MkdirDialog::MkdirDialog(PanelSharedState::P s) : Dialog(std::move(s)) {
   InputOption textbox_opt;
   textbox_opt.on_change = [this]() { this->error.clear(); };
   textbox_opt.on_enter  = [this]() { this->ok(); };
@@ -144,7 +144,7 @@ void MkdirDialog::cancel() { app->action.close_dialog(); }
 // Rename
 //
 
-RenameDialog::RenameDialog(PanelSharedState::P data) : app(std::move(data)) {
+RenameDialog::RenameDialog(PanelSharedState::P d) : Dialog(std::move(d)) {
   ButtonOption ascii_button;
   ascii_button.transform = [](const EntryState& s) {
     const std::string t = s.focused ? "[" + s.label + "]" : " " + s.label + " ";
@@ -275,7 +275,7 @@ void RenameDialog::cancel() { app->action.close_dialog(); }
 // ToClipboardDialog
 //
 
-ToClipboardDialog::ToClipboardDialog(PanelSharedState::P data) : app(std::move(data)) {
+ToClipboardDialog::ToClipboardDialog(PanelSharedState::P d) : Dialog(std::move(d)) {
   button_close = Button("OK", [this] { this->app->action.close_dialog(); });
   navigation   = Container::Vertical({button_close});
   renderer     = Renderer(navigation, [this]() -> Element { return this->render(); });
@@ -323,13 +323,13 @@ Element ToClipboardDialog::render() {
 // NYI
 //
 
-Nyi::Nyi(PanelSharedState::P s) {
+Nyi::Nyi(PanelSharedState::P d) : Dialog(std::move(d)) {
   Component nyi_textbox      = Input("", "Dummy text - Not used at all ...");
-  Component nyi_button_close = Button("OK", [s] { s->action.close_dialog(); });
+  Component nyi_button_close = Button("OK", [app=app] { app->action.close_dialog(); });
   navigation                 = Container::Vertical({nyi_textbox, nyi_button_close});
-  renderer                   = Renderer(navigation, [nyi_textbox, nyi_button_close, s]() -> Element {
+  renderer                   = Renderer(navigation, [nyi_textbox, nyi_button_close, app=app]() -> Element {
     return vbox({
-             text(s->action.dialog + " dialog example"),
+             text(app->action.dialog + " dialog example"),
              separator(),
              nyi_textbox->Render(),
              filler(),
