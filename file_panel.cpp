@@ -170,6 +170,7 @@ class FileList : public ComponentBase {
         return true;
       }
       if (event == theme().key_enter_dir) {
+        if(dir->items.empty()) return false;
         DirItem& where = dir->items.at(selected);
         if (where.is_dir()) {
           DirItem::P p = where.path_ref();
