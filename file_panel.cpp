@@ -84,14 +84,22 @@ class FileList : public ComponentBase {
         if(!is_focused && !is_selected) e |= theme().file_type(data.type());
         return e;
       };
-      elements.push_back(
-        hbox({
+      auto produce_row = [&]()->Element{
+        return hbox({
           wrap(data.filename_ref()) | xflex_grow | bgGaugeLeft(float(data.size()) / max_size, theme().size_gauge_full, theme().size_gauge_empty), 
           (data.is_dir() ? text("") : coloredInt(data.size())), 
           separatorLight(), 
           wrap(data.get_time())
-        }) | focus_management | reflect(boxes_[index])
-      );
+        }) | focus_management | reflect(boxes_[index]);
+      };
+      if(data.symlink_ref()) {
+        elements.push_back(vbox({
+          produce_row(),
+          text(" -> " + data.symlink_ref()->native()) | dim
+        }));
+      } else {
+        elements.push_back(produce_row());
+      }
       // clang-format on
       // items_shown.push_back(ei);
     }

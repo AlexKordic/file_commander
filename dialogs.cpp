@@ -272,6 +272,20 @@ void RenameDialog::ok() {
 void RenameDialog::cancel() { app->action.close_dialog(); }
 
 //
+// Copy
+//
+
+CopyDialog::CopyDialog(PanelSharedState::P d) : Dialog(std::move(d)) {
+  // [_] follow links `cp -r -L`: always follow symbolic links in SOURCE
+  // [x] preserve attributes
+  // [x] preserve relative links
+  // - detecting cyclic symbolic links
+  // - detect when dir is copied into itself
+}
+
+void CopyDialog::OnShow() {}
+
+//
 // ToClipboardDialog
 //
 

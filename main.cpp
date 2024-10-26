@@ -80,7 +80,7 @@ class Panel : public DialogOverlay {
     // register dialogs
     _overlay_dialogs["Mkdir"]           = std::make_shared<MkdirDialog>(state);
     _overlay_dialogs["Rename"]          = std::make_shared<RenameDialog>(state);
-    _overlay_dialogs["Copy"]            = std::make_shared<Nyi>(state);
+    _overlay_dialogs["Copy"]            = std::make_shared<CopyDialog>(state);
     _overlay_dialogs["Move"]            = std::make_shared<Nyi>(state);
     _overlay_dialogs["Delete"]          = std::make_shared<Nyi>(state);
     _overlay_dialogs["Find"]            = std::make_shared<Nyi>(state);

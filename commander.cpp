@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <boost/filesystem.hpp>
 #include <functional>
+#include <optional>
 using namespace boost::filesystem;
 using namespace boost::system;
 
@@ -27,11 +28,11 @@ std::string DirItem::get_time() const {
   static std::time_t nine_months_ago    = program_start_time - (60 * 60 * 24 * 30 * 9);
   static std::time_t three_months_after = program_start_time + (60 * 60 * 24 * 30 * 3);
 
-  std::tm ltm  = localtime__(_w_time);
+  std::tm ltm = localtime__(_w_time);
   char    buffer[64];
   if (_w_time < nine_months_ago) {
     return std::string(buffer, std::strftime(buffer, 64, "- %Y/%m/%d", &ltm));
-  } else if(_w_time > three_months_after) {
+  } else if (_w_time > three_months_after) {
     return std::string(buffer, std::strftime(buffer, 64, "+ %Y/%m/%d", &ltm));
   } else {
     return std::string(buffer, std::strftime(buffer, 64, "%b %e %H:%M", &ltm));
@@ -47,8 +48,13 @@ std::string DirItem::to_string() const {
 
 DirItem::DirItem(DirItem::P p, DirItem::Type type, DirItem::Perms perms) : _path(std::move(p)), _type(type), _perms(perms) {
   _filename = _path.filename().native();
-  error_code ec;
-  _w_time = last_write_time(_path, ec);
+  error_code  ec;
+  const bool is_link = boost::filesystem::is_symlink(_path, ec);
+  if (!ec.failed() && is_link) {
+    _symlink = boost::filesystem::read_symlink(_path, ec);
+    if(ec.failed()) _symlink = std::nullopt;
+  }
+  _w_time          = last_write_time(_path, ec);
   if (ec.failed()) _w_time = 0;
   if (type == boost::filesystem::directory_file) return;
   _size = file_size(_path, ec);
@@ -275,11 +281,11 @@ bool CommandArgs::selected_share_same_dir() {
 }
 
 Err push_to_clipboard(std::string const& txt) {
-  FILE * pipe = popen("pbcopy", "w");
-  if(pipe == nullptr) return Err("pbcopy not found");
+  FILE* pipe = popen("pbcopy", "w");
+  if (pipe == nullptr) return Err("pbcopy not found");
   int count = fwrite(txt.c_str(), txt.size(), 1, pipe);
   fflush(pipe);
-  if(-1 == pclose(pipe)) return Err("pbcopy pclose() err");
-  if(count != 1) return Err("pbcopy write count mismatch");
+  if (-1 == pclose(pipe)) return Err("pbcopy pclose() err");
+  if (count != 1) return Err("pbcopy write count mismatch");
   return Err();
 }

@@ -52,6 +52,12 @@ Clipboard support
 - text copy is not possible when mouse is captured
 - https://stackoverflow.com/questions/65840288/monitor-clipboard-changes-c-for-all-applications-windows
 
+Usability:
+  https://www.redhat.com/en/blog/midnight-commander-file-manager#:~:text=To%20copy%20or%20move%20a,in%20the%20non%2Dactive%20panel.
+
+Performance:
+  https://unix.stackexchange.com/questions/771238/linux-syscalls-advantage-of-copy-file-range-over-sendfile  
+
 # Design
 
                                                                                         

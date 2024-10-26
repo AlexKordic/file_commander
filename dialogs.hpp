@@ -91,7 +91,10 @@ struct ToClipboardDialog : Dialog {
   Element   render();
 };
 
-struct CopyDialog : Dialog {};
+struct CopyDialog : Dialog {
+  CopyDialog(PanelSharedState::P data);
+  void OnShow() override;
+};
 
 struct Nyi : Dialog {
   Nyi(PanelSharedState::P s);

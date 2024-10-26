@@ -11,6 +11,7 @@
 
 #include <cstdint>
 #include <ctime>
+#include <optional>
 
 enum class Orderby {
   NAME_ASC,
@@ -33,8 +34,9 @@ class DirItem {
   std::string to_string() const;
   std::string get_time() const;
 
-  const std::string& filename_ref() const { return _filename; }
-  const P&           path_ref() const { return _path; }
+  const std::string&     filename_ref() const { return _filename; }
+  const P&               path_ref() const { return _path; }
+  const std::optional<P> symlink_ref() const { return _symlink; }
 
   bool    is_dir() const { return _type == Type::directory_file; }
   bool    visible() const { return _visible; }
@@ -52,7 +54,8 @@ class DirItem {
 
   bool _visible = true;
 
-  std::string _filename;
+  std::string      _filename;
+  std::optional<P> _symlink;
 
   friend class Dir;
 };
@@ -88,7 +91,7 @@ class Dir {
   };
 
   Err   move_to(const DirItem::P path);
-  Err   refresh(); // TODO: add system notifications for current dir
+  Err   refresh();  // TODO: add system notifications for current dir
   Err   leave_dir();
   void  sort_toggle_name_direction();
   void  sort_toggle_size_direction();
