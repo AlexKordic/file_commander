@@ -6,7 +6,7 @@ An orthodox file manager. Exploring directories to run commands on selected file
 Initial Features:
 - prepend char to item render
   - dir marked with `/`
-  - symlink marked with `~`
+  - symlink takes 2 rows `-> real path` 
   - executable file marked with `*`
 - Maybe change boost to std filesystem https://en.cppreference.com/w/cpp/filesystem/is_socket~
   - Color based on file type

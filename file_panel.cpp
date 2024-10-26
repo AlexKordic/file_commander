@@ -40,13 +40,11 @@ class FileList : public ComponentBase {
   StringRef           filter_text;
   Dir*                dir;
   PanelSharedState::P app;
-  // std::vector<int> items_shown;
 
-  explicit FileList(PanelSharedState::P panel) {
-    this->dir         = panel->dir;
-    this->filter      = panel->filter;
-    this->filter_text = panel->filter_text;
-    app               = std::move(panel);
+  FileList(PanelSharedState::P panel, std::string* filter_text) : filter_text(filter_text) {
+    this->dir    = panel->dir;
+    this->filter = panel->filter;
+    app          = std::move(panel);
   }
 
   void Clamp() {
@@ -65,7 +63,7 @@ class FileList : public ComponentBase {
     Elements   elements;
     const bool is_menu_focused = Focused();
     // elements.push_back(text("Render count == " + std::to_string(_itteration)));
-    float max_size = dir->stats().largest_item_bytes;
+    float      max_size        = dir->stats().largest_item_bytes;
 
     const int item_count = dir->items.size();
     for (int index = 0; index < item_count; ++index) {
@@ -261,7 +259,7 @@ class FileList : public ComponentBase {
   Box              box_;
 };
 
-Component ftxui::FileList(PanelSharedState::P panel) { return std::make_shared<::FileList>(std::move(panel)); }
+Component ftxui::FileList(PanelSharedState::P panel, std::string* filter_text) { return std::make_shared<::FileList>(std::move(panel), filter_text); }
 
 class ColoredInt : public Node {
  public:
@@ -369,16 +367,14 @@ Decorator ftxui::bgGaugeLeft(float fraction, Color full, Color empty) {
 
 class ShowInputCursor : public NodeDecorator {
  public:
-  ShowInputCursor(Element child, Ref<int> cursor_position) : NodeDecorator(std::move(child)), _cursor_position(cursor_position) { }
+  ShowInputCursor(Element child, Ref<int> cursor_position) : NodeDecorator(std::move(child)), _cursor_position(cursor_position) {}
 
   void Render(Screen& screen) override {
     const bool draw_cursor = true;
     // TODO: animate blinking by toggling draw_cursor
-    if(draw_cursor) {
+    if (draw_cursor) {
       int x = std::max(box_.x_min, std::min(box_.x_max, box_.x_min + _cursor_position()));
-      for (int y = box_.y_min; y <= box_.y_max; ++y) {
-        screen.PixelAt(x, y).inverted = !screen.PixelAt(x, y).inverted;
-      }
+      for (int y = box_.y_min; y <= box_.y_max; ++y) { screen.PixelAt(x, y).inverted = !screen.PixelAt(x, y).inverted; }
     }
     NodeDecorator::Render(screen);
   }
@@ -386,11 +382,7 @@ class ShowInputCursor : public NodeDecorator {
   Ref<int> _cursor_position;
 };
 
-Element ftxui::showInputCursor(Element child, Ref<int> cursor_position) {
-  return std::make_shared<ShowInputCursor>(std::move(child), cursor_position);
-}
+Element   ftxui::showInputCursor(Element child, Ref<int> cursor_position) { return std::make_shared<ShowInputCursor>(std::move(child), cursor_position); }
 Decorator ftxui::showInputCursor(Ref<int> cursor_position) {
-  return [cursor_position](Element child)-> Element{
-    return showInputCursor(std::move(child), cursor_position);
-  };
+  return [cursor_position](Element child) -> Element { return showInputCursor(std::move(child), cursor_position); };
 }

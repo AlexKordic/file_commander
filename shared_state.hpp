@@ -14,7 +14,6 @@ struct PanelSharedState {
 
   Dir*             dir;
   ftxui::Component filter;
-  ftxui::StringRef filter_text;
   struct Action {
     std::shared_ptr<CommandArgs> arguments;
     std::string                  dialog;

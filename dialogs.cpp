@@ -34,10 +34,9 @@ Err Files::init(PanelSharedState::P s_) {
     if (s.focused) return text(t) | theme().sort_button_active;
     return text(t) | theme().sort_button;
   };
-  state->filter_text = filter_txt;
 
   state->filter = Input(&filter_txt, &(state->dir->path_txt), input_opt);
-  files         = FileList(state);
+  files         = FileList(state, &filter_txt);
   sort_name     = Button("Name", [dir = state->dir] { dir->sort_toggle_name_direction(); }, ascii_button);
   sort_size     = Button("Size", [dir = state->dir] { dir->sort_toggle_size_direction(); }, ascii_button);
   sort_time     = Button("Date", [dir = state->dir] { dir->sort_toggle_time_direction(); }, ascii_button);
