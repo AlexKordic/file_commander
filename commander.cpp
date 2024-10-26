@@ -273,3 +273,13 @@ bool CommandArgs::selected_share_same_dir() {
   }
   return share;
 }
+
+Err push_to_clipboard(std::string const& txt) {
+  FILE * pipe = popen("pbcopy", "w");
+  if(pipe == nullptr) return Err("pbcopy not found");
+  int count = fwrite(txt.c_str(), txt.size(), 1, pipe);
+  fflush(pipe);
+  if(-1 == pclose(pipe)) return Err("pbcopy pclose() err");
+  if(count != 1) return Err("pbcopy write count mismatch");
+  return Err();
+}

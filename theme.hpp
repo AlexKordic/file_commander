@@ -46,6 +46,7 @@ struct Theme {
     sort_button_active,
 
     mkdir_errortxt,
+    clipboard_msg,
 
     unused;
   

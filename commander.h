@@ -125,4 +125,6 @@ struct Commander {
   std::vector<DirCollection> panels;
 };
 
+Err push_to_clipboard(std::string const& txt);
+
 #endif  // FC_COMMANDER_H_

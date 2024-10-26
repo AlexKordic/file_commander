@@ -2,6 +2,7 @@
 #include "dialogs.hpp"
 #include <ftxui/component/component.hpp>
 #include <ftxui/dom/elements.hpp>
+#include <string>
 
 #include "boost/filesystem/operations.hpp"
 #include "commander.h"
@@ -269,6 +270,54 @@ void RenameDialog::ok() {
 }
 
 void RenameDialog::cancel() { app->action.close_dialog(); }
+
+//
+// ToClipboardDialog
+//
+
+ToClipboardDialog::ToClipboardDialog(PanelSharedState::P data) : app(std::move(data)) {
+  button_close = Button("OK", [this] { this->app->action.close_dialog(); });
+  navigation   = Container::Vertical({button_close});
+  renderer     = Renderer(navigation, [this]() -> Element { return this->render(); });
+}
+
+void ToClipboardDialog::OnShow() {
+  items_copied                            = 0;
+  std::vector<DirItem::P>& selected       = app->action.arguments->selected;
+  int                      selected_count = selected.size();
+  int                      required_size  = 0;
+  for (int i = selected_count - 1; i >= 0; --i) required_size += selected.at(i).size();
+  std::string text;
+  text.reserve(required_size);
+  const bool just_names = app->action.dialog == "NameToClipboard";
+  if (just_names) {
+    for (int i = selected_count - 1; i >= 0; --i) {
+      text += selected.at(i).filename().native();
+      text += "\n";
+    }
+  } else {
+    for (int i = selected_count - 1; i >= 0; --i) {
+      text += selected.at(i).native();
+      text += "\n";
+    }
+  }
+  // copy to clipboard
+  Err e = push_to_clipboard(text);
+  if (e.ok()) items_copied = selected.size();
+}
+
+Element ToClipboardDialog::render() {
+  const char* what = app->action.dialog == "NameToClipboard" ? " names" : " paths";
+  return vbox({
+           text(""),
+           text(std::to_string(this->items_copied) + what + " copied to clipboard") | theme().clipboard_msg,
+           text(""),
+           separator(),
+           button_close->Render(),
+           separator(),
+         })
+    | border | center;
+}
 
 //
 // NYI

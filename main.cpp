@@ -85,8 +85,8 @@ class Panel : public DialogOverlay {
     _overlay_dialogs["Move"]            = std::make_shared<Nyi>(state);
     _overlay_dialogs["Delete"]          = std::make_shared<Nyi>(state);
     _overlay_dialogs["Find"]            = std::make_shared<Nyi>(state);
-    _overlay_dialogs["NameToClipboard"] = std::make_shared<Nyi>(state);
-    _overlay_dialogs["PathToClipboard"] = std::make_shared<Nyi>(state);
+    _overlay_dialogs["NameToClipboard"] = std::make_shared<ToClipboardDialog>(state);
+    _overlay_dialogs["PathToClipboard"] = std::make_shared<ToClipboardDialog>(state);
   }
   void    move_to(DirItem::P& where) { dir.move_to(where); }
   Element render() {

@@ -86,6 +86,17 @@ struct RenameDialog : Dialog {
   void cancel();
 };
 
+struct ToClipboardDialog : Dialog {
+  PanelSharedState::P app;
+  int                 items_copied = 0;
+
+  ToClipboardDialog(PanelSharedState::P data);
+  void OnShow() override;
+
+  Component button_close;
+  Element   render();
+};
+
 struct Nyi : Dialog {
   Nyi(PanelSharedState::P s);
   void OnShow() override {}
