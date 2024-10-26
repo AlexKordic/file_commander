@@ -4,17 +4,11 @@
 An orthodox file manager. Exploring directories to run commands on selected files.
 
 Initial Features:
-- prepend char to item render
-  - dir marked with `/`
-  - symlink takes 2 rows `-> real path` 
-  - executable file marked with `*`
++ prepend char to item render
+  + dir marked with `/`
+  + symlink takes 2 rows `-> real path` 
+  + executable file colored green
 - Maybe change boost to std filesystem https://en.cppreference.com/w/cpp/filesystem/is_socket~
-  - Color based on file type
-    - Block file('b')
-    - Character device file('c')
-    - Named pipe file or just a pipe file('p')
-    - Symbolic link file('l')
-    - Socket file('s')
 - monitor dir changes and real-time updates
 + Left and Right panel
 - Panel having multiple tabs

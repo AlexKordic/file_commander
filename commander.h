@@ -39,6 +39,7 @@ class DirItem {
   const std::optional<P> symlink_ref() const { return _symlink; }
 
   bool    is_dir() const { return _type == Type::directory_file; }
+  bool    is_exe() const;
   bool    visible() const { return _visible; }
   bool    selected() const { return _selected; }
   Type    type() const { return _type; }

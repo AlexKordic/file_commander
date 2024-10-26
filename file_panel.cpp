@@ -28,6 +28,13 @@ namespace {
 // Similar to std::clamp, but allow hi to be lower than lo.
 template <class T> constexpr const T& clamp(const T& v, const T& lo, const T& hi) { return v < lo ? lo : hi < v ? hi : v; }
 
+Decorator filetype_color(const DirItem& item) {
+  if (item.is_dir()) return color(theme().file_directory_file);
+  Color base = theme().file_type(item.type());
+  if (item.is_exe()) { return color(Color::Interpolate(0.5, base, theme().file_perm_exe)); }
+  return color(base);
+}
+
 }  // namespace
 
 }  // namespace ftxui
@@ -78,10 +85,15 @@ class FileList : public ComponentBase {
       auto       focus_management = (selected != index) ? ftxui::nothing : is_menu_focused ? ftxui::focus : ftxui::select;
       // clang-format off
       auto wrap = [&](const std::string& x) -> Element { 
-        Element e = text(x);
+        Element e;
+        if(data.is_dir()) {
+          e = text("/" + x);
+        } else {
+          e = text(x);
+        }
         if (is_focused) e |= theme().files_focused;
         if (is_selected) e |= theme().files_selected;
-        if(!is_focused && !is_selected) e |= theme().file_type(data.type());
+        if(!is_focused && !is_selected) e |= filetype_color(data);
         return e;
       };
       auto produce_row = [&]()->Element{
@@ -170,7 +182,7 @@ class FileList : public ComponentBase {
         return true;
       }
       if (event == theme().key_enter_dir) {
-        if(dir->items.empty()) return false;
+        if (dir->items.empty()) return false;
         DirItem& where = dir->items.at(selected);
         if (where.is_dir()) {
           DirItem::P p = where.path_ref();

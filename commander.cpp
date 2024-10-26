@@ -23,6 +23,8 @@ inline std::tm localtime__(std::time_t timer) {
   return bt;
 }
 
+bool DirItem::is_exe() const { return (_perms & (perms::owner_exe | perms::group_exe | perms::others_exe)) > 0; }
+
 std::string DirItem::get_time() const {
   static std::time_t program_start_time = std::time(nullptr);
   static std::time_t nine_months_ago    = program_start_time - (60 * 60 * 24 * 30 * 9);
@@ -48,13 +50,13 @@ std::string DirItem::to_string() const {
 
 DirItem::DirItem(DirItem::P p, DirItem::Type type, DirItem::Perms perms) : _path(std::move(p)), _type(type), _perms(perms) {
   _filename = _path.filename().native();
-  error_code  ec;
+  error_code ec;
   const bool is_link = boost::filesystem::is_symlink(_path, ec);
   if (!ec.failed() && is_link) {
     _symlink = boost::filesystem::read_symlink(_path, ec);
-    if(ec.failed()) _symlink = std::nullopt;
+    if (ec.failed()) _symlink = std::nullopt;
   }
-  _w_time          = last_write_time(_path, ec);
+  _w_time = last_write_time(_path, ec);
   if (ec.failed()) _w_time = 0;
   if (type == boost::filesystem::directory_file) return;
   _size = file_size(_path, ec);

@@ -5,6 +5,7 @@
 #include <ftxui/component/event.hpp>
 #include <ftxui/dom/elements.hpp>
 #include <boost/filesystem/file_status.hpp>
+#include <ftxui/screen/color.hpp>
 
 struct Theme {
   Theme();
@@ -21,15 +22,9 @@ struct Theme {
   std::vector<ftxui::Color> filesize_colors;
   ftxui::Color size_gauge_full;
   ftxui::Color size_gauge_empty;
-  
-  ftxui::Decorator 
-    files_path,
-    files_filter_search,
-    files_border,
-    files_selected,
-    files_focused,
-    fileskind_dir,
 
+  ftxui::Color     
+    file_perm_exe,
     file_status_error,
     file_file_not_found,
     file_regular_file,
@@ -40,7 +35,15 @@ struct Theme {
     file_fifo_file,
     file_socket_file,
     file_reparse_file,
-    file_type_unknown,
+    file_type_unknown;
+
+  ftxui::Decorator 
+    files_path,
+    files_filter_search,
+    files_border,
+    files_selected,
+    files_focused,
+    fileskind_dir,
 
     sort_button,
     sort_button_active,
@@ -50,7 +53,7 @@ struct Theme {
 
     unused;
   
-  ftxui::Decorator file_type(boost::filesystem::file_type t);
+  ftxui::Color file_type(boost::filesystem::file_type t);
 };
 
 Theme& theme();

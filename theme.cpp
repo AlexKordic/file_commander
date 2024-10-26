@@ -22,17 +22,18 @@ Theme::Theme() {
   files_selected      = color(Color::Gold1) | bold;
   files_focused       = color(Color::DarkOliveGreen2) | inverted | bold;
 
-  file_status_error   = color(Color::Red);
-  file_file_not_found = color(Color::Red);
-  file_regular_file   = color(Color::White);
-  file_directory_file = color(Color::Turquoise2);
-  file_symlink_file   = color(Color::Magenta);
-  file_block_file     = color(Color::SandyBrown);
-  file_character_file = color(Color::Salmon1);
-  file_fifo_file      = color(Color::LightGoldenrod3);
-  file_socket_file    = color(Color::MistyRose3);
-  file_reparse_file   = color(Color::DarkKhaki);
-  file_type_unknown   = color(Color::Red);
+  file_perm_exe       = Color::SpringGreen1;
+  file_status_error   = Color::Red;
+  file_file_not_found = Color::Red;
+  file_regular_file   = Color::White;
+  file_directory_file = Color::Turquoise2;
+  file_symlink_file   = Color::Magenta;
+  file_block_file     = Color::SandyBrown;
+  file_character_file = Color::Salmon1;
+  file_fifo_file      = Color::LightGoldenrod3;
+  file_socket_file    = Color::MistyRose3;
+  file_reparse_file   = Color::DarkKhaki;
+  file_type_unknown   = Color::Red;
 
   sort_button        = bgcolor(Color::Wheat4);
   sort_button_active = bgcolor(Color::Wheat4) | color(Color::Salmon1);
@@ -50,7 +51,7 @@ Theme::Theme() {
   key_find               = Event::F3;
 }
 
-ftxui::Decorator Theme::file_type(boost::filesystem::file_type t) {
+ftxui::Color Theme::file_type(boost::filesystem::file_type t) {
   switch (t) {
   case boost::filesystem::status_error: return file_status_error;
   case boost::filesystem::file_not_found: return file_file_not_found;
