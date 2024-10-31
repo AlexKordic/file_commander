@@ -4,6 +4,7 @@
 An orthodox file manager. Exploring directories to run commands on selected files.
 
 Initial Features:
+- glob select & deselect
 + prepend char to item render
   + dir marked with `/`
   + symlink takes 2 rows `-> real path` 
@@ -19,7 +20,7 @@ Initial Features:
 + Target for the command is always other-panel-selected-tab. Some commands ignore target dir and files.
 - Command search like vscode-F1 with option to update key-shorcut on the spot
 - Easily add new commands 
-- When width is small show single panel only with visible other panel path
+- Show single panel full-width, with visible other panel path, toggle on key-event
 - All commands happen in separate thread, like TC copy in background.
 - Command progress panel TBD
 - FileList implement vscroll_indicator & yframe and create Element's for only visible items.
@@ -34,10 +35,18 @@ Initial commands:
 + names to clipboard
 + paths to clipboard
 - Find files, breadth-first-search, creates new tab for results
+  - `Result-TABS`: Allow Dir to contain empty-path(no parent dir) but contain file list to work on
 - allow defining custom command
   - 7z compress & extract
   - tar/gz extract
   - open in installed editor app
+- new tab from selected items
+- enter focused dir in target tab
+- Back <> Forward navigation tree
+  - remembering `Result-TABS` state
+  - Display navigation tree - new dialog
+  - move through navigation tree nodes - new dialog
+  - Delete navigation and associated `Dir`s on key-event
 
 ## Extra
 
