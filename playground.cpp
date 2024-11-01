@@ -158,7 +158,7 @@ class SizeMonitor {
   SizeMonitor(int64_t source_size, boost::filesystem::path destination) {
     this->source_size = source_size;
     this->destination = destination;
-    std::thread t([this]() { this->run(); });
+    thread = std::thread([this]() { this->run(); });
   }
   void stop() {
     running = false;
