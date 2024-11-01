@@ -215,7 +215,7 @@ int Dir::offset_vissible(int curr, int offset) {
     return -1;
   };
 
-  curr = std::max(0, std::min(int(items.size()), curr));
+  curr = std::max(0, std::min(int(items.size() - 1), curr));
   if (offset < 0) reverse();
   // find starting visible item
   int start = find_visible(curr);

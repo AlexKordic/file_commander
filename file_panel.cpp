@@ -84,14 +84,14 @@ class FileList : public ComponentBase {
       const bool is_selected      = data.selected();
       auto       focus_management = (selected != index) ? ftxui::nothing : is_menu_focused ? ftxui::focus : ftxui::select;
       // clang-format off
-      auto wrap = [&](const std::string& x) -> Element { 
+      auto wrap = [&](const std::string& x, bool apply_focus=true) -> Element { 
         Element e;
         if(data.is_dir()) {
           e = text("/" + x);
         } else {
           e = text(x);
         }
-        if (is_focused) e |= theme().files_focused;
+        if (apply_focus && is_focused) e |= theme().files_focused;
         if (is_selected) e |= theme().files_selected;
         if(!is_focused && !is_selected) e |= filetype_color(data);
         return e;
@@ -101,7 +101,7 @@ class FileList : public ComponentBase {
           wrap(data.filename_ref()) | xflex_grow | bgGaugeLeft(float(data.size()) / max_size, theme().size_gauge_full, theme().size_gauge_empty), 
           (data.is_dir() ? text("") : coloredInt(data.size())), 
           separatorLight(), 
-          wrap(data.get_time())
+          wrap(data.get_time(), false)
         }) | focus_management | reflect(boxes_[index]);
       };
       if(data.symlink_ref()) {
@@ -153,6 +153,7 @@ class FileList : public ComponentBase {
       if (event == theme().key_files_select) {
         dir->item_toggle_select(selected);
         selected = dir->next_visible(selected);
+        return true;
       }
       if (event == theme().key_clear_selection) {
         dir->clear_selection();
@@ -216,6 +217,13 @@ class FileList : public ComponentBase {
       }
 
       if (selected != old_selected) { return true; }
+
+      static const Event forbidden_events[]  = {Event::ArrowDown, Event::ArrowUp};
+      static const auto  b_                  = std::begin(forbidden_events);
+      static const auto  e_                  = std::end(forbidden_events);
+      const bool         dont_send_to_filter = std::find(b_, e_, event) != e_;
+      if (dont_send_to_filter) return false;
+
       // let the filter handle key events
       const bool filter_changed = filter->OnEvent(event);
       if (filter_changed) { dir->apply_filter(filter_text()); }
