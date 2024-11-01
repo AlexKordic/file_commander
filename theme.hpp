@@ -23,7 +23,9 @@ struct Theme {
   ftxui::Color size_gauge_full;
   ftxui::Color size_gauge_empty;
 
-  ftxui::Color     
+  ftxui::Color
+    default_fg,
+    default_bg,
     file_perm_exe,
     file_status_error,
     file_file_not_found,
@@ -50,6 +52,7 @@ struct Theme {
 
     mkdir_errortxt,
     clipboard_msg,
+    copy_destination,
 
     unused;
   

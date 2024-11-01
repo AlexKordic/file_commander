@@ -1,13 +1,11 @@
 #ifndef _PERUN_FC_DIALOGS_
 #define _PERUN_FC_DIALOGS_
 
-#include "err.hpp"
 #include "shared_state.hpp"
 
 #include <ftxui/component/component.hpp>
 #include <ftxui/component/event.hpp>
 
-#include <map>
 #include <memory>
 #include <string>
 
@@ -94,6 +92,22 @@ struct ToClipboardDialog : Dialog {
 struct CopyDialog : Dialog {
   CopyDialog(PanelSharedState::P data);
   void OnShow() override;
+
+  std::string destination_path;
+
+  Component button_cancel, button_ok;
+  Component op_follow_links;
+  Component op_preserve_attributes;
+  Component op_preserve_relative_links;
+  Component input_destination_path;
+
+  bool b_follow_links = false;
+  bool b_preserve_attributes = true;
+  bool b_preserve_relative_links = true;
+
+  Element render();
+  void run_copy();
+  void cancel_copy();
 };
 
 struct Nyi : Dialog {

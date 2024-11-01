@@ -1,4 +1,10 @@
 
+#include "file_panel.hpp"
+#include "commander.h"
+#include "dialogs.hpp"
+#include "log.hpp"
+#include "theme.hpp"
+
 #include <ftxui-grid-container/grid-container.hpp>
 #include <ftxui/component/component.hpp>
 #include <ftxui/component/component_base.hpp>
@@ -7,14 +13,11 @@
 #include <ftxui/dom/elements.hpp>
 #include <ftxui/dom/table.hpp>
 
+#include <map>
 #include <functional>
 #include <memory>
 #include <string>
 #include <utility>
-
-#include "commander.h"
-#include "dialogs.hpp"
-#include "log.hpp"
 
 #include <boost/filesystem.hpp>
 
@@ -95,7 +98,7 @@ class Panel : public DialogOverlay {
     if (!_overlay_renderer) return document;
     return dbox({
       document,
-      _overlay_renderer->Render() | clear_under | center,
+      _overlay_renderer->Render() | clear_under_colors | center,
     });
   }
 
@@ -114,7 +117,7 @@ class FileCommander {
     navigation = Container::Horizontal({left.navigation, right.navigation});
     renderer  = Renderer(navigation, [&]() -> Element {
       // Two panels side by side
-      return hbox({left.render() | xflex_grow, separatorLight(), right.render() | xflex_grow});
+      return hbox({left.render() | xflex_grow, separatorLight(), right.render() | xflex_grow}) | bgcolor(theme().default_bg) | color(theme().default_fg);
     });
   }
   // returns

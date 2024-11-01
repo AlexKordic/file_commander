@@ -22,6 +22,9 @@ Theme::Theme() {
   files_selected      = color(Color::Gold1) | bold;
   files_focused       = color(Color::DarkOliveGreen2) | inverted | bold;
 
+  default_fg = Color::White;
+  default_bg = Color::Black;
+
   file_perm_exe       = Color::SpringGreen1;
   file_status_error   = Color::Red;
   file_file_not_found = Color::Red;
@@ -40,6 +43,7 @@ Theme::Theme() {
 
   mkdir_errortxt = color(Color::LightPink3);
   clipboard_msg  = color(Color::LightPink3);
+  copy_destination = color(Color::LightPink3);
 
   key_copy               = Event::F5;
   key_move               = Event::F6;

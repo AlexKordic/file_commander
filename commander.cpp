@@ -33,7 +33,7 @@ std::string DirItem::get_time() const {
   std::tm ltm = localtime__(_w_time);
   char    buffer[64];
   if (_w_time < nine_months_ago) {
-    return std::string(buffer, std::strftime(buffer, 64, "- %Y/%m/%d", &ltm));
+    return std::string(buffer, std::strftime(buffer, 64, "  %Y/%m/%d", &ltm));
   } else if (_w_time > three_months_after) {
     return std::string(buffer, std::strftime(buffer, 64, "+ %Y/%m/%d", &ltm));
   } else {

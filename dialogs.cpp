@@ -38,10 +38,10 @@ Files::Files(PanelSharedState::P s) : Dialog(std::move(s)) {
   };
 
   app->filter = Input(&filter_txt, &(app->dir->path_txt), input_opt);
-  files         = FileList(app, &filter_txt);
-  sort_name     = Button("Name", [dir = app->dir] { dir->sort_toggle_name_direction(); }, ascii_button);
-  sort_size     = Button("Size", [dir = app->dir] { dir->sort_toggle_size_direction(); }, ascii_button);
-  sort_time     = Button("Date", [dir = app->dir] { dir->sort_toggle_time_direction(); }, ascii_button);
+  files       = FileList(app, &filter_txt);
+  sort_name   = Button("Name", [dir = app->dir] { dir->sort_toggle_name_direction(); }, ascii_button);
+  sort_size   = Button("Size", [dir = app->dir] { dir->sort_toggle_size_direction(); }, ascii_button);
+  sort_time   = Button("Date", [dir = app->dir] { dir->sort_toggle_time_direction(); }, ascii_button);
 
   auto render_selection = [state = app, sort_name = sort_name, sort_size = sort_size, sort_time = sort_time]() -> Element {
     std::string prefixes[3] = {"  ", "  ", "  "};
@@ -93,14 +93,22 @@ MkdirDialog::MkdirDialog(PanelSharedState::P s) : Dialog(std::move(s)) {
   textbox_opt.multiline = false;  // otherwise new_dir_name contains `\n` at the end
   textbox               = Input(&new_dir_name, "Name for new directory", textbox_opt);
 
-  button_ok    = Button("OK", [this] { this->ok(); });
-  button_close = Button("Cancel", [this] { this->cancel(); });
+  button_ok         = Button("   OK   ", [this] { this->ok(); });
+  button_close      = Button(" Cancel ", [this] { this->cancel(); });
+  auto close_on_esc = [this](Event event) -> bool {
+    if (event == Event::Escape) {
+      this->cancel();
+      return true;
+    }
+    return false;
+  };
 
-  navigation = Container::Vertical({
-    textbox,
-    button_ok,
-    button_close,
-  });
+  navigation = CatchEvent(Container::Vertical({
+                            textbox,
+                            button_ok,
+                            button_close,
+                          }),
+                          close_on_esc);
   renderer   = Renderer(navigation, [this]() -> Element { return this->render(); });
 }
 
@@ -117,9 +125,9 @@ Element MkdirDialog::render() {
   };
   if (!error.empty()) { e.push_back(text(error) | theme().mkdir_errortxt); }
   e.push_back(filler());
-  e.push_back(button_ok->Render());
-  e.push_back(button_close->Render());
-  return vbox(std::move(e)) | border | size(HEIGHT, GREATER_THAN, 18) | center;
+  e.push_back(button_ok->Render() | hcenter);
+  e.push_back(button_close->Render() | hcenter);
+  return window(text(" Make Dir ") | bold | hcenter, vbox(std::move(e)), BorderStyle::DOUBLE);
 }
 
 void MkdirDialog::ok() {
@@ -197,16 +205,17 @@ RenameDialog::RenameDialog(PanelSharedState::P d) : Dialog(std::move(d)) {
   });
   renderer   = Renderer(navigation, [&] {
     // simple
-    return vbox({
-             hbox({
-               button_ok->Render(),
-               separator(),
-               button_close->Render(),
-             }),
-             separator(),
-             menu->Render() | vscroll_indicator | yframe,
-           })
-      | border;
+    return window(text(" Rename ") | bold | hcenter,
+                    vbox({
+                    hbox({
+                      button_ok->Render() | hcenter | xflex_grow,
+                      separator(),
+                      button_close->Render() | hcenter | xflex_grow,
+                    }),
+                    separator(),
+                    menu->Render() | vscroll_indicator | yframe,
+                  }),
+                    BorderStyle::DOUBLE);
   });
 }
 
@@ -275,15 +284,76 @@ void RenameDialog::cancel() { app->action.close_dialog(); }
 // Copy
 //
 
+/*
+  There is no progress interface in filesystem::copy, see playground.cpp for workaround
+*/
 CopyDialog::CopyDialog(PanelSharedState::P d) : Dialog(std::move(d)) {
   // [_] follow links `cp -r -L`: always follow symbolic links in SOURCE
   // [x] preserve attributes
   // [x] preserve relative links
   // - detecting cyclic symbolic links
   // - detect when dir is copied into itself
+  // - detect when file is copied into itself
+  InputOption input_opt;
+  input_opt.multiline    = false;
+  input_destination_path = Input(&destination_path, "", input_opt);
+
+  button_ok                  = Button("  COPY  ", [this] { this->run_copy(); });
+  button_cancel              = Button(" Cancel ", [this] { this->cancel_copy(); });
+  op_follow_links            = Checkbox("Follow Links in Source", &b_follow_links);
+  op_preserve_attributes     = Checkbox("Preserve attributes", &b_preserve_attributes);
+  op_preserve_relative_links = Checkbox("Keep relative links", &b_preserve_relative_links);
+
+  auto close_on_esc = [this](Event event) -> bool {
+    if (event == Event::Escape) {
+      this->cancel_copy();
+      return true;
+    }
+    return false;
+  };
+
+  navigation = CatchEvent(Container::Vertical({
+                            input_destination_path,
+                            button_ok,
+                            op_follow_links,
+                            op_preserve_attributes,
+                            op_preserve_relative_links,
+                            button_cancel,
+                          }),
+                          close_on_esc);
+  renderer   = Renderer(navigation, [this]() -> Element { return this->render(); });
 }
 
-void CopyDialog::OnShow() {}
+void CopyDialog::cancel_copy() { app->action.close_dialog(); }
+void CopyDialog::run_copy() { app->action.close_dialog(); }
+
+Element CopyDialog::render() {
+  int file_count = app->action.arguments->selected.size();
+  // clang-format off
+  return window(
+    text(" Copy " + std::to_string(file_count) + " selected items ") | bold | hcenter,
+  vbox({
+            hbox({text(" TO: "), input_destination_path->Render(), text(" ")}),
+            // text(""),
+            separator(),
+            button_ok->Render() | hcenter,
+            text(""),
+            op_follow_links->Render(),
+            op_preserve_attributes->Render(),
+            op_preserve_relative_links->Render(),
+            text(""),
+            button_cancel->Render() | hcenter,
+          }),
+          BorderStyle::DOUBLE
+        );
+  // clang-format on
+}
+
+void CopyDialog::OnShow() {
+  button_ok->TakeFocus();
+  app->action.arguments->use_focused_as_alternative();
+  destination_path = app->action.arguments->target.native();
+}
 
 //
 // ToClipboardDialog
@@ -330,7 +400,7 @@ Element ToClipboardDialog::render() {
            button_close->Render(),
            separator(),
          })
-    | border | center;
+    | border;
 }
 
 //
@@ -339,9 +409,9 @@ Element ToClipboardDialog::render() {
 
 Nyi::Nyi(PanelSharedState::P d) : Dialog(std::move(d)) {
   Component nyi_textbox      = Input("", "Dummy text - Not used at all ...");
-  Component nyi_button_close = Button("OK", [app=app] { app->action.close_dialog(); });
+  Component nyi_button_close = Button("OK", [app = app] { app->action.close_dialog(); });
   navigation                 = Container::Vertical({nyi_textbox, nyi_button_close});
-  renderer                   = Renderer(navigation, [nyi_textbox, nyi_button_close, app=app]() -> Element {
+  renderer                   = Renderer(navigation, [nyi_textbox, nyi_button_close, app = app]() -> Element {
     return vbox({
              text(app->action.dialog + " dialog example"),
              separator(),
@@ -349,7 +419,7 @@ Nyi::Nyi(PanelSharedState::P d) : Dialog(std::move(d)) {
              filler(),
              nyi_button_close->Render(),
            })
-      | border | size(HEIGHT, GREATER_THAN, 18) | center;
+      | border | size(HEIGHT, GREATER_THAN, 18);
   });
 }
 

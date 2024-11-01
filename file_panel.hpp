@@ -25,6 +25,8 @@ Element showInputCursor(Element child, Ref<int> cursor_position);
 
 Decorator showInputCursor(Ref<int> cursor_position);
 
+Element clear_under_colors(Element element);
+
 }  // namespace ftxui
 
 #endif  // _PERUN_FC_GRID_IN_MENU_

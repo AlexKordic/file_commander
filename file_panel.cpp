@@ -5,19 +5,20 @@
 #include "log.hpp"
 #include "theme.hpp"
 
-#include <cmath>
 #include <ftxui/component/component.hpp>
-#include <ftxui/component/event.hpp>  // for Event, Event::ArrowDown, Event::ArrowLeft, Event::ArrowRight, Event::ArrowUp, Event::End, Event::Home, Event::PageDown, Event::PageUp, Event::Return, Event::Tab, Event::TabReverse
-#include <ftxui/dom/direction.hpp>    // for Direction, Direction::Down, Direction::Left, Direction::Right, Direction::Up
+#include <ftxui/component/event.hpp>
+#include <ftxui/dom/direction.hpp>
 #include <ftxui/dom/elements.hpp>
-#include <ftxui/dom/table.hpp>  // for Table, TableSelection
+#include <ftxui/dom/table.hpp>
 
+#include <cmath>
 #include <algorithm>
 #include <cstdint>
+#include <ftxui/screen/color.hpp>
 #include <memory>
-#include <string>   // for operator+, string
-#include <utility>  // for move
-#include <vector>   // for vector, __alloc_traits<>::value_type
+#include <string>
+#include <utility>
+#include <vector>
 
 using namespace ftxui;
 
@@ -86,7 +87,7 @@ class FileList : public ComponentBase {
       // clang-format off
       auto wrap = [&](const std::string& x, bool apply_focus=true) -> Element { 
         Element e;
-        if(data.is_dir()) {
+        if(apply_focus && data.is_dir()) {
           e = text("/" + x);
         } else {
           e = text(x);
@@ -414,4 +415,31 @@ class ShowInputCursor : public NodeDecorator {
 Element   ftxui::showInputCursor(Element child, Ref<int> cursor_position) { return std::make_shared<ShowInputCursor>(std::move(child), cursor_position); }
 Decorator ftxui::showInputCursor(Ref<int> cursor_position) {
   return [cursor_position](Element child) -> Element { return showInputCursor(std::move(child), cursor_position); };
+}
+
+class ClearUnder : public NodeDecorator {
+ public:
+  using NodeDecorator::NodeDecorator;
+
+  void Render(Screen& screen) override {
+    const Color fg = theme().default_fg;
+    const Color bg = theme().default_bg;
+    for (int y = box_.y_min; y <= box_.y_max; ++y) {
+      for (int x = box_.x_min; x <= box_.x_max; ++x) {
+        screen.PixelAt(x, y) = Pixel();
+        screen.PixelAt(x, y).character = " ";
+        screen.PixelAt(x, y).background_color = bg;
+        screen.PixelAt(x, y).foreground_color = fg;
+      }
+    }
+    Node::Render(screen);
+  }
+};
+
+/// @brief Before drawing |child|, clear the pixels below. This is useful in
+//         combinaison with dbox.
+/// @see ftxui::dbox
+/// @ingroup dom
+Element ftxui::clear_under_colors(Element element) {
+  return std::make_shared<ClearUnder>(std::move(element));
 }
