@@ -5,7 +5,9 @@
 #include <algorithm>
 #include <boost/filesystem.hpp>
 #include <functional>
+#include <memory>
 #include <optional>
+#include <vector>
 using namespace boost::filesystem;
 using namespace boost::system;
 
@@ -21,6 +23,16 @@ inline std::tm localtime__(std::time_t timer) {
   bt = *std::localtime(&timer);
 #endif
   return bt;
+}
+
+std::string to_lower(const std::string& str) {
+  std::string result = str;
+  std::transform(result.begin(), result.end(), result.begin(), [](unsigned char c) { return std::tolower(c); });
+  return result;
+}
+size_t filter_match(const std::string& str, const std::string& substr) {
+  std::string lower_str = to_lower(str);
+  return lower_str.find(substr) != std::string::npos;
 }
 
 bool DirItem::is_exe() const { return (_perms & (perms::owner_exe | perms::group_exe | perms::others_exe)) > 0; }
@@ -48,8 +60,7 @@ std::string DirItem::to_string() const {
   return _filename + " | " + std::to_string(_size) + " | " + ss.str();
 }
 
-DirItem::DirItem(DirItem::P p, DirItem::Type type, DirItem::Perms perms) : _path(std::move(p)), _type(type), _perms(perms) {
-  _filename = _path.filename().native();
+void DirItem::update(Type type, Perms perms) {
   error_code ec;
   const bool is_link = boost::filesystem::is_symlink(_path, ec);
   if (!ec.failed() && is_link) {
@@ -61,6 +72,11 @@ DirItem::DirItem(DirItem::P p, DirItem::Type type, DirItem::Perms perms) : _path
   if (type == boost::filesystem::directory_file) return;
   _size = file_size(_path, ec);
   if (ec.failed()) _size = -1;
+}
+
+DirItem::DirItem(DirItem::P p, DirItem::Type type, DirItem::Perms perms) : _path(std::move(p)), _type(type), _perms(perms) {
+  _filename = _path.filename().native();
+  update(type, perms);
 }
 
 Err Dir::leave_dir() {
@@ -91,6 +107,49 @@ Err Dir::move_to(const DirItem::P p) {
   _sort();
   _calculate();
   return Err();
+}
+
+void Dir::partial_refresh(UpdatedFiles changes) {
+  // We don't care what is the type of change
+  // - if path doesn't exist we should remove it from the list
+  // - if path exists update size and date
+  auto find = [&](DirItem::P& p) {
+    for (auto it = items.begin(); it != items.end(); ++it) {
+      // if (boost::filesystem::equivalent(it->_path, p)) { return it; }
+      if (it->_path == p) { return it; }
+    }
+    return items.end();
+  };
+  for (DirItemUpdated& updated : *changes) {
+    error_code  ec;
+    file_status fs     = status(updated.path, ec);
+    auto        listed = find(updated.path);
+    const bool  found  = listed != items.end();
+    if (ec) {
+      // find it and remove from the list
+      if (found) items.erase(listed);
+      continue;
+    }
+    if (found) {
+      listed->update(fs.type(), fs.permissions());
+    } else {
+      const bool sanity_check = boost::filesystem::equivalent(updated.path.parent_path(), this->path);
+      if (!sanity_check) {
+        Perun::l.e("FS change event sanity check failed", updated.path.native(), {{"root", this->path.native()}});
+        continue;
+      }
+      DirItem& inserted = items.emplace_back(updated.path, fs.type(), fs.permissions());
+      if (filter_match(inserted._filename, filter.phrase)) {
+        inserted._visible = true;
+      } else {
+        inserted._visible = false;
+      }
+    }
+  }
+  if (!changes->empty()) {
+    _sort();
+    _calculate();
+  }
 }
 
 void Dir::_sort() {
@@ -159,16 +218,6 @@ CommandArgs::P Dir::take_selected() {
     if (x._selected) s->selected.push_back(x._path);
   }
   return s;
-}
-
-std::string to_lower(const std::string& str) {
-  std::string result = str;
-  std::transform(result.begin(), result.end(), result.begin(), [](unsigned char c) { return std::tolower(c); });
-  return result;
-}
-size_t filter_match(const std::string& str, const std::string& substr) {
-  std::string lower_str = to_lower(str);
-  return lower_str.find(substr) != std::string::npos;
 }
 
 void Dir::apply_filter(std::string must_contain) {

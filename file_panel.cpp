@@ -188,13 +188,15 @@ class FileList : public ComponentBase {
         DirItem& where = dir->items.at(selected);
         if (where.is_dir()) {
           DirItem::P p = where.path_ref();
-          Err        e = dir->move_to(p);
-          if (e.ok()) {
-            selected = 0;
-            filter_text->clear();
-            return true;
-          }
-          Perun::l.e("dir->move_to()", e.steps.front());
+          app->move_to(p);
+          return true;
+          // Err        e = dir->move_to(p);
+          // if (e.ok()) {
+          //   selected = 0;
+          //   filter_text->clear();
+          //   return true;
+          // }
+          // Perun::l.e("dir->move_to()", e.steps.front());
         }
         return false;
       }

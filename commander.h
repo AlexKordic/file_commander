@@ -7,10 +7,12 @@
 #include <boost/filesystem/path.hpp>
 
 #include "err.hpp"
+#include "fifo_queue.hpp"
 #include "log.hpp"
 
 #include <cstdint>
 #include <ctime>
+#include <memory>
 #include <optional>
 
 enum class Orderby {
@@ -31,6 +33,7 @@ class DirItem {
   using Perms = boost::filesystem::perms;
 
   DirItem(P p, Type type, Perms perms);
+  void        update(Type type, Perms perms);
   std::string to_string() const;
   std::string get_time() const;
 
@@ -59,6 +62,26 @@ class DirItem {
   std::optional<P> _symlink;
 
   friend class Dir;
+};
+
+struct DirItemUpdated {
+  DirItem::P path;
+  enum class Event {
+    Created,
+    Removed,
+    Renamed,
+    Modified,
+  } what;
+
+  DirItemUpdated(const char* p, Event e) : path(p), what(e) {}
+};
+
+using UpdatedFiles = std::unique_ptr<std::vector<DirItemUpdated>>;
+
+struct FileChangeFunnel {
+  using Callback = std::function<void(UpdatedFiles changes)>;
+  static std::unique_ptr<FileChangeFunnel> create(DirItem::P root, Callback cb);
+  virtual ~FileChangeFunnel() = default;
 };
 
 struct CommandArgs {
@@ -92,6 +115,7 @@ class Dir {
   };
 
   Err   move_to(const DirItem::P path);
+  void  partial_refresh(UpdatedFiles changes);
   Err   refresh();  // TODO: add system notifications for current dir
   Err   leave_dir();
   void  sort_toggle_name_direction();
@@ -116,18 +140,16 @@ class Dir {
   Filter filter;
   Stats  _calculated;
   void   _calculate();
-
-  void _sort();
+  void   _sort();
 };
 
-struct DirCollection {
-  std::vector<Dir> tabs;
-  int              selected_tab = 0;
-};
-
-struct Commander {
-  std::vector<DirCollection> panels;
-};
+// struct DirCollection {
+//   std::vector<Dir> tabs;
+//   int              selected_tab = 0;
+// };
+// struct Commander {
+//   std::vector<DirCollection> panels;
+// };
 
 Err push_to_clipboard(std::string const& txt);
 

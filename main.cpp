@@ -1,7 +1,7 @@
 
-#include "file_panel.hpp"
 #include "commander.h"
 #include "dialogs.hpp"
+#include "file_panel.hpp"
 #include "log.hpp"
 #include "theme.hpp"
 
@@ -13,8 +13,8 @@
 #include <ftxui/dom/elements.hpp>
 #include <ftxui/dom/table.hpp>
 
-#include <map>
 #include <functional>
+#include <map>
 #include <memory>
 #include <string>
 #include <utility>
@@ -27,6 +27,8 @@ using namespace Perun;
 class Panel;
 
 using TargetFunc = std::function<DirItem::P(Panel*)>;
+
+using ExecuteOnUiThread = std::function<void(std::function<void()>)>;
 
 class DialogOverlay {
  public:
@@ -68,16 +70,21 @@ class Panel : public DialogOverlay {
   Dir        dir;
   TargetFunc get_target;
 
-  explicit Panel(DirItem::P location, TargetFunc get_target) : get_target(get_target) {
-    dir.move_to(location);
+  ExecuteOnUiThread                 run_on_ui;
+  std::unique_ptr<FileChangeFunnel> update_funnel;
+  Perun::FifoQueue<UpdatedFiles>    pending_changes;
+
+  Panel(DirItem::P location, TargetFunc get_target, ExecuteOnUiThread e) : get_target(get_target), run_on_ui(e) {
+    this->move_to(location);
     state                      = std::make_shared<PanelSharedState>(&dir);
-    navigation                  = Container::Tab({}, &_active_dialog);
+    navigation                 = Container::Tab({}, &_active_dialog);
+    state->move_to             = [this](DirItem::P where) { this->move_to(where); };
     state->action.close_dialog = [this]() { close_dialog(); };
     state->action.show_dialog  = [this]() {
       state->action.arguments->target = this->get_target(this);
       show_dialog(state->action.dialog);
     };
-    auto files = std::make_shared<ftxui::Files>(state);
+    auto files     = std::make_shared<ftxui::Files>(state);
     _main_document = std::dynamic_pointer_cast<ftxui::Dialog>(files);
     navigation->Add(_main_document->navigation);
     // register dialogs
@@ -90,7 +97,24 @@ class Panel : public DialogOverlay {
     _overlay_dialogs["NameToClipboard"] = std::make_shared<ToClipboardDialog>(state);
     _overlay_dialogs["PathToClipboard"] = std::make_shared<ToClipboardDialog>(state);
   }
-  void    move_to(DirItem::P& where) { dir.move_to(where); }
+  void move_to(DirItem::P& where) {
+    dir.move_to(where);
+    update_funnel = FileChangeFunnel::create(where, [this](UpdatedFiles changes) {
+      // record changes
+      pending_changes.push(std::move(changes));
+      // schedule apply changes on UI thread
+      this->run_on_ui([this]() {
+        while (true) {
+          UpdatedFiles batch;
+          FifoError    err = this->pending_changes.try_pop(batch);
+          if (FifoError::OK != err) return;
+          this->dir.partial_refresh(std::move(batch));
+        }
+      });
+    });
+    // clear old updates that don't matter any more
+    pending_changes.erase_if([this](const UpdatedFiles& x) -> bool { return true; });
+  }
   Element render() {
     // Panel is always shown
     Element document = _main_document->renderer->Render();
@@ -113,9 +137,9 @@ class FileCommander {
  public:
   Component navigation;
   Component renderer;
-  FileCommander(DirItem::P location) : left(location, get_target()), right(location, get_target()) {
+  FileCommander(DirItem::P location, ExecuteOnUiThread exec) : left(location, get_target(), exec), right(location, get_target(), exec) {
     navigation = Container::Horizontal({left.navigation, right.navigation});
-    renderer  = Renderer(navigation, [&]() -> Element {
+    renderer   = Renderer(navigation, [&]() -> Element {
       // Two panels side by side
       return hbox({left.render() | xflex_grow, separatorLight(), right.render() | xflex_grow}) | bgcolor(theme().default_bg) | color(theme().default_fg);
     });
@@ -164,10 +188,15 @@ class LogAdapter {
 };
 
 int main() {
-  auto          cwd = boost::filesystem::current_path();
-  FileCommander app(cwd);
+  auto screen = ScreenInteractive::Fullscreen();
 
-  auto       screen = ScreenInteractive::Fullscreen();
+  auto          cwd  = boost::filesystem::current_path();
+  auto          exec = [&screen](std::function<void()> f) -> void { 
+    screen.Post(f);
+    screen.Post(Event::Custom);
+  };
+  FileCommander app(cwd, exec);
+
   LogAdapter adapt_logs(screen);
 
   // screen.TrackMouse(false);

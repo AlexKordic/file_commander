@@ -142,7 +142,7 @@ void MkdirDialog::ok() {
   }
   boost::filesystem::create_directory(dir_path);
   // Close dialog
-  app->dir->refresh();
+  // app->dir->refresh();
   app->action.close_dialog();
 }
 
@@ -271,7 +271,7 @@ void RenameDialog::ok() {
     menu->ChildAt(i)->Detach();
   }
   if (app->action.arguments->selected.empty()) {
-    app->dir->refresh();
+    // app->dir->refresh();
     app->action.close_dialog();
     return;
   }

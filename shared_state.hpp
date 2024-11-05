@@ -2,6 +2,7 @@
 #define _PERUN_FC_SHARED_STATE_
 
 #include <ftxui/component/component.hpp>
+#include <boost/filesystem.hpp>
 
 #include <functional>
 #include <memory>
@@ -20,6 +21,8 @@ struct PanelSharedState {
     std::function<void()>        show_dialog;
     std::function<void()>        close_dialog;
   } action;
+
+  std::function<void(boost::filesystem::path)> move_to;
 
   explicit PanelSharedState(Dir* d);
 };
