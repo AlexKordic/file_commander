@@ -11,8 +11,8 @@
 #include <ftxui/dom/elements.hpp>
 #include <ftxui/dom/table.hpp>
 
-#include <cmath>
 #include <algorithm>
+#include <cmath>
 #include <cstdint>
 #include <ftxui/screen/color.hpp>
 #include <memory>
@@ -53,6 +53,14 @@ class FileList : public ComponentBase {
     this->dir    = panel->dir;
     this->filter = panel->filter;
     app          = std::move(panel);
+
+    app->get_focused_item = [this]() -> DirItem::P const* {
+      this->Clamp();
+      auto focused_index = dir->offset_vissible(selected, 0);
+      if (dir->items.empty()) return nullptr;
+      auto& focused = dir->items.at(focused_index);
+      return &focused.path_ref();
+    };
   }
 
   void Clamp() {
@@ -428,8 +436,8 @@ class ClearUnder : public NodeDecorator {
     const Color bg = theme().default_bg;
     for (int y = box_.y_min; y <= box_.y_max; ++y) {
       for (int x = box_.x_min; x <= box_.x_max; ++x) {
-        screen.PixelAt(x, y) = Pixel();
-        screen.PixelAt(x, y).character = " ";
+        screen.PixelAt(x, y)                  = Pixel();
+        screen.PixelAt(x, y).character        = " ";
         screen.PixelAt(x, y).background_color = bg;
         screen.PixelAt(x, y).foreground_color = fg;
       }
@@ -442,6 +450,4 @@ class ClearUnder : public NodeDecorator {
 //         combinaison with dbox.
 /// @see ftxui::dbox
 /// @ingroup dom
-Element ftxui::clear_under_colors(Element element) {
-  return std::make_shared<ClearUnder>(std::move(element));
-}
+Element ftxui::clear_under_colors(Element element) { return std::make_shared<ClearUnder>(std::move(element)); }

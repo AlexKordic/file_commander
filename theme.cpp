@@ -6,6 +6,10 @@
 using namespace ftxui;
 
 Theme::Theme() {
+  key_switch_focused_panel = Event::Tab;
+  key_target_dir_to_focused_item_right = Event::ArrowRightCtrl;
+  key_target_dir_to_focused_item_left = Event::ArrowLeftCtrl;
+
   key_files_select    = Event::Character(' ');
   key_clear_selection = Event::Escape;
   key_enter_dir       = Event::Return;

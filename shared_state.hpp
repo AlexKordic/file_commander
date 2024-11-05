@@ -1,8 +1,8 @@
 #ifndef _PERUN_FC_SHARED_STATE_
 #define _PERUN_FC_SHARED_STATE_
 
-#include <ftxui/component/component.hpp>
 #include <boost/filesystem.hpp>
+#include <ftxui/component/component.hpp>
 
 #include <functional>
 #include <memory>
@@ -22,7 +22,8 @@ struct PanelSharedState {
     std::function<void()>        close_dialog;
   } action;
 
-  std::function<void(boost::filesystem::path)> move_to;
+  std::function<void(boost::filesystem::path)>    move_to;
+  std::function<boost::filesystem::path const*()> get_focused_item;
 
   explicit PanelSharedState(Dir* d);
 };

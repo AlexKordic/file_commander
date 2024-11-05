@@ -9,10 +9,13 @@ Initial Features:
   + dir marked with `/`
   + symlink takes 2 rows `-> real path` 
   + executable file colored green
-- Maybe change boost to std filesystem https://en.cppreference.com/w/cpp/filesystem/is_socket~
-- monitor dir changes and real-time updates
++ monitor dir changes and real-time updates
+  + Macos
+  - Linux inotify
+  - Windows ??
 + Left and Right panel
 - Panel having multiple tabs
+  - Do not refresh UI if changes are inside not-shown tab
 + tab contains file list allowing selection ?with undo-selection-action?
 + esc clears selection
 + If no item selected then item under the cursor is considered selected
@@ -41,7 +44,7 @@ Initial commands:
   - tar/gz extract
   - open in installed editor app
 - new tab from selected items
-- enter focused dir in target tab
++ enter focused dir in target tab
 - Back <> Forward navigation tree
   - remembering `Result-TABS` state
   - Display navigation tree - new dialog

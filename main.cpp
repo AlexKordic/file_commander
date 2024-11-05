@@ -76,26 +76,26 @@ class Panel : public DialogOverlay {
 
   Panel(DirItem::P location, TargetFunc get_target, ExecuteOnUiThread e) : get_target(get_target), run_on_ui(e) {
     this->move_to(location);
-    state                      = std::make_shared<PanelSharedState>(&dir);
+    _state                      = std::make_shared<PanelSharedState>(&dir);
     navigation                 = Container::Tab({}, &_active_dialog);
-    state->move_to             = [this](DirItem::P where) { this->move_to(where); };
-    state->action.close_dialog = [this]() { close_dialog(); };
-    state->action.show_dialog  = [this]() {
-      state->action.arguments->target = this->get_target(this);
-      show_dialog(state->action.dialog);
+    _state->move_to             = [this](DirItem::P where) { this->move_to(where); };
+    _state->action.close_dialog = [this]() { close_dialog(); };
+    _state->action.show_dialog  = [this]() {
+      _state->action.arguments->target = this->get_target(this);
+      show_dialog(_state->action.dialog);
     };
-    auto files     = std::make_shared<ftxui::Files>(state);
-    _main_document = std::dynamic_pointer_cast<ftxui::Dialog>(files);
+    _files     = std::make_shared<ftxui::Files>(_state);
+    _main_document = std::dynamic_pointer_cast<ftxui::Dialog>(_files);
     navigation->Add(_main_document->navigation);
     // register dialogs
-    _overlay_dialogs["Mkdir"]           = std::make_shared<MkdirDialog>(state);
-    _overlay_dialogs["Rename"]          = std::make_shared<RenameDialog>(state);
-    _overlay_dialogs["Copy"]            = std::make_shared<CopyDialog>(state);
-    _overlay_dialogs["Move"]            = std::make_shared<Nyi>(state);
-    _overlay_dialogs["Delete"]          = std::make_shared<Nyi>(state);
-    _overlay_dialogs["Find"]            = std::make_shared<Nyi>(state);
-    _overlay_dialogs["NameToClipboard"] = std::make_shared<ToClipboardDialog>(state);
-    _overlay_dialogs["PathToClipboard"] = std::make_shared<ToClipboardDialog>(state);
+    _overlay_dialogs["Mkdir"]           = std::make_shared<MkdirDialog>(_state);
+    _overlay_dialogs["Rename"]          = std::make_shared<RenameDialog>(_state);
+    _overlay_dialogs["Copy"]            = std::make_shared<CopyDialog>(_state);
+    _overlay_dialogs["Move"]            = std::make_shared<Nyi>(_state);
+    _overlay_dialogs["Delete"]          = std::make_shared<Nyi>(_state);
+    _overlay_dialogs["Find"]            = std::make_shared<Nyi>(_state);
+    _overlay_dialogs["NameToClipboard"] = std::make_shared<ToClipboardDialog>(_state);
+    _overlay_dialogs["PathToClipboard"] = std::make_shared<ToClipboardDialog>(_state);
   }
   void move_to(DirItem::P& where) {
     dir.move_to(where);
@@ -125,9 +125,20 @@ class Panel : public DialogOverlay {
       _overlay_renderer->Render() | clear_under_colors | center,
     });
   }
+  DirItem::P focused_dir() {
+    // get focused item, if its dir return item's path
+    auto focused = _state->get_focused_item();
+    if(!focused) return dir.path;
+    boost::system::error_code ec;
+    const bool isdir = boost::filesystem::is_directory(*focused, ec);
+    if(!ec.failed() && isdir) return *focused;
+    // dir.path would be root of the shown dir, but we want to support list of files all from different dirs, for ex. search result.
+    return focused->parent_path();
+  }
 
  private:
-  PanelSharedState::P state;
+  PanelSharedState::P    _state;
+  std::shared_ptr<Files> _files;
 };
 
 class FileCommander {
@@ -138,7 +149,32 @@ class FileCommander {
   Component navigation;
   Component renderer;
   FileCommander(DirItem::P location, ExecuteOnUiThread exec) : left(location, get_target(), exec), right(location, get_target(), exec) {
-    navigation = Container::Horizontal({left.navigation, right.navigation});
+    auto global_shortcuts = [this](Event event) -> bool {
+      // Tab between panels
+      if (event == theme().key_switch_focused_panel) {
+        // switch focus to target pannel
+        if (left.navigation->Focused()) {
+          right.navigation->TakeFocus();
+        } else {
+          left.navigation->TakeFocus();
+        }
+        return true;
+      }
+      // Move target to selected dir
+      const bool change_right = event == theme().key_target_dir_to_focused_item_right && left.navigation->Focused();
+      const bool change_left  = event == theme().key_target_dir_to_focused_item_left && right.navigation->Focused();
+      if (change_right) {
+        DirItem::P where = left.focused_dir();
+        right.move_to(where);
+        return true;
+      } else if(change_left) {
+        DirItem::P where = right.focused_dir();
+        left.move_to(where);
+        return true;
+      }
+      return false;
+    };
+    navigation = CatchEvent(Container::Horizontal({left.navigation, right.navigation}), global_shortcuts);
     renderer   = Renderer(navigation, [&]() -> Element {
       // Two panels side by side
       return hbox({left.render() | xflex_grow, separatorLight(), right.render() | xflex_grow}) | bgcolor(theme().default_bg) | color(theme().default_fg);
@@ -190,8 +226,8 @@ class LogAdapter {
 int main() {
   auto screen = ScreenInteractive::Fullscreen();
 
-  auto          cwd  = boost::filesystem::current_path();
-  auto          exec = [&screen](std::function<void()> f) -> void { 
+  auto cwd  = boost::filesystem::current_path();
+  auto exec = [&screen](std::function<void()> f) -> void {
     screen.Post(f);
     screen.Post(Event::Custom);
   };
