@@ -1,5 +1,6 @@
 
-#include "commander.h"
+#include "bfs.hpp"
+#include "commander.hpp"
 #include "dialogs.hpp"
 #include "file_panel.hpp"
 #include "log.hpp"
@@ -26,7 +27,7 @@ using namespace Perun;
 
 class Panel;
 
-using TargetFunc = std::function<DirItem::P(Panel*)>;
+using TargetFunc = std::function<Filepath(Panel*)>;
 
 using ExecuteOnUiThread = std::function<void(std::function<void()>)>;
 
@@ -74,17 +75,17 @@ class Panel : public DialogOverlay {
   std::unique_ptr<FileChangeFunnel> update_funnel;
   Perun::FifoQueue<UpdatedFiles>    pending_changes;
 
-  Panel(DirItem::P location, TargetFunc get_target, ExecuteOnUiThread e) : get_target(get_target), run_on_ui(e) {
+  Panel(Filepath location, TargetFunc get_target, ExecuteOnUiThread e) : get_target(get_target), run_on_ui(e) {
     this->move_to(location);
     _state                      = std::make_shared<PanelSharedState>(&dir);
-    navigation                 = Container::Tab({}, &_active_dialog);
-    _state->move_to             = [this](DirItem::P where) { this->move_to(where); };
+    navigation                  = Container::Tab({}, &_active_dialog);
+    _state->move_to             = [this](Filepath where) { this->move_to(where); };
     _state->action.close_dialog = [this]() { close_dialog(); };
     _state->action.show_dialog  = [this]() {
       _state->action.arguments->target = this->get_target(this);
       show_dialog(_state->action.dialog);
     };
-    _files     = std::make_shared<ftxui::Files>(_state);
+    _files         = std::make_shared<ftxui::Files>(_state);
     _main_document = std::dynamic_pointer_cast<ftxui::Dialog>(_files);
     navigation->Add(_main_document->navigation);
     // register dialogs
@@ -97,7 +98,7 @@ class Panel : public DialogOverlay {
     _overlay_dialogs["NameToClipboard"] = std::make_shared<ToClipboardDialog>(_state);
     _overlay_dialogs["PathToClipboard"] = std::make_shared<ToClipboardDialog>(_state);
   }
-  void move_to(DirItem::P& where) {
+  void move_to(Filepath& where) {
     dir.move_to(where);
     update_funnel = FileChangeFunnel::create(where, [this](UpdatedFiles changes) {
       // record changes
@@ -125,13 +126,13 @@ class Panel : public DialogOverlay {
       _overlay_renderer->Render() | clear_under_colors | center,
     });
   }
-  DirItem::P focused_dir() {
+  Filepath focused_dir() {
     // get focused item, if its dir return item's path
     auto focused = _state->get_focused_item();
-    if(!focused) return dir.path;
+    if (!focused) return dir.path;
     boost::system::error_code ec;
-    const bool isdir = boost::filesystem::is_directory(*focused, ec);
-    if(!ec.failed() && isdir) return *focused;
+    const bool                isdir = boost::filesystem::is_directory(*focused, ec);
+    if (!ec.failed() && isdir) return *focused;
     // dir.path would be root of the shown dir, but we want to support list of files all from different dirs, for ex. search result.
     return focused->parent_path();
   }
@@ -148,7 +149,7 @@ class FileCommander {
  public:
   Component navigation;
   Component renderer;
-  FileCommander(DirItem::P location, ExecuteOnUiThread exec) : left(location, get_target(), exec), right(location, get_target(), exec) {
+  FileCommander(Filepath l, Filepath r, ExecuteOnUiThread exec) : left(l, get_target(), exec), right(r, get_target(), exec) {
     auto global_shortcuts = [this](Event event) -> bool {
       // Tab between panels
       if (event == theme().key_switch_focused_panel) {
@@ -164,11 +165,11 @@ class FileCommander {
       const bool change_right = event == theme().key_target_dir_to_focused_item_right && left.navigation->Focused();
       const bool change_left  = event == theme().key_target_dir_to_focused_item_left && right.navigation->Focused();
       if (change_right) {
-        DirItem::P where = left.focused_dir();
+        Filepath where = left.focused_dir();
         right.move_to(where);
         return true;
-      } else if(change_left) {
-        DirItem::P where = right.focused_dir();
+      } else if (change_left) {
+        Filepath where = right.focused_dir();
         left.move_to(where);
         return true;
       }
@@ -182,7 +183,7 @@ class FileCommander {
   }
   // returns
   TargetFunc get_target() {
-    return [this](Panel* self) -> DirItem::P {
+    return [this](Panel* self) -> Filepath {
       // self is origin pannel, return target panel's path
       if (self == &left) return right.dir.path;
       if (self == &right) return left.dir.path;
@@ -223,15 +224,25 @@ class LogAdapter {
   std::function<void()>                                         flush_logs;
 };
 
-int main() {
+#include <iostream>
+
+void set_console_size(int width, int height) { std::cout << "\e[8;" << height << ";" << width << "t"; }
+
+int main(int argc, char** argv) {
+  // For debugging
+  set_console_size(140, 60);
+
   auto screen = ScreenInteractive::Fullscreen();
 
-  auto cwd  = boost::filesystem::current_path();
+  auto cwd        = boost::filesystem::current_path();
+  auto left_path  = argc > 1 ? argv[1] : cwd;
+  auto right_path = argc > 2 ? argv[2] : cwd;
+
   auto exec = [&screen](std::function<void()> f) -> void {
     screen.Post(f);
     screen.Post(Event::Custom);
   };
-  FileCommander app(cwd, exec);
+  FileCommander app(left_path, right_path, exec);
 
   LogAdapter adapt_logs(screen);
 

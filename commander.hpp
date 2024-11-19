@@ -2,10 +2,7 @@
 #ifndef FC_COMMANDER_H_
 #define FC_COMMANDER_H_
 
-#include <boost/filesystem.hpp>
-#include <boost/filesystem/file_status.hpp>
-#include <boost/filesystem/path.hpp>
-
+#include "bfs.hpp"
 #include "err.hpp"
 #include "fifo_queue.hpp"
 #include "log.hpp"
@@ -28,28 +25,34 @@ class Dir;
 
 class DirItem {
  public:
-  using P     = boost::filesystem::path;
   using Type  = boost::filesystem::file_type;
   using Perms = boost::filesystem::perms;
 
-  DirItem(P p, Type type, Perms perms);
+  explicit DirItem(Filepath p);
+  DirItem(Filepath p, Type type, Perms perms);
   void        update(Type type, Perms perms);
   std::string to_string() const;
   std::string get_time() const;
 
-  const std::string&     filename_ref() const { return _filename; }
-  const P&               path_ref() const { return _path; }
-  const std::optional<P> symlink_ref() const { return _symlink; }
+  const std::string& filename_ref() const { return _filename; }
+  const Filepath&    path_ref() const { return _path; }
+
+  const std::optional<Filepath>    symlink_ref() const { return _symlink; }
+  const std::optional<std::string> warning_ref() const { return _warning; }
 
   bool    is_dir() const { return _type == Type::directory_file; }
   bool    is_exe() const;
   bool    visible() const { return _visible; }
   bool    selected() const { return _selected; }
   Type    type() const { return _type; }
+  Perms   perms() const { return _perms; }
   int64_t size() const { return _size; }
 
+  void _set_symlink_target(Filepath p) { _symlink = std::move(p); }
+  void _set_warning(std::string w) { _warning = std::move(w); }
+
  private:
-  P           _path;
+  Filepath    _path;
   Type        _type     = Type::type_unknown;
   Perms       _perms    = Perms::no_perms;
   int64_t     _size     = 0;
@@ -58,14 +61,15 @@ class DirItem {
 
   bool _visible = true;
 
-  std::string      _filename;
-  std::optional<P> _symlink;
+  std::string                _filename;
+  std::optional<Filepath>    _symlink;
+  std::optional<std::string> _warning;
 
   friend class Dir;
 };
 
 struct DirItemUpdated {
-  DirItem::P path;
+  Filepath path;
   enum class Event {
     Created,
     Removed,
@@ -80,15 +84,15 @@ using UpdatedFiles = std::unique_ptr<std::vector<DirItemUpdated>>;
 
 struct FileChangeFunnel {
   using Callback = std::function<void(UpdatedFiles changes)>;
-  static std::unique_ptr<FileChangeFunnel> create(DirItem::P root, Callback cb);
+  static std::unique_ptr<FileChangeFunnel> create(Filepath root, Callback cb);
   virtual ~FileChangeFunnel() = default;
 };
 
 struct CommandArgs {
   using P = std::shared_ptr<CommandArgs>;
-  std::vector<DirItem::P> selected;
-  DirItem::P              focused;
-  DirItem::P              origin, target;
+  std::vector<Filepath> selected;
+  Filepath              focused;
+  Filepath              origin, target;
 
   void use_focused_as_alternative() {
     if (selected.size() == 0 && focused.empty() == false) { selected.push_back(focused); }
@@ -99,7 +103,7 @@ struct CommandArgs {
 class Dir {
  public:
   // selection
-  DirItem::P           path;
+  Filepath             path;
   std::string          path_txt;
   std::vector<DirItem> items;
   Orderby              order_by   = Orderby::NAME_ASC;
@@ -114,7 +118,7 @@ class Dir {
     int64_t largest_item_bytes = 0;
   };
 
-  Err   move_to(const DirItem::P path);
+  Err   move_to(const Filepath path);
   void  partial_refresh(UpdatedFiles changes);
   Err   refresh();  // TODO: add system notifications for current dir
   Err   leave_dir();

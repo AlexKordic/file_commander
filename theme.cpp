@@ -6,9 +6,9 @@
 using namespace ftxui;
 
 Theme::Theme() {
-  key_switch_focused_panel = Event::Tab;
+  key_switch_focused_panel             = Event::Tab;
   key_target_dir_to_focused_item_right = Event::ArrowRightCtrl;
-  key_target_dir_to_focused_item_left = Event::ArrowLeftCtrl;
+  key_target_dir_to_focused_item_left  = Event::ArrowLeftCtrl;
 
   key_files_select    = Event::Character(' ');
   key_clear_selection = Event::Escape;
@@ -25,6 +25,9 @@ Theme::Theme() {
   files_border        = borderStyled(Color::DarkOliveGreen3Ter);
   files_selected      = color(Color::Gold1) | bold;
   files_focused       = color(Color::DarkOliveGreen2) | inverted | bold;
+
+  files_warning = color(Color::OrangeRed1);
+  files_symlink = dim;
 
   default_fg = Color::White;
   default_bg = Color::Black;
@@ -45,8 +48,8 @@ Theme::Theme() {
   sort_button        = bgcolor(Color::Wheat4);
   sort_button_active = bgcolor(Color::Wheat4) | color(Color::Salmon1);
 
-  mkdir_errortxt = color(Color::LightPink3);
-  clipboard_msg  = color(Color::LightPink3);
+  mkdir_errortxt   = color(Color::LightPink3);
+  clipboard_msg    = color(Color::LightPink3);
   copy_destination = color(Color::LightPink3);
 
   key_copy               = Event::F5;

@@ -1,8 +1,10 @@
 #ifndef _PERUN_FC_DIALOGS_
 #define _PERUN_FC_DIALOGS_
 
+#include "commander.hpp"
 #include "shared_state.hpp"
 
+// #include <boost/filesystem.hpp>
 #include <ftxui/component/component.hpp>
 #include <ftxui/component/event.hpp>
 
@@ -97,17 +99,32 @@ struct CopyDialog : Dialog {
 
   Component button_cancel, button_ok;
   Component op_follow_links;
-  Component op_preserve_attributes;
   Component op_preserve_relative_links;
   Component input_destination_path;
 
-  bool b_follow_links = false;
-  bool b_preserve_attributes = true;
+  Component files;
+
+  bool b_follow_links            = false;
+  // bool b_preserve_timestamps     = true;
+  // bool b_preserve_ownership      = false;
   bool b_preserve_relative_links = true;
 
   Element render();
-  void run_copy();
-  void cancel_copy();
+  void    run_copy();
+  void    cancel_copy();
+
+  PanelSharedState::P  _operation_state;
+  std::string          _filter_text;
+  std::unique_ptr<Dir> _virtual_dir; // enumerate items to copy
+  void _clear_operation_state();
+
+  struct Visited {
+    DirItem  source;
+    Filepath destination;
+  };
+  std::vector<Visited> _visited_dirs;
+
+  void _queue_files(const std::vector<DirItem>& files, Filepath destination);
 };
 
 struct Nyi : Dialog {

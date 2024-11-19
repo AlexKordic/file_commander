@@ -1,6 +1,6 @@
 
 #include "file_panel.hpp"
-#include "commander.h"
+#include "commander.hpp"
 #include "dialogs.hpp"
 #include "log.hpp"
 #include "theme.hpp"
@@ -54,7 +54,7 @@ class FileList : public ComponentBase {
     this->filter = panel->filter;
     app          = std::move(panel);
 
-    app->get_focused_item = [this]() -> DirItem::P const* {
+    app->get_focused_item = [this]() -> Filepath const* {
       this->Clamp();
       auto focused_index = dir->offset_vissible(selected, 0);
       if (dir->items.empty()) return nullptr;
@@ -113,16 +113,15 @@ class FileList : public ComponentBase {
           wrap(data.get_time(), false)
         }) | focus_management | reflect(boxes_[index]);
       };
-      if(data.symlink_ref()) {
-        elements.push_back(vbox({
-          produce_row(),
-          text(" -> " + data.symlink_ref()->native()) | dim
-        }));
+      if(data.symlink_ref() || data.warning_ref()) {
+        Elements rows = {produce_row()};
+        if(data.symlink_ref()) rows.push_back(text(" -> " + data.symlink_ref()->native()) | theme().files_symlink);
+        if(data.warning_ref()) rows.push_back(text(*data.warning_ref()) | theme().files_warning);
+        elements.push_back(vbox(std::move(rows)));
       } else {
         elements.push_back(produce_row());
       }
       // clang-format on
-      // items_shown.push_back(ei);
     }
     return vbox(std::move(elements)) | yflex | reflect(box_);
   }
@@ -159,73 +158,75 @@ class FileList : public ComponentBase {
       if (event == Event::Home) { selected = dir->offset_vissible(0, 0); }
       if (event == Event::End) { selected = dir->offset_vissible(dir->items.size(), 0); }
 
-      if (event == theme().key_files_select) {
-        dir->item_toggle_select(selected);
-        selected = dir->next_visible(selected);
-        return true;
-      }
-      if (event == theme().key_clear_selection) {
-        dir->clear_selection();
-        return true;
-      }
-      if (event == theme().key_select_all) {
-        dir->select_all();
-        return true;
-      }
-      if (event == theme().key_leave_dir) {
-        const DirItem::P old_path = dir->path;
-        Err              e        = dir->leave_dir();
-        if (!e.ok()) {
-          Perun::l.e("dir->leave_dir()", e.steps.front());
+      if (app->commands_enabled) {
+        if (event == theme().key_files_select) {
+          dir->item_toggle_select(selected);
+          selected = dir->next_visible(selected);
+          return true;
+        }
+        if (event == theme().key_clear_selection) {
+          dir->clear_selection();
+          return true;
+        }
+        if (event == theme().key_select_all) {
+          dir->select_all();
+          return true;
+        }
+        if (event == theme().key_leave_dir) {
+          const Filepath old_path = dir->path;
+          Err            e        = dir->leave_dir();
+          if (!e.ok()) {
+            Perun::l.e("dir->leave_dir()", e.steps.front());
+            return false;
+          }
+          selected = 0;
+          filter_text->clear();
+          // find our old_path and set it as focused
+          for (int i = 0; i < dir->items.size(); i++) {
+            const DirItem& item = dir->items.at(i);
+            if (item.path_ref() == old_path) {
+              selected = i;
+              break;
+            }
+          }
+          return true;
+        }
+        if (event == theme().key_enter_dir) {
+          if (dir->items.empty()) return false;
+          DirItem& where = dir->items.at(selected);
+          if (where.is_dir()) {
+            Filepath p = where.path_ref();
+            app->move_to(p);
+            return true;
+            // Err        e = dir->move_to(p);
+            // if (e.ok()) {
+            //   selected = 0;
+            //   filter_text->clear();
+            //   return true;
+            // }
+            // Perun::l.e("dir->move_to()", e.steps.front());
+          }
           return false;
         }
-        selected = 0;
-        filter_text->clear();
-        // find our old_path and set it as focused
-        for (int i = 0; i < dir->items.size(); i++) {
-          const DirItem& item = dir->items.at(i);
-          if (item.path_ref() == old_path) {
-            selected = i;
-            break;
-          }
-        }
-        return true;
-      }
-      if (event == theme().key_enter_dir) {
-        if (dir->items.empty()) return false;
-        DirItem& where = dir->items.at(selected);
-        if (where.is_dir()) {
-          DirItem::P p = where.path_ref();
-          app->move_to(p);
-          return true;
-          // Err        e = dir->move_to(p);
-          // if (e.ok()) {
-          //   selected = 0;
-          //   filter_text->clear();
-          //   return true;
-          // }
-          // Perun::l.e("dir->move_to()", e.steps.front());
-        }
-        return false;
-      }
 
-      // check for registered actions
-      for (const auto& action : commands().available) {
-        if (event == action.key) {
-          app->action.dialog            = action.dialog;
-          app->action.arguments         = dir->take_selected();
-          app->action.arguments->origin = dir->path;
-          const bool no_items           = dir->items.empty();
-          if (no_items) {
-            // no items for selected to point to
-            app->action.arguments->focused = DirItem::P();
-          } else {
-            app->action.arguments->focused = dir->items.at(selected).path_ref();
+        // check for registered actions
+        for (const auto& action : commands().available) {
+          if (event == action.key) {
+            app->action.dialog            = action.dialog;
+            app->action.arguments         = dir->take_selected();
+            app->action.arguments->origin = dir->path;
+            const bool no_items           = dir->items.empty();
+            if (no_items) {
+              // no items for selected to point to
+              app->action.arguments->focused = Filepath();
+            } else {
+              app->action.arguments->focused = dir->items.at(selected).path_ref();
+            }
+            app->action.show_dialog();
+            return true;
           }
-          app->action.show_dialog();
-          return true;
         }
-      }
+      }  // end of commands_enabled
 
       if (selected != old_selected) { return true; }
 

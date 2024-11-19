@@ -53,6 +53,8 @@ struct Theme {
     files_border,
     files_selected,
     files_focused,
+    files_warning,
+    files_symlink,
     fileskind_dir,
 
     sort_button,

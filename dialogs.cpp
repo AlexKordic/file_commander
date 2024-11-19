@@ -1,15 +1,26 @@
 
 #include "dialogs.hpp"
-#include <ftxui/component/component.hpp>
-#include <ftxui/dom/elements.hpp>
-#include <string>
+#include "bfs.hpp"
 
-#include "boost/filesystem/operations.hpp"
-#include "commander.h"
+#include "commander.hpp"
 #include "file_panel.hpp"
 #include "log.hpp"
+#include "shared_state.hpp"
 #include "theme.hpp"
 
+#include <boost/filesystem/file_status.hpp>
+#include <boost/filesystem/operations.hpp>
+#include <boost/system/detail/error_code.hpp>
+
+#include <ftxui/component/component.hpp>
+#include <ftxui/dom/elements.hpp>
+
+#include <memory>
+#include <string>
+
+using boost::filesystem::directory_entry;
+using boost::filesystem::directory_iterator;
+using boost::filesystem::file_status;
 using boost::system::error_code;
 
 namespace ftxui {
@@ -55,7 +66,7 @@ Files::Files(PanelSharedState::P s) : Dialog(std::move(s)) {
     }
     auto     s        = state->dir->stats();
     Elements children = Elements({
-      text("sel " + std::to_string(s.items_selected) + "/" + std::to_string(s.items_total)),
+      text("Sel " + std::to_string(s.items_selected) + "/" + std::to_string(s.items_total)),
       text(" bytes "),
       coloredInt(s.bytes_selected),
       text("/"),
@@ -289,21 +300,32 @@ void RenameDialog::cancel() { app->action.close_dialog(); }
 */
 CopyDialog::CopyDialog(PanelSharedState::P d) : Dialog(std::move(d)) {
   // [_] follow links `cp -r -L`: always follow symbolic links in SOURCE
-  // [x] preserve attributes
+  // [x] preserve permissions
+  // [x] preserve timestamps
+  // [x] preserve ownership
   // [x] preserve relative links
-  // - detecting cyclic symbolic links
-  // - detect when dir is copied into itself
-  // - detect when file is copied into itself
-  InputOption input_opt;
+  // + detecting cyclic symbolic links
+  // + detect when dir is copied into itself
+  // + detect when file is copied into itself
+  InputOption input_opt  = InputOption::Default();
   input_opt.multiline    = false;
   input_destination_path = Input(&destination_path, "", input_opt);
 
-  button_ok                  = Button("  COPY  ", [this] { this->run_copy(); });
-  button_cancel              = Button(" Cancel ", [this] { this->cancel_copy(); });
-  op_follow_links            = Checkbox("Follow Links in Source", &b_follow_links);
-  op_preserve_attributes     = Checkbox("Preserve attributes", &b_preserve_attributes);
-  op_preserve_relative_links = Checkbox("Keep relative links", &b_preserve_relative_links);
+  button_ok     = Button("  COPY  ", [this] { this->run_copy(); });
+  // TODO: add button "open in new tab ⮂ ↱↱↱ 🆕 tab  "
+  button_cancel = Button(" Cancel ", [this] { this->cancel_copy(); });
+  CheckboxOption checkbox_opt;
+  checkbox_opt.on_change     = [this]() { this->OnShow(); };
+  op_follow_links            = Checkbox("Follow Links in Source", &b_follow_links, checkbox_opt);
+  op_preserve_relative_links = Checkbox("Keep relative links", &b_preserve_relative_links, checkbox_opt);
 
+  input_opt.transform = [](InputState state) {
+    if (state.is_placeholder) {
+      return state.element | theme().files_path;
+    } else {
+      return state.element | theme().files_filter_search;
+    }
+  };
   auto close_on_esc = [this](Event event) -> bool {
     if (event == Event::Escape) {
       this->cancel_copy();
@@ -311,14 +333,20 @@ CopyDialog::CopyDialog(PanelSharedState::P d) : Dialog(std::move(d)) {
     }
     return false;
   };
+  _virtual_dir                       = std::make_unique<Dir>();
+  _operation_state                   = std::make_shared<PanelSharedState>(_virtual_dir.get());
+  _operation_state->commands_enabled = false;
+  _operation_state->move_to          = [](Filepath) {};
+  _operation_state->get_focused_item = []() -> Filepath const* { return nullptr; };
+  _operation_state->filter           = Input(&_filter_text, &(_virtual_dir->path_txt), input_opt);
+  files                              = FileList(_operation_state, &_filter_text);
 
   navigation = CatchEvent(Container::Vertical({
                             input_destination_path,
-                            button_ok,
+                            Container::Horizontal({button_ok, button_cancel}),
                             op_follow_links,
-                            op_preserve_attributes,
                             op_preserve_relative_links,
-                            button_cancel,
+                            files,
                           }),
                           close_on_esc);
   renderer   = Renderer(navigation, [this]() -> Element { return this->render(); });
@@ -328,7 +356,11 @@ void CopyDialog::cancel_copy() { app->action.close_dialog(); }
 void CopyDialog::run_copy() { app->action.close_dialog(); }
 
 Element CopyDialog::render() {
-  int file_count = app->action.arguments->selected.size();
+  int file_count  = app->action.arguments->selected.size();
+  int bytes_total = 0;
+  for (DirItem const& item : _virtual_dir->items) {
+    if (item.type() == boost::filesystem::regular_file) { bytes_total += item.size(); }
+  }
   // clang-format off
   return window(
     text(" Copy " + std::to_string(file_count) + " selected items ") | bold | hcenter,
@@ -336,24 +368,142 @@ Element CopyDialog::render() {
             hbox({text(" TO: "), input_destination_path->Render(), text(" ")}),
             // text(""),
             separator(),
-            button_ok->Render() | hcenter,
-            text(""),
-            op_follow_links->Render(),
-            op_preserve_attributes->Render(),
-            op_preserve_relative_links->Render(),
-            text(""),
-            button_cancel->Render() | hcenter,
+            hbox({button_ok->Render() | hcenter, button_cancel->Render() | hcenter}) | hcenter,
+            separatorHeavy(),
+            op_follow_links->Render() | hcenter,
+            op_preserve_relative_links->Render() | hcenter,
+            hbox({text("Bytes: "), coloredInt(bytes_total), text(" | Filter: "), _operation_state->filter->Render()}) | hcenter,
+            separatorHeavy(),
+            files->Render() | vscroll_indicator | yframe,
           }),
           BorderStyle::DOUBLE
         );
   // clang-format on
 }
 
+void CopyDialog::_clear_operation_state() {
+  _virtual_dir->items.clear();
+  _visited_dirs.clear();
+}
+
 void CopyDialog::OnShow() {
+  _clear_operation_state();
   button_ok->TakeFocus();
   app->action.arguments->use_focused_as_alternative();
-  destination_path = app->action.arguments->target.native();
+  destination_path       = app->action.arguments->target.native();
+  _virtual_dir->path     = app->action.arguments->target;
+  _virtual_dir->path_txt = app->action.arguments->target.native();
+  std::vector<DirItem> selected;
+  selected.reserve(app->action.arguments->selected.size());
+  for (auto& p : app->action.arguments->selected) { selected.emplace_back(p); }
+  _queue_files(selected, app->action.arguments->target);
 }
+
+Filepath resolve_symlink(Filepath path) {
+  std::vector<Filepath> chain;
+  error_code            ec;
+  for (;;) {
+    Filepath symlink_target = boost::filesystem::read_symlink(path, ec);
+    if (ec.failed() || symlink_target.empty()) return path;
+    for (Filepath& visited : chain) {
+      error_code ec;
+      if (boost::filesystem::equivalent(visited, symlink_target, ec)) return Filepath();
+    }
+    chain.push_back(path);
+    path = symlink_target;
+  }
+}
+
+// TODO:
+//  - preserve owner
+// This traversal should be depth first because we want to create tree like depiction in our list
+void CopyDialog::_queue_files(const std::vector<DirItem>& files, Filepath destination) {
+  std::vector<DirItem>& q = _virtual_dir->items;
+  // if type is dir path is to be mkdired
+  // if type is link path is where to place link and target is link target
+  // else path is source file and target is destination file for copy operation
+
+  auto do_place_link = [&q](Filepath const& location, Filepath const& destination, boost::filesystem::perms p) {
+    error_code ec;
+    DirItem&   link = q.emplace_back(location, boost::filesystem::symlink_file, p);
+    link._set_symlink_target(destination);
+  };
+  auto place_on_queue = [&, this](const DirItem& item) -> void {
+    error_code ec;
+    const auto new_record_path = destination / item.path_ref().filename();
+    const bool copy_to_self    = boost::filesystem::equivalent(item.path_ref(), new_record_path, ec);
+    if (!ec.failed() && copy_to_self) {
+      auto& created = q.emplace_back(DirItem(item.path_ref(), boost::filesystem::status_error, item.perms()));
+      created._set_symlink_target(destination / item.path_ref().filename());
+      created._set_warning("Copy to self");
+      return;
+    }
+    // Act on symlink
+    if (item.symlink_ref()) {
+      // handle link
+      const bool relative = item.symlink_ref()->is_relative();
+      if (!b_follow_links && b_preserve_relative_links && relative) {
+        // create relative symlink
+        do_place_link(new_record_path, *item.symlink_ref(), item.perms());
+        return;
+      }
+      Filepath symlink_target = resolve_symlink(item.path_ref());
+      if (symlink_target.empty()) {
+        auto& created = q.emplace_back(DirItem(item.path_ref(), boost::filesystem::status_error, item.perms()));
+        created._set_symlink_target(new_record_path);
+        created._set_warning("Cyclic symlink");
+        return;
+      }
+      if (b_follow_links) {
+        // use symlink_target intstead of item, converting symlink to actual dir item
+        this->_queue_files({DirItem(symlink_target, item.type(), item.perms())}, new_record_path);
+        return;
+      }
+      // create absolute symlink
+      Filepath absolute_symlink_target = boost::filesystem::canonical(symlink_target, item.path_ref().parent_path(), ec);
+      if (!ec.failed()) { symlink_target = absolute_symlink_target; }
+      do_place_link(new_record_path, symlink_target, item.perms());
+      return;
+    }
+    // Act on directory
+    if (item.type() == boost::filesystem::directory_file) {
+      // detect cyclic dir
+      for (auto& visited : _visited_dirs) {
+        if (boost::filesystem::equivalent(visited.source.path_ref(), item.path_ref(), ec)) {
+          // dir already copied, create link to it instead
+          do_place_link(new_record_path, visited.destination, item.perms());
+          return;
+        }
+      }
+      _visited_dirs.push_back({.source = DirItem(item), .destination = new_record_path});
+      // queue create dir command
+      q.push_back(DirItem(new_record_path, boost::filesystem::directory_file, item.perms()));
+      // Recurse into subdir
+      std::vector<DirItem> subdir_items;
+      error_code           ec;
+      for (directory_entry& subdir_item : directory_iterator(item.path_ref(), ec)) {
+        error_code  ec;
+        file_status fs = subdir_item.status(ec);
+        subdir_items.emplace_back(subdir_item.path(), fs.type(), fs.permissions());
+      }
+      _queue_files(subdir_items, new_record_path);
+      return;
+    }
+    // Act on file
+    auto& created = q.emplace_back(item);
+    created._set_symlink_target(new_record_path);
+  };
+  // TODO: prevent dir copy into itself
+  // TODO: prevent file copy into itself
+  for (auto& item : files) {
+    if (item.type() == boost::filesystem::status_error) {
+      auto& created = q.emplace_back(item);
+      created._set_symlink_target(destination / item.path_ref().filename());
+      continue;
+    }
+    place_on_queue(item);
+  }
+};
 
 //
 // ToClipboardDialog
@@ -366,10 +516,10 @@ ToClipboardDialog::ToClipboardDialog(PanelSharedState::P d) : Dialog(std::move(d
 }
 
 void ToClipboardDialog::OnShow() {
-  items_copied                            = 0;
-  std::vector<DirItem::P>& selected       = app->action.arguments->selected;
-  int                      selected_count = selected.size();
-  int                      required_size  = 0;
+  items_copied                          = 0;
+  std::vector<Filepath>& selected       = app->action.arguments->selected;
+  int                    selected_count = selected.size();
+  int                    required_size  = 0;
   for (int i = selected_count - 1; i >= 0; --i) required_size += selected.at(i).size();
   std::string text;
   text.reserve(required_size);

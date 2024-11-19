@@ -1,5 +1,5 @@
 
-#include "commander.h"
+#include "commander.hpp"
 
 #include <functional>
 #include <memory>
@@ -37,7 +37,7 @@ void DirEvents_callback(ConstFSEventStreamRef sr, void* callback_info, size_t nu
 
 class DirEvents : public FileChangeFunnel {
  public:
-  DirEvents(boost::filesystem::path where, FileChangeFunnel::Callback cb) : _callback(cb) {
+  DirEvents(Filepath where, FileChangeFunnel::Callback cb) : _callback(cb) {
     FSEventStreamCreateFlags flags = kFSEventStreamCreateFlagFileEvents;  // | kFSEventStreamCreateFlagNoDefer;
 
     _root = boost::filesystem::canonical(where);
@@ -108,15 +108,15 @@ class DirEvents : public FileChangeFunnel {
   bool valid() { return !!_stream; }
 
  private:
-  boost::filesystem::path               _root;
+  Filepath                              _root;
   FileChangeFunnel::Callback            _callback;
   std::vector<std::string>              _paths_to_watch;
   std::unique_ptr<FSEventStreamContext> _context;
   FSEventStreamRef                      _stream;
 
-  std::thread _runloop_thread;
+  std::thread  _runloop_thread;
   CFRunLoopRef _runloop_ref;
-  std::mutex  _m;
+  std::mutex   _m;
 };
 
 // route events to DirEvents method:
@@ -126,4 +126,4 @@ void DirEvents_callback(ConstFSEventStreamRef sr, void* callback_info, size_t nu
   self->events_received(sr, num_events, event_paths, event_flags, event_ids);
 }
 
-std::unique_ptr<FileChangeFunnel> FileChangeFunnel::create(DirItem::P root, Callback cb) { return std::make_unique<DirEvents>(root, cb); }
+std::unique_ptr<FileChangeFunnel> FileChangeFunnel::create(Filepath root, Callback cb) { return std::make_unique<DirEvents>(root, cb); }

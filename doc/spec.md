@@ -4,7 +4,8 @@
 An orthodox file manager. Exploring directories to run commands on selected files.
 
 Initial Features:
-- glob select & deselect
+- keep focused item according to path. `selected` as index will *move* when `FileChangeFunnel` adds/removes item from `Dir`.
+- glob select & deselect - popup
 + prepend char to item render
   + dir marked with `/`
   + symlink takes 2 rows `-> real path` 
@@ -63,6 +64,11 @@ Usability:
 
 Performance:
   https://unix.stackexchange.com/questions/771238/linux-syscalls-advantage-of-copy-file-range-over-sendfile  
+
+
+Extended key events allowing shift+left, alt+enter, etc.
+
+Builtin editor: https://github.com/howl-editor/howl https://howl.io/
 
 # Design
 

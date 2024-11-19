@@ -1,6 +1,8 @@
 
-#include "commander.h"
-#include "boost/filesystem/file_status.hpp"
+#include "commander.hpp"
+
+#include <boost/filesystem/file_status.hpp>
+#include <boost/system/detail/error_code.hpp>
 
 #include <algorithm>
 #include <boost/filesystem.hpp>
@@ -61,6 +63,11 @@ std::string DirItem::to_string() const {
 }
 
 void DirItem::update(Type type, Perms perms) {
+  _type  = type;
+  _perms = perms;
+  // Allow files we cant access to exist in our lists
+  if (_type == boost::filesystem::status_error) return;
+
   error_code ec;
   const bool is_link = boost::filesystem::is_symlink(_path, ec);
   if (!ec.failed() && is_link) {
@@ -74,7 +81,18 @@ void DirItem::update(Type type, Perms perms) {
   if (ec.failed()) _size = -1;
 }
 
-DirItem::DirItem(DirItem::P p, DirItem::Type type, DirItem::Perms perms) : _path(std::move(p)), _type(type), _perms(perms) {
+DirItem::DirItem(Filepath p) : _path(std::move(p)) {
+  _filename = _path.filename().native();
+  error_code ec;
+  file_status fs = status(_path, ec);
+  if(ec.failed()) {
+    update(boost::filesystem::status_error, boost::filesystem::no_perms);
+    return;
+  }
+  update(fs.type(), fs.permissions());
+}
+
+DirItem::DirItem(Filepath p, DirItem::Type type, DirItem::Perms perms) : _path(std::move(p)) {
   _filename = _path.filename().native();
   update(type, perms);
 }
@@ -87,14 +105,15 @@ Err Dir::leave_dir() {
 
 Err Dir::refresh() { return move_to(path); }
 
-Err Dir::move_to(const DirItem::P p) {
+Err Dir::move_to(const Filepath p) {
   if (false == exists(p)) return Err("don't exists path=" + p.native());
   if (false == is_directory(p)) return Err("must be dir path=" + p.native());
   items.clear();
   error_code dir_ec;
   for (directory_entry& item : directory_iterator(p, dir_ec)) {
     error_code  ec;
-    file_status fs = status(item.path(), ec);
+    // file_status fs = status(item.path(), ec);
+    file_status fs = item.status(ec);
     if (ec) {
       Problems::report(ec.message() + " : stat() error on " + item.path().native());
       continue;
@@ -113,7 +132,7 @@ void Dir::partial_refresh(UpdatedFiles changes) {
   // We don't care what is the type of change
   // - if path doesn't exist we should remove it from the list
   // - if path exists update size and date
-  auto find = [&](DirItem::P& p) {
+  auto find = [&](Filepath& p) {
     for (auto it = items.begin(); it != items.end(); ++it) {
       // if (boost::filesystem::equivalent(it->_path, p)) { return it; }
       if (it->_path == p) { return it; }
@@ -246,7 +265,7 @@ int Dir::offset_vissible(int curr, int offset) {
   using Cont         = std::function<bool(int)>;
   int  increment     = 1;
   auto f_inc         = [&](int i) -> bool { return i < items.size(); };
-  auto f_dec         = [&](int i) -> bool { return i >= 0; };
+  auto f_dec         = [&](int i) -> bool { return items.size() && i >= 0; };
   Cont there_is_more = f_inc;
   auto reverse       = [&]() {
     if (increment > 0) {
