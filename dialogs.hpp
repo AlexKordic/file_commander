@@ -44,6 +44,7 @@ struct Files : Dialog {
   Component   files;
   std::string filter_txt;
   Component   sort_name, sort_size, sort_time;
+  int         filter_cursor_pos = 0;
 
   explicit Files(PanelSharedState::P s);
   void OnShow() override {}
@@ -118,8 +119,8 @@ struct CopyDialog : Dialog {
 
   PanelSharedState::P  _operation_state;
   std::string          _filter_text;
-  std::unique_ptr<Dir> _virtual_dir; // enumerate items to copy
-  void _clear_operation_state();
+  std::unique_ptr<Dir> _virtual_dir;  // enumerate items to copy
+  void                 _clear_operation_state();
 
   struct Visited {
     DirItem  source;

@@ -45,6 +45,7 @@ Files::Files(PanelSharedState::P s) : Dialog(std::move(s)) {
       return state.element | theme().files_filter_search;
     }
   };
+  input_opt.cursor_position = &filter_cursor_pos;
   ButtonOption ascii_button;
   ascii_button.transform = [](const EntryState& s) {
     const std::string t = s.focused ? "[" + s.label + "]" : " " + s.label + " ";
@@ -52,7 +53,7 @@ Files::Files(PanelSharedState::P s) : Dialog(std::move(s)) {
     return text(t) | theme().sort_button;
   };
 
-  app->filter = Input(&filter_txt, &(app->dir->path_txt), input_opt);
+  app->filter = Input(&filter_txt, &(app->dir->path_txt), input_opt) | showInputCursor(&filter_cursor_pos);
   files       = FileList(app, &filter_txt);
   sort_name   = Button("Name", [dir = app->dir] { dir->sort_toggle_name_direction(); }, ascii_button);
   sort_size   = Button("Size", [dir = app->dir] { dir->sort_toggle_size_direction(); }, ascii_button);
