@@ -4,6 +4,7 @@
 
 #include "commander.hpp"
 #include "file_panel.hpp"
+#include "file_io_jobs.hpp"
 #include "log.hpp"
 #include "shared_state.hpp"
 #include "theme.hpp"
@@ -22,6 +23,9 @@ using boost::filesystem::directory_entry;
 using boost::filesystem::directory_iterator;
 using boost::filesystem::file_status;
 using boost::system::error_code;
+
+using Perun::JobSpec;
+using Perun::file_operations;
 
 namespace ftxui {
 
@@ -66,7 +70,7 @@ Files::Files(PanelSharedState::P s) : Dialog(std::move(s)) {
     }
     auto     s        = state->dir->stats();
     Elements children = Elements({
-      text("Sel " + std::to_string(s.items_selected) + "/" + std::to_string(s.items_total)),
+      text(" Sel " + std::to_string(s.items_selected) + "/" + std::to_string(s.items_total)),
       text(" bytes "),
       coloredInt(s.bytes_selected),
       text("/"),
@@ -85,7 +89,7 @@ Files::Files(PanelSharedState::P s) : Dialog(std::move(s)) {
   navigation = Container::Vertical({Container::Horizontal({sort_name, sort_size, sort_time}), files});
   renderer   = Renderer(navigation, [filter = app->filter, render_selection = render_selection, files = files]() -> Element {
     return vbox({
-      filter->Render() | ftxui::focus | ftxui::select,
+      hbox({text(" "), filter->Render() | ftxui::focus | ftxui::select, text(" ")}),
       render_selection(),
       files->Render() | vscroll_indicator | yframe | theme().files_border,
     });
@@ -298,7 +302,7 @@ void RenameDialog::cancel() { app->action.close_dialog(); }
 /*
   There is no progress interface in filesystem::copy, see playground.cpp for workaround
 */
-CopyDialog::CopyDialog(PanelSharedState::P d) : Dialog(std::move(d)) {
+CopyDialog::CopyDialog(PanelSharedState::P d, RedrawUI r) : Dialog(std::move(d)), redraw_ui(r) {
   // [_] follow links `cp -r -L`: always follow symbolic links in SOURCE
   // [x] preserve permissions
   // [x] preserve timestamps
@@ -352,8 +356,24 @@ CopyDialog::CopyDialog(PanelSharedState::P d) : Dialog(std::move(d)) {
   renderer   = Renderer(navigation, [this]() -> Element { return this->render(); });
 }
 
-void CopyDialog::cancel_copy() { app->action.close_dialog(); }
-void CopyDialog::run_copy() { app->action.close_dialog(); }
+void CopyDialog::cancel_copy() {
+  _clear_operation_state();
+  app->action.close_dialog();
+}
+
+void CopyDialog::run_copy() {
+  auto job = std::make_shared<JobSpec>(JobSpec::Type::COPY, std::move(_virtual_dir->items));
+  _clear_operation_state();
+  job->_bytes_total = 0;
+  for (DirItem const& item : job->_items) {
+    if (item.type() == boost::filesystem::regular_file) { job->_bytes_total += item.size(); }
+  }
+  // whenever job updates, redraw UI
+  job->updated = this->redraw_ui;
+  file_operations().add_job(job);
+  // TODO: add job to CommandProgressPanel
+  app->action.close_dialog();
+}
 
 Element CopyDialog::render() {
   int file_count  = app->action.arguments->selected.size();

@@ -1,0 +1,269 @@
+
+#include "file_io_jobs.hpp"
+#include <condition_variable>
+#include <mutex>
+#include <thread>
+#include "fifo_queue.hpp"
+#include "log.hpp"
+
+using boost::filesystem::copy_options;
+using boost::system::error_code;
+
+namespace Perun {
+
+constexpr int64_t LARGE_FILE_SIZE_FROM     = 10 * 1024 * 1024;  // 10MB
+constexpr auto    PROGRESS_UPDATE_INTERVAL = std::chrono::milliseconds(200);
+
+//
+// Calculate progress and throughput
+//
+ProgressInfo::ProgressInfo() {
+  start_ts = now();
+  last_ts  = start_ts;
+}
+
+bool ProgressInfo::update(int64_t new_size, int64_t source_size) {
+  if (new_size == current_size) return false;
+  double ts    = now();
+  Mbps         = ((current_size - new_size) * 8 / 1000000.0) / (last_ts - ts);
+  current_size = new_size;
+  last_ts      = ts;
+  percentage   = 100 * float(current_size) / source_size;
+  average_Mbps = (current_size * 8 / 1000000.0) / (last_ts - start_ts);
+  return true;
+}
+
+void JobSpec::_calculate_transfer_stats() {
+  const bool current_index_valid = _current_item_index >= 0 && _current_item_index < _items.size();
+  if (!current_index_valid) return;
+  const DirItem& item = _items.at(_current_item_index);
+  if (!item.symlink_ref()) return;
+  const bool is_large_file   = item.size() > LARGE_FILE_SIZE_FROM;
+  int64_t    bytes_processed = _bytes_processed;
+  if (is_large_file) {
+    // Only for large files we calculate precise progress
+    error_code ec;
+    int64_t    latest_size = file_size(*item.symlink_ref(), ec);
+    // Expect `system:2` error on when file_size was invoked before copy creates a file
+    if (ec.failed()) return;
+    bytes_processed += latest_size;
+    _current_item.update(latest_size, item.size());
+  } else {
+    _current_item.average_Mbps = _total.average_Mbps;
+    _current_item.Mbps         = _total.Mbps;
+    _current_item.percentage   = 0;
+  }
+  _total.update(bytes_processed, _bytes_total);
+}
+
+//
+// Separate thread to notify UI about progress of file operations
+// When Job have blocked on large item do a check for file size to get progress info for large files
+//
+class ProgressMonitor {
+ public:
+  ProgressMonitor() {
+    _thread = std::thread([this]() { this->run(); });
+  }
+  ~ProgressMonitor() {
+    stop();
+    if (_thread.joinable()) _thread.join();
+  }
+  void stop() {
+    _running = false;
+    _condition.notify_all();
+  }
+  void add_job(std::shared_ptr<JobSpec> job) {
+    {
+      std::unique_lock lock(_m);
+      _new_jobs.push_back(std::move(job));
+    }
+    _condition.notify_all();
+  }
+
+ protected:
+  volatile bool _running = true;
+
+  std::thread                           _thread;
+  std::condition_variable               _condition;
+  std::mutex                            _m;
+  std::vector<std::shared_ptr<JobSpec>> _new_jobs;
+
+  // not updated by other threads:
+  std::vector<std::shared_ptr<JobSpec>> _jobs;
+
+  void run() {
+    while (_running) {
+      {
+        // collect new jobs
+        std::unique_lock lock(_m);
+        for (auto& job : _new_jobs) { _jobs.push_back(std::move(job)); }
+        _new_jobs.clear();
+        if (_jobs.empty()) {
+          // suspend thread if no jobs
+          while (_new_jobs.empty() && _running) { _condition.wait(lock); }
+          continue;
+        }
+      }
+
+      // Do update for each job and then sleep
+      std::vector<JobSpec*> updated_jobs;
+      for (size_t i = 0; i < _jobs.size(); i++) {
+        auto&           job = _jobs.at(i);
+        std::lock_guard lock(job->_m);
+        if (job->is_stopped()) {
+          // Remove stopped job
+          _jobs.erase(_jobs.begin() + i);
+          continue;
+        } else {
+          ++i;
+        }
+        // Either UI is updated from here or in ThreadedFileJobs after item is processed
+        // Check timing to proceed. This is to reduce number of updates and improve performance
+        if (now() < job->_last_progress_update_time + job->_progress_update_interval) continue;
+        job->_last_progress_update_time = now();
+        updated_jobs.push_back(job.get());
+        job->_calculate_transfer_stats();
+      }
+      for (auto job : updated_jobs) { job->updated(); }
+
+      std::this_thread::sleep_for(PROGRESS_UPDATE_INTERVAL);
+    }
+  }
+};
+
+JobSpec::JobSpec(Type t, std::vector<DirItem> items) {
+  _type  = t;
+  _items = std::move(items);
+}
+
+void JobInstructions::report_error(DirItem item, std::string message) {
+  auto& inserted = _errors.emplace_back(item);
+  inserted._set_warning(std::move(message));
+}
+
+class ThreadedFileJobs : public FileJobs {
+ public:
+  ThreadedFileJobs() {
+    _thread = std::thread([this]() { this->run(); });
+  }
+  virtual ~ThreadedFileJobs() {
+    _queue.close();
+    _thread.join();
+  }
+  FifoError add_job(std::shared_ptr<JobSpec> job) override {
+    job->_queued_time = now();
+    return _queue.push(std::move(job));
+  }
+  JobError cancel_job(JobSpec* job) override {
+    // TODO: implement
+    return JobError::OK;
+  }
+  RunningJobsInfo get_running_job() override {
+    std::shared_ptr<JobSpec> active;
+    {
+      std::lock_guard lock(_m);
+      active = _job;
+    }
+    return {std::move(active), _queue.size()};
+  }
+
+ private:
+  void run() {
+    while (true) {
+      std::shared_ptr<JobSpec> job;
+      FifoError                err = _queue.pop(job);
+      if (err == FifoError::Destroyed) { break; }
+      job->_started_time = now();
+      job->_total        = ProgressInfo();
+      {
+        std::lock_guard lock(_m);
+        _job = std::move(job);
+      }
+      _progress_monitor.add_job(_job);
+      switch (_job->_type) {
+      case JobSpec::Type::COPY: run_copy(_job.get()); break;
+      case JobSpec::Type::MOVE: break;
+      case JobSpec::Type::DELETE: break;
+      }
+      _job->_finished_time = now();  // why not within job->_m mutex ??
+      _job->updated();
+    }
+  }
+
+  void run_copy(JobSpec* job) {
+    error_code       ec;
+    std::unique_lock lock(job->_m);
+    // Defer            update_job_duration([&]() { _job->_finished_time = now(); });
+    // _job->_items is not to be modified by other threads
+    for (auto& item : job->_items) {
+      Defer update_progress([&]() { job->_current_item_index++; });
+      // if type is dir path is to be mkdired
+      // if type is link path is where to place link and symlink_ref is link target
+      // else path is source file and symlink_ref is destination file for copy operation
+      if (item.type() == boost::filesystem::file_type::status_error) { continue; }
+      if (item.type() == boost::filesystem::file_type::directory_file) {
+        lock.unlock();
+        boost::filesystem::create_directory(item.path_ref(), ec);
+        lock.lock();
+        if (ec.failed()) {
+          // report error
+          job->report_error(item, "Failed to create directory: " + ec.message());
+          // also all items going into this dir may fail now, but we will let them error out individually
+        }
+        continue;
+      }
+      if (item.type() == boost::filesystem::file_type::symlink_file) {
+        if (!item.symlink_ref()) {
+          job->report_error(item, "Symlink target not set");
+          continue;
+        }
+        lock.unlock();
+        boost::filesystem::create_symlink(item.path_ref(), *item.symlink_ref(), ec);
+        lock.lock();
+        if (ec.failed()) {
+          // report error
+          job->report_error(item, "Failed to create symlink: " + ec.message());
+        }
+        continue;
+      }
+      // else path is source file and target is destination file for copy operation
+      // this operation is blocking. progress will be updated by separate thread.
+      job->_current_item = ProgressInfo();
+      lock.unlock();
+      copy_options op = copy_options::overwrite_existing;
+      boost::filesystem::copy_file(item.path_ref(), *item.symlink_ref(), op, ec);
+      lock.lock();
+      if (ec.failed()) {
+        job->report_error(item, "Failed to copy file: " + ec.message());
+        job->_bytes_total -= item.size();
+      } else {
+        job->_bytes_processed += item.size();
+      }
+      job->_total.update(job->_bytes_processed, job->_bytes_total);
+      // invoke callback
+      if (now() > job->_last_progress_update_time + job->_progress_update_interval) {
+        job->_last_progress_update_time = now();
+        lock.unlock();
+        job->updated();
+        lock.lock();
+      }
+    }
+  }
+
+  std::shared_ptr<JobSpec>                   _job;
+  Perun::FifoQueue<std::shared_ptr<JobSpec>> _queue;
+
+  ProgressMonitor _progress_monitor;
+
+  // TODO: use map of thread pools, with configured sizes for each device. NVMe devices should have more threads than HDDs.
+  std::thread _thread;
+  std::mutex  _m;
+};
+
+FileJobs& file_operations() {
+  static ThreadedFileJobs jobs;
+  return jobs;
+}
+
+}  // namespace Perun

@@ -33,7 +33,7 @@ FetchContent_Declare(
 FetchContent_MakeAvailable(ftxui)
 FetchContent_MakeAvailable(ftxui-grid-container)
 FetchContent_MakeAvailable(Boost)
-add_executable(fc main.cpp log.cpp err.cpp commander.cpp theme.cpp file_panel.cpp dialogs.cpp shared_state.cpp file_change_funnel.cpp)
+add_executable(fc main.cpp log.cpp err.cpp commander.cpp theme.cpp file_panel.cpp dialogs.cpp shared_state.cpp file_change_funnel.cpp file_io_jobs.cpp)
 target_link_libraries(fc
   PRIVATE ftxui-grid-container Boost::filesystem "-framework CoreServices"
 )

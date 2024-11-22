@@ -11,6 +11,8 @@
 #include <memory>
 #include <string>
 
+using RedrawUI = std::function<void()>;
+
 namespace ftxui {
 
 struct Command {
@@ -92,7 +94,8 @@ struct ToClipboardDialog : Dialog {
 };
 
 struct CopyDialog : Dialog {
-  CopyDialog(PanelSharedState::P data);
+  RedrawUI redraw_ui;
+  CopyDialog(PanelSharedState::P data, RedrawUI r);
   void OnShow() override;
 
   std::string destination_path;

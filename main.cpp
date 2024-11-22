@@ -2,6 +2,7 @@
 #include "bfs.hpp"
 #include "commander.hpp"
 #include "dialogs.hpp"
+#include "file_io_jobs.hpp"
 #include "file_panel.hpp"
 #include "log.hpp"
 #include "theme.hpp"
@@ -14,6 +15,8 @@
 #include <ftxui/dom/elements.hpp>
 #include <ftxui/dom/table.hpp>
 
+#include <cmath>
+#include <format>
 #include <functional>
 #include <map>
 #include <memory>
@@ -72,10 +75,11 @@ class Panel : public DialogOverlay {
   TargetFunc get_target;
 
   ExecuteOnUiThread                 run_on_ui;
+  RedrawUI                          redraw_ui;
   std::unique_ptr<FileChangeFunnel> update_funnel;
   Perun::FifoQueue<UpdatedFiles>    pending_changes;
 
-  Panel(Filepath location, TargetFunc get_target, ExecuteOnUiThread e) : get_target(get_target), run_on_ui(e) {
+  Panel(Filepath location, TargetFunc get_target, ExecuteOnUiThread e, RedrawUI r) : get_target(get_target), run_on_ui(e), redraw_ui(r) {
     this->move_to(location);
     _state                      = std::make_shared<PanelSharedState>(&dir);
     navigation                  = Container::Tab({}, &_active_dialog);
@@ -91,7 +95,7 @@ class Panel : public DialogOverlay {
     // register dialogs
     _overlay_dialogs["Mkdir"]           = std::make_shared<MkdirDialog>(_state);
     _overlay_dialogs["Rename"]          = std::make_shared<RenameDialog>(_state);
-    _overlay_dialogs["Copy"]            = std::make_shared<CopyDialog>(_state);
+    _overlay_dialogs["Copy"]            = std::make_shared<CopyDialog>(_state, redraw_ui);
     _overlay_dialogs["Move"]            = std::make_shared<Nyi>(_state);
     _overlay_dialogs["Delete"]          = std::make_shared<Nyi>(_state);
     _overlay_dialogs["Find"]            = std::make_shared<Nyi>(_state);
@@ -142,14 +146,49 @@ class Panel : public DialogOverlay {
   std::shared_ptr<Files> _files;
 };
 
+std::string job_type_to_string(JobInstructions::Type type) {
+  switch (type) {
+  case JobInstructions::Type::COPY: return "COPY";
+  case JobInstructions::Type::MOVE: return "MOVE";
+  case JobInstructions::Type::DELETE: return "DELETE";
+  }
+}
+
+struct JobProgressBar {
+  Element render() {
+    auto  jobinfo = file_operations().get_running_job();
+    auto& job     = jobinfo.job;
+    if (!job) return text("empty");
+    if (job->is_stopped()) return text("stopped");
+    std::lock_guard lock(job->_m);
+    const bool      current_index_valid = job->_current_item_index >= 0 && job->_current_item_index < job->_items.size();
+    if (!current_index_valid) return text("invalid data");
+    const DirItem& item = job->_items.at(job->_current_item_index);
+    if (!item.symlink_ref()) return text("malformed current item");
+    std::string total_info = std::format(" [{:3}] {:5}[{:5}] Mbps {}/{} items ", std::lround(job->_total.percentage), std::lround(job->_total.Mbps), std::lround(job->_total.average_Mbps), job->_current_item_index + 1, job->_items.size());
+    std::string curr_info  = std::format(" [{:3}] {:5}Mbps {} ", std::lround(job->_current_item.percentage), std::lround(job->_current_item.Mbps), item.path_ref().native());
+    std::string task_info  = std::format(" [{}] [{}] ", jobinfo.queued_jobs, job_type_to_string(job->_type));
+    return hbox({
+      // TODO: implement DELETE, MOVE
+      text(task_info) | theme().progress_operation,
+      text("|"),
+      bgGaugeLeft(job->_total.percentage / 100, theme().size_gauge_full, theme().size_gauge_empty, text(total_info)) | theme().progress_total,
+      text("|"),
+      bgGaugeLeft(job->_current_item.percentage / 100, theme().size_gauge_full, theme().size_gauge_empty, text(curr_info)) | xflex_grow | theme().progress_current,
+      text("|"),
+    });
+  }
+};
+
 class FileCommander {
  protected:
-  Panel left, right;
+  Panel          left, right;
+  JobProgressBar progress_bar;
 
  public:
   Component navigation;
   Component renderer;
-  FileCommander(Filepath l, Filepath r, ExecuteOnUiThread exec) : left(l, get_target(), exec), right(r, get_target(), exec) {
+  FileCommander(Filepath l, Filepath r, ExecuteOnUiThread exec, RedrawUI redraw) : left(l, get_target(), exec, redraw), right(r, get_target(), exec, redraw) {
     auto global_shortcuts = [this](Event event) -> bool {
       // Tab between panels
       if (event == theme().key_switch_focused_panel) {
@@ -178,7 +217,13 @@ class FileCommander {
     navigation = CatchEvent(Container::Horizontal({left.navigation, right.navigation}), global_shortcuts);
     renderer   = Renderer(navigation, [&]() -> Element {
       // Two panels side by side
-      return hbox({left.render() | xflex_grow, separatorLight(), right.render() | xflex_grow}) | bgcolor(theme().default_bg) | color(theme().default_fg);
+      Elements el;
+      auto     jobinfo = file_operations().get_running_job();
+      if (jobinfo.job) { el.push_back(progress_bar.render()); }
+      el.push_back(hbox({left.render() | xflex_grow, right.render() | xflex_grow}) | bgcolor(theme().default_bg) | color(theme().default_fg));
+      // TODO: why is this separator required for progress bar to be rendered?
+      el.push_back(separatorLight());
+      return vbox(std::move(el));
     });
   }
   // returns
@@ -242,7 +287,8 @@ int main(int argc, char** argv) {
     screen.Post(f);
     screen.Post(Event::Custom);
   };
-  FileCommander app(left_path, right_path, exec);
+  auto          redraw = [&screen]() -> void { screen.Post(Event::Custom); };
+  FileCommander app(left_path, right_path, exec, redraw);
 
   LogAdapter adapt_logs(screen);
 

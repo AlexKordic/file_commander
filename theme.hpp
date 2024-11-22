@@ -64,6 +64,10 @@ struct Theme {
     clipboard_msg,
     copy_destination,
 
+    progress_operation,
+    progress_total,
+    progress_current,
+
     unused;
   
   ftxui::Color file_type(boost::filesystem::file_type t);

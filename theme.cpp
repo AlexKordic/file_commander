@@ -29,6 +29,10 @@ Theme::Theme() {
   files_warning = color(Color::OrangeRed1);
   files_symlink = dim;
 
+  progress_operation = color(Color::SpringGreen1);
+  progress_total     = color(Color::PaleTurquoise1);
+  progress_current   = color(Color::PaleGreen1);
+
   default_fg = Color::White;
   default_bg = Color::Black;
 
