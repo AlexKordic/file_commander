@@ -16,7 +16,7 @@ Theme::Theme() {
   key_leave_dir       = Event::Character("?");
   key_select_all      = Event::CtrlA;
 
-  filesize_colors  = {Color::White, Color::White, Color::Yellow, Color::Red, Color::Plum3};
+  filesize_colors  = {Color::White, Color::White, Color::Yellow, Color::IndianRed1, Color::Plum3};
   size_gauge_full  = Color::MediumPurple4;
   size_gauge_empty = Color::Grey0;
 

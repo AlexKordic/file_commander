@@ -83,9 +83,9 @@ void DirItem::update(Type type, Perms perms) {
 
 DirItem::DirItem(Filepath p) : _path(std::move(p)) {
   _filename = _path.filename().native();
-  error_code ec;
+  error_code  ec;
   file_status fs = status(_path, ec);
-  if(ec.failed()) {
+  if (ec.failed()) {
     update(boost::filesystem::status_error, boost::filesystem::no_perms);
     return;
   }
@@ -128,14 +128,22 @@ Err Dir::move_to(const Filepath p) {
   return Err();
 }
 
+// Only items in the same directory are listed in changes
 void Dir::partial_refresh(UpdatedFiles changes) {
   // We don't care what is the type of change
   // - if path doesn't exist we should remove it from the list
   // - if path exists update size and date
   auto find = [&](Filepath& p) {
+    std::string p_filename = p.filename().native();
     for (auto it = items.begin(); it != items.end(); ++it) {
-      // if (boost::filesystem::equivalent(it->_path, p)) { return it; }
-      if (it->_path == p) { return it; }
+      if (it->_filename == p_filename) {
+        // equivalent does not work when file was deleted as it checks now for existance
+        // error_code ec;
+        // if (boost::filesystem::equivalent(it->_path, p, ec)) {
+        //   if (false == ec.failed()) return it;
+        // }
+        return it;
+      }
     }
     return items.end();
   };

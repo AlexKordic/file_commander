@@ -1,12 +1,14 @@
 
 #include "commander.hpp"
 
+#include <sys/stat.h>
 #include <functional>
 #include <memory>
 #include <mutex>
 #include <stdexcept>
 #include <string>
 #include <thread>
+#include <utility>  // For std::declval
 #include <vector>
 
 #include <CoreServices/CoreServices.h>
@@ -33,14 +35,33 @@ DirItemUpdated::Event What(FSEventStreamEventFlags f) {
   return DirItemUpdated::Event::Modified;
 }
 
+struct FileId {
+  // decltype(std::declval<struct stat>().st_dev) device_id;
+  // decltype(std::declval<struct stat>().st_ino) inode_number;
+  struct stat _stat;
+
+  bool same_dir(const FileId& other) const { return _stat.st_dev == other._stat.st_dev && _stat.st_ino == other._stat.st_ino; }
+
+  static bool from_filename(FileId& out, const char* filename) {
+    const bool err = lstat(filename, &out._stat);
+    if (err) { return false; }
+    return true;
+  }
+};
+
 void DirEvents_callback(ConstFSEventStreamRef sr, void* callback_info, size_t num_events, void* event_paths_, const FSEventStreamEventFlags event_flags[], const FSEventStreamEventId event_ids[]);
 
 class DirEvents : public FileChangeFunnel {
  public:
   DirEvents(Filepath where, FileChangeFunnel::Callback cb) : _callback(cb) {
-    FSEventStreamCreateFlags flags = kFSEventStreamCreateFlagFileEvents;  // | kFSEventStreamCreateFlagNoDefer;
-
     _root = boost::filesystem::canonical(where);
+
+    FSEventStreamCreateFlags flags = kFSEventStreamCreateFlagFileEvents;  // | kFSEventStreamCreateFlagNoDefer;
+    if (!FileId::from_filename(_root_id, _root.native().c_str())) {
+      auto msg = "our dir lstat failed " + std::to_string(errno) + " " + _root.native();
+      Problems::report(msg);
+      throw std::runtime_error(msg);
+    }
     _paths_to_watch.push_back(_root.native());
     _context.reset(new FSEventStreamContext{0, this, nullptr, nullptr, nullptr});
     _stream = FSEventStreamCreate(kCFAllocatorDefault, DirEvents_callback, _context.get(), getArrayRef(_paths_to_watch), kFSEventStreamEventIdSinceNow, 0.2, flags);
@@ -61,34 +82,15 @@ class DirEvents : public FileChangeFunnel {
   void events_received(ConstFSEventStreamRef sr, size_t num_events, const char** event_paths, const FSEventStreamEventFlags* event_flags, const FSEventStreamEventId* event_ids) {
     UpdatedFiles filtered_events = std::make_unique<std::vector<DirItemUpdated>>();
     filtered_events->reserve(num_events);
-    std::string const& our_path     = _root.native();
-    auto               on_same_path = [&](const char* filename, int& i) {
-      const int our_path_len = our_path.size();
-      for (; i < our_path_len; i += 1) {
-        if (filename[i] == '\0' || filename[i] != our_path[i]) {
-          // found end of string or char differs from our path
-          return false;
-        }
-      }
-      return true;
-    };
     for (int event_index = 0; event_index < num_events; event_index++) {
-      const char* filename = event_paths[event_index];
-      int         i        = 0;
-      if (!on_same_path(filename, i)) { continue; }
-      // next char should be /
-      if (filename[i++] != '/') { continue; }
-      for (;; i += 1) {
-        if (filename[i] == '\0') {
-          // found end of string before filtering out this item
-          filtered_events->emplace_back(filename, What(event_flags[event_index]));
-          break;
-        }
-        if (filename[i] == '/') {
-          // found dir separator, filter out this item
-          break;
-        }
-      }
+      // Using parent dir to identify items in our watched dir
+      Filepath    signaled_path(event_paths[event_index]);
+      std::string parent_dir = signaled_path.parent_path().native();
+      FileId      parent_dir_id;
+      if (!FileId::from_filename(parent_dir_id, parent_dir.c_str())) { continue; }
+      const bool same_dir = parent_dir_id.same_dir(_root_id);
+      if (!same_dir) { continue; }
+      filtered_events->emplace_back(event_paths[event_index], What(event_flags[event_index]));
     }
     _callback(std::move(filtered_events));
   }
@@ -108,6 +110,7 @@ class DirEvents : public FileChangeFunnel {
   bool valid() { return !!_stream; }
 
  private:
+  FileId                                _root_id;
   Filepath                              _root;
   FileChangeFunnel::Callback            _callback;
   std::vector<std::string>              _paths_to_watch;

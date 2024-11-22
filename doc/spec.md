@@ -4,7 +4,6 @@
 An orthodox file manager. Exploring directories to run commands on selected files.
 
 Initial Features:
-- [bug] copy owerwrite operation creates duplicate files in target dir file list
 - keep focused item according to path. `selected` as index will *move* when `FileChangeFunnel` adds/removes item from `Dir`.
 - glob select & deselect - popup
 + prepend char to item render
