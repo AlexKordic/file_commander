@@ -407,14 +407,9 @@ class FileList : public ComponentBase {
           if (where.is_dir()) {
             Filepath p = where.path_ref();
             app->move_to(p);
+            selected = 0;
+            filter_text->clear();
             return true;
-            // Err        e = dir->move_to(p);
-            // if (e.ok()) {
-            //   selected = 0;
-            //   filter_text->clear();
-            //   return true;
-            // }
-            // Perun::l.e("dir->move_to()", e.steps.front());
           }
           return false;
         }
