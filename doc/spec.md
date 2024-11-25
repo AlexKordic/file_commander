@@ -25,13 +25,13 @@ Initial Features:
 - Command search like vscode-F1 with option to update key-shorcut on the spot
 - Easily add new commands 
 - Show single panel full-width, with visible other panel path, toggle on key-event
-- All commands happen in separate thread, like TC copy in background.
-- Command progress panel TBD
-- FileList implement vscroll_indicator & yframe and create Element's for only visible items.
++ All commands happen in separate thread, like TC copy in background.
++ Command progress panel TBD
++ FileList implement vscroll_indicator & yframe and create Element's for only visible items.
 
 Initial commands:
 + mkdir
-- copy & confirm popup
++ copy & confirm popup
 - move & confirm popup
 - delete & confirm popup
 + rename
