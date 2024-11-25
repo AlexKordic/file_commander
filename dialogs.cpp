@@ -288,7 +288,7 @@ void RenameDialog::ok() {
     menu->ChildAt(i)->Detach();
   }
   if (app->action.arguments->selected.empty()) {
-    // app->dir->refresh();
+    app->dir->clear_selection();
     app->action.close_dialog();
     return;
   }
@@ -373,6 +373,7 @@ void CopyDialog::run_copy() {
   // whenever job updates, redraw UI
   job->updated = this->redraw_ui;
   file_operations().add_job(job);
+  app->dir->clear_selection();
   app->action.close_dialog();
 }
 
