@@ -35,7 +35,7 @@ Dialog::Dialog(PanelSharedState::P app) : app(app) {}
 // Files
 //
 
-Files::Files(PanelSharedState::P s) : Dialog(std::move(s)) {
+Files::Files(PanelSharedState::P s, RedrawUI r) : Dialog(std::move(s)), redraw_ui(r) {
   InputOption input_opt = InputOption::Default();
   input_opt.multiline   = false;
   input_opt.transform   = [](InputState state) {
@@ -54,7 +54,7 @@ Files::Files(PanelSharedState::P s) : Dialog(std::move(s)) {
   };
 
   app->filter = Input(&filter_txt, &(app->dir->path_txt), input_opt) | showInputCursor(&filter_cursor_pos);
-  files       = FileList(app, &filter_txt);
+  files       = FileList(app, &filter_txt, redraw_ui);
   sort_name   = Button("Name", [dir = app->dir] { dir->sort_toggle_name_direction(); }, ascii_button);
   sort_size   = Button("Size", [dir = app->dir] { dir->sort_toggle_size_direction(); }, ascii_button);
   sort_time   = Button("Date", [dir = app->dir] { dir->sort_toggle_time_direction(); }, ascii_button);
@@ -88,11 +88,12 @@ Files::Files(PanelSharedState::P s) : Dialog(std::move(s)) {
   };
 
   navigation = Container::Vertical({Container::Horizontal({sort_name, sort_size, sort_time}), files});
-  renderer   = Renderer(navigation, [filter = app->filter, render_selection = render_selection, files = files]() -> Element {
+  renderer   = Renderer(navigation, [app = app, render_selection = render_selection, files = files]() -> Element {
     return vbox({
-      hbox({text(" "), filter->Render() | ftxui::focus | ftxui::select, text(" ")}),
+      hbox({text(" "), app->filter->Render() | ftxui::focus | ftxui::select, text(" | " + std::to_string(app->render_count) + " ")}),
       render_selection(),
-      files->Render() | vscroll_indicator | yframe | theme().files_border,
+      // files->Render() | vscroll_indicator | yframe | theme().files_border,
+      files->Render() | theme().files_border,
     });
   });
   files->TakeFocus();
@@ -344,7 +345,7 @@ CopyDialog::CopyDialog(PanelSharedState::P d, RedrawUI r) : Dialog(std::move(d))
   _operation_state->move_to          = [](Filepath) {};
   _operation_state->get_focused_item = []() -> Filepath const* { return nullptr; };
   _operation_state->filter           = Input(&_filter_text, &(_virtual_dir->path_txt), input_opt);
-  files                              = FileList(_operation_state, &_filter_text);
+  files                              = FileList(_operation_state, &_filter_text, redraw_ui);
 
   navigation = CatchEvent(Container::Vertical({
                             input_destination_path,
@@ -372,7 +373,6 @@ void CopyDialog::run_copy() {
   // whenever job updates, redraw UI
   job->updated = this->redraw_ui;
   file_operations().add_job(job);
-  // TODO: add job to CommandProgressPanel
   app->action.close_dialog();
 }
 
@@ -395,7 +395,7 @@ Element CopyDialog::render() {
             op_preserve_relative_links->Render() | hcenter,
             hbox({text("Bytes: "), coloredInt(bytes_total), text(" | Filter: "), _operation_state->filter->Render()}) | hcenter,
             separatorHeavy(),
-            files->Render() | vscroll_indicator | yframe,
+            files->Render() | theme().files_border,
           }),
           BorderStyle::DOUBLE
         );
@@ -435,8 +435,6 @@ Filepath resolve_symlink(Filepath path) {
   }
 }
 
-// TODO:
-//  - preserve owner
 // This traversal should be depth first because we want to create tree like depiction in our list
 void CopyDialog::_queue_files(const std::vector<DirItem>& files, Filepath destination) {
   std::vector<DirItem>& q = _virtual_dir->items;
@@ -514,8 +512,6 @@ void CopyDialog::_queue_files(const std::vector<DirItem>& files, Filepath destin
     auto& created = q.emplace_back(item);
     created._set_symlink_target(new_record_path);
   };
-  // TODO: prevent dir copy into itself
-  // TODO: prevent file copy into itself
   for (auto& item : files) {
     if (item.type() == boost::filesystem::status_error) {
       auto& created = q.emplace_back(item);

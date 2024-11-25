@@ -31,15 +31,13 @@ FetchContent_Declare(
 )
 
 FetchContent_MakeAvailable(ftxui)
-FetchContent_MakeAvailable(ftxui-grid-container)
+# FetchContent_MakeAvailable(ftxui-grid-container)
 FetchContent_MakeAvailable(Boost)
 add_executable(fc main.cpp log.cpp err.cpp commander.cpp theme.cpp file_panel.cpp dialogs.cpp shared_state.cpp file_change_funnel.cpp file_io_jobs.cpp)
-target_link_libraries(fc
-  PRIVATE ftxui-grid-container Boost::filesystem "-framework CoreServices"
-)
+target_link_libraries(fc PRIVATE ftxui::screen ftxui::dom ftxui::component Boost::filesystem "-framework CoreServices")
 
-add_executable(playground playground.cpp)
-target_link_libraries(playground ftxui::component Boost::filesystem)
+add_executable(playground playground.cpp log.cpp err.cpp commander.cpp theme.cpp file_panel.cpp dialogs.cpp shared_state.cpp file_change_funnel.cpp file_io_jobs.cpp)
+target_link_libraries(playground PRIVATE ftxui::screen ftxui::dom ftxui::component Boost::filesystem "-framework CoreServices")
 
 # TODO: conditional parts for mac and linux
 add_executable(dirnotify dir_notify/fsevents.cpp dir_notify/test.cpp)

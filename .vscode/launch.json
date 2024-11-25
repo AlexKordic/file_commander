@@ -6,15 +6,16 @@
   "configurations": [
     {
       "name": "DBGlldb",
-      "type": "cppdbg",
+      "type": "lldb",
       "request": "launch",
       "program": "${command:cmake.launchTargetPath}",
-      "stopAtEntry": false,
-      "args": ["/tmp", "/tmp/alex"],
-      "environment": [],
+      "args": ["/Users/alexkordic/Downloads", "/tmp/alex"],
       "cwd": "/tmp",
-      "externalConsole": true,
-      "MIMode": "lldb"
+      "terminal": "external",
+      // "stopAtEntry": false,
+      // "environment": [],
+      // "externalConsole": true,
+      // "MIMode": "lldb"
     }
   ]
 }

@@ -45,8 +45,9 @@ struct Files : Dialog {
   std::string filter_txt;
   Component   sort_name, sort_size, sort_time;
   int         filter_cursor_pos = 0;
+  RedrawUI    redraw_ui;
 
-  explicit Files(PanelSharedState::P s);
+  explicit Files(PanelSharedState::P s, RedrawUI r);
   void OnShow() override {}
 };
 

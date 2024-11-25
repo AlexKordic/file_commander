@@ -15,6 +15,7 @@
 #include <cmath>
 #include <cstdint>
 #include <ftxui/screen/color.hpp>
+#include <functional>
 #include <memory>
 #include <string>
 #include <utility>
@@ -25,6 +26,20 @@ using namespace ftxui;
 namespace ftxui {
 
 namespace {
+
+// Helper class.
+class NodeDecorator : public Node {
+ public:
+  explicit NodeDecorator(Element child) : Node({std::move(child)}) {}
+  void ComputeRequirement() override {
+    Node::ComputeRequirement();
+    requirement_ = children_[0]->requirement();
+  }
+  void SetBox(Box box) override {
+    Node::SetBox(box);
+    children_[0]->SetBox(box);
+  }
+};
 
 // Similar to std::clamp, but allow hi to be lower than lo.
 template <class T> constexpr const T& clamp(const T& v, const T& lo, const T& hi) { return v < lo ? lo : hi < v ? hi : v; }
@@ -40,6 +55,171 @@ Decorator filetype_color(const DirItem& item) {
 
 }  // namespace ftxui
 
+// Normally ftxui would wrap vbox(all files) | vscroll_indicator | yframe | border.
+// We want: vbox(only visible file count) | vscroll_indicator | yframe | border
+// To achieve this reverse flow of information is needed. Instead of instancing files then calculating scroll bar size we want FileList to create only visible count of files and use total file count info to construct scroll bar.
+// Additionally one file entry can be 3 lines high, so we need to account for that.
+// ??? To integrate vscroll_indicator into FileList we need Custom element to wrap our rendered content.
+// Maybe r.yflex_grow = 1 is the solution to occupying all available space.
+
+std::string box_to_string(const Box& box) { return std::format("x:{} y:{} w:{} h:{}", box.x_min, box.y_min, box.x_max, box.y_max); }
+
+using HightMismatch = std::function<void()>;
+
+struct RedrawVariables {
+  int items_produced   = 0;
+  int items_total      = 0;
+  int component_height = 10;
+  int screen_height    = 250;
+
+  bool operator==(const RedrawVariables& other) const { return items_produced == other.items_produced && items_total == other.items_total && component_height == other.component_height && screen_height == other.screen_height; }
+};
+
+struct SizeContext {
+  Box             box;  // Mouse click support
+  RedrawVariables v;
+  RedrawVariables last_v;
+  int             rows_produced = 0;
+  int             start_index   = 0;
+
+  SizeContext() {
+    last_v.component_height = -1;
+    last_v.screen_height    = -1;
+    last_v.items_produced   = -1;
+    last_v.items_total      = -1;
+  }
+
+  void set_screen_height(int height) {
+    if (height != v.screen_height) should_redraw = true;
+    v.screen_height = height;
+  }
+  void set_component_height(int height) {
+    if (height != v.component_height) should_redraw = true;
+    v.component_height = height;
+  }
+  void invoke_redraw() {
+    // protect against infinite redraws
+    if (v == last_v) return;
+    last_v = v;
+    redraw();
+  }
+
+  HightMismatch redraw;
+  bool          should_redraw = false;
+};
+
+class FilelistScrollIndicator : public NodeDecorator {
+ private:
+  SizeContext* _context;
+
+ public:
+  // using NodeDecorator::NodeDecorator;
+  FilelistScrollIndicator(Element child, SizeContext* context) : NodeDecorator(std::move(child)), _context(context) {}
+
+  void ComputeRequirement() override {
+    NodeDecorator::ComputeRequirement();
+    requirement_ = children_[0]->requirement();
+    requirement_.min_x++;
+  }
+
+  void SetBox(Box box) override {
+    box_ = box;
+    box.x_max--;
+    children_[0]->SetBox(box);
+  }
+
+  void Render(Screen& screen) final {
+    NodeDecorator::Render(screen);
+
+    // Will draw only on right border of our box.
+    // Each pixel allows for half of vertical line: up:╹ full:┃ down:╻
+    if (_context->v.items_produced >= _context->v.items_total) return;  // no need for scroll bar
+    // All calculation is done in char units
+    // TODO: Fix calculation for items_produced != rows_produced (symlinks with warnings)
+    float items_total     = _context->v.items_total;
+    float widget_height   = float(box_.y_max) - box_.y_min + 1;
+    float visible_portion = float(_context->v.items_produced) / items_total;
+    float start_point     = (float(_context->start_index) / items_total) * widget_height;
+    float end_point       = start_point + (visible_portion * widget_height);
+    float start_y         = box_.y_min + start_point;
+    float end_y           = box_.y_min + end_point;
+
+    // determine should we start half line:
+    const float firstpixel_start_fraction = start_y - int(start_y);
+    if (firstpixel_start_fraction < 0.25) {
+      screen.PixelAt(box_.x_max, int(start_y)).character = "┃";
+    } else {  // in case of shortest line, let it be half line at the top:
+      screen.PixelAt(box_.x_max, int(start_y)).character = "╻";
+    }
+    if (int(end_y) <= box_.y_max) {
+      const float lastpixel_end_fraction = end_y - int(end_y);
+      if (lastpixel_end_fraction < 0.25) {
+        // Test: Maybe use empty char by not rendering to a pixel
+        screen.PixelAt(box_.x_max, int(end_y)).character = " ";
+      } else if (lastpixel_end_fraction < 0.75) {  // in case of shortest line, let it be half line at the bottom:
+        screen.PixelAt(box_.x_max, int(end_y)).character = "╹";
+      } else {
+        screen.PixelAt(box_.x_max, int(end_y)).character = "┃";
+      }
+    }
+    int last_full_y = std::min(int(end_y) - 1, box_.y_max);
+    for (int y = int(start_y) + 1; y <= last_full_y; ++y) { screen.PixelAt(box_.x_max, y).character = "┃"; }
+  }
+};
+
+Element filelistScrollIndicator(SizeContext* context, Element child) { return std::make_shared<FilelistScrollIndicator>(std::move(child), context); }
+
+Decorator filelist_scroll_indicator(SizeContext* context) {
+  return [context](Element child) { return filelistScrollIndicator(context, std::move(child)); };
+}
+
+class FileListReflect : public Node {
+ public:
+  FileListReflect(Element child, SizeContext* context) : Node(unpack(std::move(child))), _context(context) { int ii = 14; }
+
+  void ComputeRequirement() final {
+    Node::ComputeRequirement();
+    requirement_ = children_[0]->requirement();
+
+    requirement_.flex_grow_y   = 1;  // _context->v.screen_height;
+    requirement_.flex_shrink_y = 1;  // _context->v.component_height;
+    // DONE: experiment with 1
+    // DONE: inspect what pannel do here !
+    requirement_.min_y         = 1;
+  }
+
+  void SetBox(Box box) final {
+    _context->box = box;
+    // Perun::l.d("FileListReflect::SetBox", "", {{"box", box_to_string(box)}});
+    Node::SetBox(box);
+    children_[0]->SetBox(box);
+  }
+
+  void Render(Screen& screen) final {
+    _context->set_screen_height(screen.dimy());
+    _context->box = Box::Intersection(screen.stencil, _context->box);
+    _context->set_component_height(_context->box.y_max - _context->box.y_min + 1);
+    //
+    // Redraw to allow FileList to produce more Elements
+    // This action can cause a cascade of redraws.
+    const bool all_items_visible              = _context->v.items_total == _context->v.items_produced;
+    const bool rowcount_larger_than_component = _context->v.items_total > _context->v.component_height;
+    const bool filelist_matched_rowcount      = _context->v.component_height == _context->v.items_produced;  // should also trigger y-shrink
+    if (_context->should_redraw || !all_items_visible && rowcount_larger_than_component && !filelist_matched_rowcount) {
+      _context->should_redraw = false;
+      _context->invoke_redraw();
+    }
+    Node::Render(screen);
+  }
+
+ private:
+  SizeContext* _context;
+};
+
+Decorator fl_reflect(SizeContext* context) {
+  return [context](Element child) -> Element { return std::make_shared<FileListReflect>(std::move(child), context); };
+}
+
 /// @brief A list of file items. The user can navigate through them.
 class FileList : public ComponentBase {
  public:
@@ -48,11 +228,13 @@ class FileList : public ComponentBase {
   StringRef           filter_text;
   Dir*                dir;
   PanelSharedState::P app;
+  RedrawUI            redraw_ui;
 
-  FileList(PanelSharedState::P panel, std::string* filter_text) : filter_text(filter_text) {
+  FileList(PanelSharedState::P panel, std::string* filter_text, RedrawUI redraw_ui) : filter_text(filter_text), redraw_ui(redraw_ui) {
     this->dir    = panel->dir;
     this->filter = panel->filter;
     app          = std::move(panel);
+    _size.redraw = redraw_ui;
 
     app->get_focused_item = [this]() -> Filepath const* {
       this->Clamp();
@@ -71,23 +253,46 @@ class FileList : public ComponentBase {
 
   void OnAnimation(animation::Params& params) override { filter->OnAnimation(params); }
 
-  int64_t _itteration = 0;
+  int _find_start_index() {
+    int       items_placed = 0;
+    int       start_index  = dir->offset_vissible(selected, -_size.v.component_height / 2);
+    const int item_count   = dir->items.size();
+    for (int index = start_index; index < item_count && items_placed < _size.v.component_height; ++index) {
+      if (dir->items.at(index).visible()) { ++items_placed; }
+    }
+    while (start_index > 0 && items_placed < _size.v.component_height) {
+      // prepend items in amount equal to mising at the end
+      const int index_before = dir->prev_visible(start_index);
+      if (index_before >= start_index) break;
+      start_index = index_before;
+      items_placed++;
+    }
+    return start_index;
+  }
+
   Element Render() override {
-    _itteration++;
+    // elements.push_back(text("Render count == " + std::to_string(_itteration)));
+    app->render_count++;
     Clamp();
 
     Elements   elements;
     const bool is_menu_focused = Focused();
-    // elements.push_back(text("Render count == " + std::to_string(_itteration)));
     float      max_size        = dir->stats().largest_item_bytes;
 
+    int start_index = _find_start_index();
+
     const int item_count = dir->items.size();
-    for (int index = 0; index < item_count; ++index) {
+    _size.v.items_total  = item_count;
+    _size.start_index    = start_index;
+    int items_placed     = 0;
+    int rows_placed      = 0;
+    for (int index = start_index; index < item_count && items_placed < _size.v.component_height; ++index) {
       const DirItem& data = dir->items.at(index);
       if (false == data.visible()) {
         boxes_[index] = Box();
         continue;
       }
+      ++items_placed;
 
       const bool is_focused       = (selected == index) && is_menu_focused;
       const bool is_selected      = data.selected();
@@ -113,17 +318,26 @@ class FileList : public ComponentBase {
           wrap(data.get_time(), false)
         }) | focus_management | reflect(boxes_[index]);
       };
+      rows_placed++;
       if(data.symlink_ref() || data.warning_ref()) {
         Elements rows = {produce_row()};
-        if(data.symlink_ref()) rows.push_back(text(" -> " + data.symlink_ref()->native()) | theme().files_symlink);
-        if(data.warning_ref()) rows.push_back(text(*data.warning_ref()) | theme().files_warning);
+        if(data.symlink_ref()) {
+          rows.push_back(text(" -> " + data.symlink_ref()->native()) | theme().files_symlink);
+          rows_placed++;
+        }
+        if(data.warning_ref()) {
+          rows.push_back(text(*data.warning_ref()) | theme().files_warning);
+          rows_placed++;
+        }
         elements.push_back(vbox(std::move(rows)));
       } else {
         elements.push_back(produce_row());
       }
       // clang-format on
     }
-    return vbox(std::move(elements)) | yflex | reflect(box_);
+    _size.v.items_produced = items_placed;
+    _size.rows_produced    = rows_placed;
+    return vbox(std::move(elements)) | yframe | fl_reflect(&_size) | filelist_scroll_indicator(&_size);
   }
 
   std::string string_to_hex(const std::string& input) {
@@ -138,7 +352,6 @@ class FileList : public ComponentBase {
     return output;
   }
 
-  // NOLINTNEXTLINE(readability-function-cognitive-complexity)
   bool OnEvent(Event event) override {
     Clamp();
     if (!CaptureMouse(event)) { return false; }
@@ -148,7 +361,7 @@ class FileList : public ComponentBase {
     if (Focused()) {
       // Perun::l.d("OnEvent", "", {{"_", string_to_hex(event.input())}, {"dbg", event.DebugString()}, {";", "\n"}});
       const int old_selected = selected;
-      const int page_lines   = box_.y_max - box_.y_min;
+      const int page_lines   = _size.box.y_max - _size.box.y_min;
       if (event == Event::ArrowUp || event == Event::Character('k')) { selected = dir->prev_visible(selected); }
       if (event == Event::ArrowDown || event == Event::Character('j')) { selected = dir->next_visible(selected); }
       // if (event == Event::ArrowLeft || event == Event::Character('h')) { OnLeft(); }
@@ -278,7 +491,7 @@ class FileList : public ComponentBase {
   }
 
   bool OnMouseWheel(Event event) {
-    if (!box_.Contain(event.mouse().x, event.mouse().y)) { return false; }
+    if (!_size.box.Contain(event.mouse().x, event.mouse().y)) { return false; }
     const int old_selected = selected;
 
     if (event.mouse().button == Mouse::WheelUp) { selected = dir->prev_visible(selected); }
@@ -295,12 +508,12 @@ class FileList : public ComponentBase {
   bool Focusable() const final { return true; }
 
  protected:
+  SizeContext      _size;
   // Mouse click support:
   std::vector<Box> boxes_;
-  Box              box_;
 };
 
-Component ftxui::FileList(PanelSharedState::P panel, std::string* filter_text) { return std::make_shared<::FileList>(std::move(panel), filter_text); }
+Component ftxui::FileList(PanelSharedState::P panel, std::string* filter_text, RedrawUI redraw_ui) { return std::make_shared<::FileList>(std::move(panel), filter_text, redraw_ui); }
 
 class ColoredInt : public Node {
  public:
@@ -347,20 +560,6 @@ class ColoredInt : public Node {
 };
 
 Element ftxui::coloredInt(int64_t n) { return std::make_shared<ColoredInt>(n, theme().filesize_colors); }
-
-// Helper class.
-class NodeDecorator : public Node {
- public:
-  explicit NodeDecorator(Element child) : Node({std::move(child)}) {}
-  void ComputeRequirement() override {
-    Node::ComputeRequirement();
-    requirement_ = children_[0]->requirement();
-  }
-  void SetBox(Box box) override {
-    Node::SetBox(box);
-    children_[0]->SetBox(box);
-  }
-};
 
 class BgGaugeLeft : public NodeDecorator {
  public:

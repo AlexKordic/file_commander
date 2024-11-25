@@ -1,64 +1,62 @@
 
-#include <cstdint>
+#include "file_panel.hpp"
+
+#include <boost/filesystem.hpp>
+#include <boost/filesystem/operations.hpp>
+#include <ftxui/component/component.hpp>
+#include <ftxui/component/component_base.hpp>
+#include <ftxui/component/component_options.hpp>
+#include <ftxui/component/screen_interactive.hpp>
+#include <ftxui/dom/elements.hpp>
 #include <ftxui/dom/linear_gradient.hpp>
 #include <ftxui/screen/color.hpp>
 
-#include <boost/filesystem.hpp>
-// #include "boost/filesystem/directory.hpp"
-// #include "boost/filesystem/path.hpp"
-
-#include "boost/filesystem/operations.hpp"
-#include "ftxui/component/component.hpp"
-#include "ftxui/component/component_base.hpp"
-#include "ftxui/component/component_options.hpp"
-#include "ftxui/component/screen_interactive.hpp"
-#include "ftxui/dom/elements.hpp"
-
+#include <cstdint>
 #include <functional>
 #include <iostream>
 #include <string>
 #include <thread>
 #include <utility>
 
-namespace ftxui {
+// namespace ftxui {
 
-// Helper class.
-class NodeDecorator : public Node {
- public:
-  explicit NodeDecorator(Element child) : Node({std::move(child)}) {}
-  void ComputeRequirement() override {
-    Node::ComputeRequirement();
-    requirement_ = children_[0]->requirement();
-  }
-  void SetBox(Box box) override {
-    Node::SetBox(box);
-    children_[0]->SetBox(box);
-  }
-};
+// // Helper class.
+// class NodeDecorator : public Node {
+//  public:
+//   explicit NodeDecorator(Element child) : Node({std::move(child)}) {}
+//   void ComputeRequirement() override {
+//     Node::ComputeRequirement();
+//     requirement_ = children_[0]->requirement();
+//   }
+//   void SetBox(Box box) override {
+//     Node::SetBox(box);
+//     children_[0]->SetBox(box);
+//   }
+// };
 
-class ShowInputCursor : public NodeDecorator {
- public:
-  ShowInputCursor(Element child, Ref<int> cursor_position) : NodeDecorator(std::move(child)), _cursor_position(cursor_position) {}
+// class ShowInputCursor : public NodeDecorator {
+//  public:
+//   ShowInputCursor(Element child, Ref<int> cursor_position) : NodeDecorator(std::move(child)), _cursor_position(cursor_position) {}
 
-  void Render(Screen& screen) override {
-    const bool draw_cursor = true;
-    // TODO: animate blinking by toggling draw_cursor
-    if (draw_cursor) {
-      int x = std::max(box_.x_min, std::min(box_.x_max, box_.x_min + _cursor_position()));
-      for (int y = box_.y_min; y <= box_.y_max; ++y) { screen.PixelAt(x, y).inverted = !screen.PixelAt(x, y).inverted; }
-    }
-    NodeDecorator::Render(screen);
-  }
+//   void Render(Screen& screen) override {
+//     const bool draw_cursor = true;
+//     // TODO: animate blinking by toggling draw_cursor
+//     if (draw_cursor) {
+//       int x = std::max(box_.x_min, std::min(box_.x_max, box_.x_min + _cursor_position()));
+//       for (int y = box_.y_min; y <= box_.y_max; ++y) { screen.PixelAt(x, y).inverted = !screen.PixelAt(x, y).inverted; }
+//     }
+//     NodeDecorator::Render(screen);
+//   }
 
-  Ref<int> _cursor_position;
-};
+//   Ref<int> _cursor_position;
+// };
 
-Element   showInputCursor(Element child, Ref<int> cursor_position) { return std::make_shared<ShowInputCursor>(std::move(child), cursor_position); }
-Decorator showInputCursor(Ref<int> cursor_position) {
-  return [cursor_position](Element child) -> Element { return showInputCursor(std::move(child), cursor_position); };
-}
+// Element   showInputCursor(Element child, Ref<int> cursor_position) { return std::make_shared<ShowInputCursor>(std::move(child), cursor_position); }
+// Decorator showInputCursor(Ref<int> cursor_position) {
+//   return [cursor_position](Element child) -> Element { return showInputCursor(std::move(child), cursor_position); };
+// }
 
-}  // namespace ftxui
+// }  // namespace ftxui
 
 using namespace ftxui;
 
@@ -126,7 +124,7 @@ double now() {
   return now.time_since_epoch().count() / 1000000.0;
 }
 
-// 
+//
 // Calculate progress and throughput
 //
 struct ProgressTimer {
@@ -158,7 +156,7 @@ class SizeMonitor {
   SizeMonitor(int64_t source_size, boost::filesystem::path destination) {
     this->source_size = source_size;
     this->destination = destination;
-    thread = std::thread([this]() { this->run(); });
+    thread            = std::thread([this]() { this->run(); });
   }
   void stop() {
     running = false;
@@ -232,7 +230,116 @@ int main_filecopy_progress() {
   return 0;
 }
 
+int main_yflex() {
+  std::vector<std::string> lines = {
+    R"(#include ftxui/component/captured_mouse.hpp"  // for ftxui)", R"(#include ftxui/component/component.hpp"  // for Radiobox, Vertical, Checkbox, Horizontal, Renderer, ResizableSplitBottom, ResizableSplitRight)", R"(#include ftxui/component/component_base.hpp"      // for ComponentBase)", R"(#include ftxui/component/screen_interactive.hpp"  // for ScreenInteractive)", R"(#include ftxui/dom/elements.hpp"  // for text, window, operator|, vbox, hbox, Element, flexbox, bgcolor, filler, flex, size, border, hcenter, color, EQUAL, bold, dim, notflex, xflex_grow, yflex_grow, HEIGHT, WIDTH)", R"(#include ftxui/dom/flexbox_config.hpp"  // for FlexboxConfig, FlexboxConfig::AlignContent, FlexboxConfig::JustifyContent, FlexboxConfig::AlignContent::Center, FlexboxConfig::AlignItems, FlexboxConfig::Direction, FlexboxConfig::JustifyContent::Center, FlexboxConfig::Wrap)", R"(#include ftxui/screen/color.hpp"        // for Color, Color::Black)",
+  };
+  // clang-format on
+  int        selected = 0;
+  MenuOption option;
+  auto       menu     = Menu(lines, &selected, option);
+  auto       renderer = Renderer(menu, [&] {
+    return vbox({
+             menu->Render() | yflex | border,
+           })
+      | border;
+  });
+  auto       screen   = ScreenInteractive::Fullscreen();
+  screen.Loop(renderer);
+  return 0;
+}
+
+#include "commander.hpp"
+#include "file_panel.hpp"
+#include "theme.hpp"
+
+int main_file_list() {
+  auto        screen            = ScreenInteractive::Fullscreen();
+  auto        redraw_ui         = [&screen]() { screen.PostEvent(Event::Custom); };
+  int         filter_cursor_pos = 0;
+  std::string filter_txt;
+  Dir         dir;
+  dir.move_to(Filepath("/Users/alexkordic/Downloads"));
+  // dir.move_to(Filepath("/tmp/alex"));
+  PanelSharedState::P app = std::make_shared<PanelSharedState>(&dir);
+
+  InputOption input_opt = InputOption::Default();
+  input_opt.multiline   = false;
+  input_opt.transform   = [](InputState state) {
+    if (state.is_placeholder) {
+      return state.element | theme().files_path;
+    } else {
+      return state.element | theme().files_filter_search;
+    }
+  };
+  input_opt.cursor_position = &filter_cursor_pos;
+  ButtonOption ascii_button;
+  ascii_button.transform = [](const EntryState& s) {
+    const std::string t = s.focused ? "[" + s.label + "]" : " " + s.label + " ";
+    if (s.focused) return text(t) | theme().sort_button_active;
+    return text(t) | theme().sort_button;
+  };
+
+  app->filter         = Input(&filter_txt, &(app->dir->path_txt), input_opt) | showInputCursor(&filter_cursor_pos);
+  Component files     = FileList(app, &filter_txt, redraw_ui);
+  Component sort_name = Button("Name", [dir = app->dir] { dir->sort_toggle_name_direction(); }, ascii_button);
+  Component sort_size = Button("Size", [dir = app->dir] { dir->sort_toggle_size_direction(); }, ascii_button);
+  Component sort_time = Button("Date", [dir = app->dir] { dir->sort_toggle_time_direction(); }, ascii_button);
+
+  auto render_selection = [state = app, sort_name = sort_name, sort_size = sort_size, sort_time = sort_time]() -> Element {
+    std::string prefixes[3] = {"  ", "  ", "  "};
+    switch (state->dir->order_by) {
+    case Orderby::NAME_ASC: prefixes[0] = "↑↑"; break;
+    case Orderby::NAME_DESC: prefixes[0] = "↓↓"; break;
+    case Orderby::SIZE_ASC: prefixes[1] = "↑↑"; break;
+    case Orderby::SIZE_DESC: prefixes[1] = "↓↓"; break;
+    case Orderby::TIME_ASC: prefixes[2] = "↑↑"; break;
+    case Orderby::TIME_DESC: prefixes[2] = "↓↓"; break;
+    }
+    auto     s        = state->dir->stats();
+    Elements children = Elements({
+      text(" Sel " + std::to_string(s.items_selected) + "/" + std::to_string(s.items_total)),
+      text(" bytes "),
+      coloredInt(s.bytes_selected),
+      text("/"),
+      coloredInt(s.bytes_total),
+      text(" | "),
+      text(prefixes[0]),
+      sort_name->Render(),
+      text(prefixes[1]),
+      sort_size->Render(),
+      text(prefixes[2]),
+      sort_time->Render(),
+    });
+    return hbox(std::move(children));
+  };
+
+  Component navigation = Container::Vertical({Container::Horizontal({sort_name, sort_size, sort_time}), files});
+  Component renderer   = Renderer(navigation, [app = app, render_selection = render_selection, files = files]() -> Element {
+    return vbox({
+      text("1"),
+      text("2"),
+      hbox({text(" "), app->filter->Render() | ftxui::focus | ftxui::select, text(" | " + std::to_string(app->render_count) + " ")}),
+      render_selection(),
+      // files->Render() | vscroll_indicator | yframe | theme().files_border,
+      files->Render() | theme().files_border,
+      text("3"),
+      text("4"),
+      text("5"),
+      text("6"),
+    });
+  });
+  files->TakeFocus();
+
+  std::cout << "\e[8;" << 60 << ";" << 140 << "t";
+
+  screen.Loop(renderer);
+  return 0;
+}
+
 int main() {
   // return main_multicursor();
-  return main_filecopy_progress();
+  // return main_filecopy_progress();
+  // return main_yflex();
+  return main_file_list();
 }

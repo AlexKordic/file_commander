@@ -22,12 +22,14 @@ struct PanelSharedState {
     std::function<void()>        show_dialog;
     std::function<void()>        close_dialog;
   } action;
-  bool commands_enabled = true;
+  bool    commands_enabled = true;
+  int64_t render_count     = 0;
 
   std::function<void(Filepath)>    move_to;
   std::function<Filepath const*()> get_focused_item;
 
   explicit PanelSharedState(Dir* d);
+  PanelSharedState() = delete;
 };
 
 #endif  // _PERUN_FC_SHARED_STATE_

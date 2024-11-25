@@ -7,7 +7,7 @@
 #include "log.hpp"
 #include "theme.hpp"
 
-#include <ftxui-grid-container/grid-container.hpp>
+// #include <ftxui-grid-container/grid-container.hpp>
 #include <ftxui/component/component.hpp>
 #include <ftxui/component/component_base.hpp>
 #include <ftxui/component/component_options.hpp>
@@ -89,7 +89,7 @@ class Panel : public DialogOverlay {
       _state->action.arguments->target = this->get_target(this);
       show_dialog(_state->action.dialog);
     };
-    _files         = std::make_shared<ftxui::Files>(_state);
+    _files         = std::make_shared<ftxui::Files>(_state, redraw_ui);
     _main_document = std::dynamic_pointer_cast<ftxui::Dialog>(_files);
     navigation->Add(_main_document->navigation);
     // register dialogs
@@ -200,14 +200,19 @@ class FileCommander {
         }
         return true;
       }
-      // Move target to selected dir
+      // Move target to selected dir.
+      // Do not apply if dialog is active on the source panel. When rename is open we want ctrl+right/left to move cursor by entire word.
       const bool change_right = event == theme().key_target_dir_to_focused_item_right && left.navigation->Focused();
       const bool change_left  = event == theme().key_target_dir_to_focused_item_left && right.navigation->Focused();
       if (change_right) {
+        const bool dialog_active = left._active_dialog > 0;
+        if (dialog_active) return false;
         Filepath where = left.focused_dir();
         right.move_to(where);
         return true;
       } else if (change_left) {
+        const bool dialog_active = right._active_dialog > 0;
+        if (dialog_active) return false;
         Filepath where = right.focused_dir();
         left.move_to(where);
         return true;
@@ -219,10 +224,8 @@ class FileCommander {
       // Two panels side by side
       Elements el;
       auto     jobinfo = file_operations().get_running_job();
-      if (jobinfo.job) { el.push_back(progress_bar.render()); }
-      el.push_back(hbox({left.render() | xflex_grow, right.render() | xflex_grow}) | bgcolor(theme().default_bg) | color(theme().default_fg));
-      // TODO: why is this separator required for progress bar to be rendered?
-      el.push_back(separatorLight());
+      el.push_back(hbox({left.render() | xflex_grow, right.render() | xflex_grow}) | yflex | bgcolor(theme().default_bg) | color(theme().default_fg));
+      if (jobinfo.job && false == jobinfo.job->is_stopped()) { el.push_back(progress_bar.render()); }
       return vbox(std::move(el));
     });
   }
