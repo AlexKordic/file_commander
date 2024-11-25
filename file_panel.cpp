@@ -387,11 +387,8 @@ class FileList : public ComponentBase {
         }
         if (event == theme().key_leave_dir) {
           const Filepath old_path = dir->path;
-          Err            e        = dir->leave_dir();
-          if (!e.ok()) {
-            Perun::l.e("dir->leave_dir()", e.steps.front());
-            return false;
-          }
+          const Filepath parent_dir = dir->path.parent_path();
+          app->move_to(parent_dir);
           selected = 0;
           filter_text->clear();
           // find our old_path and set it as focused
