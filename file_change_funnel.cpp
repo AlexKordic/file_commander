@@ -22,8 +22,13 @@ static CFArrayRef getArrayRef(const std::vector<std::string>& strings) {
     CFStringRef cfStr = CFStringCreateWithCString(kCFAllocatorDefault, string.c_str(), kCFStringEncodingUTF8);
     string_refs.push_back(cfStr);
   }
-  // TODO: IS release required for each element in string_refs here?
-  return CFArrayCreate(kCFAllocatorDefault, reinterpret_cast<const void**>(string_refs.data()), string_refs.size(), nullptr);
+  // Use kCFTypeArrayCallBacks to ensure the array retains/releases its elements
+  CFArrayRef array = CFArrayCreate(kCFAllocatorDefault, reinterpret_cast<const void**>(string_refs.data()), string_refs.size(), &kCFTypeArrayCallBacks);
+  // Release our ownership of the CFStringRefs
+  for (CFStringRef cfStr : string_refs) {
+    CFRelease(cfStr);
+  }
+  return array;
 }
 
 DirItemUpdated::Event What(FSEventStreamEventFlags f) {
@@ -64,7 +69,9 @@ class DirEvents : public FileChangeFunnel {
     }
     _paths_to_watch.push_back(_root.native());
     _context.reset(new FSEventStreamContext{0, this, nullptr, nullptr, nullptr});
-    _stream = FSEventStreamCreate(kCFAllocatorDefault, DirEvents_callback, _context.get(), getArrayRef(_paths_to_watch), kFSEventStreamEventIdSinceNow, 0.2, flags);
+    CFArrayRef pathsArray = getArrayRef(_paths_to_watch);
+    _stream = FSEventStreamCreate(kCFAllocatorDefault, DirEvents_callback, _context.get(), pathsArray, kFSEventStreamEventIdSinceNow, 0.2, flags);
+    CFRelease(pathsArray);
     if (!_stream) throw std::runtime_error("FSEventStreamCreate failed");
     _runloop_thread = std::thread([this]() {
       // TODO: https://lore.kernel.org/git/de558eb7-8931-a5b5-d711-459ae3f52216@jeffhostetler.com/T/
