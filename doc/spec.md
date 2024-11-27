@@ -28,12 +28,15 @@ Initial Features:
 + All commands happen in separate thread, like TC copy in background.
 + Command progress panel TBD
 + FileList implement vscroll_indicator & yframe and create Element's for only visible items.
+- Bookmarks
+- Keep state across runs
+- mouse/trackpad only usage
 
 Initial commands:
 + mkdir
 + copy & confirm popup
 - move & confirm popup
-- delete & confirm popup
++ delete & confirm popup
 + rename
 + multi-rename
 + names to clipboard
