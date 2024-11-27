@@ -82,6 +82,8 @@ struct SizeContext {
   int             rows_produced = 0;
   int             start_index   = 0;
 
+  int _min_y = 1;
+
   SizeContext() {
     last_v.component_height = -1;
     last_v.screen_height    = -1;
@@ -183,9 +185,9 @@ class FileListReflect : public Node {
 
     requirement_.flex_grow_y   = 1;  // _context->v.screen_height;
     requirement_.flex_shrink_y = 1;  // _context->v.component_height;
-    // DONE: experiment with 1
     // DONE: inspect what pannel do here !
-    requirement_.min_y         = 1;
+    // DONE: experiment with 1.
+    requirement_.min_y         = _context->_min_y;
   }
 
   void SetBox(Box box) final {
@@ -243,6 +245,7 @@ class FileList : public ComponentBase {
       auto& focused = dir->items.at(focused_index);
       return &focused.path_ref();
     };
+    app->set_min_y = [this](int y) { _size._min_y = y; };
   }
 
   void Clamp() {

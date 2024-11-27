@@ -213,7 +213,7 @@ public:
   [[nodiscard]] FifoError try_pop(T& value) {
     {
       std::lock_guard guard(_lock);
-      if(!_is_valid) return FifoError::Destroyed;
+      if(!_is_valid && _storage.empty()) return FifoError::Destroyed;
       if(_storage.empty()) return FifoError::Empty;
       value = std::move(_storage.front());
       _storage.pop_front();
@@ -230,7 +230,7 @@ public:
         // will release lock in process of waiting and acquire again before return:
         _c_pop_blocking_on.wait(guard);
       }
-      if(!_is_valid) return FifoError::Destroyed;
+      if(!_is_valid && _storage.empty()) return FifoError::Destroyed;
       value = std::move(_storage.front());
       _storage.pop_front();
     }
@@ -250,7 +250,7 @@ public:
           return FifoError::Timeouted;
         }
       }
-      if(!_is_valid) return FifoError::Destroyed;
+      if(!_is_valid && _storage.empty()) return FifoError::Destroyed;
       value = std::move(_storage.front());
       _storage.pop_front();
     }
@@ -285,7 +285,7 @@ public:
 
   [[nodiscard]] FifoError get(T& value, std::function<bool(const T&)> f) {
     std::lock_guard guard(_lock);
-    if(!_is_valid) return FifoError::Destroyed;
+    if(!_is_valid && _storage.empty()) return FifoError::Destroyed;
     // for (const T& el : _storage) {
     for (auto it = _storage.begin(); it != _storage.end(); ++it) {
       if(f(*it)) {

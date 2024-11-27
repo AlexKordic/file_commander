@@ -107,7 +107,8 @@ struct CopyDialog : Dialog {
   Component op_preserve_relative_links;
   Component input_destination_path;
 
-  Component files;
+  Component _files;
+  int64_t   _bytes_total = 0;
 
   bool b_follow_links            = false;
   // bool b_preserve_timestamps     = true;
@@ -130,6 +131,21 @@ struct CopyDialog : Dialog {
   std::vector<Visited> _visited_dirs;
 
   void _queue_files(const std::vector<DirItem>& files, Filepath destination);
+};
+
+struct DeleteDialog : Dialog {
+  DeleteDialog(PanelSharedState::P s, RedrawUI r);
+  void OnShow() override;
+
+  int       selected = 0;
+  Component menu;
+  Component button_ok;
+  Component button_close;
+
+  void ok();
+  void cancel();
+  PanelSharedState::P  _operation_state;
+  RedrawUI redraw_ui;
 };
 
 struct Nyi : Dialog {

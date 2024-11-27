@@ -4,6 +4,7 @@
 #include "commander.hpp"
 #include "fifo_queue.hpp"
 
+#include <cstdint>
 #include <memory>
 #include <mutex>
 #include <vector>
@@ -37,6 +38,7 @@ struct JobStats {
   int          _current_item_index = 0;
   ProgressInfo _current_item;
   ProgressInfo _total;
+  int64_t      _items_pending = -1;
 
   // Reducing update frequency logic:
   double       _last_progress_update_time = 0;
@@ -46,7 +48,7 @@ struct JobStats {
   double _started_time    = -1;
   double _finished_time   = -1;
   double _bytes_processed = 0;
-  double _bytes_total     = 0;  // updated by CopyDialog
+  double _bytes_total     = 0;
 };
 struct JobInterface {
   std::mutex            _m;
@@ -59,6 +61,7 @@ struct JobInterface {
 struct JobSpec : JobInstructions, JobStats, JobInterface {
   JobSpec(Type t, std::vector<DirItem> items);
 
+  int64_t item_count() const { return _items_pending > 0 ? _items_pending : _items.size(); }
   // Not in FileJobs books
   bool is_stopped() const { return _started_time > 0 && _finished_time > 0; };
 

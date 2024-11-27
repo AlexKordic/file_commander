@@ -15,6 +15,8 @@
 struct Theme {
   Theme();
 
+  size_t copy_files_min_y = 50;
+
   ftxui::Event 
     key_switch_focused_panel,
     key_files_select,

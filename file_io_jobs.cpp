@@ -1,6 +1,7 @@
 
 #include "file_io_jobs.hpp"
 #include <condition_variable>
+#include <cstdint>
 #include <mutex>
 #include <thread>
 #include "fifo_queue.hpp"
@@ -135,12 +136,69 @@ class ProgressMonitor {
 JobSpec::JobSpec(Type t, std::vector<DirItem> items) {
   _type  = t;
   _items = std::move(items);
+  for (DirItem const& item : _items) {
+    if (item.type() == boost::filesystem::regular_file) { _bytes_total += item.size(); }
+  }
 }
 
 void JobInstructions::report_error(DirItem item, std::string message) {
   auto& inserted = _errors.emplace_back(item);
   inserted._set_warning(std::move(message));
 }
+
+struct DelayedUpdateDiscovery {
+  double  interval     = 0.2;
+  double  last_ts      = now();
+  int64_t bytes_queued = 0;
+  int64_t items_queued = 0;
+
+  bool file_found(int64_t file_size, JobSpec* job) {
+    double ts = now();
+    bytes_queued += file_size;
+    items_queued++;
+    if (ts < last_ts + interval) return false;
+    last_ts = ts;
+    flush(job);
+    return true;
+  }
+  void flush(JobSpec* job) {
+    {
+      std::lock_guard lock(job->_m);
+      job->_bytes_total += bytes_queued;
+      job->_items_pending += items_queued;
+      bytes_queued = 0;
+      items_queued = 0;
+    }
+    job->updated();
+  }
+};
+
+struct DelayedUpdateDelete {
+  double               interval = 0.1;
+  double               last_ts  = now();
+  std::vector<DirItem> items_deleted;
+
+  void file_deleted(DirItem file, JobSpec* job) {
+    double ts = now();
+    // bytes_queued += std::max(0ll, file.size());
+    items_deleted.push_back(std::move(file));
+    if (ts < last_ts + interval) return;
+    last_ts = ts;
+    flush(job);
+  }
+  void flush(JobSpec* job) {
+    {
+      std::lock_guard lock(job->_m);
+      for (auto& item : items_deleted) {
+        job->_bytes_processed += std::max(0ll, item.size());
+        job->_items.emplace_back(std::move(item));
+      }
+      job->_current_item_index = job->_items.size() -1;
+    }
+    items_deleted.clear();
+    job->updated();
+  }
+};
 
 class ThreadedFileJobs : public FileJobs {
  public:
@@ -184,11 +242,60 @@ class ThreadedFileJobs : public FileJobs {
       switch (_job->_type) {
       case JobSpec::Type::COPY: run_copy(_job.get()); break;
       case JobSpec::Type::MOVE: break;
-      case JobSpec::Type::DELETE: break;
+      case JobSpec::Type::DELETE: run_delete(_job.get()); break;
       }
       _job->_finished_time = now();  // why not within job->_m mutex ??
       _job->updated();
     }
+  }
+
+  void _discover_files(JobSpec* job, std::vector<DirItem>& items, FifoQueue<DirItem>& files, DelayedUpdateDiscovery& update) {
+    error_code ec;
+    for (DirItem const& item : items) {
+      if (item.type() == boost::filesystem::file_type::directory_file) {
+        std::vector<DirItem> subdir_items;
+        for (boost::filesystem::directory_entry& subdir_item : boost::filesystem::directory_iterator(item.path_ref(), ec)) { subdir_items.emplace_back(DirItem(subdir_item.path())); }
+        _discover_files(job, subdir_items, files, update);
+        // push parent dir item last
+      }
+      update.file_found(std::max(0ll, item.size()), job);
+      files.push(item);
+    }
+  }
+
+  void run_delete(JobSpec* job) {
+    FifoQueue<DirItem>   files;
+    std::vector<DirItem> initial_items;
+    {
+      std::lock_guard lock(job->_m);
+      initial_items = std::move(job->_items);
+      job->_items.clear();
+    }
+    // discovery thread.
+    std::thread discovery_thread([job, &initial_items, &files, this]() {
+      DelayedUpdateDiscovery update;
+      job->_items_pending = 0;
+      _discover_files(job, initial_items, files, update);
+      update.flush(job);
+      files.close();
+    });
+    // delete thread.
+    DelayedUpdateDelete update;
+    error_code          ec;
+    while (true) {
+      DirItem   item("", boost::filesystem::file_type::status_error, boost::filesystem::perms::no_perms);
+      FifoError err = files.pop(item);
+      if (err == FifoError::Destroyed) {
+        break;
+      }
+      boost::filesystem::remove(item.path_ref(), ec);
+      if (ec.failed()) { 
+        job->report_error(item, "Failed to delete file: " + ec.message()); 
+      }
+      update.file_deleted(item, job);
+    }
+    update.flush(job);
+    if (discovery_thread.joinable()) discovery_thread.join();
   }
 
   void run_copy(JobSpec* job) {

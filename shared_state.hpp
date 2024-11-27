@@ -27,6 +27,7 @@ struct PanelSharedState {
 
   std::function<void(Filepath)>    move_to;
   std::function<Filepath const*()> get_focused_item;
+  std::function<void(int)>         set_min_y;
 
   explicit PanelSharedState(Dir* d);
   PanelSharedState() = delete;

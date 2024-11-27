@@ -3,8 +3,8 @@
 #include "bfs.hpp"
 
 #include "commander.hpp"
-#include "file_panel.hpp"
 #include "file_io_jobs.hpp"
+#include "file_panel.hpp"
 #include "log.hpp"
 #include "shared_state.hpp"
 #include "theme.hpp"
@@ -24,8 +24,8 @@ using boost::filesystem::directory_iterator;
 using boost::filesystem::file_status;
 using boost::system::error_code;
 
-using Perun::JobSpec;
 using Perun::file_operations;
+using Perun::JobSpec;
 
 namespace ftxui {
 
@@ -345,14 +345,14 @@ CopyDialog::CopyDialog(PanelSharedState::P d, RedrawUI r) : Dialog(std::move(d))
   _operation_state->move_to          = [](Filepath) {};
   _operation_state->get_focused_item = []() -> Filepath const* { return nullptr; };
   _operation_state->filter           = Input(&_filter_text, &(_virtual_dir->path_txt), input_opt);
-  files                              = FileList(_operation_state, &_filter_text, redraw_ui);
+  _files                             = FileList(_operation_state, &_filter_text, redraw_ui);
 
   navigation = CatchEvent(Container::Vertical({
                             input_destination_path,
                             Container::Horizontal({button_ok, button_cancel}),
                             op_follow_links,
                             op_preserve_relative_links,
-                            files,
+                            _files,
                           }),
                           close_on_esc);
   renderer   = Renderer(navigation, [this]() -> Element { return this->render(); });
@@ -366,10 +366,6 @@ void CopyDialog::cancel_copy() {
 void CopyDialog::run_copy() {
   auto job = std::make_shared<JobSpec>(JobSpec::Type::COPY, std::move(_virtual_dir->items));
   _clear_operation_state();
-  job->_bytes_total = 0;
-  for (DirItem const& item : job->_items) {
-    if (item.type() == boost::filesystem::regular_file) { job->_bytes_total += item.size(); }
-  }
   // whenever job updates, redraw UI
   job->updated = this->redraw_ui;
   file_operations().add_job(job);
@@ -379,11 +375,8 @@ void CopyDialog::run_copy() {
 
 Element CopyDialog::render() {
   int file_count  = app->action.arguments->selected.size();
-  int bytes_total = 0;
-  for (DirItem const& item : _virtual_dir->items) {
-    if (item.type() == boost::filesystem::regular_file) { bytes_total += item.size(); }
-  }
   // clang-format off
+  auto virtual_files = _files->Render();
   return window(
     text(" Copy " + std::to_string(file_count) + " selected items ") | bold | hcenter,
   vbox({
@@ -394,9 +387,9 @@ Element CopyDialog::render() {
             separatorHeavy(),
             op_follow_links->Render() | hcenter,
             op_preserve_relative_links->Render() | hcenter,
-            hbox({text("Bytes: "), coloredInt(bytes_total), text(" | Filter: "), _operation_state->filter->Render()}) | hcenter,
+            hbox({text("Bytes: "), coloredInt(_bytes_total), text(" | Filter: "), _operation_state->filter->Render()}) | hcenter,
             separatorHeavy(),
-            files->Render() | theme().files_border,
+            std::move(virtual_files) | theme().files_border,
           }),
           BorderStyle::DOUBLE
         );
@@ -413,12 +406,18 @@ void CopyDialog::OnShow() {
   button_ok->TakeFocus();
   app->action.arguments->use_focused_as_alternative();
   destination_path       = app->action.arguments->target.native();
+  // To display target path in filter box:
   _virtual_dir->path     = app->action.arguments->target;
   _virtual_dir->path_txt = app->action.arguments->target.native();
   std::vector<DirItem> selected;
   selected.reserve(app->action.arguments->selected.size());
   for (auto& p : app->action.arguments->selected) { selected.emplace_back(p); }
   _queue_files(selected, app->action.arguments->target);
+  _bytes_total = 0;
+  for (DirItem const& item : _virtual_dir->items) {
+    if (item.type() == boost::filesystem::regular_file) { _bytes_total += item.size(); }
+  }
+  _operation_state->set_min_y(std::min(theme().copy_files_min_y, _virtual_dir->items.size()));
 }
 
 Filepath resolve_symlink(Filepath path) {
@@ -522,6 +521,85 @@ void CopyDialog::_queue_files(const std::vector<DirItem>& files, Filepath destin
     place_on_queue(item);
   }
 };
+
+//
+// DeleteDialog
+//
+
+DeleteDialog::DeleteDialog(PanelSharedState::P s, RedrawUI r) : Dialog(std::move(s)), redraw_ui(r) {
+  ButtonOption ascii_button;
+  ascii_button.transform = [](const EntryState& s) {
+    const std::string t = s.focused ? "[" + s.label + "]" : " " + s.label + " ";
+    if (s.focused) return text(t) | theme().sort_button_active;
+    return text(t) | theme().sort_button;
+  };
+  button_ok    = Button("DELETE", [this] { this->ok(); }, ascii_button);
+  button_close = Button("Cancel", [this] { this->cancel(); }, ascii_button);
+  auto close_on_esc = [this](Event event) -> bool {
+    if (event == Event::Escape) {
+      this->cancel();
+      return true;
+    }
+    return false;
+  };
+  menu         = Container::Vertical({}, &selected);
+  navigation   = CatchEvent(Container::Vertical({
+    Container::Horizontal({button_ok, button_close}),
+    // Following are path items to delete
+    menu,
+  }), close_on_esc);
+  renderer     = Renderer(navigation, [&] {
+    // simple
+    return window(text(" Delete ") | bold | hcenter,
+                      vbox({
+                    hbox({
+                      button_ok->Render() | hcenter | xflex_grow,
+                      separator(),
+                      button_close->Render() | hcenter | xflex_grow,
+                    }),
+                    separator(),
+                    menu->Render() | vscroll_indicator | yframe,
+                  }),
+                      BorderStyle::DOUBLE);
+  });
+}
+
+void DeleteDialog::OnShow() {
+  // remove old data
+  menu->DetachAllChildren();
+  selected = 0;
+  app->action.arguments->use_focused_as_alternative();
+  // create items
+  int selected_count = app->action.arguments->selected.size();
+  if (selected_count == 0) {
+    cancel();
+    return;
+  }
+  const bool same_dir = app->action.arguments->selected_share_same_dir();
+  menu->DetachAllChildren();
+  if (same_dir)
+    for (int i = 0; i < selected_count; i++) menu->Add(MenuEntry(app->action.arguments->selected.at(i).native()));
+  else
+    for (int i = 0; i < selected_count; i++) menu->Add(MenuEntry(app->action.arguments->selected.at(i).filename().native()));
+
+  button_close->TakeFocus();
+}
+
+void DeleteDialog::ok() {
+  // Delete doesn't have modes of operation like Copy. Queue all selected items, ThreadedFileJobs will handle recursion.
+  std::vector<DirItem> items;
+  for(auto& p : app->action.arguments->selected) {
+    items.emplace_back(p);
+  }
+  auto job = std::make_shared<JobSpec>(JobSpec::Type::DELETE, std::move(items));
+  // whenever job updates, redraw UI
+  job->updated = this->redraw_ui;
+  file_operations().add_job(job);
+  app->dir->clear_selection();
+  app->action.close_dialog();
+}
+
+void DeleteDialog::cancel() { app->action.close_dialog(); }
 
 //
 // ToClipboardDialog

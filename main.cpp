@@ -97,7 +97,7 @@ class Panel : public DialogOverlay {
     _overlay_dialogs["Rename"]          = std::make_shared<RenameDialog>(_state);
     _overlay_dialogs["Copy"]            = std::make_shared<CopyDialog>(_state, redraw_ui);
     _overlay_dialogs["Move"]            = std::make_shared<Nyi>(_state);
-    _overlay_dialogs["Delete"]          = std::make_shared<Nyi>(_state);
+    _overlay_dialogs["Delete"]          = std::make_shared<DeleteDialog>(_state, redraw_ui);
     _overlay_dialogs["Find"]            = std::make_shared<Nyi>(_state);
     _overlay_dialogs["NameToClipboard"] = std::make_shared<ToClipboardDialog>(_state);
     _overlay_dialogs["PathToClipboard"] = std::make_shared<ToClipboardDialog>(_state);
@@ -127,7 +127,7 @@ class Panel : public DialogOverlay {
     if (!_overlay_renderer) return document;
     return dbox({
       document,
-      _overlay_renderer->Render() | clear_under_colors | center,
+      _overlay_renderer->Render() | yflex | clear_under_colors | center,
     });
   }
   Filepath focused_dir() {
@@ -158,25 +158,48 @@ struct JobProgressBar {
   Element render() {
     auto  jobinfo = file_operations().get_running_job();
     auto& job     = jobinfo.job;
-    if (!job) return text("empty");
-    if (job->is_stopped()) return text("stopped");
+    if (!job) return text("[Empty]") | theme().progress_operation;
+    std::string task_info = std::format(" [{}] [{}] ", jobinfo.queued_jobs, job_type_to_string(job->_type));
+    if (job->is_stopped()) return text(task_info + " [Stopped]") | theme().progress_operation;
     std::lock_guard lock(job->_m);
     const bool      current_index_valid = job->_current_item_index >= 0 && job->_current_item_index < job->_items.size();
-    if (!current_index_valid) return text("invalid data");
+    if (!current_index_valid) return text(task_info + " [task index invalid]") | theme().progress_operation;
     const DirItem& item = job->_items.at(job->_current_item_index);
-    if (!item.symlink_ref()) return text("malformed current item");
-    std::string total_info = std::format(" [{:3}] {:5}[{:5}] Mbps {}/{} items ", std::lround(job->_total.percentage), std::lround(job->_total.Mbps), std::lround(job->_total.average_Mbps), job->_current_item_index + 1, job->_items.size());
-    std::string curr_info  = std::format(" [{:3}] {:5}Mbps {} ", std::lround(job->_current_item.percentage), std::lround(job->_current_item.Mbps), item.path_ref().native());
-    std::string task_info  = std::format(" [{}] [{}] ", jobinfo.queued_jobs, job_type_to_string(job->_type));
-    return hbox({
-      // TODO: implement DELETE, MOVE
-      text(task_info) | theme().progress_operation,
-      text("|"),
-      bgGaugeLeft(job->_total.percentage / 100, theme().size_gauge_full, theme().size_gauge_empty, text(total_info)) | theme().progress_total,
-      text("|"),
-      bgGaugeLeft(job->_current_item.percentage / 100, theme().size_gauge_full, theme().size_gauge_empty, text(curr_info)) | xflex_grow | theme().progress_current,
-      text("|"),
-    });
+    const int64_t items_total = job->item_count();
+
+    switch (job->_type) {
+    case JobInstructions::Type::COPY: {
+      if (!item.symlink_ref()) return text(task_info + " [item target missing]") | theme().progress_operation;
+      std::string   total_info  = std::format(" [{:3}] {:5}[{:5}] Mbps {}/{} items ", std::lround(job->_total.percentage), std::lround(job->_total.Mbps), std::lround(job->_total.average_Mbps), job->_current_item_index + 1, items_total);
+      std::string   curr_info   = std::format(" [{:3}] {:5}Mbps {} ", std::lround(job->_current_item.percentage), std::lround(job->_current_item.Mbps), item.path_ref().native());
+      return hbox({
+        // TODO: implement DELETE, MOVE
+        text(task_info) | theme().progress_operation,
+        text("|"),
+        bgGaugeLeft(job->_total.percentage / 100, theme().size_gauge_full, theme().size_gauge_empty, text(total_info)) | theme().progress_total,
+        text("|"),
+        bgGaugeLeft(job->_current_item.percentage / 100, theme().size_gauge_full, theme().size_gauge_empty, text(curr_info)) | xflex_grow | theme().progress_current,
+        text("|"),
+      });
+    } break;
+    case JobInstructions::Type::MOVE:
+      return text(task_info + " [not yet implemented]") | theme().progress_operation;
+    case JobInstructions::Type::DELETE: {
+      float byte_percentage = std::max(0.0, std::min(100.0, 100.0 * job->_bytes_processed / job->_bytes_total));
+      float item_percentage = std::max(0.0, std::min(100.0, job->_current_item_index * 100.0 / items_total));
+      std::string   byte_info  = std::format(" [{:3}] {}/{} bytes ", std::lround(byte_percentage), std::lround(job->_bytes_processed), std::lround(job->_bytes_total));
+      std::string   count_info   = std::format(" [{:3}] {}/{} items ", std::lround(item_percentage), std::lround(job->_current_item_index), items_total);
+      return hbox({
+        // TODO: implement DELETE, MOVE
+        text(task_info) | theme().progress_operation,
+        text("|"),
+        bgGaugeLeft(item_percentage / 100, theme().size_gauge_full, theme().size_gauge_empty, text(byte_info)) | theme().progress_total,
+        text("|"),
+        bgGaugeLeft(byte_percentage / 100, theme().size_gauge_full, theme().size_gauge_empty, text(count_info)) | xflex_grow | theme().progress_current,
+        text("|"),
+      });
+    }
+    }
   }
 };
 
