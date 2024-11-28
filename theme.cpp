@@ -10,11 +10,14 @@ Theme::Theme() {
   key_target_dir_to_focused_item_right = Event::ArrowRightCtrl;
   key_target_dir_to_focused_item_left  = Event::ArrowLeftCtrl;
 
-  key_files_select    = Event::Character(' ');
-  key_clear_selection = Event::Escape;
-  key_enter_dir       = Event::Return;
-  key_leave_dir       = Event::Character("?");
-  key_select_all      = Event::CtrlA;
+  key_files_select         = Event::Character(' ');
+  key_cancel_dialog        = Event::Escape;
+  key_clear_selection      = Event::Escape;
+  key_enter_dir            = Event::Return;
+  key_leave_dir            = Event::Character("?");
+  key_select_all           = Event::CtrlA;
+  key_clear_errors         = Event::Escape;
+  key_toggle_error_details = Event::CtrlE;
 
   filesize_colors  = {Color::White, Color::White, Color::Yellow, Color::IndianRed1, Color::Plum3};
   size_gauge_full  = Color::MediumPurple4;
@@ -55,6 +58,8 @@ Theme::Theme() {
   mkdir_errortxt   = color(Color::LightPink3);
   clipboard_msg    = color(Color::LightPink3);
   copy_destination = color(Color::LightPink3);
+
+  recent_error = color(Color::LightPink3) | bold;
 
   key_copy               = Event::F5;
   key_move               = Event::F6;

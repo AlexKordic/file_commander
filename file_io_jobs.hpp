@@ -5,6 +5,7 @@
 #include "fifo_queue.hpp"
 
 #include <cstdint>
+#include <deque>
 #include <memory>
 #include <mutex>
 #include <vector>
@@ -63,7 +64,7 @@ struct JobSpec : JobInstructions, JobStats, JobInterface {
 
   int64_t item_count() const { return _items_pending > 0 ? _items_pending : _items.size(); }
   // Not in FileJobs books
-  bool is_stopped() const { return _started_time > 0 && _finished_time > 0; };
+  bool    is_stopped() const { return _started_time > 0 && _finished_time > 0; };
 
   void _calculate_transfer_stats();
 };
@@ -84,6 +85,11 @@ struct RunningJobsInfo {
   int64_t                  queued_jobs = 0;
 };
 
+struct JobErrorInfo {
+  std::string message;
+  double      time;
+};
+
 // Manages a queue of file operation jobs to be performed in separate thread.
 // Jobs are executed in order and can be cancelled.
 // When a job is cancelled or completed reference to it is removed.
@@ -97,6 +103,12 @@ class FileJobs {
   virtual JobError  cancel_job(JobSpec* job)              = 0;
 
   virtual RunningJobsInfo get_running_job() = 0;
+
+  virtual std::deque<JobErrorInfo> get_errors(int count)              = 0;
+  virtual std::deque<JobErrorInfo> get_errors(double after_this_time) = 0;
+
+  virtual void report_error(std::string message) = 0;
+  virtual void clear_errors()                    = 0;
 };
 
 FileJobs& file_operations();

@@ -5,15 +5,14 @@ set(CMAKE_CXX_STANDARD 20)
 include(FetchContent)
 
 FetchContent_Declare(ftxui
-  GIT_REPOSITORY https://github.com/ArthurSonzogni/ftxui
-  GIT_TAG dfb9558eaff417ee7909169d0abd66e6c52c9d55
-  # GIT_TAG v5.0.0
+  GIT_REPOSITORY https://github.com/AlexKordic/ftxui
+  GIT_TAG f3bcd37480c6e59dc372fcc93a2196cc004585f6
 )
 
-FetchContent_Declare(ftxui-grid-container
-  GIT_REPOSITORY https://github.com/mingsheng13/grid-container-ftxui
-  GIT_TAG master
-)
+# FetchContent_Declare(ftxui-grid-container
+#   GIT_REPOSITORY https://github.com/mingsheng13/grid-container-ftxui
+#   GIT_TAG master
+# )
 
 # Add boost lib sources
 set(BOOST_INCLUDE_LIBRARIES thread filesystem system)
@@ -30,8 +29,8 @@ FetchContent_Declare(
     DOWNLOAD_NO_EXTRACT FALSE
 )
 
-FetchContent_MakeAvailable(ftxui)
-# FetchContent_MakeAvailable(ftxui-grid-container)
+# FetchContent_MakeAvailable(ftxui)
+add_subdirectory(/Users/alexkordic/code/alex_ftxui ftxui)
 FetchContent_MakeAvailable(Boost)
 add_executable(fc main.cpp log.cpp err.cpp commander.cpp theme.cpp file_panel.cpp dialogs.cpp shared_state.cpp file_change_funnel.cpp file_io_jobs.cpp)
 target_link_libraries(fc PRIVATE ftxui::component Boost::filesystem "-framework CoreServices")

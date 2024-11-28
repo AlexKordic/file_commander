@@ -8,6 +8,7 @@
 #include "theme.hpp"
 
 // #include <ftxui-grid-container/grid-container.hpp>
+#include <deque>
 #include <ftxui/component/component.hpp>
 #include <ftxui/component/component_base.hpp>
 #include <ftxui/component/component_options.hpp>
@@ -43,6 +44,8 @@ class DialogOverlay {
   ftxui::Dialog::P                        _main_document;     // always rendered, always first child of Panel::container
   Component                               _overlay_renderer;  // selected renderer from _overlay_dialogs, always second child of Panel::container
   std::map<std::string, ftxui::Dialog::P> _overlay_dialogs;
+
+  bool dialog_active() { return _active_dialog > 0; }
 
   void close_dialog() {
     // Move navigation to main document
@@ -96,14 +99,21 @@ class Panel : public DialogOverlay {
     _overlay_dialogs["Mkdir"]           = std::make_shared<MkdirDialog>(_state);
     _overlay_dialogs["Rename"]          = std::make_shared<RenameDialog>(_state);
     _overlay_dialogs["Copy"]            = std::make_shared<CopyDialog>(_state, redraw_ui);
-    _overlay_dialogs["Move"]            = std::make_shared<Nyi>(_state);
+    _overlay_dialogs["Move"]            = std::make_shared<MoveDialog>(_state, redraw_ui);
     _overlay_dialogs["Delete"]          = std::make_shared<DeleteDialog>(_state, redraw_ui);
     _overlay_dialogs["Find"]            = std::make_shared<Nyi>(_state);
     _overlay_dialogs["NameToClipboard"] = std::make_shared<ToClipboardDialog>(_state);
     _overlay_dialogs["PathToClipboard"] = std::make_shared<ToClipboardDialog>(_state);
   }
   void move_to(Filepath& where) {
-    dir.move_to(where);
+    // clear old updates that don't matter any more
+    pending_changes.erase_if([this](const UpdatedFiles& x) -> bool { return true; });
+
+    Err err = dir.move_to(where);
+    if (!err.ok()) {
+      file_operations().report_error("[Panel move_to] " + err.steps.front());
+      return;
+    }
     update_funnel = FileChangeFunnel::create(where, [this](UpdatedFiles changes) {
       // record changes
       pending_changes.push(std::move(changes));
@@ -117,8 +127,6 @@ class Panel : public DialogOverlay {
         }
       });
     });
-    // clear old updates that don't matter any more
-    pending_changes.erase_if([this](const UpdatedFiles& x) -> bool { return true; });
   }
   Element render() {
     // Panel is always shown
@@ -164,14 +172,14 @@ struct JobProgressBar {
     std::lock_guard lock(job->_m);
     const bool      current_index_valid = job->_current_item_index >= 0 && job->_current_item_index < job->_items.size();
     if (!current_index_valid) return text(task_info + " [task index invalid]") | theme().progress_operation;
-    const DirItem& item = job->_items.at(job->_current_item_index);
-    const int64_t items_total = job->item_count();
+    const DirItem& item        = job->_items.at(job->_current_item_index);
+    const int64_t  items_total = job->item_count();
 
     switch (job->_type) {
     case JobInstructions::Type::COPY: {
       if (!item.symlink_ref()) return text(task_info + " [item target missing]") | theme().progress_operation;
-      std::string   total_info  = std::format(" [{:3}] {:5}[{:5}] Mbps {}/{} items ", std::lround(job->_total.percentage), std::lround(job->_total.Mbps), std::lround(job->_total.average_Mbps), job->_current_item_index + 1, items_total);
-      std::string   curr_info   = std::format(" [{:3}] {:5}Mbps {} ", std::lround(job->_current_item.percentage), std::lround(job->_current_item.Mbps), item.path_ref().native());
+      std::string total_info = std::format(" [{:3}] {:5}[{:5}] Mbps {}/{} items ", std::lround(job->_total.percentage), std::lround(job->_total.Mbps), std::lround(job->_total.average_Mbps), job->_current_item_index + 1, items_total);
+      std::string curr_info  = std::format(" [{:3}] {:5}Mbps {} ", std::lround(job->_current_item.percentage), std::lround(job->_current_item.Mbps), item.path_ref().native());
       return hbox({
         // TODO: implement DELETE, MOVE
         text(task_info) | theme().progress_operation,
@@ -182,13 +190,22 @@ struct JobProgressBar {
         text("|"),
       });
     } break;
-    case JobInstructions::Type::MOVE:
-      return text(task_info + " [not yet implemented]") | theme().progress_operation;
+    case JobInstructions::Type::MOVE: {
+      // just _current_item_index is being updated
+      float       item_percentage = std::max(0.0, std::min(100.0, job->_current_item_index * 100.0 / items_total));
+      std::string count_info      = std::format(" [{:3}] {}/{} items ", std::lround(item_percentage), std::lround(job->_current_item_index), items_total);
+      return hbox({
+        text(task_info) | theme().progress_operation,
+        text("|"),
+        bgGaugeLeft(item_percentage / 100, theme().size_gauge_full, theme().size_gauge_empty, text(count_info)) | xflex_grow | theme().progress_current,
+        text("|"),
+      });
+    } break;
     case JobInstructions::Type::DELETE: {
-      float byte_percentage = std::max(0.0, std::min(100.0, 100.0 * job->_bytes_processed / job->_bytes_total));
-      float item_percentage = std::max(0.0, std::min(100.0, job->_current_item_index * 100.0 / items_total));
-      std::string   byte_info  = std::format(" [{:3}] {}/{} bytes ", std::lround(byte_percentage), std::lround(job->_bytes_processed), std::lround(job->_bytes_total));
-      std::string   count_info   = std::format(" [{:3}] {}/{} items ", std::lround(item_percentage), std::lround(job->_current_item_index), items_total);
+      float       byte_percentage = std::max(0.0, std::min(100.0, 100.0 * job->_bytes_processed / job->_bytes_total));
+      float       item_percentage = std::max(0.0, std::min(100.0, job->_current_item_index * 100.0 / items_total));
+      std::string byte_info       = std::format(" [{:3}] {}/{} bytes ", std::lround(byte_percentage), std::lround(job->_bytes_processed), std::lround(job->_bytes_total));
+      std::string count_info      = std::format(" [{:3}] {}/{} items ", std::lround(item_percentage), std::lround(job->_current_item_index), items_total);
       return hbox({
         // TODO: implement DELETE, MOVE
         text(task_info) | theme().progress_operation,
@@ -203,53 +220,66 @@ struct JobProgressBar {
   }
 };
 
-class FileCommander {
+class FileCommander : public DialogOverlay {
  protected:
-  Panel          left, right;
-  JobProgressBar progress_bar;
+  Panel              left, right;
+  JobProgressBar     progress_bar;
+  std::deque<double> clear_errors_sequence;
+
+  std::function<void()> _close_dialog;
+  std::function<int()>  _get_dimx;
 
  public:
-  Component navigation;
+  int       _left_size   = 20;
+  int       _screen_dimx = 0;
   Component renderer;
-  FileCommander(Filepath l, Filepath r, ExecuteOnUiThread exec, RedrawUI redraw) : left(l, get_target(), exec, redraw), right(r, get_target(), exec, redraw) {
-    auto global_shortcuts = [this](Event event) -> bool {
-      // Tab between panels
-      if (event == theme().key_switch_focused_panel) {
-        // switch focus to target pannel
-        if (left.navigation->Focused()) {
-          right.navigation->TakeFocus();
-        } else {
-          left.navigation->TakeFocus();
-        }
-        return true;
+
+  FileCommander(Filepath l, Filepath r, ExecuteOnUiThread exec, RedrawUI redraw, std::function<int()> dimx) : left(l, get_target(), exec, redraw), right(r, get_target(), exec, redraw), _get_dimx(dimx) {
+    _close_dialog         = [this]() { close_dialog(); };
+    auto global_shortcuts = [this](Event event) -> bool { return this->handle_global_shortcuts(event); };
+    // Overlay dialogs on top of main document:
+    // - errors - fullscreen
+    // - commands - top, expands as needed
+    // - tasks - fullscreen
+
+    navigation = Container::Tab({}, &_active_dialog);
+
+    // NOTE: When ResizableSplitRight, which is a Component, is used it expects components having .Render() as children.
+    //       So we need to combine navigation with its render, like so:
+    Component            left_combined  = Renderer(left.navigation, [this]() -> Element { return left.render(); });
+    Component            right_combined = Renderer(right.navigation, [this]() -> Element { return right.render(); });
+    ResizableSplitOption split;
+    split.main            = left_combined;
+    split.back            = right_combined;
+    split.main_size       = &(this->_left_size);
+    split.direction       = ftxui::Direction::Right;
+    split.separator_func  = [this]() -> Element { return ::ftxui::separatorDouble(); };
+    Component both_panels = CatchEvent(ResizableSplit(split), global_shortcuts);
+
+    navigation->Add(both_panels);
+    _overlay_dialogs["ErrorList"] = std::make_shared<ErrorListDialog>(_close_dialog);
+    renderer                      = Renderer(navigation, [=, this]() -> Element {
+      // TODO: different when single panel layout is active
+      // check for resize:
+      int screen_w = _get_dimx();
+      if (screen_w != _screen_dimx) {
+        _screen_dimx = screen_w;
+        _left_size  = screen_w / 2;
       }
-      // Move target to selected dir.
-      // Do not apply if dialog is active on the source panel. When rename is open we want ctrl+right/left to move cursor by entire word.
-      const bool change_right = event == theme().key_target_dir_to_focused_item_right && left.navigation->Focused();
-      const bool change_left  = event == theme().key_target_dir_to_focused_item_left && right.navigation->Focused();
-      if (change_right) {
-        const bool dialog_active = left._active_dialog > 0;
-        if (dialog_active) return false;
-        Filepath where = left.focused_dir();
-        right.move_to(where);
-        return true;
-      } else if (change_left) {
-        const bool dialog_active = right._active_dialog > 0;
-        if (dialog_active) return false;
-        Filepath where = right.focused_dir();
-        left.move_to(where);
-        return true;
-      }
-      return false;
-    };
-    navigation = CatchEvent(Container::Horizontal({left.navigation, right.navigation}), global_shortcuts);
-    renderer   = Renderer(navigation, [&]() -> Element {
-      // Two panels side by side
+
       Elements el;
       auto     jobinfo = file_operations().get_running_job();
-      el.push_back(hbox({left.render() | xflex_grow, right.render() | xflex_grow}) | yflex | bgcolor(theme().default_bg) | color(theme().default_fg));
+      // Two panels side by side
+      // el.push_back(hbox({left.render() | xflex_grow, right.render() | xflex_grow}) | yflex | bgcolor(theme().default_bg) | color(theme().default_fg));
+      el.push_back(both_panels->Render() | yflex | bgcolor(theme().default_bg) | color(theme().default_fg));
+      // Progress bar if there is a job running
       if (jobinfo.job && false == jobinfo.job->is_stopped()) { el.push_back(progress_bar.render()); }
-      return vbox(std::move(el));
+      // Quick preview of latest errors
+      auto errors = file_operations().get_errors(theme().max_errors_to_show);
+      for (auto& x : errors) { el.push_back(text(" 咎 " + x.message) | theme().recent_error); }
+      Element document = vbox(std::move(el));
+      if (!_overlay_renderer) return document;
+      return dbox({document, _overlay_renderer->Render() | yflex | clear_under_colors | hcenter});
     });
   }
   // returns
@@ -261,6 +291,59 @@ class FileCommander {
       l.e("FileCommander::get_target", "unknown self");
       return left.dir.path;
     };
+  }
+
+  bool handle_global_shortcuts(Event event) {
+    if (event == theme().key_toggle_error_details && !dialog_active()) {
+      show_dialog("ErrorList");
+      return true;
+    }
+
+    if (event == theme().key_clear_errors) {
+      clear_errors_sequence.emplace_front(now());
+      while (clear_errors_sequence.size() > theme().clear_errors_command_repeat_count) { clear_errors_sequence.pop_back(); }
+      const double sequence_interval = clear_errors_sequence.front() - clear_errors_sequence.back();
+      const bool   full_sequence     = clear_errors_sequence.size() >= theme().clear_errors_command_repeat_count;
+      const bool   in_time_window    = sequence_interval < theme().clear_errors_command_sequence;
+      if (full_sequence && in_time_window) {
+        auto seq = clear_errors_sequence;
+        file_operations().clear_errors();
+        clear_errors_sequence.clear();
+        return true;
+      }
+      // we let this event through when it's not a full sequence or it's not in time window
+    } else {
+      clear_errors_sequence.clear();
+    }
+
+    // Tab between panels
+    if (event == theme().key_switch_focused_panel) {
+      // switch focus to target pannel
+      if (left.navigation->Focused()) {
+        right.navigation->TakeFocus();
+      } else {
+        left.navigation->TakeFocus();
+      }
+      return true;
+    }
+    // Move target to selected dir.
+    // Do not apply if dialog is active on the source panel. When rename is open we want ctrl+right/left to move cursor by entire word.
+    const bool change_right = event == theme().key_target_dir_to_focused_item_right && left.navigation->Focused();
+    const bool change_left  = event == theme().key_target_dir_to_focused_item_left && right.navigation->Focused();
+    if (change_right) {
+      const bool dialog_active = left._active_dialog > 0;
+      if (dialog_active) return false;
+      Filepath where = left.focused_dir();
+      right.move_to(where);
+      return true;
+    } else if (change_left) {
+      const bool dialog_active = right._active_dialog > 0;
+      if (dialog_active) return false;
+      Filepath where = right.focused_dir();
+      left.move_to(where);
+      return true;
+    }
+    return false;
   }
 };
 
@@ -301,7 +384,16 @@ void set_console_size(int width, int height) { std::cout << "\e[8;" << height <<
 
 int main(int argc, char** argv) {
   // For debugging
+  // TODO: Improve performance of rendering large number of errors
   set_console_size(140, 60);
+  for (int i = 0; i < 1000; ++i) {
+    file_operations().report_error("DBG " + std::to_string(i)
+                                   + " Contrary to popular belief, Lorem Ipsum is not simply random text. It has roots in a piece of classical Latin literature from 45 BC, making it over 2000 years old. Richard McClintock, a Latin professor at Hampden-Sydney College in Virginia, looked up one of the more obscure Latin words, consectetur, from a Lorem Ipsum passage, and going through the cites of the word in classical literature, discovered the undoubtable source. Lorem Ipsum comes from sections 1.10.32 and 1.10.33 of "
+                                     "de Finibus Bonorum et Malorum"
+                                     " (The Extremes of Good and Evil) by Cicero, written in 45 BC. This book is a treatise on the theory of ethics, very popular during the Renaissance. The first line of Lorem Ipsum, "
+                                     "Lorem ipsum dolor sit amet.."
+                                     ", comes from a line in section 1.10.32");
+  }
 
   auto screen = ScreenInteractive::Fullscreen();
 
@@ -314,7 +406,8 @@ int main(int argc, char** argv) {
     screen.Post(Event::Custom);
   };
   auto          redraw = [&screen]() -> void { screen.Post(Event::Custom); };
-  FileCommander app(left_path, right_path, exec, redraw);
+  auto          dimx   = [&screen]() -> int { return screen.dimx(); };
+  FileCommander app(left_path, right_path, exec, redraw, dimx);
 
   LogAdapter adapt_logs(screen);
 

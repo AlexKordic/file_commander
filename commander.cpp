@@ -1,5 +1,6 @@
 
 #include "commander.hpp"
+#include "file_io_jobs.hpp"
 
 #include <boost/filesystem/file_status.hpp>
 #include <boost/system/detail/error_code.hpp>
@@ -39,7 +40,7 @@ size_t filter_match(const std::string& str, const std::string& substr) {
 
 bool DirItem::is_exe() const { return (_perms & (perms::owner_exe | perms::group_exe | perms::others_exe)) > 0; }
 
-std::string DirItem::get_time() const {
+std::string time_to_string(double _w_time) {
   static std::time_t program_start_time = std::time(nullptr);
   static std::time_t nine_months_ago    = program_start_time - (60 * 60 * 24 * 30 * 9);
   static std::time_t three_months_after = program_start_time + (60 * 60 * 24 * 30 * 3);
@@ -53,6 +54,10 @@ std::string DirItem::get_time() const {
   } else {
     return std::string(buffer, std::strftime(buffer, 64, "%b %e %H:%M", &ltm));
   }
+}
+
+std::string DirItem::get_time() const {
+  return time_to_string(_w_time);
 }
 
 std::string DirItem::to_string() const {
@@ -115,7 +120,7 @@ Err Dir::move_to(const Filepath p) {
     // file_status fs = status(item.path(), ec);
     file_status fs = item.status(ec);
     if (ec) {
-      Problems::report(ec.message() + " : stat() error on " + item.path().native());
+      Perun::file_operations().report_error(ec.message() + " : stat() error on " + item.path().native());
       continue;
     }
     items.emplace_back(item.path(), fs.type(), fs.permissions());

@@ -27,9 +27,39 @@ using boost::system::error_code;
 using Perun::file_operations;
 using Perun::JobSpec;
 
+std::string time_to_string(double time);
+
 namespace ftxui {
 
 Dialog::Dialog(PanelSharedState::P app) : app(app) {}
+
+std::function<Element(const EntryState&)> ascii_button_transform() {
+  return [](const EntryState& s) -> Element {
+    const std::string t = s.focused ? "[" + s.label + "]" : " " + s.label + " ";
+    if (s.focused) return text(t) | theme().sort_button_active;
+    return text(t) | theme().sort_button;
+  };
+}
+
+std::function<Element(const EntryState& state)> text_menuitem_transform() {
+  return [](const EntryState& state)-> Element {
+    std::string label = (state.active ? "> " : "  ") + state.label;
+    Element     e     = paragraph(std::move(label));
+    if (state.focused) { e = e | inverted; }
+    if (state.active) { e = e | bold; }
+    return e;
+  };
+}
+
+template <typename THIS> std::function<bool(Event e)> close_on_esc(THIS* self) {
+  return [self](Event e) -> bool {
+    if (e == theme().key_cancel_dialog) {
+      self->cancel();
+      return true;
+    }
+    return false;
+  };
+}
 
 //
 // Files
@@ -47,11 +77,7 @@ Files::Files(PanelSharedState::P s, RedrawUI r) : Dialog(std::move(s)), redraw_u
   };
   input_opt.cursor_position = &filter_cursor_pos;
   ButtonOption ascii_button;
-  ascii_button.transform = [](const EntryState& s) {
-    const std::string t = s.focused ? "[" + s.label + "]" : " " + s.label + " ";
-    if (s.focused) return text(t) | theme().sort_button_active;
-    return text(t) | theme().sort_button;
-  };
+  ascii_button.transform = ascii_button_transform();
 
   app->filter = Input(&filter_txt, &(app->dir->path_txt), input_opt) | showInputCursor(&filter_cursor_pos);
   files       = FileList(app, &filter_txt, redraw_ui);
@@ -110,22 +136,15 @@ MkdirDialog::MkdirDialog(PanelSharedState::P s) : Dialog(std::move(s)) {
   textbox_opt.multiline = false;  // otherwise new_dir_name contains `\n` at the end
   textbox               = Input(&new_dir_name, "Name for new directory", textbox_opt);
 
-  button_ok         = Button("   OK   ", [this] { this->ok(); });
-  button_close      = Button(" Cancel ", [this] { this->cancel(); });
-  auto close_on_esc = [this](Event event) -> bool {
-    if (event == Event::Escape) {
-      this->cancel();
-      return true;
-    }
-    return false;
-  };
+  button_ok    = Button("   OK   ", [this] { this->ok(); });
+  button_close = Button(" Cancel ", [this] { this->cancel(); });
 
   navigation = CatchEvent(Container::Vertical({
                             textbox,
                             button_ok,
                             button_close,
                           }),
-                          close_on_esc);
+                          close_on_esc(this));
   renderer   = Renderer(navigation, [this]() -> Element { return this->render(); });
 }
 
@@ -171,14 +190,10 @@ void MkdirDialog::cancel() { app->action.close_dialog(); }
 
 RenameDialog::RenameDialog(PanelSharedState::P d) : Dialog(std::move(d)) {
   ButtonOption ascii_button;
-  ascii_button.transform = [](const EntryState& s) {
-    const std::string t = s.focused ? "[" + s.label + "]" : " " + s.label + " ";
-    if (s.focused) return text(t) | theme().sort_button_active;
-    return text(t) | theme().sort_button;
-  };
-  button_ok    = Button("Rename", [this] { this->ok(); }, ascii_button);
-  button_close = Button("Cancel", [this] { this->cancel(); }, ascii_button);
-  menu         = Container::Vertical({}, &selected);
+  ascii_button.transform = ascii_button_transform();
+  button_ok              = Button("Rename", [this] { this->ok(); }, ascii_button);
+  button_close           = Button("Cancel", [this] { this->cancel(); }, ascii_button);
+  menu                   = Container::Vertical({}, &selected);
 
   auto menu_event_filter = [this, menu = menu, button_ok = button_ok, button_close = button_close](Event event) -> bool {
     int& selected = this->selected;
@@ -319,7 +334,7 @@ CopyDialog::CopyDialog(PanelSharedState::P d, RedrawUI r) : Dialog(std::move(d))
 
   button_ok     = Button("  COPY  ", [this] { this->run_copy(); });
   // TODO: add button "open in new tab ⮂ ↱↱↱ 🆕 tab  "
-  button_cancel = Button(" Cancel ", [this] { this->cancel_copy(); });
+  button_cancel = Button(" Cancel ", [this] { this->cancel(); });
   CheckboxOption checkbox_opt;
   checkbox_opt.on_change     = [this]() { this->OnShow(); };
   op_follow_links            = Checkbox("Follow Links in Source", &b_follow_links, checkbox_opt);
@@ -331,13 +346,6 @@ CopyDialog::CopyDialog(PanelSharedState::P d, RedrawUI r) : Dialog(std::move(d))
     } else {
       return state.element | theme().files_filter_search;
     }
-  };
-  auto close_on_esc = [this](Event event) -> bool {
-    if (event == Event::Escape) {
-      this->cancel_copy();
-      return true;
-    }
-    return false;
   };
   _virtual_dir                       = std::make_unique<Dir>();
   _operation_state                   = std::make_shared<PanelSharedState>(_virtual_dir.get());
@@ -354,11 +362,11 @@ CopyDialog::CopyDialog(PanelSharedState::P d, RedrawUI r) : Dialog(std::move(d))
                             op_preserve_relative_links,
                             _files,
                           }),
-                          close_on_esc);
+                          close_on_esc(this));
   renderer   = Renderer(navigation, [this]() -> Element { return this->render(); });
 }
 
-void CopyDialog::cancel_copy() {
+void CopyDialog::cancel() {
   _clear_operation_state();
   app->action.close_dialog();
 }
@@ -374,7 +382,7 @@ void CopyDialog::run_copy() {
 }
 
 Element CopyDialog::render() {
-  int file_count  = app->action.arguments->selected.size();
+  int file_count = app->action.arguments->selected.size();
   // clang-format off
   auto virtual_files = _files->Render();
   return window(
@@ -528,30 +536,20 @@ void CopyDialog::_queue_files(const std::vector<DirItem>& files, Filepath destin
 
 DeleteDialog::DeleteDialog(PanelSharedState::P s, RedrawUI r) : Dialog(std::move(s)), redraw_ui(r) {
   ButtonOption ascii_button;
-  ascii_button.transform = [](const EntryState& s) {
-    const std::string t = s.focused ? "[" + s.label + "]" : " " + s.label + " ";
-    if (s.focused) return text(t) | theme().sort_button_active;
-    return text(t) | theme().sort_button;
-  };
-  button_ok    = Button("DELETE", [this] { this->ok(); }, ascii_button);
-  button_close = Button("Cancel", [this] { this->cancel(); }, ascii_button);
-  auto close_on_esc = [this](Event event) -> bool {
-    if (event == Event::Escape) {
-      this->cancel();
-      return true;
-    }
-    return false;
-  };
-  menu         = Container::Vertical({}, &selected);
-  navigation   = CatchEvent(Container::Vertical({
-    Container::Horizontal({button_ok, button_close}),
-    // Following are path items to delete
-    menu,
-  }), close_on_esc);
-  renderer     = Renderer(navigation, [&] {
+  ascii_button.transform = ascii_button_transform();
+  button_ok              = Button("DELETE", [this] { this->ok(); }, ascii_button);
+  button_close           = Button("Cancel", [this] { this->cancel(); }, ascii_button);
+  menu                   = Container::Vertical({}, &selected);
+  navigation             = CatchEvent(Container::Vertical({
+                            Container::Horizontal({button_ok, button_close}),
+                            // Following are path items to delete
+                            menu,
+                          }),
+                                      close_on_esc(this));
+  renderer               = Renderer(navigation, [&] {
     // simple
     return window(text(" Delete ") | bold | hcenter,
-                      vbox({
+                                vbox({
                     hbox({
                       button_ok->Render() | hcenter | xflex_grow,
                       separator(),
@@ -560,7 +558,7 @@ DeleteDialog::DeleteDialog(PanelSharedState::P s, RedrawUI r) : Dialog(std::move
                     separator(),
                     menu->Render() | vscroll_indicator | yframe,
                   }),
-                      BorderStyle::DOUBLE);
+                                BorderStyle::DOUBLE);
   });
 }
 
@@ -588,10 +586,8 @@ void DeleteDialog::OnShow() {
 void DeleteDialog::ok() {
   // Delete doesn't have modes of operation like Copy. Queue all selected items, ThreadedFileJobs will handle recursion.
   std::vector<DirItem> items;
-  for(auto& p : app->action.arguments->selected) {
-    items.emplace_back(p);
-  }
-  auto job = std::make_shared<JobSpec>(JobSpec::Type::DELETE, std::move(items));
+  for (auto& p : app->action.arguments->selected) { items.emplace_back(p); }
+  auto job     = std::make_shared<JobSpec>(JobSpec::Type::DELETE, std::move(items));
   // whenever job updates, redraw UI
   job->updated = this->redraw_ui;
   file_operations().add_job(job);
@@ -602,6 +598,77 @@ void DeleteDialog::ok() {
 void DeleteDialog::cancel() { app->action.close_dialog(); }
 
 //
+// MoveDialog
+//
+
+MoveDialog::MoveDialog(PanelSharedState::P s, RedrawUI r) : Dialog(std::move(s)), redraw_ui(r) {
+  ButtonOption ascii_button;
+  ascii_button.transform = ascii_button_transform();
+  button_ok              = Button(" MOVE ", [this] { this->ok(); }, ascii_button);
+  button_close           = Button("Cancel", [this] { this->cancel(); }, ascii_button);
+  menu                   = Container::Vertical({}, &selected);
+  navigation             = CatchEvent(Container::Vertical({
+                            Container::Horizontal({button_ok, button_close}),
+                            // Following are path items to delete
+                            menu,
+                          }),
+                                      close_on_esc(this));
+  renderer               = Renderer(navigation, [&] {
+    // simple
+    return window(text(" Move ") | bold | hcenter,
+                                vbox({
+                    hbox({
+                      button_ok->Render() | hcenter | xflex_grow,
+                      separator(),
+                      button_close->Render() | hcenter | xflex_grow,
+                    }),
+                    separator(),
+                    menu->Render() | vscroll_indicator | yframe,
+                  }),
+                                BorderStyle::DOUBLE);
+  });
+}
+
+void MoveDialog::OnShow() {
+  // remove old data
+  menu->DetachAllChildren();
+  selected = 0;
+  app->action.arguments->use_focused_as_alternative();
+  // create items
+  int selected_count = app->action.arguments->selected.size();
+  if (selected_count == 0) {
+    cancel();
+    return;
+  }
+  const bool same_dir = app->action.arguments->selected_share_same_dir();
+  menu->DetachAllChildren();
+  if (same_dir)
+    for (int i = 0; i < selected_count; i++) menu->Add(MenuEntry(app->action.arguments->selected.at(i).native()));
+  else
+    for (int i = 0; i < selected_count; i++) menu->Add(MenuEntry(app->action.arguments->selected.at(i).filename().native()));
+
+  button_ok->TakeFocus();
+}
+
+void MoveDialog::ok() {
+  // Delete doesn't have modes of operation like Copy. Queue all selected items, ThreadedFileJobs will handle recursion.
+  std::vector<DirItem> items;
+  items.reserve(app->action.arguments->selected.size());
+  Filepath destination_path = app->action.arguments->target;
+  for (auto& p : app->action.arguments->selected) {
+    auto& inserted = items.emplace_back(p);
+    inserted._set_symlink_target(destination_path / p.filename());
+  }
+  auto job     = std::make_shared<JobSpec>(JobSpec::Type::MOVE, std::move(items));
+  // whenever job updates, redraw UI
+  job->updated = this->redraw_ui;
+  file_operations().add_job(job);
+  app->dir->clear_selection();
+  app->action.close_dialog();
+}
+
+void MoveDialog::cancel() { app->action.close_dialog(); }
+
 // ToClipboardDialog
 //
 
@@ -668,6 +735,66 @@ Nyi::Nyi(PanelSharedState::P d) : Dialog(std::move(d)) {
       | border | size(HEIGHT, GREATER_THAN, 18);
   });
 }
+
+//
+// ErrorListDialog
+//
+
+ErrorListDialog::ErrorListDialog(std::function<void()> close_dialog) : Dialog(nullptr), close_dialog(close_dialog) {
+  ButtonOption ascii_button;
+  ascii_button.transform = ascii_button_transform();
+
+  button_hide  = Button(" Hide ", close_dialog, ascii_button);
+  button_clear = Button(" Clear ", [this] { this->clear(); }, ascii_button);
+  menu         = Container::Vertical({}, &selected);
+  navigation   = CatchEvent(Container::Vertical({
+                            Container::Horizontal({button_hide, button_clear}),
+                            // Following are path items to delete
+                            menu,
+                          }),
+                            close_on_esc(this));
+  renderer     = Renderer(navigation, [this] {
+    // add items in render method
+    auto items = file_operations().get_errors(latest_error_time);
+    if (items.size() > 0) {
+      selected += items.size();  // because we are adding new records before selection
+      latest_error_time = items.front().time;
+      Components      new_records;
+      MenuEntryOption entry_option;
+      entry_option.transform = text_menuitem_transform();
+      for (auto& item : items) { new_records.push_back(MenuEntry(time_to_string(item.time) + " | " + item.message, entry_option)); }
+      menu->Prepend(std::make_move_iterator(new_records.begin()), std::make_move_iterator(new_records.end()));
+    }
+    // clamp selected to number of items
+    selected = std::max(0, std::min(selected, static_cast<int>(menu->ChildCount() - 1)));
+    return window(text(" Error History ") | bold | hcenter,
+                      vbox({
+                    hbox({
+                      button_hide->Render() | hcenter | xflex_grow,
+                      separator(),
+                      button_clear->Render() | hcenter | xflex_grow,
+                    }),
+                    separator(),
+                    menu->Render() | vscroll_indicator | yframe,
+                  }),
+                      BorderStyle::DOUBLE);
+  });
+}
+
+void ErrorListDialog::clear() {
+  file_operations().clear_errors();
+  menu->DetachAllChildren();
+  selected = 0;
+  this->close_dialog();
+}
+
+void ErrorListDialog::cancel() { this->close_dialog(); }
+
+void ErrorListDialog::OnShow() {}
+
+//
+// Commands
+//
 
 Commands::Commands() {
   available.reserve(100);

@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <mutex>
 #include <thread>
+
 #include "fifo_queue.hpp"
 #include "log.hpp"
 
@@ -146,6 +147,17 @@ void JobInstructions::report_error(DirItem item, std::string message) {
   inserted._set_warning(std::move(message));
 }
 
+struct DelayedUpdate {
+  double interval = 0.2;
+  double last_ts  = now();
+  bool   is_time_to_update() {
+    double ts = now();
+    if (ts < last_ts + interval) return false;
+    last_ts = ts;
+    return true;
+  }
+};
+
 struct DelayedUpdateDiscovery {
   double  interval     = 0.2;
   double  last_ts      = now();
@@ -193,7 +205,7 @@ struct DelayedUpdateDelete {
         job->_bytes_processed += std::max(0ll, item.size());
         job->_items.emplace_back(std::move(item));
       }
-      job->_current_item_index = job->_items.size() -1;
+      job->_current_item_index = job->_items.size() - 1;
     }
     items_deleted.clear();
     job->updated();
@@ -226,6 +238,37 @@ class ThreadedFileJobs : public FileJobs {
     return {std::move(active), _queue.size()};
   }
 
+  std::deque<JobErrorInfo> get_errors(int count) override {
+    std::deque<JobErrorInfo> r;
+    std::lock_guard lock(_m);
+    int i = 0;
+    for (auto it = _errors.rbegin(); it != _errors.rend(); ++it, ++i) {
+      if (i >= count) break;
+      r.push_back(*it);
+    }
+    return r;
+  }
+
+  std::deque<JobErrorInfo> get_errors(double after_this_time) override {
+    std::deque<JobErrorInfo> r;
+    std::lock_guard lock(_m);
+    for (auto it = _errors.rbegin(); it != _errors.rend(); ++it) {
+      if (it->time <= after_this_time) break;
+      r.push_back(*it);
+    }
+    return r;
+  }
+
+  void report_error(std::string message) override {
+    std::lock_guard lock(_m);
+    _errors.emplace_back(std::move(message), now());
+  }
+
+  void clear_errors() override {
+    std::lock_guard lock(_m);
+    _errors.clear();
+  }
+
  private:
   void run() {
     while (true) {
@@ -241,7 +284,7 @@ class ThreadedFileJobs : public FileJobs {
       _progress_monitor.add_job(_job);
       switch (_job->_type) {
       case JobSpec::Type::COPY: run_copy(_job.get()); break;
-      case JobSpec::Type::MOVE: break;
+      case JobSpec::Type::MOVE: run_move(_job.get()); break;
       case JobSpec::Type::DELETE: run_delete(_job.get()); break;
       }
       _job->_finished_time = now();  // why not within job->_m mutex ??
@@ -272,7 +315,7 @@ class ThreadedFileJobs : public FileJobs {
       job->_items.clear();
     }
     // discovery thread.
-    std::thread discovery_thread([job, &initial_items, &files, this]() {
+    std::thread         discovery_thread([job, &initial_items, &files, this]() {
       DelayedUpdateDiscovery update;
       job->_items_pending = 0;
       _discover_files(job, initial_items, files, update);
@@ -285,17 +328,59 @@ class ThreadedFileJobs : public FileJobs {
     while (true) {
       DirItem   item("", boost::filesystem::file_type::status_error, boost::filesystem::perms::no_perms);
       FifoError err = files.pop(item);
-      if (err == FifoError::Destroyed) {
-        break;
-      }
+      if (err == FifoError::Destroyed) { break; }
       boost::filesystem::remove(item.path_ref(), ec);
       if (ec.failed()) { 
-        job->report_error(item, "Failed to delete file: " + ec.message()); 
+        file_operations().report_error("[Delete] " + item.path_ref().native());
+        std::lock_guard lock(job->_m);
+        job->report_error(item, "Failed to delete file: " + ec.message());
       }
       update.file_deleted(item, job);
     }
     update.flush(job);
     if (discovery_thread.joinable()) discovery_thread.join();
+  }
+
+  void run_move(JobSpec* job) {
+    DelayedUpdate update;
+    for (int i = 0; i < job->_items.size(); i++) {
+      auto&      item = job->_items.at(i);
+      error_code ec;
+      boost::filesystem::rename(item.path_ref(), *item.symlink_ref(), ec);
+      if (ec.value() == boost::system::errc::cross_device_link) {
+        // We need to copy instead of move.
+        copy_options op = copy_options::overwrite_existing | copy_options::recursive | copy_options::copy_symlinks;
+        boost::filesystem::copy(item.path_ref(), *item.symlink_ref(), op, ec);
+        if (ec.failed()) {
+          file_operations().report_error("[Move copy cross_device_link] " + item.path_ref().native());
+          std::lock_guard lock(job->_m);
+          job->report_error(item, "Failed to copy file: " + ec.message());
+          continue;
+        }
+        // now delete original
+        boost::filesystem::remove_all(item.path_ref(), ec);
+        if (ec.failed()) {
+          file_operations().report_error("[Move remove source cross_device_link] " + item.path_ref().native());
+          std::lock_guard lock(job->_m);
+          job->report_error(item, "Failed to remove source file: " + ec.message());
+          continue;
+        }
+      }
+      if (ec.failed()) {
+        // "Failed to move file: Cross-device link"
+        file_operations().report_error("[Move] " + item.path_ref().native());
+        std::lock_guard lock(job->_m);
+        job->report_error(item, "Failed to move file: " + ec.message());
+      }
+
+      if (update.is_time_to_update()) {
+        {
+          std::lock_guard lock(job->_m);
+          job->_current_item_index = i;
+        }
+        job->updated();
+      }
+    }
   }
 
   void run_copy(JobSpec* job) {
@@ -312,6 +397,7 @@ class ThreadedFileJobs : public FileJobs {
       if (item.type() == boost::filesystem::file_type::directory_file) {
         lock.unlock();
         boost::filesystem::create_directory(item.path_ref(), ec);
+        if (ec.failed()) file_operations().report_error("[mkdir] " + item.path_ref().native());
         lock.lock();
         if (ec.failed()) {
           // report error
@@ -323,10 +409,14 @@ class ThreadedFileJobs : public FileJobs {
       if (item.type() == boost::filesystem::file_type::symlink_file) {
         if (!item.symlink_ref()) {
           job->report_error(item, "Symlink target not set");
+          lock.unlock();
+          if (ec.failed()) file_operations().report_error("[Symlink target not set] " + item.path_ref().native());
+          lock.lock();
           continue;
         }
         lock.unlock();
         boost::filesystem::create_symlink(item.path_ref(), *item.symlink_ref(), ec);
+        if (ec.failed()) file_operations().report_error("[symlink] " + item.path_ref().native());
         lock.lock();
         if (ec.failed()) {
           // report error
@@ -340,6 +430,7 @@ class ThreadedFileJobs : public FileJobs {
       lock.unlock();
       copy_options op = copy_options::overwrite_existing;
       boost::filesystem::copy_file(item.path_ref(), *item.symlink_ref(), op, ec);
+      if (ec.failed()) file_operations().report_error("[Copy] " + item.path_ref().native());
       lock.lock();
       if (ec.failed()) {
         job->report_error(item, "Failed to copy file: " + ec.message());
@@ -360,6 +451,7 @@ class ThreadedFileJobs : public FileJobs {
 
   std::shared_ptr<JobSpec>                   _job;
   Perun::FifoQueue<std::shared_ptr<JobSpec>> _queue;
+  std::deque<JobErrorInfo>                   _errors;
 
   ProgressMonitor _progress_monitor;
 

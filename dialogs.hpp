@@ -117,7 +117,7 @@ struct CopyDialog : Dialog {
 
   Element render();
   void    run_copy();
-  void    cancel_copy();
+  void    cancel();
 
   PanelSharedState::P  _operation_state;
   std::string          _filter_text;
@@ -133,6 +133,21 @@ struct CopyDialog : Dialog {
   void _queue_files(const std::vector<DirItem>& files, Filepath destination);
 };
 
+struct MoveDialog : Dialog {
+  MoveDialog(PanelSharedState::P data, RedrawUI r);
+  void OnShow() override;
+
+  int       selected = 0;
+  Component menu;
+  Component button_ok;
+  Component button_close;
+
+  void                ok();
+  void                cancel();
+  PanelSharedState::P _operation_state;
+  RedrawUI            redraw_ui;
+};
+
 struct DeleteDialog : Dialog {
   DeleteDialog(PanelSharedState::P s, RedrawUI r);
   void OnShow() override;
@@ -141,16 +156,31 @@ struct DeleteDialog : Dialog {
   Component menu;
   Component button_ok;
   Component button_close;
+  void      ok();
+  void      cancel();
+  RedrawUI  redraw_ui;
 
-  void ok();
-  void cancel();
-  PanelSharedState::P  _operation_state;
-  RedrawUI redraw_ui;
+  PanelSharedState::P _operation_state;
 };
 
 struct Nyi : Dialog {
   Nyi(PanelSharedState::P s);
   void OnShow() override {}
+};
+
+struct ErrorListDialog : Dialog {
+  ErrorListDialog(std::function<void()> close_dialog);
+  void OnShow() override;
+  void cancel();
+  void clear();
+
+  Component button_hide;
+  Component button_clear;
+  Component menu;
+  int       selected          = 0;
+  double    latest_error_time = 0;
+
+  std::function<void()> close_dialog;
 };
 
 }  // namespace ftxui

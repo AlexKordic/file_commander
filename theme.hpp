@@ -16,16 +16,22 @@ struct Theme {
   Theme();
 
   size_t copy_files_min_y = 50;
+  double clear_errors_command_sequence = 1.0;
+  int    clear_errors_command_repeat_count = 3;
+  int    max_errors_to_show = 3; // in FileCommander error quick view
 
   ftxui::Event 
     key_switch_focused_panel,
     key_files_select,
+    key_cancel_dialog,
     key_clear_selection,
     key_select_all,
     key_enter_dir,
     key_leave_dir,
     key_target_dir_to_focused_item_right,
-    key_target_dir_to_focused_item_left;
+    key_target_dir_to_focused_item_left,
+    key_clear_errors,
+    key_toggle_error_details;
 
   ftxui::Event key_mkdir, key_copy, key_move, key_delete, key_rename, key_names_to_clipboard, key_paths_to_clipboard, key_find;
 
@@ -69,6 +75,8 @@ struct Theme {
     progress_operation,
     progress_total,
     progress_current,
+
+    recent_error,
 
     unused;
   

@@ -1,5 +1,6 @@
 
 #include "commander.hpp"
+#include "file_io_jobs.hpp"
 
 #include <sys/stat.h>
 #include <functional>
@@ -64,7 +65,7 @@ class DirEvents : public FileChangeFunnel {
     FSEventStreamCreateFlags flags = kFSEventStreamCreateFlagFileEvents;  // | kFSEventStreamCreateFlagNoDefer;
     if (!FileId::from_filename(_root_id, _root.native().c_str())) {
       auto msg = "our dir lstat failed " + std::to_string(errno) + " " + _root.native();
-      Problems::report(msg);
+      Perun::file_operations().report_error(msg);
       throw std::runtime_error(msg);
     }
     _paths_to_watch.push_back(_root.native());

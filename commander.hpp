@@ -12,6 +12,8 @@
 #include <memory>
 #include <optional>
 
+std::string time_to_string(double time);
+
 enum class Orderby {
   NAME_ASC,
   NAME_DESC,

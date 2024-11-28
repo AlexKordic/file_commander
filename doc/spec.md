@@ -6,6 +6,7 @@ An orthodox file manager. Exploring directories to run commands on selected file
 Initial Features:
 - keep focused item according to path. `selected` as index will *move* when `FileChangeFunnel` adds/removes item from `Dir`.
 - glob select & deselect - popup
++ try ResizableSplitRight between panels
 + prepend char to item render
   + dir marked with `/`
   + symlink takes 2 rows `-> real path` 
