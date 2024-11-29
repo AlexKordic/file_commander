@@ -14,6 +14,7 @@
 #include <boost/system/detail/error_code.hpp>
 
 #include <ftxui/component/component.hpp>
+#include <ftxui/component/screen_interactive.hpp>
 #include <ftxui/dom/elements.hpp>
 
 #include <memory>
@@ -31,6 +32,22 @@ std::string time_to_string(double time);
 
 namespace ftxui {
 
+Element screen_render_time() {
+  const double seconds = ScreenInteractive::Active()->LastFrameTime();
+  const int    ms      = std::lround(1000.0 * seconds);
+  auto         e       = text(" " + std::to_string(ms) + "ms ");
+  if (ms > 500) {
+    e = e | bgcolor(theme().debuginfo_colors[3]);
+  } else if (ms > 120) {
+    e = e | bgcolor(theme().debuginfo_colors[2]);
+  } else if (ms > 16) {
+    e = e | bgcolor(theme().debuginfo_colors[1]);
+  } else {
+    e = e | bgcolor(theme().debuginfo_colors[0]);
+  }
+  return e;
+}
+
 Dialog::Dialog(PanelSharedState::P app) : app(app) {}
 
 std::function<Element(const EntryState&)> ascii_button_transform() {
@@ -42,9 +59,9 @@ std::function<Element(const EntryState&)> ascii_button_transform() {
 }
 
 std::function<Element(const EntryState& state)> text_menuitem_transform() {
-  return [](const EntryState& state)-> Element {
-    std::string label = (state.active ? "> " : "  ") + state.label;
-    Element     e     = paragraph(std::move(label));
+  return [](const EntryState& state) -> Element {
+    // std::string label = (state.active ? "> " : "  ") + state.label;
+    Element e = paragraph(state.label);
     if (state.focused) { e = e | inverted; }
     if (state.active) { e = e | bold; }
     return e;
@@ -112,13 +129,13 @@ Files::Files(PanelSharedState::P s, RedrawUI r) : Dialog(std::move(s)), redraw_u
     });
     return hbox(std::move(children));
   };
+  debug_info = [this]() -> Element { return text(" " + std::to_string(app->render_count) + " "); };
 
   navigation = Container::Vertical({Container::Horizontal({sort_name, sort_size, sort_time}), files});
-  renderer   = Renderer(navigation, [app = app, render_selection = render_selection, files = files]() -> Element {
+  renderer   = Renderer(navigation, [app = app, render_selection = render_selection, files = files, this]() -> Element {
     return vbox({
-      hbox({text(" "), app->filter->Render() | ftxui::focus | ftxui::select, text(" | " + std::to_string(app->render_count) + " ")}),
+      hbox({text(" "), app->filter->Render() | ftxui::focus | ftxui::select, this->debug_info()}),
       render_selection(),
-      // files->Render() | vscroll_indicator | yframe | theme().files_border,
       files->Render() | theme().files_border,
     });
   });
@@ -767,7 +784,7 @@ ErrorListDialog::ErrorListDialog(std::function<void()> close_dialog) : Dialog(nu
     }
     // clamp selected to number of items
     selected = std::max(0, std::min(selected, static_cast<int>(menu->ChildCount() - 1)));
-    return window(text(" Error History ") | bold | hcenter,
+    return window(hbox({text(" Error History [" + std::to_string(menu->ChildCount()) + "]"), screen_render_time()}) | bold | hcenter,
                       vbox({
                     hbox({
                       button_hide->Render() | hcenter | xflex_grow,

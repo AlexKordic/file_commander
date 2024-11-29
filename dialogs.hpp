@@ -15,6 +15,8 @@ using RedrawUI = std::function<void()>;
 
 namespace ftxui {
 
+Element screen_render_time();
+
 struct Command {
   Event       key;
   std::string dialog;
@@ -49,6 +51,8 @@ struct Files : Dialog {
 
   explicit Files(PanelSharedState::P s, RedrawUI r);
   void OnShow() override {}
+
+  std::function<Element()> debug_info;
 };
 
 struct MkdirDialog : Dialog {

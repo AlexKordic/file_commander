@@ -6,7 +6,7 @@ include(FetchContent)
 
 FetchContent_Declare(ftxui
   GIT_REPOSITORY https://github.com/AlexKordic/ftxui
-  GIT_TAG f3bcd37480c6e59dc372fcc93a2196cc004585f6
+  GIT_TAG 0ba2a0f9ce727d5e18331de3116d4e7b242bea64
 )
 
 # FetchContent_Declare(ftxui-grid-container

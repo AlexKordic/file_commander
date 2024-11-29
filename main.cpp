@@ -149,6 +149,8 @@ class Panel : public DialogOverlay {
     return focused->parent_path();
   }
 
+  void set_debug_info(std::function<Element()> info) { _files->debug_info = info; }
+
  private:
   PanelSharedState::P    _state;
   std::shared_ptr<Files> _files;
@@ -238,9 +240,11 @@ class FileCommander : public DialogOverlay {
     _close_dialog         = [this]() { close_dialog(); };
     auto global_shortcuts = [this](Event event) -> bool { return this->handle_global_shortcuts(event); };
     // Overlay dialogs on top of main document:
-    // - errors - fullscreen
+    // + errors - fullscreen
     // - commands - top, expands as needed
     // - tasks - fullscreen
+
+    left.set_debug_info([]() -> Element { return screen_render_time(); });
 
     navigation = Container::Tab({}, &_active_dialog);
 
@@ -249,8 +253,8 @@ class FileCommander : public DialogOverlay {
     Component            left_combined  = Renderer(left.navigation, [this]() -> Element { return left.render(); });
     Component            right_combined = Renderer(right.navigation, [this]() -> Element { return right.render(); });
     ResizableSplitOption split;
-    split.main            = left_combined;
-    split.back            = right_combined;
+    split.back            = left_combined;
+    split.main            = right_combined;
     split.main_size       = &(this->_left_size);
     split.direction       = ftxui::Direction::Right;
     split.separator_func  = [this]() -> Element { return ::ftxui::separatorDouble(); };
@@ -264,7 +268,7 @@ class FileCommander : public DialogOverlay {
       int screen_w = _get_dimx();
       if (screen_w != _screen_dimx) {
         _screen_dimx = screen_w;
-        _left_size  = screen_w / 2;
+        _left_size   = screen_w / 2;
       }
 
       Elements el;

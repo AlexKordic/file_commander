@@ -36,6 +36,7 @@ struct Theme {
   ftxui::Event key_mkdir, key_copy, key_move, key_delete, key_rename, key_names_to_clipboard, key_paths_to_clipboard, key_find;
 
   std::vector<ftxui::Color> filesize_colors;
+  std::vector<ftxui::Color> debuginfo_colors;
   ftxui::Color size_gauge_full;
   ftxui::Color size_gauge_empty;
 
