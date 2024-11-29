@@ -2,9 +2,10 @@
 #define _PERUN_FC_DIALOGS_
 
 #include "commander.hpp"
+#include "file_io_jobs.hpp"
+#include "file_panel.hpp"
 #include "shared_state.hpp"
 
-// #include <boost/filesystem.hpp>
 #include <ftxui/component/component.hpp>
 #include <ftxui/component/event.hpp>
 
@@ -173,16 +174,29 @@ struct Nyi : Dialog {
 };
 
 struct ErrorListDialog : Dialog {
-  ErrorListDialog(std::function<void()> close_dialog);
+  ErrorListDialog(std::function<void()> close_dialog, RedrawUI redraw_ui);
   void OnShow() override;
   void cancel();
   void clear();
+  void refresh_items();
+  void build_menu();
 
   Component button_hide;
   Component button_clear;
   Component menu;
   int       selected          = 0;
   double    latest_error_time = 0;
+
+  SizeContext                     _size;
+  std::deque<Perun::JobErrorInfo> _items;
+  RedrawUI                        _redraw_ui;
+
+  struct Dbg {
+    int height         = 0;
+    int start_index    = 0;
+    int rows_produced  = 0;
+    int items_produced = 0;
+  } dbg;
 
   std::function<void()> close_dialog;
 };

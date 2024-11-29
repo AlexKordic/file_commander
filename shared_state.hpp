@@ -9,7 +9,21 @@
 #include <memory>
 
 class Dir;
+class DirItem;
 struct CommandArgs;
+
+struct RowInfo {
+  const bool     is_menu_focused;
+  const float    max_size;
+  int&           rows_placed;
+  int            index    = 0;
+  bool           focused  = false;
+  bool           selected = false;
+  ftxui::Box*    box      = nullptr;
+  const DirItem* data     = nullptr;
+
+  RowInfo(bool menu_focused, float max_size, int& rows_placed);
+};
 
 struct PanelSharedState {
   using P = std::shared_ptr<PanelSharedState>;
@@ -25,9 +39,10 @@ struct PanelSharedState {
   bool    commands_enabled = true;
   int64_t render_count     = 0;
 
-  std::function<void(Filepath)>    move_to;
-  std::function<Filepath const*()> get_focused_item;
-  std::function<void(int)>         set_min_y;
+  std::function<ftxui::Element(RowInfo&)> transform;
+  std::function<void(Filepath)>           move_to;
+  std::function<Filepath const*()>        get_focused_item;
+  std::function<void(int)>                set_min_y;
 
   explicit PanelSharedState(Dir* d);
   PanelSharedState() = delete;

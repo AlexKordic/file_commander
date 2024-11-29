@@ -16,6 +16,7 @@ struct Theme {
   Theme();
 
   size_t copy_files_min_y = 50;
+  size_t errorlist_min_y = 50;
   double clear_errors_command_sequence = 1.0;
   int    clear_errors_command_repeat_count = 3;
   int    max_errors_to_show = 3; // in FileCommander error quick view

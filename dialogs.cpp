@@ -3,8 +3,6 @@
 #include "bfs.hpp"
 
 #include "commander.hpp"
-#include "file_io_jobs.hpp"
-#include "file_panel.hpp"
 #include "log.hpp"
 #include "shared_state.hpp"
 #include "theme.hpp"
@@ -97,7 +95,7 @@ Files::Files(PanelSharedState::P s, RedrawUI r) : Dialog(std::move(s)), redraw_u
   ascii_button.transform = ascii_button_transform();
 
   app->filter = Input(&filter_txt, &(app->dir->path_txt), input_opt) | showInputCursor(&filter_cursor_pos);
-  files       = FileList(app, &filter_txt, redraw_ui);
+  files       = fileList(app, &filter_txt, redraw_ui);
   sort_name   = Button("Name", [dir = app->dir] { dir->sort_toggle_name_direction(); }, ascii_button);
   sort_size   = Button("Size", [dir = app->dir] { dir->sort_toggle_size_direction(); }, ascii_button);
   sort_time   = Button("Date", [dir = app->dir] { dir->sort_toggle_time_direction(); }, ascii_button);
@@ -370,7 +368,7 @@ CopyDialog::CopyDialog(PanelSharedState::P d, RedrawUI r) : Dialog(std::move(d))
   _operation_state->move_to          = [](Filepath) {};
   _operation_state->get_focused_item = []() -> Filepath const* { return nullptr; };
   _operation_state->filter           = Input(&_filter_text, &(_virtual_dir->path_txt), input_opt);
-  _files                             = FileList(_operation_state, &_filter_text, redraw_ui);
+  _files                             = fileList(_operation_state, &_filter_text, redraw_ui);
 
   navigation = CatchEvent(Container::Vertical({
                             input_destination_path,
@@ -757,7 +755,9 @@ Nyi::Nyi(PanelSharedState::P d) : Dialog(std::move(d)) {
 // ErrorListDialog
 //
 
-ErrorListDialog::ErrorListDialog(std::function<void()> close_dialog) : Dialog(nullptr), close_dialog(close_dialog) {
+ErrorListDialog::ErrorListDialog(std::function<void()> close_dialog, RedrawUI redraw_ui) : Dialog(nullptr), close_dialog(close_dialog), _redraw_ui(redraw_ui) {
+  _size.redraw = redraw_ui;
+  _size._min_y = theme().errorlist_min_y;
   ButtonOption ascii_button;
   ascii_button.transform = ascii_button_transform();
 
@@ -770,32 +770,66 @@ ErrorListDialog::ErrorListDialog(std::function<void()> close_dialog) : Dialog(nu
                             menu,
                           }),
                             close_on_esc(this));
-  renderer     = Renderer(navigation, [this] {
+  renderer     = Renderer(navigation, [this]() -> Element {
     // add items in render method
-    auto items = file_operations().get_errors(latest_error_time);
-    if (items.size() > 0) {
-      selected += items.size();  // because we are adding new records before selection
-      latest_error_time = items.front().time;
-      Components      new_records;
-      MenuEntryOption entry_option;
-      entry_option.transform = text_menuitem_transform();
-      for (auto& item : items) { new_records.push_back(MenuEntry(time_to_string(item.time) + " | " + item.message, entry_option)); }
-      menu->Prepend(std::make_move_iterator(new_records.begin()), std::make_move_iterator(new_records.end()));
-    }
-    // clamp selected to number of items
-    selected = std::max(0, std::min(selected, static_cast<int>(menu->ChildCount() - 1)));
+    refresh_items();
+    build_menu();
     return window(hbox({text(" Error History [" + std::to_string(menu->ChildCount()) + "]"), screen_render_time()}) | bold | hcenter,
                       vbox({
+                    hbox({text("h=" + std::to_string(dbg.height) + " idx=" + std::to_string(dbg.start_index) + " rows=" + std::to_string(dbg.rows_produced) + " sel=" + std::to_string(selected) + " items=" + std::to_string(dbg.items_produced) + "/" + std::to_string(_items.size()))}),
                     hbox({
                       button_hide->Render() | hcenter | xflex_grow,
                       separator(),
                       button_clear->Render() | hcenter | xflex_grow,
                     }),
                     separator(),
-                    menu->Render() | vscroll_indicator | yframe,
+                    menu->Render() | yframe | fl_reflect(&_size) | filelist_scroll_indicator(&_size),
                   }),
                       BorderStyle::DOUBLE);
   });
+}
+
+void ErrorListDialog::refresh_items() {
+  std::deque<Perun::JobErrorInfo> new_items = file_operations().get_errors(latest_error_time);
+  auto                            new_count = new_items.size();
+  _items.insert(_items.begin(), std::make_move_iterator(new_items.begin()), std::make_move_iterator(new_items.end()));
+  // selected += new_items.size();
+  // // clamp selected to number of items
+  // selected = std::max(0, std::min(selected, static_cast<int>(_items.size() - 1)));
+  if (new_count > 0) { latest_error_time = _items.front().time; }
+  _size.v.items_total = _items.size();
+}
+void ErrorListDialog::build_menu() {
+  menu->DetachAllChildren();
+  // find start index
+  int height        = std::min(_size.v.component_height, static_cast<int>(_items.size()));
+  int start_index   = std::max(0, selected - (height / 2));
+  _size.start_index = start_index;
+  MenuEntryOption entry_option;
+  entry_option.transform = text_menuitem_transform();
+  int items_placed       = 0;
+  for (int i = 0; i < height && (start_index + i) < _items.size(); ++i) {
+    auto& item = _items.at(start_index + i);
+    menu->Add(MenuEntry(time_to_string(item.time) + " | " + item.message, entry_option));
+    items_placed++;
+  }
+  _size.rows_produced    = items_placed;  // TODO: this is not correct as we are using paragraph() instead of text() in text_menuitem_transform()
+  _size.v.items_produced = items_placed;
+
+  // debug:
+  dbg.height         = height;
+  dbg.start_index    = start_index;
+  dbg.rows_produced  = items_placed;
+  dbg.items_produced = items_placed;
+
+  // if (items.size() > 0) {
+  //   selected += items.size();  // because we are adding new records before selection
+  //   Components      new_records;
+  //   MenuEntryOption entry_option;
+  //   entry_option.transform = text_menuitem_transform();
+  //   for (auto& item : items) { new_records.push_back(MenuEntry(time_to_string(item.time) + " | " + item.message, entry_option)); }
+  //   menu->Prepend(std::make_move_iterator(new_records.begin()), std::make_move_iterator(new_records.end()));
+  // }
 }
 
 void ErrorListDialog::clear() {

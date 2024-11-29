@@ -20,7 +20,7 @@ Theme::Theme() {
   key_toggle_error_details = Event::CtrlE;
 
   filesize_colors  = {Color::White, Color::White, Color::Yellow, Color::IndianRed1, Color::Plum3};
-  debuginfo_colors = {Color::White, Color::Yellow, Color::IndianRed1, Color::Plum3};
+  debuginfo_colors = {Color::Black, Color::Yellow, Color::IndianRed1, Color::Plum3};
   size_gauge_full  = Color::MediumPurple4;
   size_gauge_empty = Color::Grey0;
 

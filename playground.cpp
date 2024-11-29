@@ -281,7 +281,7 @@ int main_file_list() {
   };
 
   app->filter         = Input(&filter_txt, &(app->dir->path_txt), input_opt) | showInputCursor(&filter_cursor_pos);
-  Component files     = FileList(app, &filter_txt, redraw_ui);
+  Component files     = fileList(app, &filter_txt, redraw_ui);
   Component sort_name = Button("Name", [dir = app->dir] { dir->sort_toggle_name_direction(); }, ascii_button);
   Component sort_size = Button("Size", [dir = app->dir] { dir->sort_toggle_size_direction(); }, ascii_button);
   Component sort_time = Button("Date", [dir = app->dir] { dir->sort_toggle_time_direction(); }, ascii_button);

@@ -261,7 +261,7 @@ class FileCommander : public DialogOverlay {
     Component both_panels = CatchEvent(ResizableSplit(split), global_shortcuts);
 
     navigation->Add(both_panels);
-    _overlay_dialogs["ErrorList"] = std::make_shared<ErrorListDialog>(_close_dialog);
+    _overlay_dialogs["ErrorList"] = std::make_shared<ErrorListDialog>(_close_dialog, redraw);
     renderer                      = Renderer(navigation, [=, this]() -> Element {
       // TODO: different when single panel layout is active
       // check for resize:

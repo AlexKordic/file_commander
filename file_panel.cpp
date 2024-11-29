@@ -23,6 +23,8 @@
 
 using namespace ftxui;
 
+RowInfo::RowInfo(bool menu_focused, float max_size, int& rows_placed) : is_menu_focused(menu_focused), max_size(max_size), rows_placed(rows_placed) {}
+
 namespace ftxui {
 
 namespace {
@@ -53,7 +55,47 @@ Decorator filetype_color(const DirItem& item) {
 
 }  // namespace
 
-}  // namespace ftxui
+std::function<Element(RowInfo&)> filelist_transform() {
+  return [](RowInfo& r) -> Element {
+    const DirItem& data = *(r.data);
+    Element        n;
+    Element        size;
+    if (data.is_dir()) {
+      n    = text("/" + data.filename_ref());
+      size = text("");
+    } else {
+      n    = text(data.filename_ref());
+      size = coloredInt(data.size());
+    }
+    n = n | xflex_grow | bgGaugeLeft(float(data.size()) / r.max_size);
+    if (r.focused) n |= theme().files_focused;
+    if (r.selected) n |= theme().files_selected;
+    if (!r.focused && !r.selected) n |= filetype_color(data);
+
+    Element t = text(data.get_time());
+    if (r.selected) t |= theme().files_selected;
+
+    Element row = hbox({std::move(n), std::move(size), separatorLight(), std::move(t)});
+    if (r.focused) {
+      if (r.is_menu_focused) row |= ftxui::focus;
+      else row |= ftxui::select;
+    }
+    row |= reflect(*r.box);
+    if (data.symlink_ref() || data.warning_ref()) {
+      Elements rows = {std::move(row)};
+      if (data.symlink_ref()) {
+        rows.push_back(text(" -> " + data.symlink_ref()->native()) | theme().files_symlink);
+        r.rows_placed++;
+      }
+      if (data.warning_ref()) {
+        rows.push_back(text(*data.warning_ref()) | theme().files_warning);
+        r.rows_placed++;
+      }
+      return vbox(std::move(rows));
+    }
+    return std::move(row);
+  };
+}
 
 // Normally ftxui would wrap vbox(all files) | vscroll_indicator | yframe | border.
 // We want: vbox(only visible file count) | vscroll_indicator | yframe | border
@@ -64,51 +106,29 @@ Decorator filetype_color(const DirItem& item) {
 
 std::string box_to_string(const Box& box) { return std::format("x:{} y:{} w:{} h:{}", box.x_min, box.y_min, box.x_max, box.y_max); }
 
-using HightMismatch = std::function<void()>;
+bool RedrawVariables::operator==(const RedrawVariables& other) const { return items_produced == other.items_produced && items_total == other.items_total && component_height == other.component_height && screen_height == other.screen_height; }
 
-struct RedrawVariables {
-  int items_produced   = 0;
-  int items_total      = 0;
-  int component_height = 10;
-  int screen_height    = 250;
+SizeContext::SizeContext() {
+  last_v.component_height = -1;
+  last_v.screen_height    = -1;
+  last_v.items_produced   = -1;
+  last_v.items_total      = -1;
+}
 
-  bool operator==(const RedrawVariables& other) const { return items_produced == other.items_produced && items_total == other.items_total && component_height == other.component_height && screen_height == other.screen_height; }
-};
-
-struct SizeContext {
-  Box             box;  // Mouse click support
-  RedrawVariables v;
-  RedrawVariables last_v;
-  int             rows_produced = 0;
-  int             start_index   = 0;
-
-  int _min_y = 1;
-
-  SizeContext() {
-    last_v.component_height = -1;
-    last_v.screen_height    = -1;
-    last_v.items_produced   = -1;
-    last_v.items_total      = -1;
-  }
-
-  void set_screen_height(int height) {
-    if (height != v.screen_height) should_redraw = true;
-    v.screen_height = height;
-  }
-  void set_component_height(int height) {
-    if (height != v.component_height) should_redraw = true;
-    v.component_height = height;
-  }
-  void invoke_redraw() {
-    // protect against infinite redraws
-    if (v == last_v) return;
-    last_v = v;
-    redraw();
-  }
-
-  HightMismatch redraw;
-  bool          should_redraw = false;
-};
+void SizeContext::set_screen_height(int height) {
+  if (height != v.screen_height) should_redraw = true;
+  v.screen_height = height;
+}
+void SizeContext::set_component_height(int height) {
+  if (height != v.component_height) should_redraw = true;
+  v.component_height = height;
+}
+void SizeContext::invoke_redraw() {
+  // protect against infinite redraws
+  if (v == last_v) return;
+  last_v = v;
+  redraw();
+}
 
 class FilelistScrollIndicator : public NodeDecorator {
  private:
@@ -274,21 +294,19 @@ class FileList : public ComponentBase {
   }
 
   Element Render() override {
-    // elements.push_back(text("Render count == " + std::to_string(_itteration)));
     app->render_count++;
     Clamp();
 
     Elements   elements;
     const bool is_menu_focused = Focused();
-    float      max_size        = dir->stats().largest_item_bytes;
 
-    int start_index = _find_start_index();
-
-    const int item_count = dir->items.size();
-    _size.v.items_total  = item_count;
-    _size.start_index    = start_index;
-    int items_placed     = 0;
-    int rows_placed      = 0;
+    int       start_index = _find_start_index();
+    const int item_count  = dir->items.size();
+    _size.v.items_total   = item_count;
+    _size.start_index     = start_index;
+    _size.rows_produced   = 0;
+    RowInfo row_info(is_menu_focused, dir->stats().largest_item_bytes, _size.rows_produced);
+    int     items_placed = 0;
     for (int index = start_index; index < item_count && items_placed < _size.v.component_height; ++index) {
       const DirItem& data = dir->items.at(index);
       if (false == data.visible()) {
@@ -297,49 +315,57 @@ class FileList : public ComponentBase {
       }
       ++items_placed;
 
-      const bool is_focused       = (selected == index) && is_menu_focused;
-      const bool is_selected      = data.selected();
-      auto       focus_management = (selected != index) ? ftxui::nothing : is_menu_focused ? ftxui::focus : ftxui::select;
+      row_info.index    = index;
+      row_info.focused  = (selected == index) && is_menu_focused;
+      row_info.selected = data.selected();
+      row_info.data     = &data;
+      row_info.box      = &boxes_[index];
+
       // clang-format off
-      auto wrap = [&](const std::string& x, bool apply_focus=true) -> Element { 
-        Element e;
-        if(apply_focus && data.is_dir()) {
-          e = text("/" + x);
+      auto transform = [](RowInfo& r)-> Element {
+        const DirItem& data = *(r.data);
+        Element n;
+        Element size;
+        if(data.is_dir()) {
+          n    = text("/" + data.filename_ref());
+          size = text("");
         } else {
-          e = text(x);
+          n    = text(data.filename_ref());
+          size = coloredInt(data.size());
         }
-        if (apply_focus && is_focused) e |= theme().files_focused;
-        if (is_selected) e |= theme().files_selected;
-        if(!is_focused && !is_selected) e |= filetype_color(data);
-        return e;
+        n = n | xflex_grow | bgGaugeLeft(float(data.size()) / r.max_size);
+        if(r.focused)  n |= theme().files_focused;
+        if(r.selected) n |= theme().files_selected;
+        if(!r.focused && !r.selected) n |= filetype_color(data);
+
+        Element t = text(data.get_time());
+        if(r.selected) t |= theme().files_selected;
+
+        Element row = hbox({std::move(n), std::move(size), separatorLight(), std::move(t)});
+        if(r.focused) {
+          if(r.is_menu_focused) row |= ftxui::focus;
+          else row |= ftxui::select;
+        }
+        row |= reflect(*r.box);
+        if(data.symlink_ref() || data.warning_ref()) {
+          Elements rows = {std::move(row)};
+          if(data.symlink_ref()) {
+            rows.push_back(text(" -> " + data.symlink_ref()->native()) | theme().files_symlink);
+            r.rows_placed++;
+          }
+          if(data.warning_ref()) {
+            rows.push_back(text(*data.warning_ref()) | theme().files_warning);
+            r.rows_placed++;
+          }
+          return vbox(std::move(rows));
+        }
+        return std::move(row);
       };
-      auto produce_row = [&]()->Element{
-        return hbox({
-          wrap(data.filename_ref()) | xflex_grow | bgGaugeLeft(float(data.size()) / max_size, theme().size_gauge_full, theme().size_gauge_empty), 
-          (data.is_dir() ? text("") : coloredInt(data.size())), 
-          separatorLight(), 
-          wrap(data.get_time(), false)
-        }) | focus_management | reflect(boxes_[index]);
-      };
-      rows_placed++;
-      if(data.symlink_ref() || data.warning_ref()) {
-        Elements rows = {produce_row()};
-        if(data.symlink_ref()) {
-          rows.push_back(text(" -> " + data.symlink_ref()->native()) | theme().files_symlink);
-          rows_placed++;
-        }
-        if(data.warning_ref()) {
-          rows.push_back(text(*data.warning_ref()) | theme().files_warning);
-          rows_placed++;
-        }
-        elements.push_back(vbox(std::move(rows)));
-      } else {
-        elements.push_back(produce_row());
-      }
+      elements.push_back(transform(row_info));
+      row_info.rows_placed++;
       // clang-format on
     }
     _size.v.items_produced = items_placed;
-    _size.rows_produced    = rows_placed;
     return vbox(std::move(elements)) | yframe | fl_reflect(&_size) | filelist_scroll_indicator(&_size);
   }
 
@@ -389,7 +415,7 @@ class FileList : public ComponentBase {
           return true;
         }
         if (event == theme().key_leave_dir) {
-          const Filepath old_path = dir->path;
+          const Filepath old_path   = dir->path;
           const Filepath parent_dir = dir->path.parent_path();
           app->move_to(parent_dir);
           selected = 0;
@@ -508,7 +534,7 @@ class FileList : public ComponentBase {
   std::vector<Box> boxes_;
 };
 
-Component ftxui::FileList(PanelSharedState::P panel, std::string* filter_text, RedrawUI redraw_ui) { return std::make_shared<::FileList>(std::move(panel), filter_text, redraw_ui); }
+Component fileList(PanelSharedState::P panel, std::string* filter_text, RedrawUI redraw_ui) { return std::make_shared<FileList>(std::move(panel), filter_text, redraw_ui); }
 
 class ColoredInt : public Node {
  public:
@@ -554,7 +580,7 @@ class ColoredInt : public Node {
   float              progress_;
 };
 
-Element ftxui::coloredInt(int64_t n) { return std::make_shared<ColoredInt>(n, theme().filesize_colors); }
+Element coloredInt(int64_t n) { return std::make_shared<ColoredInt>(n, theme().filesize_colors); }
 
 class BgGaugeLeft : public NodeDecorator {
  public:
@@ -594,10 +620,13 @@ class BgGaugeLeft : public NodeDecorator {
   Color _empty;
 };
 
-Element ftxui::bgGaugeLeft(float fraction, Color full, Color empty, Element child) { return std::make_shared<BgGaugeLeft>(std::move(child), fraction, full, empty); }
+Element bgGaugeLeft(float fraction, Color full, Color empty, Element child) { return std::make_shared<BgGaugeLeft>(std::move(child), fraction, full, empty); }
 
-Decorator ftxui::bgGaugeLeft(float fraction, Color full, Color empty) {
+Decorator bgGaugeLeft(float fraction, Color full, Color empty) {
   return [fraction, full, empty](Element child) { return bgGaugeLeft(fraction, full, empty, std::move(child)); };
+}
+Decorator bgGaugeLeft(float fraction) {
+  return [fraction](Element child) { return bgGaugeLeft(fraction, theme().size_gauge_full, theme().size_gauge_empty, std::move(child)); };
 }
 
 class ShowInputCursor : public NodeDecorator {
@@ -617,8 +646,8 @@ class ShowInputCursor : public NodeDecorator {
   Ref<int> _cursor_position;
 };
 
-Element   ftxui::showInputCursor(Element child, Ref<int> cursor_position) { return std::make_shared<ShowInputCursor>(std::move(child), cursor_position); }
-Decorator ftxui::showInputCursor(Ref<int> cursor_position) {
+Element   showInputCursor(Element child, Ref<int> cursor_position) { return std::make_shared<ShowInputCursor>(std::move(child), cursor_position); }
+Decorator showInputCursor(Ref<int> cursor_position) {
   return [cursor_position](Element child) -> Element { return showInputCursor(std::move(child), cursor_position); };
 }
 
@@ -645,4 +674,6 @@ class ClearUnder : public NodeDecorator {
 //         combinaison with dbox.
 /// @see ftxui::dbox
 /// @ingroup dom
-Element ftxui::clear_under_colors(Element element) { return std::make_shared<ClearUnder>(std::move(element)); }
+Element clear_under_colors(Element element) { return std::make_shared<ClearUnder>(std::move(element)); }
+
+}  // namespace ftxui
