@@ -111,6 +111,8 @@ struct CopyDialog : Dialog {
   Component op_follow_links;
   Component op_preserve_relative_links;
   Component input_destination_path;
+  int       filter_cursor_pos      = 0;
+  int       destination_cursor_pos = 0;
 
   Component _files;
   int64_t   _bytes_total = 0;
@@ -179,16 +181,18 @@ struct ErrorListDialog : Dialog {
   void cancel();
   void clear();
   void refresh_items();
-  void build_menu();
 
-  Component button_hide;
-  Component button_clear;
-  Component menu;
-  int       selected          = 0;
-  double    latest_error_time = 0;
+  Component            button_hide;
+  Component            button_clear;
+  PanelSharedState::P  _operation_state;
+  std::string          _filter_text;
+  std::unique_ptr<Dir> _virtual_dir;  // enumerate items to copy
+  Component            _files;
+  double               latest_error_time = 0;
+  int                  filter_cursor_pos = 0;
 
-  SizeContext                     _size;
-  std::deque<Perun::JobErrorInfo> _items;
+  // SizeContext                     _size;
+  // std::deque<Perun::JobErrorInfo> _items;
   RedrawUI                        _redraw_ui;
 
   struct Dbg {

@@ -102,6 +102,8 @@ DirItem::DirItem(Filepath p, DirItem::Type type, DirItem::Perms perms) : _path(s
   update(type, perms);
 }
 
+DirItem::DirItem(Filepath p, std::string name, Type type, Perms perms, std::time_t t, int64_t size) : _path(std::move(p)), _filename(std::move(name)), _w_time(t), _size(size) {}
+
 Err Dir::leave_dir() {
   auto parent_dir = path.parent_path();
   if (parent_dir == path) { return Err("leave_dir() on root"); }

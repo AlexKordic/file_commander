@@ -66,6 +66,20 @@ std::function<Element(const EntryState& state)> text_menuitem_transform() {
   };
 }
 
+InputOption filelist_filter_opt(int& filter_cursor_pos) {
+  InputOption input_opt = InputOption::Default();
+  input_opt.multiline   = false;
+  input_opt.transform   = [](InputState state) {
+    if (state.is_placeholder) {
+      return state.element | theme().files_path;
+    } else {
+      return state.element | theme().files_filter_search;
+    }
+  };
+  input_opt.cursor_position = &filter_cursor_pos;
+  return input_opt;
+}
+
 template <typename THIS> std::function<bool(Event e)> close_on_esc(THIS* self) {
   return [self](Event e) -> bool {
     if (e == theme().key_cancel_dialog) {
@@ -81,16 +95,7 @@ template <typename THIS> std::function<bool(Event e)> close_on_esc(THIS* self) {
 //
 
 Files::Files(PanelSharedState::P s, RedrawUI r) : Dialog(std::move(s)), redraw_ui(r) {
-  InputOption input_opt = InputOption::Default();
-  input_opt.multiline   = false;
-  input_opt.transform   = [](InputState state) {
-    if (state.is_placeholder) {
-      return state.element | theme().files_path;
-    } else {
-      return state.element | theme().files_filter_search;
-    }
-  };
-  input_opt.cursor_position = &filter_cursor_pos;
+  InputOption  input_opt = filelist_filter_opt(filter_cursor_pos);
   ButtonOption ascii_button;
   ascii_button.transform = ascii_button_transform();
 
@@ -336,16 +341,7 @@ void RenameDialog::cancel() { app->action.close_dialog(); }
 */
 CopyDialog::CopyDialog(PanelSharedState::P d, RedrawUI r) : Dialog(std::move(d)), redraw_ui(r) {
   // [_] follow links `cp -r -L`: always follow symbolic links in SOURCE
-  // [x] preserve permissions
-  // [x] preserve timestamps
-  // [x] preserve ownership
-  // [x] preserve relative links
-  // + detecting cyclic symbolic links
-  // + detect when dir is copied into itself
-  // + detect when file is copied into itself
-  InputOption input_opt  = InputOption::Default();
-  input_opt.multiline    = false;
-  input_destination_path = Input(&destination_path, "", input_opt);
+  input_destination_path = Input(&destination_path, "", filelist_filter_opt(destination_cursor_pos));
 
   button_ok     = Button("  COPY  ", [this] { this->run_copy(); });
   // TODO: add button "open in new tab ⮂ ↱↱↱ 🆕 tab  "
@@ -355,19 +351,10 @@ CopyDialog::CopyDialog(PanelSharedState::P d, RedrawUI r) : Dialog(std::move(d))
   op_follow_links            = Checkbox("Follow Links in Source", &b_follow_links, checkbox_opt);
   op_preserve_relative_links = Checkbox("Keep relative links", &b_preserve_relative_links, checkbox_opt);
 
-  input_opt.transform = [](InputState state) {
-    if (state.is_placeholder) {
-      return state.element | theme().files_path;
-    } else {
-      return state.element | theme().files_filter_search;
-    }
-  };
   _virtual_dir                       = std::make_unique<Dir>();
   _operation_state                   = std::make_shared<PanelSharedState>(_virtual_dir.get());
   _operation_state->commands_enabled = false;
-  _operation_state->move_to          = [](Filepath) {};
-  _operation_state->get_focused_item = []() -> Filepath const* { return nullptr; };
-  _operation_state->filter           = Input(&_filter_text, &(_virtual_dir->path_txt), input_opt);
+  _operation_state->filter           = Input(&_filter_text, &(_virtual_dir->path_txt), filelist_filter_opt(filter_cursor_pos));
   _files                             = fileList(_operation_state, &_filter_text, redraw_ui);
 
   navigation = CatchEvent(Container::Vertical({
@@ -756,86 +743,66 @@ Nyi::Nyi(PanelSharedState::P d) : Dialog(std::move(d)) {
 //
 
 ErrorListDialog::ErrorListDialog(std::function<void()> close_dialog, RedrawUI redraw_ui) : Dialog(nullptr), close_dialog(close_dialog), _redraw_ui(redraw_ui) {
-  _size.redraw = redraw_ui;
-  _size._min_y = theme().errorlist_min_y;
   ButtonOption ascii_button;
   ascii_button.transform = ascii_button_transform();
 
-  button_hide  = Button(" Hide ", close_dialog, ascii_button);
-  button_clear = Button(" Clear ", [this] { this->clear(); }, ascii_button);
-  menu         = Container::Vertical({}, &selected);
-  navigation   = CatchEvent(Container::Vertical({
+  button_hide                        = Button(" Hide ", close_dialog, ascii_button);
+  button_clear                       = Button(" Clear ", [this] { this->clear(); }, ascii_button);
+  _virtual_dir                       = std::make_unique<Dir>();
+  _operation_state                   = std::make_shared<PanelSharedState>(_virtual_dir.get());
+  _operation_state->commands_enabled = false;
+  _operation_state->set_min_y(theme().errorlist_min_y);
+  _operation_state->filter = Input(&_filter_text, &(_virtual_dir->path_txt), filelist_filter_opt(filter_cursor_pos));
+  _operation_state->transform = [](RowInfo& r) -> Element {
+    auto row = hbox({text(r.data->path_ref().native()), separator(), paragraph(r.data->filename_ref())});
+    if (r.focused) {
+      row |= theme().files_focused;
+      if (r.is_menu_focused) row |= ftxui::focus;
+      else row |= ftxui::select;
+    }
+    row |= reflect(*r.box);
+    return std::move(row);
+  };
+  _files                   = fileList(_operation_state, &_filter_text, redraw_ui);
+  navigation               = CatchEvent(Container::Vertical({
                             Container::Horizontal({button_hide, button_clear}),
                             // Following are path items to delete
-                            menu,
+                            _files,
                           }),
-                            close_on_esc(this));
-  renderer     = Renderer(navigation, [this]() -> Element {
+                                        close_on_esc(this));
+  renderer                 = Renderer(navigation, [this]() -> Element {
     // add items in render method
     refresh_items();
-    build_menu();
-    return window(hbox({text(" Error History [" + std::to_string(menu->ChildCount()) + "]"), screen_render_time()}) | bold | hcenter,
-                      vbox({
-                    hbox({text("h=" + std::to_string(dbg.height) + " idx=" + std::to_string(dbg.start_index) + " rows=" + std::to_string(dbg.rows_produced) + " sel=" + std::to_string(selected) + " items=" + std::to_string(dbg.items_produced) + "/" + std::to_string(_items.size()))}),
+    return window(hbox({text(" Error History [" + std::to_string(_virtual_dir->items.size()) + "]"), screen_render_time()}) | bold | hcenter,
+                                  vbox({
                     hbox({
                       button_hide->Render() | hcenter | xflex_grow,
                       separator(),
                       button_clear->Render() | hcenter | xflex_grow,
                     }),
                     separator(),
-                    menu->Render() | yframe | fl_reflect(&_size) | filelist_scroll_indicator(&_size),
+                    _files->Render() | theme().files_border,
                   }),
-                      BorderStyle::DOUBLE);
+                                  BorderStyle::DOUBLE);
   });
 }
 
 void ErrorListDialog::refresh_items() {
   std::deque<Perun::JobErrorInfo> new_items = file_operations().get_errors(latest_error_time);
-  auto                            new_count = new_items.size();
-  _items.insert(_items.begin(), std::make_move_iterator(new_items.begin()), std::make_move_iterator(new_items.end()));
+  if (new_items.size() > 0) {
+    latest_error_time = new_items.front().time;
+    _virtual_dir->items.reserve(new_items.size() + _virtual_dir->items.size());
+  }
+  for (auto& err : new_items) { _virtual_dir->items.insert(_virtual_dir->items.begin(), DirItem(time_to_string(err.time), err.message, boost::filesystem::socket_file, boost::filesystem::perms::no_perms, 0, 0)); }
   // selected += new_items.size();
   // // clamp selected to number of items
   // selected = std::max(0, std::min(selected, static_cast<int>(_items.size() - 1)));
-  if (new_count > 0) { latest_error_time = _items.front().time; }
-  _size.v.items_total = _items.size();
-}
-void ErrorListDialog::build_menu() {
-  menu->DetachAllChildren();
-  // find start index
-  int height        = std::min(_size.v.component_height, static_cast<int>(_items.size()));
-  int start_index   = std::max(0, selected - (height / 2));
-  _size.start_index = start_index;
-  MenuEntryOption entry_option;
-  entry_option.transform = text_menuitem_transform();
-  int items_placed       = 0;
-  for (int i = 0; i < height && (start_index + i) < _items.size(); ++i) {
-    auto& item = _items.at(start_index + i);
-    menu->Add(MenuEntry(time_to_string(item.time) + " | " + item.message, entry_option));
-    items_placed++;
-  }
-  _size.rows_produced    = items_placed;  // TODO: this is not correct as we are using paragraph() instead of text() in text_menuitem_transform()
-  _size.v.items_produced = items_placed;
-
-  // debug:
-  dbg.height         = height;
-  dbg.start_index    = start_index;
-  dbg.rows_produced  = items_placed;
-  dbg.items_produced = items_placed;
-
-  // if (items.size() > 0) {
-  //   selected += items.size();  // because we are adding new records before selection
-  //   Components      new_records;
-  //   MenuEntryOption entry_option;
-  //   entry_option.transform = text_menuitem_transform();
-  //   for (auto& item : items) { new_records.push_back(MenuEntry(time_to_string(item.time) + " | " + item.message, entry_option)); }
-  //   menu->Prepend(std::make_move_iterator(new_records.begin()), std::make_move_iterator(new_records.end()));
-  // }
+  _operation_state->set_min_y(std::min(theme().errorlist_min_y, _virtual_dir->items.size()));
 }
 
 void ErrorListDialog::clear() {
   file_operations().clear_errors();
-  menu->DetachAllChildren();
-  selected = 0;
+  _virtual_dir->items.clear();
   this->close_dialog();
 }
 

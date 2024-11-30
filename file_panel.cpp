@@ -321,49 +321,8 @@ class FileList : public ComponentBase {
       row_info.data     = &data;
       row_info.box      = &boxes_[index];
 
-      // clang-format off
-      auto transform = [](RowInfo& r)-> Element {
-        const DirItem& data = *(r.data);
-        Element n;
-        Element size;
-        if(data.is_dir()) {
-          n    = text("/" + data.filename_ref());
-          size = text("");
-        } else {
-          n    = text(data.filename_ref());
-          size = coloredInt(data.size());
-        }
-        n = n | xflex_grow | bgGaugeLeft(float(data.size()) / r.max_size);
-        if(r.focused)  n |= theme().files_focused;
-        if(r.selected) n |= theme().files_selected;
-        if(!r.focused && !r.selected) n |= filetype_color(data);
-
-        Element t = text(data.get_time());
-        if(r.selected) t |= theme().files_selected;
-
-        Element row = hbox({std::move(n), std::move(size), separatorLight(), std::move(t)});
-        if(r.focused) {
-          if(r.is_menu_focused) row |= ftxui::focus;
-          else row |= ftxui::select;
-        }
-        row |= reflect(*r.box);
-        if(data.symlink_ref() || data.warning_ref()) {
-          Elements rows = {std::move(row)};
-          if(data.symlink_ref()) {
-            rows.push_back(text(" -> " + data.symlink_ref()->native()) | theme().files_symlink);
-            r.rows_placed++;
-          }
-          if(data.warning_ref()) {
-            rows.push_back(text(*data.warning_ref()) | theme().files_warning);
-            r.rows_placed++;
-          }
-          return vbox(std::move(rows));
-        }
-        return std::move(row);
-      };
-      elements.push_back(transform(row_info));
+      elements.push_back(app->transform(row_info));
       row_info.rows_placed++;
-      // clang-format on
     }
     _size.v.items_produced = items_placed;
     return vbox(std::move(elements)) | yframe | fl_reflect(&_size) | filelist_scroll_indicator(&_size);

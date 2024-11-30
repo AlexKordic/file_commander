@@ -3,6 +3,13 @@
 
 An orthodox file manager. Exploring directories to run commands on selected files.
 
+Bugs:
+- Copy dir into itself !!
+- MacOS mounted flash disk does not trigger inotify events.
+  - external mkdir does not trigger inotify events.
++ Test move across disks
++ Performance fix for large number of displayed errors
+
 Initial Features:
 - keep focused item according to path. `selected` as index will *move* when `FileChangeFunnel` adds/removes item from `Dir`.
 - glob select & deselect - popup

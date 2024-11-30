@@ -30,8 +30,12 @@ class DirItem {
   using Type  = boost::filesystem::file_type;
   using Perms = boost::filesystem::perms;
 
+  // Collect all info from given path
   explicit DirItem(Filepath p);
+  // Collect all info from given path, type and perms
   DirItem(Filepath p, Type type, Perms perms);
+  // Set all attributes from given values; offten used to store non-file data
+  DirItem(Filepath p, std::string name, Type type, Perms perms, std::time_t t, int64_t size);
   void        update(Type type, Perms perms);
   std::string to_string() const;
   std::string get_time() const;
