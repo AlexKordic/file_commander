@@ -191,14 +191,11 @@ struct ErrorListDialog : Dialog {
   double               latest_error_time = 0;
   int                  filter_cursor_pos = 0;
 
-  // SizeContext                     _size;
-  // std::deque<Perun::JobErrorInfo> _items;
   RedrawUI                        _redraw_ui;
 
   struct Dbg {
     int height         = 0;
     int start_index    = 0;
-    int rows_produced  = 0;
     int items_produced = 0;
   } dbg;
 

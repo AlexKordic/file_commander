@@ -23,7 +23,7 @@
 
 using namespace ftxui;
 
-RowInfo::RowInfo(bool menu_focused, float max_size, int& rows_placed) : is_menu_focused(menu_focused), max_size(max_size), rows_placed(rows_placed) {}
+RowInfo::RowInfo(bool menu_focused, float max_size) : is_menu_focused(menu_focused), max_size(max_size) {}
 
 namespace ftxui {
 
@@ -85,11 +85,9 @@ std::function<Element(RowInfo&)> filelist_transform() {
       Elements rows = {std::move(row)};
       if (data.symlink_ref()) {
         rows.push_back(text(" -> " + data.symlink_ref()->native()) | theme().files_symlink);
-        r.rows_placed++;
       }
       if (data.warning_ref()) {
         rows.push_back(text(*data.warning_ref()) | theme().files_warning);
-        r.rows_placed++;
       }
       return vbox(std::move(rows));
     }
@@ -152,16 +150,37 @@ class FilelistScrollIndicator : public NodeDecorator {
 
   void Render(Screen& screen) final {
     NodeDecorator::Render(screen);
+    constexpr int no_visible_start_index = -1;
 
     // Will draw only on right border of our box.
     // Each pixel allows for half of vertical line: up:╹ full:┃ down:╻
     if (_context->v.items_produced >= _context->v.items_total) return;  // no need for scroll bar
     // All calculation is done in char units
-    // TODO: Fix calculation for items_produced != rows_produced (symlinks with warnings)
+
+    // DONE: Fix calculation for items_produced != rows_produced (symlinks with warnings)
+    // count produced items that have height > 1
+    int   valid_items         = 0;
+    int   empty_items         = 0;
+    float visible_start_index = no_visible_start_index;
+    for (int i = 0; i < _context->produced.size(); ++i) {
+      auto& box = _context->produced[i];
+      // When box->y_max == box->y_min we have a single line item
+      if (box->y_max >= box->y_min) {
+        ++valid_items;
+        // first valid item marks visible_start_index
+        if (visible_start_index == no_visible_start_index) visible_start_index = i + _context->start_index;
+      } else {
+        ++empty_items;
+      }
+    }
+    _context->items_visible        = valid_items;
+    _context->visible_start_index = visible_start_index;
+    float items_visible           = valid_items;  // _context->v.items_produced;
+
     float items_total     = _context->v.items_total;
     float widget_height   = float(box_.y_max) - box_.y_min + 1;
-    float visible_portion = float(_context->v.items_produced) / items_total;
-    float start_point     = (float(_context->start_index) / items_total) * widget_height;
+    float visible_portion = float(items_visible) / items_total;
+    float start_point     = (visible_start_index / items_total) * widget_height;
     float end_point       = start_point + (visible_portion * widget_height);
     float start_y         = box_.y_min + start_point;
     float end_y           = box_.y_min + end_point;
@@ -252,13 +271,15 @@ class FileList : public ComponentBase {
   PanelSharedState::P app;
   RedrawUI            redraw_ui;
 
-  FileList(PanelSharedState::P panel, std::string* filter_text, RedrawUI redraw_ui) : filter_text(filter_text), redraw_ui(redraw_ui) {
-    this->dir    = panel->dir;
-    this->filter = panel->filter;
-    app          = std::move(panel);
+  FileList(PanelSharedState::P panel, std::string* filter_text, RedrawUI redraw_ui) : filter_text(filter_text), redraw_ui(redraw_ui), app(std::move(panel)) {
+    this->dir    = app->dir;
+    this->filter = app->filter;
     _size.redraw = redraw_ui;
+    boxes_.reserve(256);
 
-    app->get_focused_item = [this]() -> Filepath const* {
+    app->get_focused_index = [this]() -> int { return selected; };
+    app->set_focused_index = [this](int index) { selected = dir->offset_vissible(index, 0); };
+    app->get_focused_item  = [this]() -> Filepath const* {
       this->Clamp();
       auto focused_index = dir->offset_vissible(selected, 0);
       if (dir->items.empty()) return nullptr;
@@ -270,6 +291,7 @@ class FileList : public ComponentBase {
 
   void Clamp() {
     int s = dir->items.size();
+    if (s != boxes_.size()) { _size.produced.clear(); }
     boxes_.resize(s);
     selected = dir->offset_vissible(selected, 0);
   }
@@ -304,8 +326,9 @@ class FileList : public ComponentBase {
     const int item_count  = dir->items.size();
     _size.v.items_total   = item_count;
     _size.start_index     = start_index;
-    _size.rows_produced   = 0;
-    RowInfo row_info(is_menu_focused, dir->stats().largest_item_bytes, _size.rows_produced);
+    _size.focused_index   = selected;
+    _size.produced.clear();
+    RowInfo row_info(is_menu_focused, dir->stats().largest_item_bytes);
     int     items_placed = 0;
     for (int index = start_index; index < item_count && items_placed < _size.v.component_height; ++index) {
       const DirItem& data = dir->items.at(index);
@@ -320,9 +343,9 @@ class FileList : public ComponentBase {
       row_info.selected = data.selected();
       row_info.data     = &data;
       row_info.box      = &boxes_[index];
+      _size.produced.push_back(&boxes_[index]);
 
       elements.push_back(app->transform(row_info));
-      row_info.rows_placed++;
     }
     _size.v.items_produced = items_placed;
     return vbox(std::move(elements)) | yframe | fl_reflect(&_size) | filelist_scroll_indicator(&_size);
@@ -349,7 +372,7 @@ class FileList : public ComponentBase {
     if (Focused()) {
       // Perun::l.d("OnEvent", "", {{"_", string_to_hex(event.input())}, {"dbg", event.DebugString()}, {";", "\n"}});
       const int old_selected = selected;
-      const int page_lines   = _size.box.y_max - _size.box.y_min;
+      const int page_lines   = _size.items_visible;  // _size.box.y_max - _size.box.y_min;
       if (event == Event::ArrowUp || event == Event::Character('k')) { selected = dir->prev_visible(selected); }
       if (event == Event::ArrowDown || event == Event::Character('j')) { selected = dir->next_visible(selected); }
       // if (event == Event::ArrowLeft || event == Event::Character('h')) { OnLeft(); }

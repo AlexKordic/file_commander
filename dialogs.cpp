@@ -752,7 +752,7 @@ ErrorListDialog::ErrorListDialog(std::function<void()> close_dialog, RedrawUI re
   _operation_state                   = std::make_shared<PanelSharedState>(_virtual_dir.get());
   _operation_state->commands_enabled = false;
   _operation_state->set_min_y(theme().errorlist_min_y);
-  _operation_state->filter = Input(&_filter_text, &(_virtual_dir->path_txt), filelist_filter_opt(filter_cursor_pos));
+  _operation_state->filter    = Input(&_filter_text, &(_virtual_dir->path_txt), filelist_filter_opt(filter_cursor_pos));
   _operation_state->transform = [](RowInfo& r) -> Element {
     auto row = hbox({text(r.data->path_ref().native()), separator(), paragraph(r.data->filename_ref())});
     if (r.focused) {
@@ -763,18 +763,18 @@ ErrorListDialog::ErrorListDialog(std::function<void()> close_dialog, RedrawUI re
     row |= reflect(*r.box);
     return std::move(row);
   };
-  _files                   = fileList(_operation_state, &_filter_text, redraw_ui);
-  navigation               = CatchEvent(Container::Vertical({
+  _files     = fileList(_operation_state, &_filter_text, redraw_ui);
+  navigation = CatchEvent(Container::Vertical({
                             Container::Horizontal({button_hide, button_clear}),
                             // Following are path items to delete
                             _files,
                           }),
-                                        close_on_esc(this));
-  renderer                 = Renderer(navigation, [this]() -> Element {
+                          close_on_esc(this));
+  renderer   = Renderer(navigation, [this]() -> Element {
     // add items in render method
     refresh_items();
     return window(hbox({text(" Error History [" + std::to_string(_virtual_dir->items.size()) + "]"), screen_render_time()}) | bold | hcenter,
-                                  vbox({
+                    vbox({
                     hbox({
                       button_hide->Render() | hcenter | xflex_grow,
                       separator(),
@@ -783,20 +783,25 @@ ErrorListDialog::ErrorListDialog(std::function<void()> close_dialog, RedrawUI re
                     separator(),
                     _files->Render() | theme().files_border,
                   }),
-                                  BorderStyle::DOUBLE);
+                    BorderStyle::DOUBLE);
   });
 }
 
 void ErrorListDialog::refresh_items() {
+  using boost::filesystem::status_error;
+  using boost::filesystem::perms::no_perms;
   std::deque<Perun::JobErrorInfo> new_items = file_operations().get_errors(latest_error_time);
   if (new_items.size() > 0) {
+    // new items are added at the start of the list and focused index stays on same, old, item
+    int focused = _operation_state->get_focused_index() + new_items.size();
     latest_error_time = new_items.front().time;
-    _virtual_dir->items.reserve(new_items.size() + _virtual_dir->items.size());
+    auto old_items    = std::move(_virtual_dir->items);
+    _virtual_dir->items.clear();
+    _virtual_dir->items.reserve(new_items.size() + old_items.size());
+    for (auto& err : new_items) _virtual_dir->items.push_back(DirItem(time_to_string(err.time), err.message, status_error, no_perms, 0, 0));
+    for (auto& err : old_items) _virtual_dir->items.push_back(err);
+    _operation_state->set_focused_index(focused);
   }
-  for (auto& err : new_items) { _virtual_dir->items.insert(_virtual_dir->items.begin(), DirItem(time_to_string(err.time), err.message, boost::filesystem::socket_file, boost::filesystem::perms::no_perms, 0, 0)); }
-  // selected += new_items.size();
-  // // clamp selected to number of items
-  // selected = std::max(0, std::min(selected, static_cast<int>(_items.size() - 1)));
   _operation_state->set_min_y(std::min(theme().errorlist_min_y, _virtual_dir->items.size()));
 }
 

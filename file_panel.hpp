@@ -46,10 +46,14 @@ struct SizeContext {
   Box             box;  // Mouse click support
   RedrawVariables v;
   RedrawVariables last_v;
-  int             rows_produced = 0;
   int             start_index   = 0;
+  int             focused_index = 0;
 
   int _min_y = 1;
+
+  std::vector<Box*> produced;
+  int               items_visible       = 0;
+  int               visible_start_index = 0;
 
   SizeContext();
   void set_screen_height(int height);

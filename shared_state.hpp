@@ -15,14 +15,13 @@ struct CommandArgs;
 struct RowInfo {
   const bool     is_menu_focused;
   const float    max_size;
-  int&           rows_placed;
   int            index    = 0;
   bool           focused  = false;
   bool           selected = false;
   ftxui::Box*    box      = nullptr;
   const DirItem* data     = nullptr;
 
-  RowInfo(bool menu_focused, float max_size, int& rows_placed);
+  RowInfo(bool menu_focused, float max_size);
 };
 
 struct PanelSharedState {
@@ -41,8 +40,10 @@ struct PanelSharedState {
 
   std::function<ftxui::Element(RowInfo&)> transform;
   std::function<void(Filepath)>           move_to;
-  std::function<Filepath const*()>        get_focused_item;
   std::function<void(int)>                set_min_y;
+  std::function<Filepath const*()>        get_focused_item;
+  std::function<void(int)>                set_focused_index;
+  std::function<int()>                    get_focused_index;
 
   explicit PanelSharedState(Dir* d);
   PanelSharedState() = delete;
