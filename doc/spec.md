@@ -44,7 +44,7 @@ Initial Features:
 Initial commands:
 + mkdir
 + copy & confirm popup
-- move & confirm popup
++ move & confirm popup
 + delete & confirm popup
 + rename
 + multi-rename
