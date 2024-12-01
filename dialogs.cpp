@@ -756,7 +756,7 @@ ErrorListDialog::ErrorListDialog(std::function<void()> close_dialog, RedrawUI re
   _operation_state->transform = [](RowInfo& r) -> Element {
     auto row = hbox({text(r.data->path_ref().native()), separator(), paragraph(r.data->filename_ref())});
     if (r.focused) {
-      row |= theme().files_focused;
+      row |= color(theme().files_focused_empty) | theme().files_focused;
       if (r.is_menu_focused) row |= ftxui::focus;
       else row |= ftxui::select;
     }

@@ -45,6 +45,8 @@ struct Theme {
   ftxui::Color
     default_fg,
     default_bg,
+    files_focused_full,
+    files_focused_empty,
     file_perm_exe,
     file_status_error,
     file_file_not_found,

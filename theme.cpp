@@ -29,7 +29,9 @@ Theme::Theme() {
   files_filter_search = color(Color::Plum2) | bgcolor(Color::GrayDark);
   files_border        = borderStyled(Color::DarkOliveGreen3Ter);
   files_selected      = color(Color::Gold1) | bold;
-  files_focused       = color(Color::DarkOliveGreen2) | inverted | bold;
+  files_focused       = bold;
+  files_focused_full  = Color::DarkGreen;
+  files_focused_empty = Color::DarkSeaGreen4;
 
   files_warning = color(Color::OrangeRed1);
   files_symlink = dim;

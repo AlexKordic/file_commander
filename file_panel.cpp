@@ -67,8 +67,9 @@ std::function<Element(RowInfo&)> filelist_transform() {
       n    = text(data.filename_ref());
       size = coloredInt(data.size());
     }
-    n = n | xflex_grow | bgGaugeLeft(float(data.size()) / r.max_size);
-    if (r.focused) n |= theme().files_focused;
+    if (r.focused) n = n | xflex_grow | bgGaugeLeft(float(data.size()) / r.max_size, theme().files_focused_full, theme().files_focused_empty) | theme().files_focused;
+    else n = n | xflex_grow | bgGaugeLeft(float(data.size()) / r.max_size);
+    // if (r.focused) n |= theme().files_focused;
     if (r.selected) n |= theme().files_selected;
     if (!r.focused && !r.selected) n |= filetype_color(data);
 
