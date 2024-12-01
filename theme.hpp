@@ -29,6 +29,7 @@ struct Theme {
     key_select_all,
     key_enter_dir,
     key_leave_dir,
+    key_refresh_dir,
     key_target_dir_to_focused_item_right,
     key_target_dir_to_focused_item_left,
     key_clear_errors,

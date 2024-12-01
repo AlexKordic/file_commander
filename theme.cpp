@@ -15,6 +15,7 @@ Theme::Theme() {
   key_clear_selection      = Event::Escape;
   key_enter_dir            = Event::Return;
   key_leave_dir            = Event::Character("?");
+  key_refresh_dir          = Event::CtrlR;
   key_select_all           = Event::CtrlA;
   key_clear_errors         = Event::Escape;
   key_toggle_error_details = Event::CtrlE;

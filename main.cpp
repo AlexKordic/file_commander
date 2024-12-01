@@ -330,6 +330,14 @@ class FileCommander : public DialogOverlay {
       }
       return true;
     }
+    if (event == theme().key_refresh_dir) {
+      if (left.navigation->Focused()) {
+        left.dir.refresh();
+      } else {
+        right.dir.refresh();
+      }
+      return true;
+    }
     // Move target to selected dir.
     // Do not apply if dialog is active on the source panel. When rename is open we want ctrl+right/left to move cursor by entire word.
     const bool change_right = event == theme().key_target_dir_to_focused_item_right && left.navigation->Focused();
@@ -388,18 +396,18 @@ void set_console_size(int width, int height) { std::cout << "\e[8;" << height <<
 
 int main(int argc, char** argv) {
   // For debugging
-  // TODO: Improve performance of rendering large number of errors
   set_console_size(140, 60);
-  for (int i = 0; i < 1000; ++i) {
-    file_operations().report_error("DBG " + std::to_string(i)
-                                   + " Contrary to popular belief, Lorem Ipsum is not simply random text. It has roots in a piece of classical Latin literature from 45 BC, making it over 2000 years old. Richard McClintock, a Latin professor at Hampden-Sydney College in Virginia, looked up one of the more obscure Latin words, consectetur, from a Lorem Ipsum passage, and going through the cites of the word in classical literature, discovered the undoubtable source. Lorem Ipsum comes from sections 1.10.32 and 1.10.33 of "
-                                     "de Finibus Bonorum et Malorum"
-                                     " (The Extremes of Good and Evil) by Cicero, written in 45 BC. This book is a treatise on the theory of ethics, very popular during the Renaissance. The first line of Lorem Ipsum, "
-                                     "Lorem ipsum dolor sit amet.."
-                                     ", comes from a line in section 1.10.32");
-  }
+  // -------------
 
   auto screen = ScreenInteractive::Fullscreen();
+
+  // std::thread([&]() {
+  //   for (int i = 0; true; ++i) {
+  //     std::this_thread::sleep_for(std::chrono::seconds(1));
+  //     file_operations().report_error("[LIVE DBG] " + std::to_string(i) + " single line item");
+  //     screen.Post(Event::Custom);
+  //   }
+  // }).detach();
 
   auto cwd        = boost::filesystem::current_path();
   auto left_path  = argc > 1 ? argv[1] : cwd;
