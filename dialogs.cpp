@@ -681,6 +681,7 @@ ToClipboardDialog::ToClipboardDialog(PanelSharedState::P d) : Dialog(std::move(d
 }
 
 void ToClipboardDialog::OnShow() {
+  app->action.arguments->use_focused_as_alternative();
   items_copied                          = 0;
   std::vector<Filepath>& selected       = app->action.arguments->selected;
   int                    selected_count = selected.size();
