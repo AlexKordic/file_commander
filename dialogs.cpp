@@ -701,6 +701,10 @@ void ToClipboardDialog::OnShow() {
       text += "\n";
     }
   }
+  if (!text.empty() && text.back() == '\n') {
+    // remove last newline
+    text.pop_back();
+  }
   // copy to clipboard
   Err e = push_to_clipboard(text);
   if (e.ok()) items_copied = selected.size();
