@@ -337,9 +337,25 @@ int main_file_list() {
   return 0;
 }
 
+// namespace Playground {
+  
+// struct DataSource {
+//   int64_t item_count = 0;
+//   int64_t focused_item_index = 0;
+// };
+
+// }
+
+int main_datasource() {
+  // ftxui::Menu();
+  return 0;
+}
+
 int main() {
   // return main_multicursor();
   // return main_filecopy_progress();
   // return main_yflex();
-  return main_file_list();
+  // return main_file_list();
+
+  return main_datasource();
 }

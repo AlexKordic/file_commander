@@ -1,8 +1,9 @@
 
 #include "dialogs.hpp"
 #include "bfs.hpp"
-
 #include "commander.hpp"
+#include "file_io_jobs.hpp"
+#include "file_panel.hpp"
 #include "log.hpp"
 #include "shared_state.hpp"
 #include "theme.hpp"
@@ -11,6 +12,7 @@
 #include <boost/filesystem/operations.hpp>
 #include <boost/system/detail/error_code.hpp>
 
+#include <cstdint>
 #include <ftxui/component/component.hpp>
 #include <ftxui/component/screen_interactive.hpp>
 #include <ftxui/dom/elements.hpp>
@@ -31,9 +33,11 @@ std::string time_to_string(double time);
 namespace ftxui {
 
 Element screen_render_time() {
-  const double seconds = ScreenInteractive::Active()->LastFrameTime();
-  const int    ms      = std::lround(1000.0 * seconds);
-  auto         e       = text(" " + std::to_string(ms) + "ms ");
+  double seconds = 0;
+  auto   screen  = ScreenInteractive::Active();
+  if (screen) seconds = screen->LastFrameTime();
+  const int ms = std::lround(1000.0 * seconds);
+  auto      e  = text(" " + std::to_string(ms) + "ms ");
   if (ms > 500) {
     e = e | bgcolor(theme().debuginfo_colors[3]);
   } else if (ms > 120) {
@@ -66,6 +70,164 @@ std::function<Element(const EntryState& state)> text_menuitem_transform() {
   };
 }
 
+// using GetIndex = std::function<int64_t()>;
+
+std::function<bool(int64_t&, int64_t)> filelist_move_id_by(PanelSharedState::P app) {
+  return [state = app](int64_t& index, int64_t offset) -> bool {
+    int64_t old = index;
+    index       = state->dir->offset_vissible(index, offset);
+    return old != index;
+  };
+}
+
+std::function<int64_t(int64_t)> filelist_count_items_before(PanelSharedState::P app) {
+  return [state = app](int64_t index) -> int64_t {
+    // TODO: optimize by using boost interval container https://www.boost.org/doc/libs/1_86_0/libs/icl/doc/html/index.html
+    if (index > state->dir->items.size()) return state->dir->items.size();
+    int64_t count = 0;
+    int64_t total = std::min(index, int64_t(state->dir->items.size()));
+    for (int64_t i = 0; i < total; i++) {
+      if (state->dir->items.at(i).visible()) count++;
+    }
+    return count;
+  };
+}
+
+std::function<Element(DSRenderContext&)> filelist_transform(PanelSharedState::P app) {
+  return [state = app](DSRenderContext& ctx) -> Element {
+    if (ctx.id < 0 || ctx.id >= state->dir->items.size()) { return text("<invalid index>"); }
+    const int64_t  largest_item_bytes = state->dir->stats().largest_item_bytes;
+    const DirItem& data               = state->dir->items.at(ctx.id);
+    const bool     selected           = data.selected();
+
+    Element n;
+    Element size;
+    if (data.is_dir()) {
+      n    = text("/" + data.filename_ref());
+      size = text("");
+    } else {
+      n    = text(data.filename_ref());
+      size = coloredInt(data.size());
+    }
+    float     size_ratio = float(data.size()) / largest_item_bytes;
+    Decorator highlight  = bgGaugeLeft(size_ratio);
+    if (ctx.focused) {
+      if (ctx.component_focused) {
+        highlight = bgGaugeLeft(size_ratio, theme().files_focused_full, theme().files_focused_empty) | theme().files_focused;
+      } else {
+        highlight = bgGaugeLeft(size_ratio, theme().files_unfocused_full, theme().files_unfocused_empty) | theme().files_focused;
+      }
+    }
+    n = n | xflex_grow | highlight;
+    if (selected) n |= theme().files_selected;
+    if (!ctx.focused && !selected) n |= filetype_color(data);
+
+    Element t = text(data.get_time());
+    if (selected) t |= theme().files_selected;
+
+    Element row = hbox({std::move(n), std::move(size), separatorLight(), std::move(t)});
+    if (ctx.focused) {
+      if (ctx.focused) row |= ftxui::focus;
+      else row |= ftxui::select;  // TODO: ftxui::select does nothing in our case, decorate background somehow
+    }
+    if (data.symlink_ref() || data.warning_ref()) {
+      Elements rows = {std::move(row)};
+      if (data.symlink_ref()) { rows.push_back(text(" -> " + data.symlink_ref()->native()) | theme().files_symlink); }
+      if (data.warning_ref()) { rows.push_back(text(*data.warning_ref()) | theme().files_warning); }
+      row = vbox(std::move(rows));
+    }
+    if (ctx.hovered) { row |= theme().files_hovered; }
+    return std::move(row);
+  };
+}
+
+void setup_filelist_datasource(PanelSharedState::P app, DataSource& data_source) {
+  data_source.dataset_size       = [state = app]() -> DataSize { return {state->dir->stats().items_visible, 0, state->dir->stats().items_total - 1}; };
+  data_source.move_id_by         = filelist_move_id_by(app);
+  data_source.count_items_before = filelist_count_items_before(app);
+  data_source.transform          = filelist_transform(app);
+}
+
+bool filelist_handle_commands(PanelSharedState* app, DataSource* data_source, DSEventContext& ctx) {
+  if (ctx.event == theme().key_files_select) {
+    app->dir->item_toggle_select(data_source->focused_id);
+    data_source->focused_id = app->dir->next_visible(data_source->focused_id);
+    return true;
+  }
+  if (ctx.event == theme().key_clear_selection) {
+    app->dir->clear_selection();
+    return true;
+  }
+  if (ctx.event == theme().key_select_all) {
+    app->dir->select_all();
+    return true;
+  }
+  if (ctx.event == theme().key_leave_dir) {
+    const Filepath old_path   = app->dir->path;
+    const Filepath parent_dir = app->dir->path.parent_path();
+    app->move_to(parent_dir);
+    data_source->focused_id = app->dir->offset_vissible(0, 0);
+    app->filter_txt.clear();
+    // find our old_path and set it as focused
+    for (int i = 0; i < app->dir->items.size(); i++) {
+      const DirItem& item = app->dir->items.at(i);
+      if (item.path_ref() == old_path) {
+        data_source->focused_id = i;
+        break;
+      }
+    }
+    return true;
+  }
+  if (ctx.event == theme().key_enter_dir) {
+    if (app->dir->items.empty()) return false;
+    DirItem& where = app->dir->items.at(data_source->focused_id);
+    if (where.is_dir()) {
+      Filepath p = where.path_ref();
+      app->move_to(p);
+      data_source->focused_id = app->dir->offset_vissible(0, 0);
+      app->filter_txt.clear();
+      return true;
+    }
+    return false;
+  }
+
+  // check for registered actions
+  for (const auto& action : commands().available) {
+    if (ctx.event == action.key) {
+      app->action.dialog            = action.dialog;
+      app->action.arguments         = app->dir->take_selected();
+      app->action.arguments->origin = app->dir->path;
+      const bool no_items           = app->dir->items.empty();
+      if (no_items) {
+        // no items for selected to point to
+        app->action.arguments->focused = Filepath();
+      } else {
+        app->action.arguments->focused = app->dir->items.at(data_source->focused_id).path_ref();
+      }
+      app->action.show_dialog();
+      return true;
+    }
+  }
+  return false;
+}
+
+bool filelist_handle_filter(PanelSharedState* app, DataSource* data_source, DSEventContext& ctx) {
+  if (ctx.handled) return true;
+  static const Event forbidden_events[]  = {Event::ArrowDown, Event::ArrowUp};
+  static const auto  b_                  = std::begin(forbidden_events);
+  static const auto  e_                  = std::end(forbidden_events);
+  const bool         dont_send_to_filter = std::find(b_, e_, ctx.event) != e_;
+  if (dont_send_to_filter) return false;
+
+  // let the filter handle key events
+  const bool filter_changed = app->filter->OnEvent(ctx.event);
+  if (filter_changed) {
+    app->dir->apply_filter(app->filter_txt);
+    data_source->move_id_by(data_source->focused_id, 0);
+  }
+  return filter_changed;
+}
+
 InputOption filelist_filter_opt(int& filter_cursor_pos) {
   InputOption input_opt = InputOption::Default();
   input_opt.multiline   = false;
@@ -90,20 +252,47 @@ template <typename THIS> std::function<bool(Event e)> close_on_esc(THIS* self) {
   };
 }
 
+Decorator filetype_color(const DirItem& item) {
+  if (item.is_dir()) return color(theme().file_directory_file);
+  Color base = theme().file_type(item.type());
+  if (item.is_exe()) { return color(Color::Interpolate(0.5, base, theme().file_perm_exe)); }
+  return color(base);
+}
+
 //
 // Files
 //
 
-Files::Files(PanelSharedState::P s, RedrawUI r) : Dialog(std::move(s)), redraw_ui(r) {
+Files::Files(PanelSharedState::P s) : Dialog(std::move(s)) {
   InputOption  input_opt = filelist_filter_opt(filter_cursor_pos);
   ButtonOption ascii_button;
   ascii_button.transform = ascii_button_transform();
 
-  app->filter = Input(&filter_txt, &(app->dir->path_txt), input_opt) | showInputCursor(&filter_cursor_pos);
-  files       = fileList(app, &filter_txt, redraw_ui);
-  sort_name   = Button("Name", [dir = app->dir] { dir->sort_toggle_name_direction(); }, ascii_button);
-  sort_size   = Button("Size", [dir = app->dir] { dir->sort_toggle_size_direction(); }, ascii_button);
-  sort_time   = Button("Date", [dir = app->dir] { dir->sort_toggle_time_direction(); }, ascii_button);
+  app->filter            = Input(&app->filter_txt, &(app->dir->path_txt), input_opt) | showInputCursor(&filter_cursor_pos);
+  app->get_focused_index = [this]() -> int { return _data_source.focused_id; };
+  app->set_focused_index = [this](int index) { _data_source.focused_id = this->app->dir->offset_vissible(index, 0); };
+  app->get_focused_item  = [this]() -> Filepath const* {
+    _data_source.focused_id = this->app->dir->offset_vissible(_data_source.focused_id, 0);
+    auto focused_index      = app->dir->offset_vissible(_data_source.focused_id, 0);
+    if (app->dir->items.empty()) return nullptr;
+    auto& focused = app->dir->items.at(focused_index);
+    return &focused.path_ref();
+  };
+  app->set_min_y = [this](int y) { _data_source.min_y = y; };
+
+  files     = DBMenu(&_data_source);
+  sort_name = Button("Name", [dir = app->dir] { dir->sort_toggle_name_direction(); }, ascii_button);
+  sort_size = Button("Size", [dir = app->dir] { dir->sort_toggle_size_direction(); }, ascii_button);
+  sort_time = Button("Date", [dir = app->dir] { dir->sort_toggle_time_direction(); }, ascii_button);
+
+  setup_filelist_datasource(app, _data_source);
+
+  _data_source.on_event = [app = app, data_source = &_data_source](DSEventContext ctx) -> bool {
+    // handle commands first
+    bool handled = filelist_handle_commands(app.get(), data_source, ctx);
+    // then handle filter
+    return handled || filelist_handle_filter(app.get(), data_source, ctx);
+  };
 
   auto render_selection = [state = app, sort_name = sort_name, sort_size = sort_size, sort_time = sort_time]() -> Element {
     std::string prefixes[3] = {"  ", "  ", "  "};
@@ -133,9 +322,15 @@ Files::Files(PanelSharedState::P s, RedrawUI r) : Dialog(std::move(s)), redraw_u
     return hbox(std::move(children));
   };
   debug_info = [this]() -> Element { return text(" " + std::to_string(app->render_count) + " "); };
+  // debug_info = [this]() -> Element { return hbox({
+  //   text(std::to_string(_data_source.focused_id) + "[" + std::to_string(_data_source.real_start_id) + "]"),
+  //   separator(),
+  //   text(std::to_string(_data_source.items_visible) + "/" + std::to_string(_data_source.v.items_total)),
+  // }); };
 
   navigation = Container::Vertical({Container::Horizontal({sort_name, sort_size, sort_time}), files});
   renderer   = Renderer(navigation, [app = app, render_selection = render_selection, files = files, this]() -> Element {
+    app->render_count++;
     return vbox({
       hbox({text(" "), app->filter->Render() | ftxui::focus | ftxui::select, this->debug_info()}),
       render_selection(),
@@ -339,7 +534,7 @@ void RenameDialog::cancel() { app->action.close_dialog(); }
 /*
   There is no progress interface in filesystem::copy, see playground.cpp for workaround
 */
-CopyDialog::CopyDialog(PanelSharedState::P d, RedrawUI r) : Dialog(std::move(d)), redraw_ui(r) {
+CopyDialog::CopyDialog(PanelSharedState::P d) : Dialog(std::move(d)) {
   // [_] follow links `cp -r -L`: always follow symbolic links in SOURCE
   input_destination_path = Input(&destination_path, "", filelist_filter_opt(destination_cursor_pos));
 
@@ -351,11 +546,16 @@ CopyDialog::CopyDialog(PanelSharedState::P d, RedrawUI r) : Dialog(std::move(d))
   op_follow_links            = Checkbox("Follow Links in Source", &b_follow_links, checkbox_opt);
   op_preserve_relative_links = Checkbox("Keep relative links", &b_preserve_relative_links, checkbox_opt);
 
-  _virtual_dir                       = std::make_unique<Dir>();
-  _operation_state                   = std::make_shared<PanelSharedState>(_virtual_dir.get());
-  _operation_state->commands_enabled = false;
-  _operation_state->filter           = Input(&_filter_text, &(_virtual_dir->path_txt), filelist_filter_opt(filter_cursor_pos));
-  _files                             = fileList(_operation_state, &_filter_text, redraw_ui);
+  _virtual_dir             = std::make_unique<Dir>();
+  _operation_state         = std::make_shared<PanelSharedState>(_virtual_dir.get());
+  _operation_state->filter = Input(&_operation_state->filter_txt, &(_virtual_dir->path_txt), filelist_filter_opt(filter_cursor_pos));
+
+  _files = DBMenu(&_data_source);
+  setup_filelist_datasource(_operation_state, _data_source);
+  _data_source.on_event = [app = _operation_state, data_source = &_data_source](DSEventContext ctx) -> bool {
+    // handle filter only
+    return filelist_handle_filter(app.get(), data_source, ctx);
+  };
 
   navigation = CatchEvent(Container::Vertical({
                             input_destination_path,
@@ -376,8 +576,6 @@ void CopyDialog::cancel() {
 void CopyDialog::run_copy() {
   auto job = std::make_shared<JobSpec>(JobSpec::Type::COPY, std::move(_virtual_dir->items));
   _clear_operation_state();
-  // whenever job updates, redraw UI
-  job->updated = this->redraw_ui;
   file_operations().add_job(job);
   app->dir->clear_selection();
   app->action.close_dialog();
@@ -536,7 +734,7 @@ void CopyDialog::_queue_files(const std::vector<DirItem>& files, Filepath destin
 // DeleteDialog
 //
 
-DeleteDialog::DeleteDialog(PanelSharedState::P s, RedrawUI r) : Dialog(std::move(s)), redraw_ui(r) {
+DeleteDialog::DeleteDialog(PanelSharedState::P s) : Dialog(std::move(s)) {
   ButtonOption ascii_button;
   ascii_button.transform = ascii_button_transform();
   button_ok              = Button("DELETE", [this] { this->ok(); }, ascii_button);
@@ -589,9 +787,7 @@ void DeleteDialog::ok() {
   // Delete doesn't have modes of operation like Copy. Queue all selected items, ThreadedFileJobs will handle recursion.
   std::vector<DirItem> items;
   for (auto& p : app->action.arguments->selected) { items.emplace_back(p); }
-  auto job     = std::make_shared<JobSpec>(JobSpec::Type::DELETE, std::move(items));
-  // whenever job updates, redraw UI
-  job->updated = this->redraw_ui;
+  auto job = std::make_shared<JobSpec>(JobSpec::Type::DELETE, std::move(items));
   file_operations().add_job(job);
   app->dir->clear_selection();
   app->action.close_dialog();
@@ -603,7 +799,7 @@ void DeleteDialog::cancel() { app->action.close_dialog(); }
 // MoveDialog
 //
 
-MoveDialog::MoveDialog(PanelSharedState::P s, RedrawUI r) : Dialog(std::move(s)), redraw_ui(r) {
+MoveDialog::MoveDialog(PanelSharedState::P s) : Dialog(std::move(s)) {
   ButtonOption ascii_button;
   ascii_button.transform = ascii_button_transform();
   button_ok              = Button(" MOVE ", [this] { this->ok(); }, ascii_button);
@@ -661,9 +857,7 @@ void MoveDialog::ok() {
     auto& inserted = items.emplace_back(p);
     inserted._set_symlink_target(destination_path / p.filename());
   }
-  auto job     = std::make_shared<JobSpec>(JobSpec::Type::MOVE, std::move(items));
-  // whenever job updates, redraw UI
-  job->updated = this->redraw_ui;
+  auto job = std::make_shared<JobSpec>(JobSpec::Type::MOVE, std::move(items));
   file_operations().add_job(job);
   app->dir->clear_selection();
   app->action.close_dialog();
@@ -747,38 +941,45 @@ Nyi::Nyi(PanelSharedState::P d) : Dialog(std::move(d)) {
 // ErrorListDialog
 //
 
-ErrorListDialog::ErrorListDialog(std::function<void()> close_dialog, RedrawUI redraw_ui) : Dialog(nullptr), close_dialog(close_dialog), _redraw_ui(redraw_ui) {
+ErrorListDialog::ErrorListDialog(std::function<void()> close_dialog) : Dialog(nullptr), close_dialog(close_dialog) {
   ButtonOption ascii_button;
   ascii_button.transform = ascii_button_transform();
 
-  button_hide                        = Button(" Hide ", close_dialog, ascii_button);
-  button_clear                       = Button(" Clear ", [this] { this->clear(); }, ascii_button);
-  _virtual_dir                       = std::make_unique<Dir>();
-  _operation_state                   = std::make_shared<PanelSharedState>(_virtual_dir.get());
-  _operation_state->commands_enabled = false;
-  _operation_state->set_min_y(theme().errorlist_min_y);
-  _operation_state->filter    = Input(&_filter_text, &(_virtual_dir->path_txt), filelist_filter_opt(filter_cursor_pos));
-  _operation_state->transform = [](RowInfo& r) -> Element {
-    auto row = hbox({text(r.data->path_ref().native()), separator(), paragraph(r.data->filename_ref())});
-    if (r.focused) {
-      row |= color(theme().files_focused_empty) | theme().files_focused;
-      if (r.is_menu_focused) row |= ftxui::focus;
-      else row |= ftxui::select;
+  button_hide                     = Button(" Hide ", close_dialog, ascii_button);
+  button_clear                    = Button(" Clear ", [this] { this->clear(); }, ascii_button);
+  _data_source.dataset_size       = []() -> DataSize { return file_operations().dataset_size(); };
+  _data_source.count_items_before = [this](int64_t id) -> int64_t { return file_operations().count_items_before(id); };
+  _data_source.move_id_by         = [this](int64_t& id, int64_t delta) -> bool { return file_operations().move_id_by(id, delta); };
+  _data_source.on_event = [this](DSEventContext c) -> bool {
+    if (c.event == Event::Return) {
+      this->button_hide->TakeFocus();
+      return true;
     }
-    row |= reflect(*r.box);
+    return c.handled;
+  };
+  _data_source.transform = [this](DSRenderContext& c) -> Element {
+    auto   item = file_operations().get_error(c.id);
+    auto   row  = hbox({text(time_to_string(item.time)), separator(), text(item.message)});
+    if (c.focused) {
+      if (c.component_focused) {
+        row |= color(theme().files_focused_empty) | ftxui::focus;
+      } else {
+        row |= color(theme().files_unfocused_empty) | ftxui::focus;
+      }
+    }
     return std::move(row);
   };
-  _files     = fileList(_operation_state, &_filter_text, redraw_ui);
+  _errors    = DBMenu(&_data_source);
   navigation = CatchEvent(Container::Vertical({
                             Container::Horizontal({button_hide, button_clear}),
                             // Following are path items to delete
-                            _files,
+                            _errors,
                           }),
                           close_on_esc(this));
   renderer   = Renderer(navigation, [this]() -> Element {
     // add items in render method
-    refresh_items();
-    return window(hbox({text(" Error History [" + std::to_string(_virtual_dir->items.size()) + "]"), screen_render_time()}) | bold | hcenter,
+    auto s = file_operations().dataset_size();
+    return window(hbox({text(" Error History [" + std::to_string(s.total) + "]"), screen_render_time()}) | bold | hcenter,
                     vbox({
                     hbox({
                       button_hide->Render() | hcenter | xflex_grow,
@@ -786,39 +987,27 @@ ErrorListDialog::ErrorListDialog(std::function<void()> close_dialog, RedrawUI re
                       button_clear->Render() | hcenter | xflex_grow,
                     }),
                     separator(),
-                    _files->Render() | theme().files_border,
+                    _errors->Render() | theme().files_border,
                   }),
                     BorderStyle::DOUBLE);
   });
 }
 
-void ErrorListDialog::refresh_items() {
-  using boost::filesystem::status_error;
-  using boost::filesystem::perms::no_perms;
-  std::deque<Perun::JobErrorInfo> new_items = file_operations().get_errors(latest_error_time);
-  if (new_items.size() > 0) {
-    // new items are added at the start of the list and focused index stays on same, old, item
-    int focused = _operation_state->get_focused_index() + new_items.size();
-    latest_error_time = new_items.front().time;
-    auto old_items    = std::move(_virtual_dir->items);
-    _virtual_dir->items.clear();
-    _virtual_dir->items.reserve(new_items.size() + old_items.size());
-    for (auto& err : new_items) _virtual_dir->items.push_back(DirItem(time_to_string(err.time), err.message, status_error, no_perms, 0, 0));
-    for (auto& err : old_items) _virtual_dir->items.push_back(err);
-    _operation_state->set_focused_index(focused);
-  }
-  _operation_state->set_min_y(std::min(theme().errorlist_min_y, _virtual_dir->items.size()));
-}
-
 void ErrorListDialog::clear() {
   file_operations().clear_errors();
-  _virtual_dir->items.clear();
   this->close_dialog();
 }
 
 void ErrorListDialog::cancel() { this->close_dialog(); }
 
-void ErrorListDialog::OnShow() {}
+void ErrorListDialog::OnShow() {
+  int  dimy   = 50;
+  auto screen = ScreenInteractive::Active();
+  if (screen) dimy = screen->dimy();
+  _data_source.min_y      = std::round(theme().errorlist_height_screen_portion * dimy);
+  const bool initial_show = _data_source.focused_id == 0;
+  if (initial_show) { _data_source.focused_id = _data_source.dataset_size().starting_id; }
+}
 
 //
 // Commands

@@ -25,13 +25,16 @@ Theme::Theme() {
   size_gauge_full  = Color::MediumPurple4;
   size_gauge_empty = Color::Grey0;
 
-  files_path          = color(Color::LightGoldenrod2Ter) | bgcolor(Color::GrayDark);
-  files_filter_search = color(Color::Plum2) | bgcolor(Color::GrayDark);
-  files_border        = borderStyled(Color::DarkOliveGreen3Ter);
-  files_selected      = color(Color::Gold1) | bold;
-  files_focused       = bold;
-  files_focused_full  = Color::DarkGreen;
-  files_focused_empty = Color::DarkSeaGreen4;
+  files_path            = color(Color::LightGoldenrod2Ter) | bgcolor(Color::GrayDark);
+  files_filter_search   = color(Color::Plum2) | bgcolor(Color::GrayDark);
+  files_border          = borderStyled(Color::DarkOliveGreen3Ter);
+  files_selected        = color(Color::Gold1) | bold;
+  files_hovered         = inverted;  // bgcolor(Color(25,25,25,100));
+  files_focused         = bold;
+  files_focused_full    = Color::DarkGreen;
+  files_focused_empty   = Color::DarkSeaGreen4;
+  files_unfocused_full  = Color::Grey19;
+  files_unfocused_empty = Color::Grey27;
 
   files_warning = color(Color::OrangeRed1);
   files_symlink = dim;

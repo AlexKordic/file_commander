@@ -1,12 +1,14 @@
 
 #include "file_io_jobs.hpp"
+#include "fifo_queue.hpp"
+#include "log.hpp"
+
+#include <ftxui/component/screen_interactive.hpp>
+
 #include <condition_variable>
 #include <cstdint>
 #include <mutex>
 #include <thread>
-
-#include "fifo_queue.hpp"
-#include "log.hpp"
 
 using boost::filesystem::copy_options;
 using boost::system::error_code;
@@ -15,6 +17,13 @@ namespace Perun {
 
 constexpr int64_t LARGE_FILE_SIZE_FROM     = 10 * 1024 * 1024;  // 10MB
 constexpr auto    PROGRESS_UPDATE_INTERVAL = std::chrono::milliseconds(200);
+
+JobInterface::JobInterface() {
+  updated = []() {
+    auto screen = ftxui::ScreenInteractive::Active();
+    if (screen) screen->PostEvent(ftxui::Event::Custom);
+  };
+}
 
 //
 // Calculate progress and throughput
@@ -240,8 +249,8 @@ class ThreadedFileJobs : public FileJobs {
 
   std::deque<JobErrorInfo> get_errors(int count) override {
     std::deque<JobErrorInfo> r;
-    std::lock_guard lock(_m);
-    int i = 0;
+    std::lock_guard          lock(_m);
+    int                      i = 0;
     for (auto it = _errors.rbegin(); it != _errors.rend(); ++it, ++i) {
       if (i >= count) break;
       r.push_back(*it);
@@ -249,24 +258,42 @@ class ThreadedFileJobs : public FileJobs {
     return r;
   }
 
-  std::deque<JobErrorInfo> get_errors(double after_this_time) override {
-    std::deque<JobErrorInfo> r;
+  JobErrorInfo get_error(int64_t i) override {
     std::lock_guard lock(_m);
-    for (auto it = _errors.rbegin(); it != _errors.rend(); ++it) {
-      if (it->time <= after_this_time) break;
-      r.push_back(*it);
-    }
-    return r;
+    if (_errors.empty()) return JobErrorInfo();
+    return _errors.at(i);
+  }
+
+  ftxui::DataSize dataset_size() override {
+    std::lock_guard lock(_m);
+    return {static_cast<int64_t>(_errors.size()), 0, static_cast<int64_t>(_errors.size() - 1)};
+  }
+  int64_t count_items_before(int64_t i) override {
+    return i;
+  }
+  bool move_id_by(int64_t& i, int64_t offset) override {
+    const int64_t initial = i;
+    const int64_t size = _errors.size();
+    i = std::max(0LL, std::min(i + offset, size - 1));
+    // return false when offset would go out of bounds.
+    return i != initial;
   }
 
   void report_error(std::string message) override {
-    std::lock_guard lock(_m);
-    _errors.emplace_back(std::move(message), now());
+    constexpr double epsilon = 0.00001;
+    std::lock_guard  lock(_m);
+    double           time = now();
+    if (!_errors.empty() && time <= _errors.back().time) {
+      // Creating always increasing time order, giving each error unique time
+      time = _errors.back().time + epsilon;
+    }
+    _errors.emplace_back(std::move(message), time);
   }
 
   void clear_errors() override {
     std::lock_guard lock(_m);
     _errors.clear();
+    _err_last_access_index = 0;
   }
 
  private:
@@ -330,7 +357,7 @@ class ThreadedFileJobs : public FileJobs {
       FifoError err = files.pop(item);
       if (err == FifoError::Destroyed) { break; }
       boost::filesystem::remove(item.path_ref(), ec);
-      if (ec.failed()) { 
+      if (ec.failed()) {
         file_operations().report_error("[Delete] " + item.path_ref().native());
         std::lock_guard lock(job->_m);
         job->report_error(item, "Failed to delete file: " + ec.message());
@@ -452,6 +479,7 @@ class ThreadedFileJobs : public FileJobs {
   std::shared_ptr<JobSpec>                   _job;
   Perun::FifoQueue<std::shared_ptr<JobSpec>> _queue;
   std::deque<JobErrorInfo>                   _errors;
+  int64_t                                    _err_last_access_index = 0;
 
   ProgressMonitor _progress_monitor;
 

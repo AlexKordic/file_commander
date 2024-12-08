@@ -16,7 +16,7 @@ struct Theme {
   Theme();
 
   size_t copy_files_min_y = 50;
-  size_t errorlist_min_y = 50;
+  float  errorlist_height_screen_portion = 0.9;
   double clear_errors_command_sequence = 1.0;
   int    clear_errors_command_repeat_count = 3;
   int    max_errors_to_show = 3; // in FileCommander error quick view
@@ -47,6 +47,8 @@ struct Theme {
     default_bg,
     files_focused_full,
     files_focused_empty,
+    files_unfocused_full,
+    files_unfocused_empty,
     file_perm_exe,
     file_status_error,
     file_file_not_found,
@@ -66,6 +68,7 @@ struct Theme {
     files_border,
     files_selected,
     files_focused,
+    files_hovered,
     files_warning,
     files_symlink,
     fileskind_dir,

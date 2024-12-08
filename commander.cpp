@@ -1,6 +1,7 @@
 
 #include "commander.hpp"
 #include "file_io_jobs.hpp"
+#include "log.hpp"
 
 #include <boost/filesystem/file_status.hpp>
 #include <boost/system/detail/error_code.hpp>
@@ -10,7 +11,9 @@
 #include <functional>
 #include <memory>
 #include <optional>
+#include <sstream>
 #include <vector>
+
 using namespace boost::filesystem;
 using namespace boost::system;
 
@@ -56,9 +59,7 @@ std::string time_to_string(double _w_time) {
   }
 }
 
-std::string DirItem::get_time() const {
-  return time_to_string(_w_time);
-}
+std::string DirItem::get_time() const { return time_to_string(_w_time); }
 
 std::string DirItem::to_string() const {
   if (_type == Type::directory_file) return _filename;

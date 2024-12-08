@@ -2,8 +2,6 @@
 #define _PERUN_FC_DIALOGS_
 
 #include "commander.hpp"
-#include "file_io_jobs.hpp"
-#include "file_panel.hpp"
 #include "shared_state.hpp"
 
 #include <ftxui/component/component.hpp>
@@ -12,11 +10,11 @@
 #include <memory>
 #include <string>
 
-using RedrawUI = std::function<void()>;
-
 namespace ftxui {
 
 Element screen_render_time();
+
+Decorator filetype_color(const DirItem& item);
 
 struct Command {
   Event       key;
@@ -44,14 +42,15 @@ struct Dialog {
 };
 
 struct Files : Dialog {
-  Component   files;
-  std::string filter_txt;
-  Component   sort_name, sort_size, sort_time;
-  int         filter_cursor_pos = 0;
-  RedrawUI    redraw_ui;
+  Component files;
+  // std::string filter_txt;
+  Component sort_name, sort_size, sort_time;
+  int       filter_cursor_pos = 0;
 
-  explicit Files(PanelSharedState::P s, RedrawUI r);
+  explicit Files(PanelSharedState::P s);
   void OnShow() override {}
+
+  DataSource _data_source;
 
   std::function<Element()> debug_info;
 };
@@ -101,8 +100,7 @@ struct ToClipboardDialog : Dialog {
 };
 
 struct CopyDialog : Dialog {
-  RedrawUI redraw_ui;
-  CopyDialog(PanelSharedState::P data, RedrawUI r);
+  CopyDialog(PanelSharedState::P data);
   void OnShow() override;
 
   std::string destination_path;
@@ -114,8 +112,9 @@ struct CopyDialog : Dialog {
   int       filter_cursor_pos      = 0;
   int       destination_cursor_pos = 0;
 
-  Component _files;
-  int64_t   _bytes_total = 0;
+  DataSource _data_source;
+  Component  _files;
+  int64_t    _bytes_total = 0;
 
   bool b_follow_links            = false;
   // bool b_preserve_timestamps     = true;
@@ -127,7 +126,7 @@ struct CopyDialog : Dialog {
   void    cancel();
 
   PanelSharedState::P  _operation_state;
-  std::string          _filter_text;
+  // std::string          _filter_text;
   std::unique_ptr<Dir> _virtual_dir;  // enumerate items to copy
   void                 _clear_operation_state();
 
@@ -141,7 +140,7 @@ struct CopyDialog : Dialog {
 };
 
 struct MoveDialog : Dialog {
-  MoveDialog(PanelSharedState::P data, RedrawUI r);
+  MoveDialog(PanelSharedState::P data);
   void OnShow() override;
 
   int       selected = 0;
@@ -152,11 +151,10 @@ struct MoveDialog : Dialog {
   void                ok();
   void                cancel();
   PanelSharedState::P _operation_state;
-  RedrawUI            redraw_ui;
 };
 
 struct DeleteDialog : Dialog {
-  DeleteDialog(PanelSharedState::P s, RedrawUI r);
+  DeleteDialog(PanelSharedState::P s);
   void OnShow() override;
 
   int       selected = 0;
@@ -165,7 +163,6 @@ struct DeleteDialog : Dialog {
   Component button_close;
   void      ok();
   void      cancel();
-  RedrawUI  redraw_ui;
 
   PanelSharedState::P _operation_state;
 };
@@ -176,28 +173,17 @@ struct Nyi : Dialog {
 };
 
 struct ErrorListDialog : Dialog {
-  ErrorListDialog(std::function<void()> close_dialog, RedrawUI redraw_ui);
+  ErrorListDialog(std::function<void()> close_dialog);
   void OnShow() override;
   void cancel();
   void clear();
-  void refresh_items();
 
-  Component            button_hide;
-  Component            button_clear;
-  PanelSharedState::P  _operation_state;
-  std::string          _filter_text;
-  std::unique_ptr<Dir> _virtual_dir;  // enumerate items to copy
-  Component            _files;
-  double               latest_error_time = 0;
-  int                  filter_cursor_pos = 0;
+  Component button_hide;
+  Component button_clear;
+  Component _errors;
+  double    latest_error_time = 0;
 
-  RedrawUI                        _redraw_ui;
-
-  struct Dbg {
-    int height         = 0;
-    int start_index    = 0;
-    int items_produced = 0;
-  } dbg;
+  DataSource _data_source;
 
   std::function<void()> close_dialog;
 };

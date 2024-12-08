@@ -4,7 +4,8 @@
 An orthodox file manager. Exploring directories to run commands on selected files.
 
 Bugs:
-- instead of redraw() I could use Node::need_iteration=true ??
++ DataSource concept for vertical menu
++ instead of redraw() I could use active interactive screen
 - Copy dir into itself !!
 - MacOS mounted flash disk does not trigger inotify events.
   - external mkdir does not trigger inotify events.

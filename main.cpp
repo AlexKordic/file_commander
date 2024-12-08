@@ -78,11 +78,10 @@ class Panel : public DialogOverlay {
   TargetFunc get_target;
 
   ExecuteOnUiThread                 run_on_ui;
-  RedrawUI                          redraw_ui;
   std::unique_ptr<FileChangeFunnel> update_funnel;
   Perun::FifoQueue<UpdatedFiles>    pending_changes;
 
-  Panel(Filepath location, TargetFunc get_target, ExecuteOnUiThread e, RedrawUI r) : get_target(get_target), run_on_ui(e), redraw_ui(r) {
+  Panel(Filepath location, TargetFunc get_target, ExecuteOnUiThread e) : get_target(get_target), run_on_ui(e) {
     this->move_to(location);
     _state                      = std::make_shared<PanelSharedState>(&dir);
     navigation                  = Container::Tab({}, &_active_dialog);
@@ -92,15 +91,15 @@ class Panel : public DialogOverlay {
       _state->action.arguments->target = this->get_target(this);
       show_dialog(_state->action.dialog);
     };
-    _files         = std::make_shared<ftxui::Files>(_state, redraw_ui);
+    _files         = std::make_shared<ftxui::Files>(_state);
     _main_document = std::dynamic_pointer_cast<ftxui::Dialog>(_files);
     navigation->Add(_main_document->navigation);
     // register dialogs
     _overlay_dialogs["Mkdir"]           = std::make_shared<MkdirDialog>(_state);
     _overlay_dialogs["Rename"]          = std::make_shared<RenameDialog>(_state);
-    _overlay_dialogs["Copy"]            = std::make_shared<CopyDialog>(_state, redraw_ui);
-    _overlay_dialogs["Move"]            = std::make_shared<MoveDialog>(_state, redraw_ui);
-    _overlay_dialogs["Delete"]          = std::make_shared<DeleteDialog>(_state, redraw_ui);
+    _overlay_dialogs["Copy"]            = std::make_shared<CopyDialog>(_state);
+    _overlay_dialogs["Move"]            = std::make_shared<MoveDialog>(_state);
+    _overlay_dialogs["Delete"]          = std::make_shared<DeleteDialog>(_state);
     _overlay_dialogs["Find"]            = std::make_shared<Nyi>(_state);
     _overlay_dialogs["NameToClipboard"] = std::make_shared<ToClipboardDialog>(_state);
     _overlay_dialogs["PathToClipboard"] = std::make_shared<ToClipboardDialog>(_state);
@@ -236,7 +235,7 @@ class FileCommander : public DialogOverlay {
   int       _screen_dimx = 0;
   Component renderer;
 
-  FileCommander(Filepath l, Filepath r, ExecuteOnUiThread exec, RedrawUI redraw, std::function<int()> dimx) : left(l, get_target(), exec, redraw), right(r, get_target(), exec, redraw), _get_dimx(dimx) {
+  FileCommander(Filepath l, Filepath r, ExecuteOnUiThread exec, std::function<int()> dimx) : left(l, get_target(), exec), right(r, get_target(), exec), _get_dimx(dimx) {
     _close_dialog         = [this]() { close_dialog(); };
     auto global_shortcuts = [this](Event event) -> bool { return this->handle_global_shortcuts(event); };
     // Overlay dialogs on top of main document:
@@ -261,7 +260,7 @@ class FileCommander : public DialogOverlay {
     Component both_panels = CatchEvent(ResizableSplit(split), global_shortcuts);
 
     navigation->Add(both_panels);
-    _overlay_dialogs["ErrorList"] = std::make_shared<ErrorListDialog>(_close_dialog, redraw);
+    _overlay_dialogs["ErrorList"] = std::make_shared<ErrorListDialog>(_close_dialog);
     renderer                      = Renderer(navigation, [=, this]() -> Element {
       // TODO: different when single panel layout is active
       // check for resize:
@@ -396,11 +395,14 @@ void set_console_size(int width, int height) { std::cout << "\e[8;" << height <<
 
 int main(int argc, char** argv) {
   // For debugging
-  set_console_size(140, 60);
+  // set_console_size(140, 60);
   // -------------
 
   auto screen = ScreenInteractive::Fullscreen();
 
+  // for (int i = 0; i < 50; ++i) {
+  //   file_operations().report_error("[DBG] " + std::to_string(i) + " INITIAL single line item");
+  // }
   // std::thread([&]() {
   //   for (int i = 0; true; ++i) {
   //     std::this_thread::sleep_for(std::chrono::seconds(1));
@@ -417,9 +419,9 @@ int main(int argc, char** argv) {
     screen.Post(f);
     screen.Post(Event::Custom);
   };
-  auto          redraw = [&screen]() -> void { screen.Post(Event::Custom); };
-  auto          dimx   = [&screen]() -> int { return screen.dimx(); };
-  FileCommander app(left_path, right_path, exec, redraw, dimx);
+  // auto          redraw = [&screen]() -> void { screen.Post(Event::Custom); };
+  auto          dimx = [&screen]() -> int { return screen.dimx(); };
+  FileCommander app(left_path, right_path, exec, dimx);
 
   LogAdapter adapt_logs(screen);
 

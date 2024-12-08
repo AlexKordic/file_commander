@@ -4,8 +4,6 @@
 
 #include "bfs.hpp"
 #include "err.hpp"
-#include "fifo_queue.hpp"
-#include "log.hpp"
 
 #include <cstdint>
 #include <ctime>
@@ -115,6 +113,7 @@ class Dir {
   Orderby              order_by   = Orderby::NAME_ASC;
   int                  cursor_pos = 0;
 
+  // TODO: use boost accumulators
   struct Stats {
     int64_t items_selected     = 0;
     int64_t items_visible      = 0;

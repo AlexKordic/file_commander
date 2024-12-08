@@ -4,6 +4,8 @@
 #include "commander.hpp"
 #include "fifo_queue.hpp"
 
+#include <ftxui/component/component_options.hpp>
+
 #include <cstdint>
 #include <deque>
 #include <memory>
@@ -55,6 +57,8 @@ struct JobInterface {
   std::mutex            _m;
   // interface for updating UI
   std::function<void()> updated;
+
+  JobInterface();
 };
 
 // Specifies single operation to be performed on a set of files.
@@ -87,7 +91,9 @@ struct RunningJobsInfo {
 
 struct JobErrorInfo {
   std::string message;
-  double      time;
+  double      time = -1.0;
+
+  bool valid() const { return time != -1.0; }
 };
 
 // Manages a queue of file operation jobs to be performed in separate thread.
@@ -104,8 +110,12 @@ class FileJobs {
 
   virtual RunningJobsInfo get_running_job() = 0;
 
-  virtual std::deque<JobErrorInfo> get_errors(int count)              = 0;
-  virtual std::deque<JobErrorInfo> get_errors(double after_this_time) = 0;
+  virtual std::deque<JobErrorInfo> get_errors(int count) = 0;
+
+  virtual JobErrorInfo get_error(int64_t i) = 0;
+  virtual ftxui::DataSize dataset_size() = 0;
+  virtual int64_t count_items_before(int64_t i) = 0;
+  virtual bool move_id_by(int64_t& i, int64_t delta) = 0;
 
   virtual void report_error(std::string message) = 0;
   virtual void clear_errors()                    = 0;

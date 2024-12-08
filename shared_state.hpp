@@ -12,33 +12,34 @@ class Dir;
 class DirItem;
 struct CommandArgs;
 
-struct RowInfo {
-  const bool     is_menu_focused;
-  const float    max_size;
-  int            index    = 0;
-  bool           focused  = false;
-  bool           selected = false;
-  ftxui::Box*    box      = nullptr;
-  const DirItem* data     = nullptr;
+// struct RowInfo {
+//   const bool     is_menu_focused;
+//   const float    max_size;
+//   int            index    = 0;
+//   bool           focused  = false;
+//   bool           selected = false;
+//   ftxui::Box*    box      = nullptr;
+//   const DirItem* data     = nullptr;
 
-  RowInfo(bool menu_focused, float max_size);
-};
+//   RowInfo(bool menu_focused, float max_size);
+// };
 
 struct PanelSharedState {
   using P = std::shared_ptr<PanelSharedState>;
 
   Dir*             dir;
   ftxui::Component filter;
+  std::string      filter_txt;
   struct Action {
     std::shared_ptr<CommandArgs> arguments;
     std::string                  dialog;
     std::function<void()>        show_dialog;
     std::function<void()>        close_dialog;
   } action;
-  bool    commands_enabled = true;
+  // bool    commands_enabled = true;
   int64_t render_count     = 0;
 
-  std::function<ftxui::Element(RowInfo&)> transform;
+  // std::function<ftxui::Element(RowInfo&)> transform;
   std::function<void(Filepath)>           move_to;
   std::function<void(int)>                set_min_y;
   std::function<Filepath const*()>        get_focused_item;
