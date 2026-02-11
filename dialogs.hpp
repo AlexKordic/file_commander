@@ -4,11 +4,13 @@
 #include "commander.hpp"
 #include "shared_state.hpp"
 
+#include <cstdint>
 #include <ftxui/component/component.hpp>
 #include <ftxui/component/event.hpp>
 
 #include <memory>
 #include <string>
+#include <thread>
 
 namespace ftxui {
 
@@ -99,6 +101,63 @@ struct ToClipboardDialog : Dialog {
   Element   render();
 };
 
+enum class CopyConflict {
+  Replace,
+  Update,
+  Skip,
+};
+
+struct CopyDialog;
+
+struct CopyDiscoveryProgress {
+  int64_t byte_count  = 0;
+  int64_t file_count  = 0;
+  int64_t dir_count   = 0;
+  int64_t link_count  = 0;
+  int64_t error_count = 0;
+  std::string current_file;
+  std::string current_dir;
+};
+
+struct CopyDiscoveryProcess {
+  using P = std::shared_ptr<CopyDiscoveryProcess>;
+
+  CopyDiscoveryProgress get_progress();
+
+  bool         _running                 = true;
+  bool         _follow_links            = false;
+  bool         _preserve_relative_links = true;
+  CopyConflict _conflict                = CopyConflict::Replace;
+  DataSource   _data_source;
+  int64_t      _bytes_total = 0;
+  bool         _completed   = false;
+  Component    _files;
+
+  PanelSharedState::P  _state;
+  std::unique_ptr<Dir> _dir;
+  struct Visited {
+    DirItem  source;
+    Filepath destination;
+  };
+  std::vector<Visited>         _visited_dirs;
+  std::shared_ptr<CommandArgs> _input_paths;
+  Filepath                     _target;
+  std::thread                  _thread;
+  std::mutex                   _m;
+  CopyDiscoveryProgress        _progress;
+
+  CopyDiscoveryProcess(CopyDialog* parent, Filepath target);
+  ~CopyDiscoveryProcess();
+
+  void _discover(const std::vector<DirItem>& files, Filepath destination);
+  void _queue_link(Filepath const& location, Filepath const& destination, boost::filesystem::perms p);
+  void _queue_error(const DirItem& item, Filepath const& new_record_path, std::string error_message);
+  bool _queue_dir(const DirItem& item, Filepath const& new_record_path);
+  void _stat_file(Filepath const& item_path);
+  void _queue_file(const DirItem& item, Filepath const& new_record_path);
+  void _run();
+};
+
 struct CopyDialog : Dialog {
   CopyDialog(PanelSharedState::P data);
   void OnShow() override;
@@ -112,31 +171,22 @@ struct CopyDialog : Dialog {
   int       filter_cursor_pos      = 0;
   int       destination_cursor_pos = 0;
 
-  DataSource _data_source;
-  Component  _files;
-  int64_t    _bytes_total = 0;
+  Component _filelist_wrapper;
 
-  bool b_follow_links            = false;
+  bool         b_follow_links            = false;
   // bool b_preserve_timestamps     = true;
   // bool b_preserve_ownership      = false;
-  bool b_preserve_relative_links = true;
+  bool         b_preserve_relative_links = true;
+  CopyConflict _conflict                 = CopyConflict::Replace;
+
+  CopyDiscoveryProcess::P _discovery_process;
 
   Element render();
   void    run_copy();
   void    cancel();
 
-  PanelSharedState::P  _operation_state;
-  // std::string          _filter_text;
-  std::unique_ptr<Dir> _virtual_dir;  // enumerate items to copy
-  void                 _clear_operation_state();
-
-  struct Visited {
-    DirItem  source;
-    Filepath destination;
-  };
-  std::vector<Visited> _visited_dirs;
-
-  void _queue_files(const std::vector<DirItem>& files, Filepath destination);
+  void _clear_operation_state();
+  void _start_new_discovery();
 };
 
 struct MoveDialog : Dialog {

@@ -9,6 +9,8 @@
 
 namespace ftxui {
 
+Event event_from_string(std::string s);
+
 Element coloredInt(int64_t n);
 
 Element bgGaugeLeft(float fraction, Color full, Color empty, Element child);

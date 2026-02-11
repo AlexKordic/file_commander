@@ -12,6 +12,22 @@ Bugs:
 + Test move across disks
 + Performance fix for large number of displayed errors
 
+Design goals:
+- UI is always responsive, displaying what job machinery is doing.
+  - Separate Discovery and Execution threads. 
+    - JobSpec to become job when posted to file_operations
+    - discovery thread to start when spec parameters are set
+    - discovery stops when JobSpec is canceled
+    - execution stops when JobSpec is canceled
+    - execution to start when posted to file_operations and discovery thread is attached to JobSpec
+    - JobSpec can be posted by UI ok button even before discovery is completed
+    - UI displays discovery progress while dialog is open
+    - task UI displays execution progress
+    - UI can pause/resume execution
+    - UI can cancel execution
+    - UI cancels discovery by creating new JobSpec without posting old one to file_operations
+- Design machinery first, then place UI as observer, issuing commands to machinery.
+
 Initial Features:
 - keep focused item according to path. `selected` as index will *move* when `FileChangeFunnel` adds/removes item from `Dir`.
 - glob select & deselect - popup
@@ -26,6 +42,7 @@ Initial Features:
   - Windows ??
 + Left and Right panel
 - Panel having multiple tabs
+  - new tab to inherit configuration from focused tab: (dir, columns, sort, filter, selection)
   - Do not refresh UI if changes are inside not-shown tab
 + tab contains file list allowing selection ?with undo-selection-action?
 + esc clears selection
@@ -38,13 +55,15 @@ Initial Features:
 + All commands happen in separate thread, like TC copy in background.
 + Command progress panel TBD
 + FileList implement vscroll_indicator & yframe and create Element's for only visible items.
-- Bookmarks
+- Dir Bookmarks
+- Inc/Dec columns in tab 
 - Keep state across runs
 - mouse/trackpad only usage
 
 Initial commands:
 + mkdir
 + copy & confirm popup
+  - replace/update/skip checkboxes as overrite option
 + move & confirm popup
 + delete & confirm popup
 + rename
@@ -53,6 +72,7 @@ Initial commands:
 + paths to clipboard
 - Find files, breadth-first-search, creates new tab for results
   - `Result-TABS`: Allow Dir to contain empty-path(no parent dir) but contain file list to work on
+  - store ignore list for each dir in settings
 - allow defining custom command
   - 7z compress & extract
   - tar/gz extract
@@ -66,6 +86,20 @@ Initial commands:
   - Delete navigation and associated `Dir`s on key-event
 
 ## Extra
+
+Drag and drop to other apps:
+- https://github.com/rkevin-arch/CLIdrag
+  Would be good as external `action`. Call it action because it should be triggered by mouse drag.
+  Make it as command and allow command key to be `mouse-drag`.
+  Implement as shared-library? Allowing to be used by all instances of the app and shut-down when last instance is closed. 
+  ? Also consider usage over ssh. Is this just a desktop environment thing ?
+
+- Allow multiple commands to have same shortcut. In this case a latest-recently-used list is maintained. When command is invoked from command menu, it is moved to the top of the list.
+
+- Extract mouse click to be command key.
+  Focus is now internal command that can be mapped to mouse click ?
+  Select is now internal command that can be mapped to mouse click ?
+  ? Or is this different mechanic requiring settings dialog ?
 
 Clipboard support
 + text paste works good
@@ -83,47 +117,68 @@ Extended key events allowing shift+left, alt+enter, etc.
 
 Builtin editor: https://github.com/howl-editor/howl https://howl.io/
 
-# Design
+# History
 
-                                                                                        
-  Left     File     Command     Options     Right
-┌<─ ~/code/FTXUI/build/examples/dom ──.[^]>┐┌<─ ...TXUI/build/examples/component ─.[^]>┐
-│.n       Name        │ Size  │Modify time ││.n       Name        │ Size  │Modify time │
-│*ftxui_exam~r_gallery│1210280│Sep  2 18:00││*ftxui_exam~_checkbox│3663336│Sep  2 18:00│
-│*ftxui_exam~alette256│ 877360│Sep  2 18:00││*ftxui_exam~_in_frame│3594768│Sep  2 18:00│
-│*ftxui_exam~color_HSV│ 758624│Sep  2 18:00││*ftxui_exam~llapsible│3776360│Sep  2 18:00│
-│*ftxui_exam~color_RGB│ 989424│Sep  2 18:00││*ftxui_exam~mposition│3787656│Sep  2 18:00│
-│*ftxui_example_dbox  │ 950016│Sep  2 18:00││*ftxui_exam~stom_loop│2545832│Sep  2 18:00│
-│*ftxui_example_gauge │ 738208│Sep  2 18:00││*ftxui_exam~_dropdown│4043928│Sep  2 18:00│
-│*ftxui_exam~direction│1053744│Sep  2 18:00││*ftxui_exam~wn_custom│4182864│Sep  2 18:00│
-│*ftxui_example_graph │1251280│Sep  2 18:00││*ftxui_exam~x_gallery│4263904│Sep  2 18:00│
-│*ftxui_exam~e_gridbox│ 956616│Sep  2 18:00││*ftxui_example_focus │3482064│Sep  2 18:00│
-│*ftxui_example_hflow │1190944│Sep  2 18:00││*ftxui_exam~us_cursor│2313752│Sep  2 18:00│
-│*ftxui_exam~html_like│1450488│Sep  2 18:00││*ftxui_exam~e_gallery│4691736│Sep  2 18:00│
-│*ftxui_exam~_gradient│ 982112│Sep  2 18:00││*ftxui_exam~omescreen│5299384│Sep  2 18:00│
-│*ftxui_exam~e_manager│1261808│Sep  2 18:00││*ftxui_example_input │3872448│Sep  2 18:00│
-│*ftxui_exam~paragraph│1220168│Sep  2 18:00││*ftxui_exam~put_style│4001496│Sep  2 18:00│
-│*ftxui_exam~separator│1016440│Sep  2 18:00││*ftxui_exam~t_gallery│3213704│Sep  2 18:00│
-│*ftxui_exam~tor_style│ 999760│Sep  2 18:00││*ftxui_example_maybe │3891328│Sep  2 18:00│
-│*ftxui_example_size  │1014224│Sep  2 18:00││*ftxui_example_menu  │3648912│Sep  2 18:00│
-│*ftxui_exam~e_spinner│1267848│Sep  2 18:00││*ftxui_example_menu2 │3962144│Sep  2 18:00│
-│*ftxui_exam~yle_blink│ 697256│Sep  2 18:00││*ftxui_exam~u_entries│4035160│Sep  2 18:00│
-│*ftxui_exam~tyle_bold│ 697192│Sep  2 18:00││*ftxui_exam~_animated│3882336│Sep  2 18:00│
-│*ftxui_exam~yle_color│1073208│Sep  2 18:00││*ftxui_exam~_in_frame│3900808│Sep  2 18:00│
-│*ftxui_exam~style_dim│ 697128│Sep  2 18:00││*ftxui_exam~orizontal│3858616│Sep  2 18:00│
-│*ftxui_exam~e_gallery│ 964120│Sep  2 18:00││*ftxui_exam~_multiple│4014840│Sep  2 18:00│
-│*ftxui_exam~hyperlink│ 709232│Sep  2 18:00││*ftxui_exam~enu_style│4254376│Sep  2 18:00│
-│*ftxui_exam~_inverted│ 697456│Sep  2 18:00││*ftxui_exam~d_gallery│3996448│Sep  2 18:00│
-│*ftxui_exam~kethrough│ 698880│Sep  2 18:00││*ftxui_exam~al_dialog│3944152│Sep  2 18:00│
-│*ftxui_exam~nderlined│ 697648│Sep  2 18:00││*ftxui_exam~og_custom│3994848│Sep  2 18:00│
-│*ftxui_exam~ed_double│ 699096│Sep  2 18:00││*ftxui_exam~ed_screen│3805768│Sep  2 18:00│
-│*ftxui_example_table │1100448│Sep  2 18:00││*ftxui_exam~key_press│2939872│Sep  2 18:00│
-│*ftxui_exam~vbox_hbox│ 611256│Sep  2 18:00││*ftxui_exam~_radiobox│3351320│Sep  2 18:00│
-│*ftxui_example_vflow │1190896│Sep  2 18:00││*ftxui_exam~_in_frame│3621568│Sep  2 18:00│
-├──────────────────────────────────────────┤├──────────────────────────────────────────┤
-│*ftxui_example_vflow                      ││*ftxui_example_radiobox_in_frame          │
-└────────────────────── 394G / 926G (42%) ─┘└────────────────────── 394G / 926G (42%) ─┘
-Hint: M-! will allow you to execute programs and see the output in the viewer.
-component #                                                                          [^]
- 1Help   2Menu    3View    4Edit    5Copy    6RenMov 7Mkdir   8Delete  9PullDn 10Quit
+## Reasons for creating this tool
 
+Ortodox file manager such as norton commander is just a cool software to start with. What would be possible to create in 2025?
+
+vscode-like command pallete (https://code.visualstudio.com/docs/getstarted/userinterface#_command-palette) is awesome:
+- Single key to remember for accessing all commands and shortcuts, noone used f1 key to read help pages of an app!
+- fuzzy search to find command is very helpfull
+- latest used commands are moved to the top of the list
+- key shortcuts is immediately visible and can be updated on the spot
+- key shortcuts have specified condition when they apply, for example only when specified dialog is focused.
+
+Terminal UI is awesome:
+- FTXUI is great library
+- Accesible over ssh
+- Can look awesome in colored terminal
+
+Multithreading for file operations. This alone is huge move toward modern app look and feel.
+Usual workflow looks like this:
+- Use UI to navigate and issue commands. This part is slow mainly waiting for key strokes.
+- When command is issued, selection is now promoted to file job input list.
+- Additional dialog is displayed to confirm action and tune available parameters.
+- Based on initial parameters an recursive discovery process runs in background to compile list of required commands to complete the job.
+- Any change in action parameters by UI causes new discovery process to be started in place of current one.
+- UI can confirm action, promoting it to a job. Even when discovery is not completed.
+- Execution process starts in background.
+- Execution progress can be monitored by UI.
+- UI can choose to pause, resume or cancel execution of any running job.
+
+Loading settings from HTTP url is quick way to continue working on any machine.
+
+File list filter by typing.
+
+No integrated terminal.
+
+Custom commands are easily implemented using luajit.
+
+Multi rename dialog. Where find next command is easily implemented using luajit. Also add lua implementation of totalcmd multirename.
+
+Easily adding new commands.
+- TBD...
+Easy integration with other apps, like text editors, image viewers, etc.
+- TBD...
+
+
+## What are baseline requirements for ortodox file manager
+
+basic commands: copy, move, delete, rename, mkdir
+
+Twin panel layout.
+
+colums for: name, size, date, permissions, owner, group
+
+## TODO:
+
+Some platform differences.
+
+Dir change notifications.
+
+boost::filesystem limitations.
+
+immediate gui limitations when creating file list.
+
+Spacing 

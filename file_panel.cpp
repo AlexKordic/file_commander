@@ -21,6 +21,97 @@ using namespace ftxui;
 
 namespace ftxui {
 
+Event event_from_string(std::string s) {
+  if(s == "<-") return Event::ArrowLeft;
+  if(s == "->") return Event::ArrowRight;
+  if(s == "up") return Event::ArrowUp;
+  if(s == "down") return Event::ArrowDown;
+  if(s == "c<-") return Event::ArrowLeftCtrl;
+  if(s == "c->") return Event::ArrowRightCtrl;
+  if(s == "cup") return Event::ArrowUpCtrl;
+  if(s == "cdown") return Event::ArrowDownCtrl;
+  if(s == "back") return Event::Backspace;
+  if(s == "del") return Event::Delete;
+  if(s == "esc") return Event::Escape;
+  if(s == "ret") return Event::Return;
+  if(s == "tab") return Event::Tab;
+  if(s == "stab") return Event::TabReverse;
+
+  if(s == "f1") return Event::F1;
+  if(s == "f2") return Event::F2;
+  if(s == "f3") return Event::F3;
+  if(s == "f4") return Event::F4;
+  if(s == "f5") return Event::F5;
+  if(s == "f6") return Event::F6;
+  if(s == "f7") return Event::F7;
+  if(s == "f8") return Event::F8;
+  if(s == "f9") return Event::F9;
+  if(s == "f10") return Event::F10;
+  if(s == "f11") return Event::F11;
+  if(s == "f12") return Event::F12;
+
+  if(s.size() == 1) return Event::Character(s[0]);
+  if(s.size() == 2) {
+    if(s[0] == 'c') {
+      if(s[1] == 'A') return Event::CtrlA;
+      if(s[1] == 'B') return Event::CtrlB;
+      if(s[1] == 'C') return Event::CtrlC;
+      if(s[1] == 'D') return Event::CtrlD;
+      if(s[1] == 'E') return Event::CtrlE;
+      if(s[1] == 'F') return Event::CtrlF;
+      if(s[1] == 'G') return Event::CtrlG;
+      if(s[1] == 'H') return Event::CtrlH;
+      if(s[1] == 'I') return Event::CtrlI;
+      if(s[1] == 'J') return Event::CtrlJ;
+      if(s[1] == 'K') return Event::CtrlK;
+      if(s[1] == 'L') return Event::CtrlL;
+      if(s[1] == 'M') return Event::CtrlM;
+      if(s[1] == 'N') return Event::CtrlN;
+      if(s[1] == 'O') return Event::CtrlO;
+      if(s[1] == 'P') return Event::CtrlP;
+      if(s[1] == 'Q') return Event::CtrlQ;
+      if(s[1] == 'R') return Event::CtrlR;
+      if(s[1] == 'S') return Event::CtrlS;
+      if(s[1] == 'T') return Event::CtrlT;
+      if(s[1] == 'U') return Event::CtrlU;
+      if(s[1] == 'V') return Event::CtrlV;
+      if(s[1] == 'W') return Event::CtrlW;
+      if(s[1] == 'X') return Event::CtrlX;
+      if(s[1] == 'Y') return Event::CtrlY;
+      if(s[1] == 'Z') return Event::CtrlZ;
+    } else if(s[0] == 'a') {
+      if(s[1] == 'A') return Event::AltA;
+      if(s[1] == 'B') return Event::AltB;
+      if(s[1] == 'C') return Event::AltC;
+      if(s[1] == 'D') return Event::AltD;
+      if(s[1] == 'E') return Event::AltE;
+      if(s[1] == 'F') return Event::AltF;
+      if(s[1] == 'G') return Event::AltG;
+      if(s[1] == 'H') return Event::AltH;
+      if(s[1] == 'I') return Event::AltI;
+      if(s[1] == 'J') return Event::AltJ;
+      if(s[1] == 'K') return Event::AltK;
+      if(s[1] == 'L') return Event::AltL;
+      if(s[1] == 'M') return Event::AltM;
+      if(s[1] == 'N') return Event::AltN;
+      if(s[1] == 'O') return Event::AltO;
+      if(s[1] == 'P') return Event::AltP;
+      if(s[1] == 'Q') return Event::AltQ;
+      if(s[1] == 'R') return Event::AltR;
+      if(s[1] == 'S') return Event::AltS;
+      if(s[1] == 'T') return Event::AltT;
+      if(s[1] == 'U') return Event::AltU;
+      if(s[1] == 'V') return Event::AltV;
+      if(s[1] == 'W') return Event::AltW;
+      if(s[1] == 'X') return Event::AltX;
+      if(s[1] == 'Y') return Event::AltY;
+      if(s[1] == 'Z') return Event::AltZ;
+    }
+  }
+
+  return Event::Custom;
+}
+
 namespace {
 
 // Helper class.

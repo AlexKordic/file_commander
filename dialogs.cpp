@@ -531,12 +531,33 @@ void RenameDialog::cancel() { app->action.close_dialog(); }
 // Copy
 //
 
+Filepath resolve_symlink(Filepath path) {
+  std::vector<Filepath> chain;
+  error_code            ec;
+  for (;;) {
+    Filepath symlink_target = boost::filesystem::read_symlink(path, ec);
+    if (ec.failed() || symlink_target.empty()) return path;
+    for (Filepath& visited : chain) {
+      error_code ec;
+      if (boost::filesystem::equivalent(visited, symlink_target, ec)) return Filepath();
+    }
+    chain.push_back(path);
+    path = symlink_target;
+  }
+}
+
 /*
-  There is no progress interface in filesystem::copy, see playground.cpp for workaround
+TODO:
+  - Encapsulate _virtual_dir, _operational_state, _data_source, _files into discovery process
+  - Run _queue_files in background
+  - Render progress from _queue_files and hide ok button until all files are queued
+  - Show ok button when all files are queued
+  - Cancel should stop _queue_files
+  - Symlink checkbox changes should restart the process
 */
 CopyDialog::CopyDialog(PanelSharedState::P d) : Dialog(std::move(d)) {
   // [_] follow links `cp -r -L`: always follow symbolic links in SOURCE
-  input_destination_path = Input(&destination_path, "", filelist_filter_opt(destination_cursor_pos));
+  // input_destination_path = Input(&destination_path, "", filelist_filter_opt(destination_cursor_pos));
 
   button_ok     = Button("  COPY  ", [this] { this->run_copy(); });
   // TODO: add button "open in new tab ⮂ ↱↱↱ 🆕 tab  "
@@ -546,23 +567,27 @@ CopyDialog::CopyDialog(PanelSharedState::P d) : Dialog(std::move(d)) {
   op_follow_links            = Checkbox("Follow Links in Source", &b_follow_links, checkbox_opt);
   op_preserve_relative_links = Checkbox("Keep relative links", &b_preserve_relative_links, checkbox_opt);
 
-  _virtual_dir             = std::make_unique<Dir>();
-  _operation_state         = std::make_shared<PanelSharedState>(_virtual_dir.get());
-  _operation_state->filter = Input(&_operation_state->filter_txt, &(_virtual_dir->path_txt), filelist_filter_opt(filter_cursor_pos));
+  // _virtual_dir             = std::make_unique<Dir>();
+  // _operation_state         = std::make_shared<PanelSharedState>(_virtual_dir.get());
+  // _operation_state->filter = Input(&_operation_state->filter_txt, &(_virtual_dir->path_txt), filelist_filter_opt(filter_cursor_pos));
+  // _files = DBMenu(&_data_source);
+  // setup_filelist_datasource(_operation_state, _data_source);
+  // _data_source.on_event = [app = _operation_state, data_source = &_data_source](DSEventContext ctx) -> bool {
+  //   // handle filter only
+  //   return filelist_handle_filter(app.get(), data_source, ctx);
+  // };
 
-  _files = DBMenu(&_data_source);
-  setup_filelist_datasource(_operation_state, _data_source);
-  _data_source.on_event = [app = _operation_state, data_source = &_data_source](DSEventContext ctx) -> bool {
-    // handle filter only
-    return filelist_handle_filter(app.get(), data_source, ctx);
-  };
+  _filelist_wrapper = Renderer([this](bool focused) -> Element {
+    if (_discovery_process) { return _discovery_process->_files->Render(); }
+    return text("No files to copy");
+  });
 
   navigation = CatchEvent(Container::Vertical({
-                            input_destination_path,
+                            // input_destination_path,
                             Container::Horizontal({button_ok, button_cancel}),
                             op_follow_links,
                             op_preserve_relative_links,
-                            _files,
+                            _filelist_wrapper,
                           }),
                           close_on_esc(this));
   renderer   = Renderer(navigation, [this]() -> Element { return this->render(); });
@@ -574,7 +599,8 @@ void CopyDialog::cancel() {
 }
 
 void CopyDialog::run_copy() {
-  auto job = std::make_shared<JobSpec>(JobSpec::Type::COPY, std::move(_virtual_dir->items));
+  if(!_discovery_process) return;
+  auto job = std::make_shared<JobSpec>(JobSpec::Type::COPY, std::move(_discovery_process->_dir->items));
   _clear_operation_state();
   file_operations().add_job(job);
   app->dir->clear_selection();
@@ -605,130 +631,195 @@ Element CopyDialog::render() {
 }
 
 void CopyDialog::_clear_operation_state() {
-  _virtual_dir->items.clear();
-  _visited_dirs.clear();
+  // _virtual_dir->items.clear();
+  // _visited_dirs.clear();
+  _discovery_process.reset();
+  _filelist_wrapper->DetachAllChildren();
 }
 
-void CopyDialog::OnShow() {
-  _clear_operation_state();
-  button_ok->TakeFocus();
-  app->action.arguments->use_focused_as_alternative();
-  destination_path       = app->action.arguments->target.native();
-  // To display target path in filter box:
-  _virtual_dir->path     = app->action.arguments->target;
-  _virtual_dir->path_txt = app->action.arguments->target.native();
+CopyDiscoveryProcess::~CopyDiscoveryProcess() {
+  _running = false;
+  if (_thread.joinable()) { _thread.join(); }
+}
+
+CopyDiscoveryProcess::CopyDiscoveryProcess(CopyDialog* parent, Filepath target) {
+  _input_paths = parent->app->action.arguments;
+  _target      = target;
+
+  _dir           = std::make_unique<Dir>();
+  _dir->path     = _target;
+  _dir->path_txt = _target.native();
+  _state         = std::make_shared<PanelSharedState>(_dir.get());
+  // TODO: filter must be part of parent
+  _state->filter = Input(&_state->filter_txt, &(_dir->path_txt), filelist_filter_opt(parent->filter_cursor_pos));
+  _files         = DBMenu(&_data_source);
+  setup_filelist_datasource(_state, _data_source);
+  _data_source.on_event = [app = _state, data_source = &_data_source](DSEventContext ctx) -> bool {
+    // handle filter only
+    return filelist_handle_filter(app.get(), data_source, ctx);
+  };
+  // Set minimum height of file list
+  size_t min_y  = 20;
+  auto   screen = ScreenInteractive::Active();
+  if (screen) { min_y = theme().copyfiles_height_screen_portion * screen->dimy(); }
+  _state->set_min_y(std::min(min_y, _dir->items.size()));
+  // start thread
+  _thread = std::thread([this]() { this->_run(); });
+}
+
+void CopyDiscoveryProcess::_run() {
   std::vector<DirItem> selected;
-  selected.reserve(app->action.arguments->selected.size());
-  for (auto& p : app->action.arguments->selected) { selected.emplace_back(p); }
-  _queue_files(selected, app->action.arguments->target);
-  _bytes_total = 0;
-  for (DirItem const& item : _virtual_dir->items) {
-    if (item.type() == boost::filesystem::regular_file) { _bytes_total += item.size(); }
+  selected.reserve(_input_paths->selected.size());
+  for (auto& p : _input_paths->selected) {
+    _stat_file(p);
+    selected.emplace_back(p);
   }
-  _operation_state->set_min_y(std::min(theme().copy_files_min_y, _virtual_dir->items.size()));
+  _discover(selected, _target);
+  _running = false;
 }
 
-Filepath resolve_symlink(Filepath path) {
-  std::vector<Filepath> chain;
-  error_code            ec;
-  for (;;) {
-    Filepath symlink_target = boost::filesystem::read_symlink(path, ec);
-    if (ec.failed() || symlink_target.empty()) return path;
-    for (Filepath& visited : chain) {
-      error_code ec;
-      if (boost::filesystem::equivalent(visited, symlink_target, ec)) return Filepath();
+CopyDiscoveryProgress CopyDiscoveryProcess::get_progress() {
+  std::lock_guard<std::mutex> lock(_m);
+  return _progress;
+}
+
+void CopyDiscoveryProcess::_queue_link(Filepath const& location, Filepath const& destination, boost::filesystem::perms p) {
+  std::lock_guard<std::mutex> lock(_m);
+  _progress.link_count++;
+  error_code ec;
+  DirItem&   link = q.emplace_back(location, boost::filesystem::symlink_file, p);
+  link._set_symlink_target(destination);
+}
+
+// item.path_ref() and new_record_path are same file
+void CopyDiscoveryProcess::_queue_error(const DirItem& item, Filepath const& new_record_path, std::string error_message) {
+  std::lock_guard<std::mutex> lock(_m);
+  _progress.error_count++;
+  auto& created = _dir->items.emplace_back(DirItem(item.path_ref(), boost::filesystem::status_error, item.perms()));
+  created._set_symlink_target(new_record_path);
+  created._set_warning(error_message);
+}
+
+bool CopyDiscoveryProcess::_queue_dir(const DirItem& item, Filepath const& new_record_path) {
+  // detect cyclic dir
+  for (auto& visited : _visited_dirs) {
+    error_code ec;
+    const bool same = boost::filesystem::equivalent(visited.source.path_ref(), item.path_ref(), ec);
+    if(ec.failed()) {
+      _queue_error(item, new_record_path, "visited syscall failed " + ec.what());
+      return false;
     }
-    chain.push_back(path);
-    path = symlink_target;
+    if (same) {
+      // dir already copied, create link to it instead
+      _queue_link(new_record_path, visited.destination, item.perms());
+      return false;
+    }
   }
+  _visited_dirs.push_back({.source = DirItem(item), .destination = new_record_path});
+  // queue create dir command
+  std::lock_guard<std::mutex> lock(_m);
+  _progress.dir_count++;
+  _progress.current_dir = item.path_ref().native();
+  _dir->items.push_back(DirItem(new_record_path, boost::filesystem::directory_file, item.perms()));
+  return true;
+}
+
+void CopyDiscoveryProcess::_stat_file(Filepath const& item_path) {
+  std::lock_guard<std::mutex> lock(_m);
+  _progress.current_file = item_path.native();
+}
+
+void CopyDiscoveryProcess::_queue_file(const DirItem& item, Filepath const& new_record_path) {
+  std::lock_guard<std::mutex> lock(_m);
+  auto&                       created = _dir->items.emplace_back(item);
+  created._set_symlink_target(new_record_path);
+  _progress.file_count++;
+  _progress.byte_count += item.size();
 }
 
 // This traversal should be depth first because we want to create tree like depiction in our list
-void CopyDialog::_queue_files(const std::vector<DirItem>& files, Filepath destination) {
-  std::vector<DirItem>& q = _virtual_dir->items;
+void CopyDiscoveryProcess::_discover(const std::vector<DirItem>& files, Filepath destination) {
+  std::vector<DirItem>& q = _dir->items;
   // if type is dir path is to be mkdired
   // if type is link path is where to place link and target is link target
   // else path is source file and target is destination file for copy operation
-
-  auto do_place_link = [&q](Filepath const& location, Filepath const& destination, boost::filesystem::perms p) {
-    error_code ec;
-    DirItem&   link = q.emplace_back(location, boost::filesystem::symlink_file, p);
-    link._set_symlink_target(destination);
-  };
-  auto place_on_queue = [&, this](const DirItem& item) -> void {
+  auto place_on_queue = [this, &destination, &q](const DirItem& item) -> void {
     error_code ec;
     const auto new_record_path = destination / item.path_ref().filename();
     const bool copy_to_self    = boost::filesystem::equivalent(item.path_ref(), new_record_path, ec);
     if (!ec.failed() && copy_to_self) {
-      auto& created = q.emplace_back(DirItem(item.path_ref(), boost::filesystem::status_error, item.perms()));
-      created._set_symlink_target(destination / item.path_ref().filename());
-      created._set_warning("Copy to self");
+      _queue_error(item, new_record_path, "Copy to self");
       return;
     }
     // Act on symlink
     if (item.symlink_ref()) {
       // handle link
       const bool relative = item.symlink_ref()->is_relative();
-      if (!b_follow_links && b_preserve_relative_links && relative) {
+      if (!_follow_links && _preserve_relative_links && relative) {
         // create relative symlink
-        do_place_link(new_record_path, *item.symlink_ref(), item.perms());
+        _queue_link(new_record_path, *item.symlink_ref(), item.perms());
         return;
       }
       Filepath symlink_target = resolve_symlink(item.path_ref());
       if (symlink_target.empty()) {
-        auto& created = q.emplace_back(DirItem(item.path_ref(), boost::filesystem::status_error, item.perms()));
-        created._set_symlink_target(new_record_path);
-        created._set_warning("Cyclic symlink");
+        _queue_error(item, new_record_path, "Cyclic symlink");
         return;
       }
-      if (b_follow_links) {
+      if (_follow_links) {
         // use symlink_target intstead of item, converting symlink to actual dir item
-        this->_queue_files({DirItem(symlink_target, item.type(), item.perms())}, new_record_path);
+        this->_discover({DirItem(symlink_target, item.type(), item.perms())}, new_record_path);
         return;
       }
       // create absolute symlink
       Filepath absolute_symlink_target = boost::filesystem::canonical(symlink_target, item.path_ref().parent_path(), ec);
       if (!ec.failed()) { symlink_target = absolute_symlink_target; }
-      do_place_link(new_record_path, symlink_target, item.perms());
+      _queue_link(new_record_path, symlink_target, item.perms());
       return;
     }
     // Act on directory
     if (item.type() == boost::filesystem::directory_file) {
-      // detect cyclic dir
-      for (auto& visited : _visited_dirs) {
-        if (boost::filesystem::equivalent(visited.source.path_ref(), item.path_ref(), ec)) {
-          // dir already copied, create link to it instead
-          do_place_link(new_record_path, visited.destination, item.perms());
-          return;
-        }
-      }
-      _visited_dirs.push_back({.source = DirItem(item), .destination = new_record_path});
-      // queue create dir command
-      q.push_back(DirItem(new_record_path, boost::filesystem::directory_file, item.perms()));
+      const bool valid = _queue_dir(item, new_record_path);
+      if (!valid) return;
       // Recurse into subdir
       std::vector<DirItem> subdir_items;
       error_code           ec;
       for (directory_entry& subdir_item : directory_iterator(item.path_ref(), ec)) {
+        _stat_file(subdir_item.path());
         error_code  ec;
         file_status fs = subdir_item.status(ec);
         subdir_items.emplace_back(subdir_item.path(), fs.type(), fs.permissions());
       }
-      _queue_files(subdir_items, new_record_path);
+      _discover(subdir_items, new_record_path);
       return;
     }
     // Act on file
-    auto& created = q.emplace_back(item);
-    created._set_symlink_target(new_record_path);
+    _queue_file(item, new_record_path);
   };
   for (auto& item : files) {
     if (item.type() == boost::filesystem::status_error) {
-      auto& created = q.emplace_back(item);
-      created._set_symlink_target(destination / item.path_ref().filename());
+      _queue_error(item, destination / item.path_ref().filename(), "stat failed");
       continue;
     }
     place_on_queue(item);
   }
 };
+
+void CopyDialog::_start_new_discovery() {
+  _discovery_process = std::make_shared<CopyDiscoveryProcess>(this, app->action.arguments->target);
+  _filelist_wrapper->Add(_discovery_process->_files);
+}
+
+void CopyDialog::OnShow() {
+  _clear_operation_state();
+  button_cancel->TakeFocus();
+  app->action.arguments->use_focused_as_alternative();
+  destination_path = app->action.arguments->target.native();
+
+  _bytes_total = 0;
+  for (DirItem const& item : _virtual_dir->items) {
+    if (item.type() == boost::filesystem::regular_file) { _bytes_total += item.size(); }
+  }
+}
 
 //
 // DeleteDialog
@@ -950,7 +1041,7 @@ ErrorListDialog::ErrorListDialog(std::function<void()> close_dialog) : Dialog(nu
   _data_source.dataset_size       = []() -> DataSize { return file_operations().dataset_size(); };
   _data_source.count_items_before = [this](int64_t id) -> int64_t { return file_operations().count_items_before(id); };
   _data_source.move_id_by         = [this](int64_t& id, int64_t delta) -> bool { return file_operations().move_id_by(id, delta); };
-  _data_source.on_event = [this](DSEventContext c) -> bool {
+  _data_source.on_event           = [this](DSEventContext c) -> bool {
     if (c.event == Event::Return) {
       this->button_hide->TakeFocus();
       return true;
@@ -958,8 +1049,8 @@ ErrorListDialog::ErrorListDialog(std::function<void()> close_dialog) : Dialog(nu
     return c.handled;
   };
   _data_source.transform = [this](DSRenderContext& c) -> Element {
-    auto   item = file_operations().get_error(c.id);
-    auto   row  = hbox({text(time_to_string(item.time)), separator(), text(item.message)});
+    auto item = file_operations().get_error(c.id);
+    auto row  = hbox({text(time_to_string(item.time)), separator(), text(item.message)});
     if (c.focused) {
       if (c.component_focused) {
         row |= color(theme().files_focused_empty) | ftxui::focus;

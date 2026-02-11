@@ -296,7 +296,13 @@ class FileCommander : public DialogOverlay {
     };
   }
 
+
   bool handle_global_shortcuts(Event event) {
+    // if (event == Event::Special("startup")) {
+    //   handle_pending_commandline_events();
+    //   return true;
+    // }
+
     if (event == theme().key_toggle_error_details && !dialog_active()) {
       show_dialog("ErrorList");
       return true;
@@ -425,7 +431,23 @@ int main(int argc, char** argv) {
 
   LogAdapter adapt_logs(screen);
 
+  // Pass keyboard events from commandline to screen
+  std::thread([argc, argv]() {
+    ScreenInteractive* screen;
+    for (;;) {
+      std::this_thread::sleep_for(std::chrono::milliseconds(16));
+      screen = ScreenInteractive::Active();
+      if(screen) break;
+    }
+    for (int i = 3; i < argc; i++) {
+      auto e = event_from_string(std::string(argv[i]));
+      screen->Post(e);
+    }
+  }).detach();
+
   // screen.TrackMouse(false);
+
+  // NOTE: exec(..) before .Loop() doesnt have effect, because there is no global active screen.
   screen.Loop(app.renderer);
 
   return 0;

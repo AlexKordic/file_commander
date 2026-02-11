@@ -15,7 +15,7 @@
 struct Theme {
   Theme();
 
-  size_t copy_files_min_y = 50;
+  float  copyfiles_height_screen_portion = 0.9;
   float  errorlist_height_screen_portion = 0.9;
   double clear_errors_command_sequence = 1.0;
   int    clear_errors_command_repeat_count = 3;
