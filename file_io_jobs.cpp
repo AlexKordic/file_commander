@@ -36,11 +36,11 @@ ProgressInfo::ProgressInfo() {
 bool ProgressInfo::update(int64_t new_size, int64_t source_size) {
   if (new_size == current_size) return false;
   double ts    = now();
-  Mbps         = ((current_size - new_size) * 8 / 1000000.0) / (last_ts - ts);
+  Mbps         = ((new_size - current_size) * 8 / 1000000.0) / (ts - last_ts);
   current_size = new_size;
   last_ts      = ts;
   percentage   = 100 * float(current_size) / source_size;
-  average_Mbps = (current_size * 8 / 1000000.0) / (last_ts - start_ts);
+  average_Mbps = (current_size * 8 / 1000000.0) / (ts - start_ts);
   return true;
 }
 
@@ -119,22 +119,20 @@ class ProgressMonitor {
 
       // Do update for each job and then sleep
       std::vector<JobSpec*> updated_jobs;
-      for (size_t i = 0; i < _jobs.size(); i++) {
-        auto&           job = _jobs.at(i);
+      for (auto it = _jobs.begin(); it != _jobs.end();) {
+        auto&           job = *it;
         std::lock_guard lock(job->_m);
         if (job->is_stopped()) {
-          // Remove stopped job
-          _jobs.erase(_jobs.begin() + i);
+          it = _jobs.erase(it);
           continue;
-        } else {
-          ++i;
         }
-        // Either UI is updated from here or in ThreadedFileJobs after item is processed
         // Check timing to proceed. This is to reduce number of updates and improve performance
-        if (now() < job->_last_progress_update_time + job->_progress_update_interval) continue;
-        job->_last_progress_update_time = now();
-        updated_jobs.push_back(job.get());
-        job->_calculate_transfer_stats();
+        if (now() >= job->_last_progress_update_time + job->_progress_update_interval) {
+          job->_last_progress_update_time = now();
+          job->_calculate_transfer_stats();
+          updated_jobs.push_back(job.get());
+        }
+        ++it;
       }
       for (auto job : updated_jobs) { job->updated(); }
 
@@ -268,12 +266,12 @@ class ThreadedFileJobs : public FileJobs {
     std::lock_guard lock(_m);
     return {static_cast<int64_t>(_errors.size()), 0, static_cast<int64_t>(_errors.size() - 1)};
   }
-  int64_t count_items_before(int64_t i) override {
-    return i;
-  }
-  bool move_id_by(int64_t& i, int64_t offset) override {
-    const int64_t initial = i;
-    const int64_t size = _errors.size();
+  int64_t count_items_before(int64_t i) override { return i; }
+  bool    move_id_by(int64_t& i, int64_t offset) override {
+    std::lock_guard lock(_m);
+    const int64_t   initial = i;
+    const int64_t   size    = static_cast<int64_t>(_errors.size());
+    if (size == 0) return false;
     i = std::max(0LL, std::min(i + offset, size - 1));
     // return false when offset would go out of bounds.
     return i != initial;

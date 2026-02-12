@@ -160,6 +160,7 @@ std::string job_type_to_string(JobInstructions::Type type) {
   case JobInstructions::Type::COPY: return "COPY";
   case JobInstructions::Type::MOVE: return "MOVE";
   case JobInstructions::Type::DELETE: return "DELETE";
+  default: return "?";
   }
 }
 

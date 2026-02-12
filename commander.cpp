@@ -188,7 +188,7 @@ void Dir::partial_refresh(UpdatedFiles changes) {
 }
 
 void Dir::_sort() {
-  std::sort(items.begin(), items.end(), [&](DirItem const& a, DirItem const& b) -> int {
+  std::sort(items.begin(), items.end(), [&](DirItem const& a, DirItem const& b) -> bool {
     const bool a_is_dir = a._type == DirItem::Type::directory_file;
     const bool b_is_dir = b._type == DirItem::Type::directory_file;
     if (a_is_dir != b_is_dir) return a_is_dir;

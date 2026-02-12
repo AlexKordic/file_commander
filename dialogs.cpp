@@ -599,7 +599,7 @@ void CopyDialog::cancel() {
 }
 
 void CopyDialog::run_copy() {
-  if(!_discovery_process) return;
+  if (!_discovery_process) return;
   auto job = std::make_shared<JobSpec>(JobSpec::Type::COPY, std::move(_discovery_process->_dir->items));
   _clear_operation_state();
   file_operations().add_job(job);
@@ -608,22 +608,37 @@ void CopyDialog::run_copy() {
 }
 
 Element CopyDialog::render() {
-  int file_count = app->action.arguments->selected.size();
+  int     file_count       = app->action.arguments->selected.size();
+  Element file_list        = text("No files to copy");
+  Element bytes_filter_row = text("");
+
+  if (_discovery_process) {
+    file_list        = _discovery_process->_files->Render();
+    auto progress    = _discovery_process->get_progress();
+    bytes_filter_row = hbox({
+      text("Bytes: "),
+      coloredInt(progress.byte_count),
+      text(" | Dirs: "),
+      text(std::to_string(progress.dir_count)),
+      text(" | Files: "),
+      text(std::to_string(progress.file_count)),
+      text(" | Filter: "),
+      _discovery_process->_state->filter->Render(),
+    });
+  }
   // clang-format off
-  auto virtual_files = _files->Render();
   return window(
     text(" Copy " + std::to_string(file_count) + " selected items ") | bold | hcenter,
   vbox({
-            hbox({text(" TO: "), input_destination_path->Render(), text(" ")}),
-            // text(""),
+            hbox({text(" TO: "), text(destination_path), text(" ")}),
             separator(),
             hbox({button_ok->Render() | hcenter, button_cancel->Render() | hcenter}) | hcenter,
             separatorHeavy(),
             op_follow_links->Render() | hcenter,
             op_preserve_relative_links->Render() | hcenter,
-            hbox({text("Bytes: "), coloredInt(_bytes_total), text(" | Filter: "), _operation_state->filter->Render()}) | hcenter,
+            bytes_filter_row | hcenter,
             separatorHeavy(),
-            std::move(virtual_files) | theme().files_border,
+            std::move(file_list) | theme().files_border,
           }),
           BorderStyle::DOUBLE
         );
@@ -643,8 +658,10 @@ CopyDiscoveryProcess::~CopyDiscoveryProcess() {
 }
 
 CopyDiscoveryProcess::CopyDiscoveryProcess(CopyDialog* parent, Filepath target) {
-  _input_paths = parent->app->action.arguments;
-  _target      = target;
+  _input_paths             = parent->app->action.arguments;
+  _target                  = target;
+  _follow_links            = parent->b_follow_links;
+  _preserve_relative_links = parent->b_preserve_relative_links;
 
   _dir           = std::make_unique<Dir>();
   _dir->path     = _target;
@@ -686,8 +703,7 @@ CopyDiscoveryProgress CopyDiscoveryProcess::get_progress() {
 void CopyDiscoveryProcess::_queue_link(Filepath const& location, Filepath const& destination, boost::filesystem::perms p) {
   std::lock_guard<std::mutex> lock(_m);
   _progress.link_count++;
-  error_code ec;
-  DirItem&   link = q.emplace_back(location, boost::filesystem::symlink_file, p);
+  auto& link = _dir->items.emplace_back(location, boost::filesystem::symlink_file, p);
   link._set_symlink_target(destination);
 }
 
@@ -705,7 +721,7 @@ bool CopyDiscoveryProcess::_queue_dir(const DirItem& item, Filepath const& new_r
   for (auto& visited : _visited_dirs) {
     error_code ec;
     const bool same = boost::filesystem::equivalent(visited.source.path_ref(), item.path_ref(), ec);
-    if(ec.failed()) {
+    if (ec.failed()) {
       _queue_error(item, new_record_path, "visited syscall failed " + ec.what());
       return false;
     }
@@ -739,11 +755,11 @@ void CopyDiscoveryProcess::_queue_file(const DirItem& item, Filepath const& new_
 
 // This traversal should be depth first because we want to create tree like depiction in our list
 void CopyDiscoveryProcess::_discover(const std::vector<DirItem>& files, Filepath destination) {
-  std::vector<DirItem>& q = _dir->items;
+  std::vector<DirItem>& q              = _dir->items;
   // if type is dir path is to be mkdired
   // if type is link path is where to place link and target is link target
   // else path is source file and target is destination file for copy operation
-  auto place_on_queue = [this, &destination, &q](const DirItem& item) -> void {
+  auto                  place_on_queue = [this, &destination, &q](const DirItem& item) -> void {
     error_code ec;
     const auto new_record_path = destination / item.path_ref().filename();
     const bool copy_to_self    = boost::filesystem::equivalent(item.path_ref(), new_record_path, ec);
@@ -813,12 +829,12 @@ void CopyDialog::OnShow() {
   _clear_operation_state();
   button_cancel->TakeFocus();
   app->action.arguments->use_focused_as_alternative();
-  destination_path = app->action.arguments->target.native();
-
-  _bytes_total = 0;
-  for (DirItem const& item : _virtual_dir->items) {
-    if (item.type() == boost::filesystem::regular_file) { _bytes_total += item.size(); }
+  if (app->action.arguments->selected.empty()) {
+    cancel();
+    return;
   }
+  destination_path = app->action.arguments->target.native();
+  _start_new_discovery();
 }
 
 //
