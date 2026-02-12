@@ -15,7 +15,7 @@ FetchContent_Declare(ftxui
 # )
 
 # Add boost lib sources
-set(BOOST_INCLUDE_LIBRARIES thread filesystem system)
+set(BOOST_INCLUDE_LIBRARIES thread filesystem system smart_ptr)
 set(BOOST_ENABLE_CMAKE ON)
 
 # Download and extract the boost library from GitHub
@@ -29,14 +29,21 @@ FetchContent_Declare(
     DOWNLOAD_NO_EXTRACT FALSE
 )
 
+# Boost must be available before alex_ftxui (it uses boost::local_shared_ptr)
+FetchContent_MakeAvailable(Boost)
+
+set(FTXUI_USE_LOCAL_SHARED_PTR ON CACHE BOOL "" FORCE)
+set(FTXUI_ENABLE_INSTALL OFF CACHE BOOL "" FORCE)
 # FetchContent_MakeAvailable(ftxui)
 add_subdirectory(/Users/alexkordic/code/alex_ftxui ftxui)
-FetchContent_MakeAvailable(Boost)
 add_executable(fc main.cpp log.cpp err.cpp commander.cpp theme.cpp file_panel.cpp dialogs.cpp shared_state.cpp file_change_funnel.cpp file_io_jobs.cpp)
 target_link_libraries(fc PRIVATE ftxui::component Boost::filesystem "-framework CoreServices")
 
 # add_executable(playground playground.cpp log.cpp err.cpp commander.cpp theme.cpp file_panel.cpp dialogs.cpp shared_state.cpp file_change_funnel.cpp file_io_jobs.cpp)
 # target_link_libraries(playground PRIVATE ftxui::component ftxui::dom ftxui::screen Boost::filesystem "-framework CoreServices")
+
+# Lua rewrite variant (LuaJIT + FTXUI)
+add_subdirectory(luarewrite)
 
 # TODO: conditional parts for mac and linux
 add_executable(dirnotify dir_notify/fsevents.cpp dir_notify/test.cpp)

@@ -176,7 +176,7 @@ class ColoredInt : public Node {
   float              progress_;
 };
 
-Element coloredInt(int64_t n) { return std::make_shared<ColoredInt>(n, theme().filesize_colors); }
+Element coloredInt(int64_t n) { return ftxui::make_shared<ColoredInt>(n, theme().filesize_colors); }
 
 class BgGaugeLeft : public NodeDecorator {
  public:
@@ -216,7 +216,7 @@ class BgGaugeLeft : public NodeDecorator {
   Color _empty;
 };
 
-Element bgGaugeLeft(float fraction, Color full, Color empty, Element child) { return std::make_shared<BgGaugeLeft>(std::move(child), fraction, full, empty); }
+Element bgGaugeLeft(float fraction, Color full, Color empty, Element child) { return ftxui::make_shared<BgGaugeLeft>(std::move(child), fraction, full, empty); }
 
 Decorator bgGaugeLeft(float fraction, Color full, Color empty) {
   return [fraction, full, empty](Element child) { return bgGaugeLeft(fraction, full, empty, std::move(child)); };
@@ -242,7 +242,7 @@ class ShowInputCursor : public NodeDecorator {
   Ref<int> _cursor_position;
 };
 
-Element   showInputCursor(Element child, Ref<int> cursor_position) { return std::make_shared<ShowInputCursor>(std::move(child), cursor_position); }
+Element   showInputCursor(Element child, Ref<int> cursor_position) { return ftxui::make_shared<ShowInputCursor>(std::move(child), cursor_position); }
 Decorator showInputCursor(Ref<int> cursor_position) {
   return [cursor_position](Element child) -> Element { return showInputCursor(std::move(child), cursor_position); };
 }
@@ -270,6 +270,6 @@ class ClearUnder : public NodeDecorator {
 //         combinaison with dbox.
 /// @see ftxui::dbox
 /// @ingroup dom
-Element clear_under_colors(Element element) { return std::make_shared<ClearUnder>(std::move(element)); }
+Element clear_under_colors(Element element) { return ftxui::make_shared<ClearUnder>(std::move(element)); }
 
 }  // namespace ftxui
