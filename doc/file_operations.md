@@ -10,10 +10,10 @@ overview: "Architecture, edge cases, gaps, and async UI analysis for copy/move/d
 File Commander's file operations (copy, move, delete) follow a three-phase pipeline:
 
 ```
-┌───────────────┐     ┌────────────────┐     ┌───────────────┐
+┌──────────────────┐     ┌─────────────────┐     ┌───────────────┐
 │   Discovery    │────▶│   Execution    │────▶│  Completion   │
-│  (background)  │     │  (background)  │     │  (UI thread)  │
-└───────────────┘     └────────────────┘     └───────────────┘
+│  (background)  │     │  (background)  │    │  (UI thread)  │
+└──────────────────┘     └─────────────────┘     └───────────────┘
 ```
 
 ### 1.1 Discovery Phase
@@ -148,8 +148,8 @@ or `boost::filesystem::remove()` for files. Errors are collected per-item.
 | Symlinks (absolute)              | Canonicalized to absolute, `create_symlink()`         |
 | Symlinks (relative, preserved)   | Target string preserved verbatim                      |
 | Symlinks (followed/dereferenced) | Resolved target treated as regular file/dir           |
-| Cyclic symlinks (A→B→A)         | Detected by `resolve_symlink()`, error reported       |
-| Cyclic directories (A/sub→A)    | Detected by `_visited_dirs`, replaced with symlink    |
+| Cyclic symlinks (A→B→A)          | Detected by `resolve_symlink()`, error reported       |
+| Cyclic directories (A/sub→A)     | Detected by `_visited_dirs`, replaced with symlink    |
 | Copy-to-self (same inode)        | Detected by `equivalent()`, error reported            |
 | Large files (>10MB)              | Per-file progress monitoring at 200ms interval        |
 | Multiple jobs                    | Queued FIFO, processed sequentially                   |
@@ -161,8 +161,8 @@ or `boost::filesystem::remove()` for files. Errors are collected per-item.
 
 ### 6.1 Attribute Preservation
 
-| Attribute              | Status              | Notes                                            |
-|------------------------|---------------------|--------------------------------------------------|
+| Attribute              | Status              | Notes                                             |
+|------------------------|---------------------|---------------------------------------------------|
 | File permissions       | **Not preserved**   | Destination gets default permissions (umask)      |
 | Timestamps (mtime)     | **Not preserved**   | Destination gets current time                     |
 | Ownership (uid/gid)    | **Not preserved**   | Destination gets current user                     |
@@ -171,14 +171,14 @@ or `boost::filesystem::remove()` for files. Errors are collected per-item.
 
 ### 6.2 Special File Types
 
-| File type          | Status              | Notes                                           |
-|--------------------|---------------------|-------------------------------------------------|
-| Block devices      | **Not handled**     | May error or be skipped silently                 |
-| Character devices  | **Not handled**     | Same                                             |
-| Named pipes (FIFO) | **Not handled**     | Same                                             |
-| Unix sockets       | **Not handled**     | Same                                             |
+| File type          | Status              | Notes                                                      |
+|--------------------|---------------------|------------------------------------------------------------|
+| Block devices      | **Not handled**     | May error or be skipped silently                           |
+| Character devices  | **Not handled**     | Same                                                       |
+| Named pipes (FIFO) | **Not handled**     | Same                                                       |
+| Unix sockets       | **Not handled**     | Same                                                       |
 | Hard links         | **Not detected**    | Multiple hard links to same inode copied as separate files |
-| Sparse files       | **Not preserved**   | Holes filled with zeros, inflating disk usage    |
+| Sparse files       | **Not preserved**   | Holes filled with zeros, inflating disk usage              |
 
 ### 6.3 Symlink Edge Cases
 
@@ -328,20 +328,20 @@ dialogs should block or interrupt the user. This section documents what is missi
 ### 8.1 Current Async Architecture
 
 ```
-┌──────────────┐     ┌──────────────────┐     ┌──────────────────┐
+┌───────────────┐     ┌─────────────────────┐     ┌────────────────────┐
 │  UI Thread   │     │  Discovery Thread │     │  Job Worker      │
 │  (FTXUI)     │     │  (per dialog)     │     │  (singleton)     │
 │              │     │                   │     │                  │
-│ ┌──────────┐ │     │ _discover()       │     │ run_copy()       │
+│ ┌───────────┐ │     │ _discover()       │     │ run_copy()       │
 │ │ CopyDialog│◀├────│  posts Event::    │     │ run_move()       │
 │ │ progress  │ │    │  Custom when done │     │ run_delete()     │
-│ └──────────┘ │     └──────────────────┘     │                  │
+│ └───────────┘ │     └─────────────────────┘     │                  │
 │              │                               │ posts Event::    │
-│ ┌──────────┐ │                               │ Custom via       │
-│ │ JobBar   │◀├───────────────────────────────│ updated()        │
-│ │ progress │ │                               └──────────────────┘
-│ └──────────┘ │
-└──────────────┘
+│ ┌───────────┐ │                               │ Custom via       │
+│ │ JobBar   │◀├──────────────────────────────────│ updated()        │
+│ │ progress │ │                               └────────────────────┘
+│ └───────────┘ │
+└───────────────┘
 ```
 
 **What works today**:
