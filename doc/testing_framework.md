@@ -1,39 +1,21 @@
 ---
 name: Lua Testing Framework
-overview: Redesign the Lua testing framework to run on the main UI thread using coroutines, with an action system, event/state concepts, and a synchronous API that requires no sleeps.
+overview: "Phase 1 (complete): Same-thread coroutine Lua testing framework. Phase 2: Refactor into scripting.hpp/cpp, encapsulate into LuaScripting class, eliminate globals, add ScheduledUpdates."
 todos:
-  - id: spec
-    content: "Update spec.md section 3.2 with revised design: same-thread coroutines, action concept, events/states, tab state, wait_event API"
+  - id: scheduled-updates
+    content: "Implement ScheduledUpdates class in scripting.hpp/cpp: priority_queue<double> timer thread that sleeps until next scheduled time, posts Event::Custom"
     status: pending
-  - id: framework-lua
-    content: Create fc_framework.lua with key-table wrapper, wait_for_jobs, check(), test_pass()
+  - id: lua-scripting-class
+    content: "Implement LuaScripting class in scripting.hpp/cpp: move all Lua state, event log, pending wait, poll state, C callbacks from main.cpp. Use lua upvalues for 'this' pointer in C callbacks."
     status: pending
-  - id: helpers-lua
-    content: Create test/helpers.lua with setup_copy_test(), file_exists(), dir_exists(), read_file(), cleanup()
+  - id: on-event-callback
+    content: "Replace g_fire_event global with DialogOverlay::on_event member callback. Set from main.cpp when LuaScripting is active."
     status: pending
-  - id: test-copy-lua
-    content: Create test/test_copy.lua end-to-end copy test using the new API
+  - id: update-main
+    content: "Update main.cpp: remove all Lua code, include scripting.hpp, instantiate LuaScripting in lua_mode block, wire on_event callbacks, CatchEvent wrapper calls scripting.on_event()"
     status: pending
-  - id: globals-accessors
-    content: Add g_app, g_root, g_lua globals and FileCommander public accessors for left/right panels
-    status: pending
-  - id: coroutine-setup
-    content: "Replace background-thread Lua with same-thread coroutine: load framework, load script as coroutine, post initial resume"
-    status: pending
-  - id: fc-key
-    content: Implement lua_fc_key() with len-based dispatch (char / event_from_string / action name), direct OnEvent
-    status: pending
-  - id: event-system
-    content: Implement fire_event(), g_event_log, poll_async_events(), and add fire_event calls to show_dialog/close_dialog/move_to/etc
-    status: pending
-  - id: wait-event
-    content: Implement lua_fc_wait_event() with lua_yield and check_lua_waits() wired into CatchEvent
-    status: pending
-  - id: state-queries
-    content: Implement fc.state(), fc.focused(), fc.selected(), fc.left_path(), fc.right_path(), fc.left_cd(), fc.right_cd()
-    status: pending
-  - id: build-and-test
-    content: Build and run test/test_copy.lua to verify end-to-end
+  - id: build-and-test-phase2
+    content: "Build and run test/test_copy.lua to verify refactoring preserves behavior"
     status: pending
 isProject: false
 ---
@@ -81,29 +63,24 @@ sequenceDiagram
 - `HandleTask()`: if Event -> `component->OnEvent(event)`; if Closure -> call it
 - Both `Post(Event)` and `Post(Closure)` go through the **same FIFO queue** — order preserved
 
-**Startup flow in [main.cpp](main.cpp):**
+**Startup flow in [main.cpp](main.cpp):** *(Phase 1 used globals + CatchEvent; Phase 2 replaces with explicit Loop + tick(), see Section 14.1)*
 
 ```cpp
-// In main(), after FileCommander construction:
-g_app = &app;
-g_root = app.renderer;
-
+// Phase 2 startup (replaces Phase 1 globals + CatchEvent approach):
 if (lua_mode) {
-    g_lua = luaL_newstate();
-    luaL_openlibs(g_lua);
-    // Register C functions...
-    // Load framework lua code
-    luaL_dofile(g_lua, "fc_framework.lua");
-    // Load test script as coroutine
-    g_lua_co = lua_newthread(g_lua);
-    luaL_loadfile(g_lua_co, script_path);
-    // Post initial coroutine resume
-    screen.Post([&]() {
-        int status = lua_resume(g_lua_co, 0);
-        handle_lua_resume_status(status);
-    });
+    LuaScripting scripting(app, app.renderer);
+    // ... wire on_event callbacks ...
+    scripting.setup(lua_script_path);
+
+    ftxui::Loop loop(&screen, app.renderer);
+    while (!loop.HasQuitted()) {
+        loop.RunOnceBlocking();
+        scripting.tick();   // first call starts coroutine
+    }
+    scripting.cleanup();
+} else {
+    screen.Loop(app.renderer);
 }
-screen.Loop(app.renderer);
 ```
 
 ## 2. Action Concept
@@ -487,7 +464,7 @@ Document in spec.md and in `fc.state()` return structure:
   - `fc.state().left.tabs[1].active == true` for the current tab
   - New actions: `tab_new`, `tab_close`, `tab_next`, `tab_prev`
 
-## 10. Files Changed
+## 10. Files Changed (Phase 1 — Completed)
 
 **Spec update:** [doc/spec.md](doc/spec.md) — rewrite section 3.2 with this design
 
@@ -511,3 +488,445 @@ Document in spec.md and in `fc.state()` return structure:
 - `test/helpers.lua` — test setup/teardown utilities
 - `test/test_copy.lua` — first end-to-end test
 
+---
+
+# Phase 2: Refactoring — Encapsulation & Globals Elimination
+
+## 11. Overview
+
+Phase 1 added ~540 lines of Lua scripting code directly into `main.cpp` using 15+ file-scope
+globals. This phase moves all Lua code into `scripting.hpp` / `scripting.cpp`, encapsulates
+state into classes, and eliminates every C++ global. Lua-side globals (`fc`, `check`, etc.)
+remain unchanged.
+
+**Goals:**
+
+1. **`class LuaScripting`** — owns all Lua state, event log, poll state, C callbacks
+2. **`class ScheduledUpdates`** — general-purpose timer thread replacing the crude 50ms poll loop
+3. **`DialogOverlay::on_event`** callback member — replaces `g_fire_event` global
+4. **Explicit `ftxui::Loop` with `tick()`** — replaces `CatchEvent` wrapper, eliminates "first event" hack
+5. **main.cpp** shrinks back to application-level wiring only
+
+## 12. ScheduledUpdates
+
+Replaces the `start_lua_poll_timer()` / `stop_lua_poll_timer()` detached thread that
+blindly sleeps 50ms in a loop. `ScheduledUpdates` is a general-purpose mechanism that can
+serve Lua polling, future animations, or any timed screen refresh.
+
+**Design:**
+
+```cpp
+// scripting.hpp
+class ScheduledUpdates {
+public:
+  ScheduledUpdates() = default;
+  ~ScheduledUpdates();  // calls stop()
+
+  void start();   // launches background thread (idempotent)
+  void stop();    // signals exit, joins thread
+
+  /// Schedule a one-shot screen update at a specific timestamp (now()-based).
+  void schedule_at(double timestamp);
+
+  /// Start periodic screen updates every interval_ms milliseconds.
+  /// Replaces any previous periodic interval. 0 = disable.
+  void start_periodic(int interval_ms);
+
+  /// Stop periodic updates (equivalent to start_periodic(0)).
+  void stop_periodic();
+
+private:
+  // Min-heap: soonest timestamp on top
+  std::priority_queue<double, std::vector<double>, std::greater<double>> _timers;
+  std::mutex              _mutex;
+  std::condition_variable _cv;
+  std::atomic<bool>       _running{false};
+  int                     _periodic_ms = 0;
+  std::thread             _thread;
+
+  void run();  // thread function
+};
+```
+
+**Thread function pseudocode (`run()`):**
+
+```
+while _running:
+    lock mutex
+    compute next_wake = min(soonest timer, now + periodic_interval)
+    if nothing scheduled:
+        wait on _cv until notified (new timer, periodic change, or stop)
+        continue
+    wait_for(lock, next_wake - now)  // or until _cv notified
+    if not _running: break
+    // remove expired one-shot timers
+    while !_timers.empty() && _timers.top() <= now():
+        _timers.pop()
+    unlock
+    screen->Post(Event::Custom)   // wake the FTXUI event loop
+```
+
+`_cv` is notified on: `schedule_at()`, `start_periodic()`, `stop_periodic()`, `stop()`.
+This gives precise wake-up timing instead of constant 50ms polling.
+
+**Why this is needed:**
+
+`RunOnceBlocking()` blocks on `task_receiver_->Receive()` until an event arrives. When
+the Lua coroutine is waiting for a background job or timeout, nothing would unblock the
+main loop without `ScheduledUpdates` posting `Event::Custom` at the right time.
+
+**Usage in LuaScripting:**
+
+- When a Lua wait begins: `_scheduler.start_periodic(50)` to keep the loop ticking
+  while polling for async events (job completion, discovery)
+- Optionally: `_scheduler.schedule_at(deadline)` for the wait timeout
+- When the wait resolves: `_scheduler.stop_periodic()`
+
+## 13. LuaScripting Class
+
+All Lua-related state and logic encapsulated in one class. No file-scope globals.
+
+### 13.1 Class Declaration
+
+```cpp
+// scripting.hpp
+class LuaScripting {
+public:
+  /// Construct with references to the app and root component for OnEvent dispatch.
+  LuaScripting(FileCommander& app, ftxui::Component root);
+  ~LuaScripting();
+
+  /// Load fc_framework.lua + test script, prepare coroutine. Returns false on error.
+  bool setup(const std::string& script_path);
+
+  /// Called after every RunOnceBlocking() in the explicit Loop.
+  /// On first call: starts the Lua coroutine (initial lua_resume).
+  /// On subsequent calls: polls async events, checks pending waits,
+  /// resumes coroutine if a wait condition is met or timed out.
+  void tick();
+
+  /// Fire a named event from C++ code (Panel, DialogOverlay, etc.)
+  void fire_event(const std::string& name, const std::string& detail = "");
+
+  /// Has the Lua script finished (completed or errored)?
+  bool finished() const;
+
+  /// Close Lua state and stop scheduler.
+  void cleanup();
+
+private:
+  // --- Application references (replaces g_app, g_root) ---
+  FileCommander&   _app;
+  ftxui::Component _root;
+
+  // --- Lua VM (replaces g_lua, g_lua_co, g_lua_finished) ---
+  lua_State* _lua    = nullptr;
+  lua_State* _lua_co = nullptr;
+  bool       _finished = false;
+  bool       _started  = false;   // has initial resume happened?
+
+  // --- Event log (replaces g_event_log, g_event_cursor) ---
+  struct ScriptEvent {
+    std::string name;
+    double      timestamp;
+    std::string detail;
+  };
+  std::deque<ScriptEvent> _event_log;
+  size_t                  _event_cursor = 0;
+
+  // --- Pending wait (replaces g_pending_wait) ---
+  struct PendingWait {
+    std::vector<std::string> event_names;
+    double                   deadline;
+    bool                     sleep_mode = false;
+  };
+  std::optional<PendingWait> _pending_wait;
+
+  // --- Async poll state (replaces g_had_running_job, etc.) ---
+  bool   _had_running_job = false;
+  bool   _had_discovery   = false;
+  int    _poll_count = 0;
+  double _last_job_finished_time = -1;
+  double _last_job_started_time  = -1;
+
+  // --- Timer thread (replaces g_poll_active + detached thread) ---
+  ScheduledUpdates _scheduler;
+
+  // --- Debug logging (replaces g_lua_log) ---
+  FILE* _log_file = nullptr;
+  void  log(const char* msg);
+  void  log(const std::string& msg) { log(msg.c_str()); }
+
+  // --- Internal methods (replaces free functions) ---
+  void poll_async_events();     // detect job_started/completed, discovery_completed
+  void handle_resume_status(int status);  // handle lua_resume return code
+  void check_waits();           // called from tick(): check event log + timeout, resume if met
+
+  // --- Lua C callbacks: access 'this' via registry, not globals ---
+  static LuaScripting* from_lua(lua_State* L);  // extract 'this' from registry
+
+  static int l_key(lua_State* L);
+  static int l_quit(lua_State* L);
+  static int l_left_cd(lua_State* L);
+  static int l_right_cd(lua_State* L);
+  static int l_left_path(lua_State* L);
+  static int l_right_path(lua_State* L);
+  static int l_focused(lua_State* L);
+  static int l_selected(lua_State* L);
+  static int l_errors(lua_State* L);
+  static int l_state(lua_State* L);
+  static int l_wait_event(lua_State* L);
+  static int l_sleep(lua_State* L);
+
+  // --- Helpers ---
+  static void push_panel_state(lua_State* L, Panel& panel);
+  Panel& get_focused_panel();
+};
+```
+
+### 13.2 Registry-Based C Callback Pattern
+
+The `this` pointer is stored once in the Lua registry under a known key. C callbacks
+retrieve it with `from_lua(L)`. Functions are registered with plain `lua_pushcfunction`
+— no closures, no upvalues needed.
+
+Additionally, `this` is passed to `__framework_init(context)` in `fc_framework.lua`,
+so the Lua side can also hold a reference if needed for future Lua-side extensions.
+
+**Registration (in `setup()`):**
+
+```cpp
+// 1. Store 'this' in Lua registry — accessible from any C callback
+lua_pushlightuserdata(_lua, this);
+lua_setfield(_lua, LUA_REGISTRYINDEX, "fc_scripting");
+
+// 2. Register 'fc' table with plain C functions (no upvalues)
+lua_newtable(_lua);
+
+auto reg = [this](const char* name, lua_CFunction fn) {
+  lua_pushcfunction(_lua, fn);
+  lua_setfield(_lua, -2, name);
+};
+
+reg("key",        l_key);
+reg("quit",       l_quit);
+reg("left_cd",    l_left_cd);
+// ... etc
+
+lua_setglobal(_lua, "fc");
+
+// 3. Load fc_framework.lua (defines __framework_init, wraps fc.key, etc.)
+luaL_dofile(_lua, "fc_framework.lua");
+
+// 4. Call __framework_init(context) — pass 'this' to Lua side
+lua_getglobal(_lua, "__framework_init");
+lua_pushlightuserdata(_lua, this);
+lua_call(_lua, 1, 0);
+```
+
+**Retrieval (in each C callback):**
+
+```cpp
+static LuaScripting* from_lua(lua_State* L) {
+  lua_getfield(L, LUA_REGISTRYINDEX, "fc_scripting");
+  auto* self = static_cast<LuaScripting*>(lua_touserdata(L, -1));
+  lua_pop(L, 1);
+  return self;
+}
+
+static int l_key(lua_State* L) {
+  auto* self = from_lua(L);
+  if (!self->_root) return luaL_error(L, "fc not initialized");
+  const char* name = luaL_checkstring(L, 1);
+  // ... dispatch using self->_root->OnEvent(...)
+}
+```
+
+The registry is shared across the main state and all coroutines, so `from_lua(L)` works
+identically whether called from `_lua` or `_lua_co`. One registry lookup per C callback
+call — negligible cost for a test framework.
+
+**Lua side (`fc_framework.lua`):**
+
+```lua
+local _cpp_context = nil
+
+function __framework_init(context)
+  _cpp_context = context
+  -- Available for future Lua-side extensions that may need
+  -- to pass context back to C helper functions
+end
+```
+
+### 13.3 Globals Eliminated
+
+| Old global                | New location                         |
+| ------------------------- | ------------------------------------ |
+| `g_fire_event`            | `DialogOverlay::on_event` callback   |
+| `g_lua_log` / `lua_log()` | `LuaScripting::_log_file` / `log()` |
+| `g_app`                   | `LuaScripting::_app`                |
+| `g_root`                  | `LuaScripting::_root`               |
+| `g_lua`                   | `LuaScripting::_lua`                |
+| `g_lua_co`                | `LuaScripting::_lua_co`             |
+| `g_lua_finished`          | `LuaScripting::_finished`           |
+| `g_event_log`             | `LuaScripting::_event_log`          |
+| `g_event_cursor`          | `LuaScripting::_event_cursor`       |
+| `g_pending_wait`          | `LuaScripting::_pending_wait`       |
+| `g_poll_active`           | `ScheduledUpdates::_running`         |
+| `g_had_running_job`       | `LuaScripting::_had_running_job`    |
+| `g_had_discovery`         | `LuaScripting::_had_discovery`      |
+| `g_poll_count`            | `LuaScripting::_poll_count`         |
+| `g_last_job_*_time`       | `LuaScripting::_last_job_*_time`    |
+
+## 14. Event Callback: `DialogOverlay::on_event`
+
+Replace `g_fire_event` (a file-scope `std::function`) with a member on `DialogOverlay`.
+Since both `Panel` and `FileCommander` inherit from `DialogOverlay`, they all get it.
+
+**Change in main.cpp (DialogOverlay class):**
+
+```cpp
+class DialogOverlay {
+public:
+  // Event callback — set by main.cpp when LuaScripting is active, no-op otherwise
+  std::function<void(const std::string&, const std::string&)> on_event;
+
+  // ... existing members ...
+
+protected:
+  void close_dialog() {
+    // ... existing logic ...
+    if (on_event) on_event("dialog_closed", "");     // was: g_fire_event
+  }
+  void show_dialog(std::string name) {
+    // ... existing logic ...
+    if (on_event) on_event("dialog_opened", name);   // was: g_fire_event
+  }
+};
+
+// In Panel::move_to():
+  if (on_event) on_event("dir_changed", where.native());  // was: g_fire_event
+```
+
+**Wiring in main.cpp (`main()`):**
+
+```cpp
+if (lua_mode) {
+  LuaScripting scripting(app, app.renderer);
+
+  auto fire = [&scripting](const std::string& n, const std::string& d) {
+    scripting.fire_event(n, d);
+  };
+  // Wire all three DialogOverlay instances
+  app.on_event             = fire;
+  app.get_left().on_event  = fire;
+  app.get_right().on_event = fire;
+
+  if (!scripting.setup(lua_script_path)) return 1;
+
+  // Explicit Loop — Lua tick() runs after every render pass
+  ftxui::Loop loop(&screen, app.renderer);
+  while (!loop.HasQuitted()) {
+    loop.RunOnceBlocking();
+    scripting.tick();   // first call starts coroutine; thereafter checks waits
+  }
+  scripting.cleanup();
+} else {
+  screen.Loop(app.renderer);
+}
+```
+
+This cleanly decouples DialogOverlay/Panel from any Lua dependency. In normal (non-Lua)
+mode, `on_event` is default-constructed (empty) and the `if (on_event)` checks are no-ops.
+
+### 14.1 Explicit Loop vs CatchEvent
+
+Phase 1 used a `CatchEvent` wrapper to intercept every FTXUI event and call
+`check_lua_waits()`. This required a "first event" hack (`lua_started` flag) because
+`screen.Post()` doesn't work before `Install()`.
+
+The explicit `ftxui::Loop` eliminates all of this:
+
+- **`Loop` constructor calls `PreMain()` → `Install()`** — the screen is fully set up,
+  `task_sender_`/`task_receiver_` are live, and `screen.Post()` works before entering
+  the `while` loop. No first-event hack needed.
+- **`tick()` runs after `RunOnceBlocking()`** — all pending events have been processed,
+  the frame has been drawn, and the component tree is in a consistent state. Lua state
+  queries always see the latest state.
+- **No event interception** — `tick()` doesn't receive or inspect FTXUI events. It simply
+  polls async state and checks the event log. Events fired during `HandleTask()` (inside
+  `RunOnceBlocking()`) are already in the log by the time `tick()` runs.
+- **`tick()` flow:**
+  1. If `!_started`: call `lua_resume(_lua_co, 0)` to start the coroutine, set `_started = true`
+  2. If `_pending_wait`: call `poll_async_events()`, then `check_waits()`
+  3. If a wait matched or timed out: resume coroutine with result
+
+**FTXUI execution sequence per iteration:**
+
+```
+RunOnceBlocking():
+  Receive(&task)           — blocks until event/closure arrives
+  HandleTask(component, task)
+    → component->OnEvent()  — fires on_event callbacks into scripting event log
+  RunOnce():
+    drain remaining tasks (non-blocking)
+    Draw()                  — render frame
+——— returns to while loop ———
+scripting.tick()           — poll, check waits, maybe resume coroutine
+```
+
+## 15. File Layout After Refactoring
+
+```
+scripting.hpp       — ScheduledUpdates class declaration
+                      LuaScripting class declaration
+                      Forward declarations (FileCommander, Panel)
+
+scripting.cpp       — ScheduledUpdates implementation
+                      LuaScripting implementation (setup, tick, fire_event, cleanup,
+                      all l_* static callbacks, poll_async_events, check_waits, etc.)
+                      #include for lua.h, lualib.h, lauxlib.h
+
+main.cpp            — DialogOverlay (with on_event member instead of g_fire_event)
+                      Panel, FileCommander, LogAdapter, main()
+                      #include "scripting.hpp"
+                      No Lua headers, no Lua code, no Lua globals
+```
+
+**main.cpp removals (lines to delete):**
+
+- Line 42: `g_fire_event` declaration
+- Lines 32–36: Lua `extern "C"` includes
+- Lines 19, 25–27: `<atomic>`, `<optional>`, `<thread>` (keep `<thread>` if still needed elsewhere)
+- Lines 432–975: Entire "LuaJIT testing framework" block (~540 lines)
+- Lines 1014–1016: `g_app` / `g_root` assignments
+
+**main.cpp modifications:**
+
+- Lines 76, 94, 152: Replace `g_fire_event` with `on_event`
+- Lines 1020–1042: Replace `CatchEvent` wrapper + `screen.Loop(wrapper)` with explicit `ftxui::Loop` + `scripting.tick()`
+- Add `#include <ftxui/component/loop.hpp>` (for `ftxui::Loop`)
+- Add `#include "scripting.hpp"`
+
+## 16. CMakeLists.txt Update
+
+Add `scripting.cpp` to the build:
+
+```cmake
+add_executable(fc
+  main.cpp
+  scripting.cpp    # <-- new
+  dialogs.cpp
+  # ... etc
+)
+```
+
+## 17. Implementation Order
+
+1. **`ScheduledUpdates`** in `scripting.hpp` + `scripting.cpp` — self-contained, testable in isolation
+2. **`LuaScripting`** class declaration in `scripting.hpp`
+3. **`LuaScripting`** implementation in `scripting.cpp` — move all functions, convert globals to members, store `this` in Lua registry, register plain `lua_pushcfunction`s, implement `tick()` with first-call start logic
+4. **`DialogOverlay::on_event`** — add member, replace `g_fire_event` references
+5. **Update `main.cpp`** — remove Lua code & globals, add `#include "scripting.hpp"`, replace `CatchEvent` wrapper + `screen.Loop(wrapper)` with explicit `ftxui::Loop` + `scripting.tick()`, wire `on_event` callbacks
+6. **Update `CMakeLists.txt`** — add `scripting.cpp`
+7. **Build & test** — `build/fc run test/test_copy.lua` must still pass

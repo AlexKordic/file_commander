@@ -13,15 +13,19 @@
 #include <ftxui/component/component_base.hpp>
 #include <ftxui/component/component_options.hpp>
 #include <ftxui/component/screen_interactive.hpp>
+#include <ftxui/component/loop.hpp>
 #include <ftxui/dom/elements.hpp>
 #include <ftxui/dom/table.hpp>
 
+#include <atomic>
 #include <cmath>
 #include <format>
 #include <functional>
 #include <map>
 #include <memory>
+#include <optional>
 #include <string>
+#include <thread>
 #include <utility>
 
 #include <boost/filesystem.hpp>
@@ -35,6 +39,9 @@ extern "C" {
 using namespace ftxui;
 using namespace Perun;
 
+// Global event callback for Lua testing framework (set in Lua init below)
+static std::function<void(const std::string&, const std::string&)> g_fire_event;
+
 class Panel;
 
 using TargetFunc = std::function<Filepath(Panel*)>;
@@ -43,8 +50,15 @@ using ExecuteOnUiThread = std::function<void(std::function<void()>)>;
 
 class DialogOverlay {
  public:
-  Component navigation;
-  int       _active_dialog = 0;
+  Component   navigation;
+  int         _active_dialog = 0;
+  std::string _active_dialog_name;
+
+  ftxui::Dialog::P get_overlay_dialog(const std::string& name) {
+    auto it = _overlay_dialogs.find(name);
+    if (it != _overlay_dialogs.end()) return it->second;
+    return nullptr;
+  }
 
  protected:
   ftxui::Dialog::P                        _main_document;     // always rendered, always first child of Panel::container
@@ -56,9 +70,11 @@ class DialogOverlay {
   void close_dialog() {
     // Move navigation to main document
     _active_dialog = 0;
+    _active_dialog_name.clear();
     _overlay_renderer.reset();
     // Remove all dialogs, child index > 0
     while (navigation->ChildCount() > 1) { navigation->ChildAt(navigation->ChildCount() - 1)->Detach(); }
+    if (g_fire_event) g_fire_event("dialog_closed", "");
   }
   void show_dialog(std::string name) {
     if (!_overlay_dialogs.contains(name)) {
@@ -66,6 +82,7 @@ class DialogOverlay {
       return;
     }
     _active_dialog = 1;
+    _active_dialog_name = name;
     // Remove all dialogs, child index > 0
     while (navigation->ChildCount() > 1) { navigation->ChildAt(navigation->ChildCount() - 1)->Detach(); }
     // Add proper dialog
@@ -75,6 +92,7 @@ class DialogOverlay {
     _overlay_renderer = dialog->renderer;
     // init dialog with input data
     dialog->OnShow();
+    if (g_fire_event) g_fire_event("dialog_opened", name);
   }
 };
 
@@ -132,6 +150,7 @@ class Panel : public DialogOverlay {
         }
       });
     });
+    if (g_fire_event) g_fire_event("dir_changed", where.native());
   }
   Element render() {
     // Panel is always shown
@@ -155,6 +174,8 @@ class Panel : public DialogOverlay {
   }
 
   void set_debug_info(std::function<Element()> info) { _files->debug_info = info; }
+
+  PanelSharedState::P get_shared_state() const { return _state; }
 
  private:
   PanelSharedState::P    _state;
@@ -241,6 +262,9 @@ class FileCommander : public DialogOverlay {
   int       _left_size   = 20;
   int       _screen_dimx = 0;
   Component renderer;
+
+  Panel& get_left() { return left; }
+  Panel& get_right() { return right; }
 
   FileCommander(Filepath l, Filepath r, ExecuteOnUiThread exec, std::function<int()> dimx) : left(l, get_target(), exec), right(r, get_target(), exec), _get_dimx(dimx) {
     _close_dialog         = [this]() { close_dialog(); };
@@ -406,61 +430,550 @@ class LogAdapter {
 
 void set_console_size(int width, int height) { std::cout << "\e[8;" << height << ";" << width << "t"; }
 
-// --- LuaJIT scripting support ---
+// =====================================================================
+// LuaJIT testing framework — same-thread, coroutine-based
+// =====================================================================
 
-static int lua_fc_post_event(lua_State* L) {
-  const char* event_str = luaL_checkstring(L, 1);
-  auto*       screen    = ScreenInteractive::Active();
-  if (screen) {
-    auto e = event_from_string(std::string(event_str));
-    screen->Post(e);
+// --- Debug logging for Lua framework ---
+static FILE* g_lua_log = nullptr;
+static void lua_log(const char* msg) {
+  if (!g_lua_log) g_lua_log = fopen("/tmp/fc_lua_debug.log", "w");
+  if (g_lua_log) { fprintf(g_lua_log, "%s\n", msg); fflush(g_lua_log); }
+}
+
+// --- Global state accessible to Lua C functions ---
+static FileCommander* g_app  = nullptr;
+static Component      g_root = nullptr;  // app.renderer — for OnEvent dispatch
+static lua_State*     g_lua  = nullptr;  // main Lua state (owns everything)
+static lua_State*     g_lua_co = nullptr;  // coroutine running the test script
+static bool           g_lua_finished = false;
+
+// --- Event log ---
+struct LuaEvent {
+  std::string name;
+  double      timestamp;
+  std::string detail;
+};
+static std::deque<LuaEvent> g_event_log;
+static size_t               g_event_cursor = 0;  // position in log when wait started
+
+static void fire_event(const std::string& name, const std::string& detail = "") {
+  g_event_log.push_back({name, now(), detail});
+}
+
+// --- Pending wait (for fc.wait_event / fc.sleep) ---
+struct PendingWait {
+  std::vector<std::string> event_names;
+  double                   deadline;
+  bool                     sleep_mode = false;  // true => deadline is success (sleep), false => deadline is timeout
+};
+static std::optional<PendingWait> g_pending_wait;
+
+// --- Poll timer: posts Event::Custom periodically while a Lua wait is pending ---
+static std::atomic<bool> g_poll_active{false};
+
+static void start_lua_poll_timer() {
+  if (g_poll_active.exchange(true)) return;
+  std::thread([]() {
+    while (g_poll_active) {
+      std::this_thread::sleep_for(std::chrono::milliseconds(50));
+      auto* screen = ScreenInteractive::Active();
+      if (screen) screen->Post(Event::Custom);
+    }
+  }).detach();
+}
+
+static void stop_lua_poll_timer() { g_poll_active = false; }
+
+// --- Poll async events (job completion, discovery) ---
+// These originate on worker threads; we detect them by polling on the UI thread.
+static bool g_had_running_job = false;
+static bool g_had_discovery   = false;
+
+static int    g_poll_count = 0;
+static double g_last_job_finished_time = -1;
+static double g_last_job_started_time  = -1;
+
+static void poll_async_events() {
+  g_poll_count++;
+  // Job start/completion — detect by timestamps to avoid missing fast jobs
+  auto jobinfo = file_operations().get_running_job();
+  if (jobinfo.job) {
+    // Detect job start
+    if (jobinfo.job->_started_time > 0 && jobinfo.job->_started_time != g_last_job_started_time) {
+      g_last_job_started_time = jobinfo.job->_started_time;
+      lua_log("poll: job_started");
+      fire_event("job_started", "");
+    }
+    // Detect job completion
+    if (jobinfo.job->_finished_time > 0 && jobinfo.job->_finished_time != g_last_job_finished_time) {
+      g_last_job_finished_time = jobinfo.job->_finished_time;
+      lua_log("poll: job_completed");
+      fire_event("job_completed", "");
+    }
+    g_had_running_job = !jobinfo.job->is_stopped();
+  } else {
+    g_had_running_job = false;
   }
-  return 0;
-}
 
-static int lua_fc_sleep(lua_State* L) {
-  int ms = (int)luaL_checknumber(L, 1);
-  std::this_thread::sleep_for(std::chrono::milliseconds(ms));
-  return 0;
-}
-
-static int lua_fc_quit(lua_State* L) {
-  auto* screen = ScreenInteractive::Active();
-  if (screen) { screen->Exit(); }
-  return 0;
-}
-
-static void run_lua_script(const std::string& script_path) {
-  // Wait for screen to become active
-  for (;;) {
-    std::this_thread::sleep_for(std::chrono::milliseconds(16));
-    if (ScreenInteractive::Active()) break;
+  // Copy discovery completion — check both panels
+  bool discovery_running = false;
+  bool has_discovery = false;
+  if (g_app) {
+    for (auto* panel : {&g_app->get_left(), &g_app->get_right()}) {
+      auto copy_dlg = std::dynamic_pointer_cast<CopyDialog>(panel->get_overlay_dialog("Copy"));
+      if (copy_dlg && copy_dlg->_discovery_process) {
+        has_discovery = true;
+        if (copy_dlg->_discovery_process->_running) {
+          discovery_running = true;
+        }
+      }
+    }
   }
+  if (g_poll_count <= 5 || (g_poll_count % 20 == 0)) {
+    lua_log(("poll #" + std::to_string(g_poll_count) + ": has_disc=" + std::to_string(has_discovery) + " disc_run=" + std::to_string(discovery_running) + " had_disc=" + std::to_string(g_had_discovery)).c_str());
+  }
+  if (g_had_discovery && !discovery_running) {
+    lua_log("poll: discovery_completed");
+    fire_event("discovery_completed", "");
+  }
+  g_had_discovery = discovery_running;
+}
 
-  lua_State* L = luaL_newstate();
-  luaL_openlibs(L);
-
-  // Register 'fc' module: fc.post_event(), fc.sleep(), fc.quit()
-  lua_newtable(L);
-  lua_pushcfunction(L, lua_fc_post_event);
-  lua_setfield(L, -2, "post_event");
-  lua_pushcfunction(L, lua_fc_sleep);
-  lua_setfield(L, -2, "sleep");
-  lua_pushcfunction(L, lua_fc_quit);
-  lua_setfield(L, -2, "quit");
-  lua_setglobal(L, "fc");
-
-  if (luaL_dofile(L, script_path.c_str()) != 0) {
-    const char* err = lua_tostring(L, -1);
+// --- Handle Lua coroutine resume status ---
+static void handle_lua_resume_status(int status) {
+  if (status == 0) {
+    // Coroutine finished normally
+    g_lua_finished = true;
+    stop_lua_poll_timer();
+  } else if (status == LUA_YIELD) {
+    // Coroutine yielded (waiting for event or sleeping)
+  } else {
+    // Error
+    const char* err = lua_tostring(g_lua_co, -1);
     file_operations().report_error(std::string("[Lua] ") + (err ? err : "unknown error"));
+    g_lua_finished = true;
+    stop_lua_poll_timer();
+    // Post Custom to refresh error display
     auto* screen = ScreenInteractive::Active();
     if (screen) screen->Post(Event::Custom);
-    lua_pop(L, 1);
   }
-  lua_close(L);
 }
 
-// --- end LuaJIT scripting support ---
+// --- Check pending Lua waits and resume coroutine if condition met ---
+static void check_lua_waits() {
+  if (!g_pending_wait || g_lua_finished) return;
+
+  // Poll for async events
+  poll_async_events();
+
+  // Check event log for match (only if we have event names to match)
+  if (!g_pending_wait->event_names.empty()) {
+    for (size_t i = g_event_cursor; i < g_event_log.size(); i++) {
+      for (auto& name : g_pending_wait->event_names) {
+        if (g_event_log[i].name == name) {
+          // Match! Resume coroutine with true
+          g_pending_wait.reset();
+          g_event_cursor = g_event_log.size();
+          stop_lua_poll_timer();
+          lua_pushboolean(g_lua_co, 1);
+          int status = lua_resume(g_lua_co, 1);
+          handle_lua_resume_status(status);
+          return;
+        }
+      }
+    }
+    g_event_cursor = g_event_log.size();
+  }
+
+  // Check deadline
+  if (now() > g_pending_wait->deadline) {
+    bool was_sleep = g_pending_wait->sleep_mode;
+    g_pending_wait.reset();
+    stop_lua_poll_timer();
+    if (was_sleep) {
+      // Sleep completed — resume with no return value
+      int status = lua_resume(g_lua_co, 0);
+      handle_lua_resume_status(status);
+    } else {
+      // Timeout — resume with nil
+      lua_pushnil(g_lua_co);
+      int status = lua_resume(g_lua_co, 1);
+      handle_lua_resume_status(status);
+    }
+  }
+}
+
+// =====================================================================
+// Lua C functions registered in the 'fc' table
+// =====================================================================
+
+// fc.key(name_or_table) — dispatch key event or action, synchronous
+static int lua_fc_key(lua_State* L) {
+  if (!g_root) return luaL_error(L, "fc not initialized");
+  // Handle table argument: process each element
+  if (lua_istable(L, 1)) {
+    int n = (int)lua_objlen(L, 1);
+    for (int i = 1; i <= n; i++) {
+      lua_rawgeti(L, 1, i);
+      const char* name = luaL_checkstring(L, -1);
+      size_t      len  = strlen(name);
+      if (len == 1) {
+        g_root->OnEvent(Event::Character(name[0]));
+      } else {
+        g_root->OnEvent(event_from_string(std::string(name)));
+      }
+      lua_pop(L, 1);
+    }
+    return 0;
+  }
+  // Single string argument
+  const char* name = luaL_checkstring(L, 1);
+  size_t      len  = strlen(name);
+  if (len == 1) {
+    g_root->OnEvent(Event::Character(name[0]));
+  } else {
+    // len >= 2: use event_from_string (covers "f5", "cA", "up", "esc", "ret", "tab", etc.)
+    // TODO: when action registry is implemented, try action lookup first for len >= 3
+    g_root->OnEvent(event_from_string(std::string(name)));
+  }
+  return 0;
+}
+
+// fc.quit() — exit the application (uses _exit for clean termination in test mode,
+// since FTXUI's EventListener blocks on stdin when backgrounded)
+static int lua_fc_quit(lua_State* L) {
+  lua_log("fc.quit() called");
+  stop_lua_poll_timer();
+  if (g_lua_log) { fclose(g_lua_log); g_lua_log = nullptr; }
+  _exit(0);
+  return 0;
+}
+
+// fc.left_cd(path) — navigate left panel to given path
+static int lua_fc_left_cd(lua_State* L) {
+  if (!g_app) return luaL_error(L, "fc not initialized");
+  auto path = boost::filesystem::path(luaL_checkstring(L, 1));
+  g_app->get_left().move_to(path);
+  return 0;
+}
+
+// fc.right_cd(path) — navigate right panel to given path
+static int lua_fc_right_cd(lua_State* L) {
+  if (!g_app) return luaL_error(L, "fc not initialized");
+  auto path = boost::filesystem::path(luaL_checkstring(L, 1));
+  g_app->get_right().move_to(path);
+  return 0;
+}
+
+// fc.left_path() — returns left panel directory path
+static int lua_fc_left_path(lua_State* L) {
+  if (!g_app) return luaL_error(L, "fc not initialized");
+  lua_pushstring(L, g_app->get_left().dir.path.native().c_str());
+  return 1;
+}
+
+// fc.right_path() — returns right panel directory path
+static int lua_fc_right_path(lua_State* L) {
+  if (!g_app) return luaL_error(L, "fc not initialized");
+  lua_pushstring(L, g_app->get_right().dir.path.native().c_str());
+  return 1;
+}
+
+// Helper: get the focused panel (the one whose navigation is focused)
+static Panel& get_focused_panel() {
+  if (g_app->get_left().navigation->Focused()) return g_app->get_left();
+  return g_app->get_right();
+}
+
+// fc.focused() — returns focused file path in the active panel
+static int lua_fc_focused(lua_State* L) {
+  if (!g_app) return luaL_error(L, "fc not initialized");
+  auto& panel   = get_focused_panel();
+  auto  focused = panel.get_shared_state()->get_focused_item();
+  if (focused) {
+    lua_pushstring(L, focused->native().c_str());
+  } else {
+    lua_pushnil(L);
+  }
+  return 1;
+}
+
+// fc.selected() — returns table of selected file paths in the active panel
+static int lua_fc_selected(lua_State* L) {
+  if (!g_app) return luaL_error(L, "fc not initialized");
+  auto& panel = get_focused_panel();
+  lua_newtable(L);
+  int idx = 1;
+  for (auto& item : panel.dir.items) {
+    if (item.selected()) {
+      lua_pushstring(L, item.path_ref().native().c_str());
+      lua_rawseti(L, -2, idx++);
+    }
+  }
+  return 1;
+}
+
+// fc.errors() — returns table of error messages
+static int lua_fc_errors(lua_State* L) {
+  auto errors = file_operations().get_errors(9999);
+  lua_newtable(L);
+  int idx = 1;
+  for (auto& e : errors) {
+    lua_pushstring(L, e.message.c_str());
+    lua_rawseti(L, -2, idx++);
+  }
+  return 1;
+}
+
+// Helper: push a panel state subtable onto the Lua stack
+static void push_panel_state(lua_State* L, Panel& panel) {
+  lua_newtable(L);
+  // path
+  lua_pushstring(L, panel.dir.path.native().c_str());
+  lua_setfield(L, -2, "path");
+  // item_count (visible items)
+  lua_pushinteger(L, panel.dir._calculated.items_visible);
+  lua_setfield(L, -2, "item_count");
+  // focused_index
+  auto state = panel.get_shared_state();
+  int  fi    = state->get_focused_index ? state->get_focused_index() : 0;
+  lua_pushinteger(L, fi);
+  lua_setfield(L, -2, "focused_index");
+  // focused_path
+  auto focused = state->get_focused_item ? state->get_focused_item() : nullptr;
+  if (focused) {
+    lua_pushstring(L, focused->native().c_str());
+  } else {
+    lua_pushnil(L);
+  }
+  lua_setfield(L, -2, "focused_path");
+  // selected_count + selected_paths
+  int selected_count = 0;
+  lua_newtable(L);  // selected_paths table
+  int idx = 1;
+  for (auto& item : panel.dir.items) {
+    if (item.selected()) {
+      selected_count++;
+      lua_pushstring(L, item.path_ref().native().c_str());
+      lua_rawseti(L, -2, idx++);
+    }
+  }
+  lua_setfield(L, -2, "selected_paths");
+  lua_pushinteger(L, selected_count);
+  lua_setfield(L, -2, "selected_count");
+  // filter
+  lua_pushstring(L, panel.dir.filter.phrase.c_str());
+  lua_setfield(L, -2, "filter");
+  // sort
+  const char* sort_str = "name_asc";
+  switch (panel.dir.order_by) {
+  case Orderby::NAME_ASC: sort_str = "name_asc"; break;
+  case Orderby::NAME_DESC: sort_str = "name_desc"; break;
+  case Orderby::SIZE_ASC: sort_str = "size_asc"; break;
+  case Orderby::SIZE_DESC: sort_str = "size_desc"; break;
+  case Orderby::TIME_ASC: sort_str = "time_asc"; break;
+  case Orderby::TIME_DESC: sort_str = "time_desc"; break;
+  }
+  lua_pushstring(L, sort_str);
+  lua_setfield(L, -2, "sort");
+  // has_dialog / active_dialog
+  lua_pushboolean(L, panel._active_dialog > 0);
+  lua_setfield(L, -2, "has_dialog");
+  if (panel._active_dialog_name.empty()) {
+    lua_pushnil(L);
+  } else {
+    lua_pushstring(L, panel._active_dialog_name.c_str());
+  }
+  lua_setfield(L, -2, "active_dialog");
+  // tabs (NOT YET IMPLEMENTED — always 1 tab)
+  lua_newtable(L);  // tabs array
+  lua_newtable(L);  // tabs[1]
+  lua_pushstring(L, panel.dir.path.native().c_str());
+  lua_setfield(L, -2, "path");
+  lua_pushboolean(L, 1);
+  lua_setfield(L, -2, "active");
+  lua_rawseti(L, -2, 1);  // tabs[1] = {...}
+  lua_setfield(L, -2, "tabs");
+}
+
+// fc.state() — returns full state snapshot
+static int lua_fc_state(lua_State* L) {
+  if (!g_app) return luaL_error(L, "fc not initialized");
+  lua_newtable(L);  // root table
+
+  // left panel
+  push_panel_state(L, g_app->get_left());
+  lua_setfield(L, -2, "left");
+
+  // right panel
+  push_panel_state(L, g_app->get_right());
+  lua_setfield(L, -2, "right");
+
+  // jobs
+  lua_newtable(L);
+  auto jobinfo = file_operations().get_running_job();
+  bool has_job = jobinfo.job && !jobinfo.job->is_stopped();
+  lua_pushboolean(L, has_job);
+  lua_setfield(L, -2, "active");
+  if (has_job) {
+    const char* jtype = "?";
+    switch (jobinfo.job->_type) {
+    case JobInstructions::Type::COPY: jtype = "copy"; break;
+    case JobInstructions::Type::MOVE: jtype = "move"; break;
+    case JobInstructions::Type::DELETE: jtype = "delete"; break;
+    }
+    lua_pushstring(L, jtype);
+    lua_setfield(L, -2, "type");
+    std::lock_guard lock(jobinfo.job->_m);
+    lua_pushnumber(L, jobinfo.job->_total.percentage);
+    lua_setfield(L, -2, "progress");
+    lua_pushinteger(L, jobinfo.job->item_count());
+    lua_setfield(L, -2, "items_total");
+    lua_pushinteger(L, jobinfo.job->_current_item_index);
+    lua_setfield(L, -2, "items_done");
+  } else {
+    lua_pushnil(L);
+    lua_setfield(L, -2, "type");
+    lua_pushnumber(L, 0);
+    lua_setfield(L, -2, "progress");
+    lua_pushinteger(L, 0);
+    lua_setfield(L, -2, "items_total");
+    lua_pushinteger(L, 0);
+    lua_setfield(L, -2, "items_done");
+  }
+  lua_pushinteger(L, jobinfo.queued_jobs);
+  lua_setfield(L, -2, "queued");
+  lua_setfield(L, -2, "jobs");
+
+  // errors
+  auto errors = file_operations().get_errors(9999);
+  lua_pushinteger(L, (int)errors.size());
+  lua_setfield(L, -2, "error_count");
+  lua_newtable(L);
+  int eidx = 1;
+  for (auto& e : errors) {
+    lua_newtable(L);
+    lua_pushstring(L, e.message.c_str());
+    lua_setfield(L, -2, "message");
+    lua_pushnumber(L, e.time);
+    lua_setfield(L, -2, "time");
+    lua_rawseti(L, -2, eidx++);
+  }
+  lua_setfield(L, -2, "errors");
+
+  return 1;
+}
+
+// fc.wait_event(name_or_table, timeout_ms) — yield coroutine until event or timeout
+static int lua_fc_wait_event(lua_State* L) {
+  // Collect event name(s)
+  std::vector<std::string> names;
+  if (lua_istable(L, 1)) {
+    int n = (int)lua_objlen(L, 1);
+    for (int i = 1; i <= n; i++) {
+      lua_rawgeti(L, 1, i);
+      names.push_back(luaL_checkstring(L, -1));
+      lua_pop(L, 1);
+    }
+  } else {
+    names.push_back(luaL_checkstring(L, 1));
+  }
+  int timeout_ms = luaL_optinteger(L, 2, 5000);
+
+  // Poll once to catch events that already happened
+  poll_async_events();
+
+  // Check if event already in log since last cursor position
+  for (size_t i = g_event_cursor; i < g_event_log.size(); i++) {
+    for (auto& name : names) {
+      if (g_event_log[i].name == name) {
+        g_event_cursor = g_event_log.size();
+        lua_pushboolean(L, 1);
+        return 1;  // already happened, no yield
+      }
+    }
+  }
+
+  // Not yet — set up wait and yield
+  g_pending_wait = PendingWait{std::move(names), now() + timeout_ms / 1000.0, false};
+  g_event_cursor = g_event_log.size();
+  start_lua_poll_timer();
+  return lua_yield(L, 0);
+}
+
+// fc.sleep(ms) — yield coroutine for N milliseconds
+static int lua_fc_sleep(lua_State* L) {
+  int ms = (int)luaL_checknumber(L, 1);
+  g_pending_wait = PendingWait{{}, now() + ms / 1000.0, true};
+  start_lua_poll_timer();
+  return lua_yield(L, 0);
+}
+
+// =====================================================================
+// Lua state setup
+// =====================================================================
+
+static void setup_lua_state(const std::string& script_path, ScreenInteractive& screen) {
+  lua_log("setup_lua_state: start");
+  g_lua = luaL_newstate();
+  luaL_openlibs(g_lua);
+
+  // Register 'fc' table with C functions
+  lua_newtable(g_lua);
+  // clang-format off
+  auto reg = [](const char* name, lua_CFunction fn) {
+    lua_pushcfunction(g_lua, fn);
+    lua_setfield(g_lua, -2, name);
+  };
+  reg("key",        lua_fc_key);
+  reg("quit",       lua_fc_quit);
+  reg("left_cd",    lua_fc_left_cd);
+  reg("right_cd",   lua_fc_right_cd);
+  reg("left_path",  lua_fc_left_path);
+  reg("right_path", lua_fc_right_path);
+  reg("focused",    lua_fc_focused);
+  reg("selected",   lua_fc_selected);
+  reg("errors",     lua_fc_errors);
+  reg("state",      lua_fc_state);
+  reg("wait_event", lua_fc_wait_event);
+  reg("sleep",      lua_fc_sleep);
+  // clang-format on
+  lua_setglobal(g_lua, "fc");
+
+  // Wire up the event callback
+  g_fire_event = fire_event;
+
+  lua_log("setup_lua_state: loading framework");
+  // Load framework Lua code
+  if (luaL_dofile(g_lua, "fc_framework.lua") != 0) {
+    const char* err = lua_tostring(g_lua, -1);
+    std::string msg = std::string("[Lua framework] ") + (err ? err : "unknown error");
+    lua_log(msg.c_str());
+    file_operations().report_error(msg);
+    lua_pop(g_lua, 1);
+    return;
+  }
+  lua_log("setup_lua_state: framework loaded OK");
+
+  // Create coroutine and load the test script
+  g_lua_co = lua_newthread(g_lua);
+  lua_log(("setup_lua_state: loading script " + script_path).c_str());
+  if (luaL_loadfile(g_lua_co, script_path.c_str()) != 0) {
+    const char* err = lua_tostring(g_lua_co, -1);
+    std::string msg = std::string("[Lua load] ") + (err ? err : "unknown error");
+    lua_log(msg.c_str());
+    file_operations().report_error(msg);
+    return;
+  }
+  lua_log("setup_lua_state: script loaded, ready for initial resume");
+  // NOTE: Cannot screen.Post() here — task_sender_ is null before screen.Loop().
+  // The initial resume is triggered by the CatchEvent handler on the first event.
+}
+
+// =====================================================================
+// End LuaJIT testing framework
+// =====================================================================
 
 int main(int argc, char** argv) {
   // For debugging
@@ -499,15 +1012,47 @@ int main(int argc, char** argv) {
 
   LogAdapter adapt_logs(screen);
 
-  // Run lua script in background thread if "run script.lua" was specified
+  // Set up globals for Lua access
+  g_app  = &app;
+  g_root = app.renderer;
+
+  screen.TrackMouse(false);
+
   if (lua_mode) {
-    std::thread([lua_script_path]() { run_lua_script(lua_script_path); }).detach();
+    // Set up Lua state with same-thread coroutine execution
+    setup_lua_state(lua_script_path, screen);
+    // Wrap the renderer with a CatchEvent that checks Lua waits after every event.
+    // Also triggers the initial coroutine resume on the first event (since screen.Post
+    // doesn't work before the event loop starts — task_sender_ is null until Install).
+    bool lua_started = false;
+    auto lua_wrapper = CatchEvent(app.renderer, [&lua_started](Event e) -> bool {
+      if (!lua_started && g_lua_co) {
+        lua_started = true;
+        lua_log("first event: starting Lua coroutine");
+        int status = lua_resume(g_lua_co, 0);
+        lua_log(("first event: resume status = " + std::to_string(status)).c_str());
+        handle_lua_resume_status(status);
+      }
+      check_lua_waits();
+      return false;  // don't consume — forward event to app.renderer
+    });
+    // NOTE: exec(..) before .Loop() doesnt have effect, because there is no global active screen.
+    screen.Loop(lua_wrapper);
+    // Cleanup Lua state
+    if (g_lua) { lua_close(g_lua); g_lua = nullptr; }
+    stop_lua_poll_timer();
+  } else {
+    // Normal mode — no Lua
+    // NOTE: exec(..) before .Loop() doesnt have effect, because there is no global active screen.
+
+    // old: screen.Loop(app.renderer);
+    ftxui::Loop loop(&screen, app.renderer);
+    while(!loop.HasQuitted()) {
+      loop.RunOnceBlocking();
+      // Now do lua scripting actions
+
+    }
   }
-
-  // screen.TrackMouse(false);
-
-  // NOTE: exec(..) before .Loop() doesnt have effect, because there is no global active screen.
-  screen.Loop(app.renderer);
 
   return 0;
 }

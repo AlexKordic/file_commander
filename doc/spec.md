@@ -334,24 +334,196 @@ struct Command {
 };
 ```
 
-#### 3.2 Custom Commands via LuaJIT
+#### 3.2 LuaJIT Testing Framework
 
-Allow users to define custom file operations in Lua scripts.
+Lua scripts drive the full UI for automated end-to-end testing. The test script runs
+on the **main UI thread** as a Lua coroutine, so key dispatches and state queries are
+synchronous with zero overhead. Only async waits (job completion, discovery) yield the
+coroutine back to the FTXUI event loop.
 
-**Steps:**
-1. Expand the `fc` Lua module with functions:
-   - `fc.get_selected()` - returns list of selected file paths.
-   - `fc.get_focused()` - returns focused file path.
-   - `fc.get_origin()` / `fc.get_target()` - panel paths.
-   - `fc.run_command(cmd)` - shell command execution.
-   - `fc.report_error(msg)` - post error to error log.
-2. Create a `LuaCommandDialog` that lists `.lua` files from a commands directory.
-3. Selecting a script runs it in a background thread with the current selection context.
-4. Add built-in scripts for common tasks:
-   - `7z_compress.lua` / `7z_extract.lua`
-   - `tar_gz_extract.lua`
-   - `open_in_editor.lua` (uses `$EDITOR` or configurable path)
-5. Register custom commands in the command palette alongside built-in ones.
+**Design principles:**
+- **Same thread**: `fc.key("f5")` calls `component->OnEvent(Event::F5)` directly —
+  no thread hop, no marshalling. State queries read `Dir`/`Panel` directly.
+- **Coroutine-based**: the test script runs inside `lua_resume()`. It yields only
+  when waiting for an async event (`fc.wait_event`). The FTXUI event loop resumes
+  it when the condition is met or timeout expires.
+- **Event-driven waits**: `fc.wait_event("job_completed", 30000)` replaces `sleep()`.
+  Background threads (copy worker, progress monitor) post `Event::Custom` which
+  wakes the event loop and triggers `check_lua_waits()`.
+- **Plain Lua**: test scripts use `assert()`, `io`, `os` from the standard library.
+  No special test runner — `./fc run test/test_copy.lua`.
+
+**Startup flow** (in `main.cpp`):
+1. Create `FileCommander` as usual. Store global `g_app` and `g_root` pointers.
+2. Create Lua state, register C functions, load `fc_framework.lua`.
+3. Load the test script as a Lua coroutine.
+4. Post a closure via `screen.Post()` that calls `lua_resume(co, 0)`.
+5. Enter `screen.Loop()`. The posted closure fires on the first event loop iteration,
+   starting the test script.
+
+##### Action Concept
+
+Unify all key-triggered operations under named **actions**. Currently key→operation
+mappings are spread across `Commands::Commands()` (file op dialogs),
+`handle_global_shortcuts()` (panel switching, refresh), and `filelist_handle_commands()`
+(select, enter_dir). An action system centralises them.
+
+```cpp
+struct Action {
+  std::string name;           // "copy", "select_all", "enter_dir"
+  std::string description;    // Human-readable
+  std::vector<Event> keys;    // Multiple keys can trigger this
+  double last_used_time = 0;  // MRU priority when keys conflict
+  enum class Scope { GLOBAL, PANEL, DIALOG } scope;
+};
+```
+
+Action registry (replaces `Commands` and hardcoded key checks):
+- **Global scope**: `switch_panel`, `refresh_dir`, `target_right`, `target_left`,
+  `toggle_errors`, `clear_errors`.
+- **Panel scope**: `select`, `select_all`, `clear_selection`, `enter_dir`, `leave_dir`,
+  `copy`, `move`, `mkdir`, `delete`, `rename`, `names_to_clipboard`,
+  `paths_to_clipboard`, `find`.
+- **Dialog scope**: `cancel`, `confirm`.
+
+Key conflict resolution: when multiple actions share the same key, the one with the
+most recent `last_used_time` wins.
+
+##### `fc.key()` Dispatch
+
+`fc.key(name_or_table)` accepts a string or a table of strings:
+```lua
+fc.key("f5")                        -- single key event
+fc.key("a")                         -- single character (text input)
+fc.key("copy")                      -- action name (len > 2)
+fc.key({"cA", "f5", "<-", "ret"})   -- sequence
+```
+
+Dispatch rules for a single name:
+- `#name == 1` : character input → `Event::Character(name[0])`
+- `#name == 2` : event code → `event_from_string(name)` ("f5", "cA", etc.)
+- `#name >= 3` : try action registry first; fall back to `event_from_string`
+  (covers "up", "esc", "ret", "tab", "down", "back", "f10"–"f12", etc.)
+
+No yield needed — `OnEvent()` is synchronous on the same thread.
+
+##### Events
+
+Events are fired from C++ into a ring buffer. Lua can wait for them.
+
+| Event | Fired when | Detail |
+|-------|-----------|--------|
+| `dialog_opened` | `DialogOverlay::show_dialog()` | dialog name |
+| `dialog_closed` | `DialogOverlay::close_dialog()` | — |
+| `dir_changed` | `Panel::move_to()` | new path |
+| `items_updated` | `Dir::partial_refresh()` / `Dir::refresh()` | — |
+| `selection_changed` | `Dir::item_toggle_select/select_all/clear_selection` | count |
+| `job_started` | Polled via `_started_time > 0` | job type |
+| `job_completed` | Polled via `is_stopped()` | job type |
+| `discovery_completed` | Polled via `_running == false` | — |
+| `error_reported` | `file_operations().report_error()` | message |
+| `errors_cleared` | `file_operations().clear_errors()` | — |
+| `tab_switched` | (future — not yet implemented) | side, tab index |
+| `tab_created` | (future) | side |
+| `tab_closed` | (future) | side |
+
+Background-thread events (`job_completed`, `job_started`, `discovery_completed`) are
+detected by polling on the UI thread. The worker thread already posts `Event::Custom`
+via `updated()`, which wakes the event loop.
+
+##### States
+
+`fc.state()` returns a comprehensive snapshot:
+```lua
+{
+  left = {
+    path = "/Users/alex/code",
+    item_count = 15,
+    focused_index = 3,
+    focused_path = "/Users/alex/code/main.cpp",
+    selected_count = 2,
+    selected_paths = {"/Users/alex/code/a.txt", "/Users/alex/code/b.txt"},
+    filter = "",
+    sort = "name_asc",
+    has_dialog = false,
+    active_dialog = nil,
+    -- Tabs (NOT YET IMPLEMENTED - currently always 1 tab).
+    -- When implemented: switching active tab on one side does NOT
+    -- affect the other side. A "tab_switched" event is fired on
+    -- the affected side only.
+    tabs = { {path = "/Users/alex/code", active = true} },
+  },
+  right = { --[[ same structure ]] },
+  jobs = {
+    active = false,
+    type = nil,
+    progress = 0,
+    items_total = 0,
+    items_done = 0,
+    queued = 0,
+  },
+  error_count = 0,
+  errors = {},
+}
+```
+
+Convenience getters: `fc.focused()`, `fc.selected()`, `fc.left_path()`,
+`fc.right_path()`. All direct reads — no yield.
+
+##### Waiting on Events
+
+```lua
+fc.wait_event("job_completed", 30000)                -- single event
+fc.wait_event({"dialog_closed", "error_reported"}, 5000)  -- any of
+```
+
+Returns `true` on match, `nil` on timeout. Yields the coroutine; resumes when
+`check_lua_waits()` detects the event or timeout in the FTXUI event loop.
+
+##### API Reference
+
+| Function | Returns | Yields | Description |
+|----------|---------|--------|-------------|
+| `fc.key(name)` | — | no | Dispatch key/action. Accepts string or table. |
+| `fc.left_cd(path)` | — | no | Navigate left panel to path. |
+| `fc.right_cd(path)` | — | no | Navigate right panel to path. |
+| `fc.state()` | table | no | Full state snapshot (see above). |
+| `fc.focused()` | string | no | Focused path in active panel. |
+| `fc.selected()` | table | no | Selected paths in active panel. |
+| `fc.left_path()` | string | no | Left panel directory path. |
+| `fc.right_path()` | string | no | Right panel directory path. |
+| `fc.errors()` | table | no | All error messages. |
+| `fc.wait_event(name, ms)` | bool/nil | yes | Wait for event with timeout. |
+| `fc.wait_for_jobs(ms)` | bool/nil | yes | Shorthand for wait_event("job_completed"). |
+| `fc.sleep(ms)` | — | yes | Yield for N ms (escape hatch). |
+| `fc.quit()` | — | no | Exit the application. |
+
+##### Key Names
+
+| Category | Names |
+|----------|-------|
+| Arrows | `up`, `down`, `<-`, `->` |
+| Ctrl+arrows | `cup`, `cdown`, `c<-`, `c->` |
+| Special | `ret`, `esc`, `tab`, `stab`, `back`, `del` |
+| Function | `f1`–`f12` |
+| Ctrl+letter | `cA`–`cZ` |
+| Character | Any single char: `" "`, `"?"`, `"a"` |
+
+##### Test Directory Structure
+
+```
+fc_framework.lua          -- preloaded framework code
+test/
+  helpers.lua             -- shared setup/teardown utilities
+  test_copy.lua           -- copy: single file, dirs, symlinks
+  test_move.lua           -- move: same device, cross-device
+  test_delete.lua         -- delete: files, dirs, nested
+  test_mkdir.lua          -- mkdir: create, name conflict
+  test_rename.lua         -- rename: single, multi-file
+  test_navigation.lua     -- enter/leave dirs, tab, filter
+```
+
+Run: `./fc run test/test_copy.lua`
 
 #### 3.3 Persist State Across Runs
 

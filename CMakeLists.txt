@@ -1,4 +1,15 @@
 cmake_minimum_required (VERSION 3.14)
+
+# Set deployment target before project() to avoid linker version mismatch warnings.
+if(NOT DEFINED CMAKE_OSX_DEPLOYMENT_TARGET)
+  execute_process(
+    COMMAND sw_vers -productVersion
+    OUTPUT_VARIABLE _macos_version
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+  )
+  set(CMAKE_OSX_DEPLOYMENT_TARGET "${_macos_version}" CACHE STRING "Minimum macOS deployment version")
+endif()
+
 project(fc LANGUAGES CXX VERSION 1.0.0)
 set(CMAKE_CXX_STANDARD 20)
 
