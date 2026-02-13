@@ -26,23 +26,34 @@ FetchContent_Declare(ftxui
 #   GIT_TAG master
 # )
 
-# Add boost lib sources
-set(BOOST_INCLUDE_LIBRARIES thread filesystem system smart_ptr)
+# Add boost lib sources (via FetchContent for dependencies)
+# NOTE: filesystem is NOT in this list -- we build it from our local git subtree (boost/filesystem/).
+# All of filesystem's direct and transitive dependencies must be listed here so their CMake targets exist.
+set(BOOST_INCLUDE_LIBRARIES
+  thread system smart_ptr                                                     # project deps (ftxui uses smart_ptr, thread)
+  assert config container_hash core detail io iterator predef scope type_traits # filesystem deps
+)
 set(BOOST_ENABLE_CMAKE ON)
 
-# Download and extract the boost library from GitHub
+# Download and extract the boost library from GitHub (deps only, ~131 MB cmake tarball)
 message(STATUS "Downloading and extracting boost library sources. This will take some time...")
 Set(FETCHCONTENT_QUIET FALSE) # Needed to print downloading progress
 FetchContent_Declare(
     Boost
-    URL https://github.com/boostorg/boost/releases/download/boost-1.84.0/boost-1.84.0.tar.gz # downloading a zip release speeds up the download
-    USES_TERMINAL_DOWNLOAD TRUE 
-    GIT_PROGRESS TRUE   
+    URL https://github.com/boostorg/boost/releases/download/boost-1.90.0/boost-1.90.0-cmake.tar.gz
+    USES_TERMINAL_DOWNLOAD TRUE
     DOWNLOAD_NO_EXTRACT FALSE
 )
 
-# Boost must be available before alex_ftxui (it uses boost::local_shared_ptr)
+# Boost deps must be available before alex_ftxui (it uses boost::local_shared_ptr) and our filesystem
 FetchContent_MakeAvailable(Boost)
+
+# Build Boost.Filesystem from our local git subtree (boost/filesystem/).
+# This lets us modify filesystem sources and track changes in git.
+# Pre-set BOOST_LIBRARY_INCLUDES so filesystem's configure checks find Boost headers from FetchContent.
+file(GLOB _boost_lib_include_dirs "${boost_SOURCE_DIR}/libs/*/include")
+set(BOOST_LIBRARY_INCLUDES ${_boost_lib_include_dirs} CACHE INTERNAL "Boost library include paths for config checks")
+add_subdirectory(boost/filesystem)
 
 set(FTXUI_USE_LOCAL_SHARED_PTR ON CACHE BOOL "" FORCE)
 set(FTXUI_ENABLE_INSTALL OFF CACHE BOOL "" FORCE)
