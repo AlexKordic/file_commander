@@ -693,6 +693,9 @@ void CopyDiscoveryProcess::_run() {
   }
   _discover(selected, _target);
   _running = false;
+  // Notify the FTXUI event loop so tick() can detect completion
+  auto* screen = ScreenInteractive::Active();
+  if (screen) screen->Post(Event::Custom);
 }
 
 CopyDiscoveryProgress CopyDiscoveryProcess::get_progress() {

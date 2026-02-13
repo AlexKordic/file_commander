@@ -12,6 +12,7 @@ endif()
 
 project(fc LANGUAGES CXX VERSION 1.0.0)
 set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 include(FetchContent)
 
@@ -56,7 +57,7 @@ set_target_properties(luajit PROPERTIES
   INTERFACE_INCLUDE_DIRECTORIES ${LUAJIT_DIR}/src
 )
 
-add_executable(fc main.cpp log.cpp err.cpp commander.cpp theme.cpp file_panel.cpp dialogs.cpp shared_state.cpp file_change_funnel.cpp file_io_jobs.cpp)
+add_executable(fc main.cpp scripting.cpp log.cpp err.cpp commander.cpp theme.cpp file_panel.cpp dialogs.cpp shared_state.cpp file_change_funnel.cpp file_io_jobs.cpp)
 target_link_libraries(fc PRIVATE ftxui::component Boost::filesystem luajit "-framework CoreServices")
 
 # add_executable(playground playground.cpp log.cpp err.cpp commander.cpp theme.cpp file_panel.cpp dialogs.cpp shared_state.cpp file_change_funnel.cpp file_io_jobs.cpp)

@@ -1,0 +1,158 @@
+#ifndef FC_SCRIPTING_HPP_
+#define FC_SCRIPTING_HPP_
+
+#include <atomic>
+#include <condition_variable>
+#include <deque>
+#include <functional>
+#include <mutex>
+#include <optional>
+#include <queue>
+#include <string>
+#include <thread>
+#include <vector>
+
+#include <ftxui/component/component.hpp>
+
+extern "C" {
+#include <lua.h>
+#include <lualib.h>
+#include <lauxlib.h>
+}
+
+// Forward declarations (defined in app.hpp)
+class FileCommander;
+class Panel;
+
+// =====================================================================
+// ScheduledUpdates — general-purpose timer thread for screen refresh
+// =====================================================================
+
+class ScheduledUpdates {
+public:
+  ScheduledUpdates() = default;
+  ~ScheduledUpdates();  // calls stop()
+
+  void start();   // launches background thread (idempotent)
+  void stop();    // signals exit, joins thread
+
+  /// Schedule a one-shot screen update at a specific timestamp (now()-based).
+  void schedule_at(double timestamp);
+
+  /// Start periodic screen updates every interval_ms milliseconds.
+  /// Replaces any previous periodic interval. 0 = disable.
+  void start_periodic(int interval_ms);
+
+  /// Stop periodic updates (equivalent to start_periodic(0)).
+  void stop_periodic();
+
+private:
+  // Min-heap: soonest timestamp on top
+  std::priority_queue<double, std::vector<double>, std::greater<double>> _timers;
+  std::mutex              _mutex;
+  std::condition_variable _cv;
+  std::atomic<bool>       _running{false};
+  int                     _periodic_ms = 0;
+  std::thread             _thread;
+
+  void run();  // thread function
+};
+
+// =====================================================================
+// LuaScripting — owns all Lua state, event log, poll state, C callbacks
+// =====================================================================
+
+class LuaScripting {
+public:
+  /// Construct with references to the app and root component for OnEvent dispatch.
+  LuaScripting(FileCommander& app, ftxui::Component root);
+  ~LuaScripting();
+
+  /// Load fc_framework.lua + test script, prepare coroutine. Returns false on error.
+  bool setup(const std::string& script_path);
+
+  /// Called after every RunOnceBlocking() in the explicit Loop.
+  /// On first call: starts the Lua coroutine (initial lua_resume).
+  /// On subsequent calls: polls async events, checks pending waits,
+  /// resumes coroutine if a wait condition is met or timed out.
+  void tick();
+
+  /// Fire a named event from C++ code (Panel, DialogOverlay, etc.)
+  void fire_event(const std::string& name, const std::string& detail = "");
+
+  /// Has the Lua script finished (completed or errored)?
+  bool finished() const;
+
+  /// Close Lua state and stop scheduler.
+  void cleanup();
+
+private:
+  // --- Application references (replaces g_app, g_root) ---
+  FileCommander&   _app;
+  ftxui::Component _root;
+
+  // --- Lua VM (replaces g_lua, g_lua_co, g_lua_finished) ---
+  lua_State* _lua    = nullptr;
+  lua_State* _lua_co = nullptr;
+  bool       _finished = false;
+  bool       _started  = false;   // has initial resume happened?
+
+  // --- Event log (replaces g_event_log, g_event_cursor) ---
+  struct ScriptEvent {
+    std::string name;
+    double      timestamp;
+    std::string detail;
+  };
+  std::deque<ScriptEvent> _event_log;
+  size_t                  _event_cursor = 0;
+
+  // --- Pending wait (replaces g_pending_wait) ---
+  struct PendingWait {
+    std::vector<std::string> event_names;
+    double                   deadline;
+    bool                     sleep_mode = false;
+  };
+  std::optional<PendingWait> _pending_wait;
+
+  // --- Async poll state (replaces g_had_running_job, etc.) ---
+  bool   _had_running_job = false;
+  bool   _had_discovery   = false;
+  int    _poll_count = 0;
+  double _last_job_finished_time = -1;
+  double _last_job_started_time  = -1;
+
+  // --- Timer thread (replaces g_poll_active + detached thread) ---
+  ScheduledUpdates _scheduler;
+
+  // --- Debug logging (replaces g_lua_log) ---
+  FILE* _log_file = nullptr;
+  void  log(const char* msg);
+  void  log(const std::string& msg) { log(msg.c_str()); }
+
+  // --- Internal methods (replaces free functions) ---
+  void poll_async_events();     // detect job_started/completed, discovery_completed
+  void handle_resume_status(int status);  // handle lua_resume return code
+  void check_waits();           // called from tick(): check event log + timeout, resume if met
+
+  // --- Lua C callbacks: access 'this' via registry, not globals ---
+  static LuaScripting* from_lua(lua_State* L);  // extract 'this' from registry
+
+  static int l_key(lua_State* L);
+  static int l_quit(lua_State* L);
+  static int l_left_cd(lua_State* L);
+  static int l_right_cd(lua_State* L);
+  static int l_left_path(lua_State* L);
+  static int l_right_path(lua_State* L);
+  static int l_focused(lua_State* L);
+  static int l_selected(lua_State* L);
+  static int l_errors(lua_State* L);
+  static int l_state(lua_State* L);
+  static int l_wait_event(lua_State* L);
+  static int l_sleep(lua_State* L);
+
+  // --- Helpers ---
+  static void push_panel_state(lua_State* L, Panel& panel);
+  Panel& get_focused_panel();
+};
+
+#endif  // FC_SCRIPTING_HPP_
