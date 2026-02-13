@@ -240,6 +240,11 @@ class ThreadedFileJobs : public FileJobs {
     job->_cancel_requested = true;
     return JobError::OK;
   }
+  JobError pause_job(JobSpec* job) override {
+    if (!job) return JobError::NOT_FOUND;
+    job->_pause_requested = true;
+    return JobError::OK;
+  }
   RunningJobsInfo get_running_job() override {
     std::shared_ptr<JobSpec> active;
     {
@@ -377,6 +382,11 @@ class ThreadedFileJobs : public FileJobs {
         files.close();  // signal discovery thread to stop
         break;
       }
+      if (job->_pause_requested.load(std::memory_order_relaxed)) {
+        job->_state = JobState::PAUSED;
+        files.close();  // signal discovery thread to stop
+        break;
+      }
       DirItem   item("", boost::filesystem::file_type::status_error, boost::filesystem::perms::no_perms);
       FifoError err = files.pop(item);
       if (err == FifoError::Destroyed) { break; }
@@ -397,6 +407,10 @@ class ThreadedFileJobs : public FileJobs {
     for (int i = 0; i < job->_items.size(); i++) {
       if (job->_cancel_requested.load(std::memory_order_relaxed)) {
         job->_state = JobState::CANCELLED;
+        return;
+      }
+      if (job->_pause_requested.load(std::memory_order_relaxed)) {
+        job->_state = JobState::PAUSED;
         return;
       }
       auto&      item = job->_items.at(i);
@@ -449,6 +463,10 @@ class ThreadedFileJobs : public FileJobs {
     for (auto& item : job->_items) {
       if (job->_cancel_requested.load(std::memory_order_relaxed)) {
         job->_state = JobState::CANCELLED;
+        return;
+      }
+      if (job->_pause_requested.load(std::memory_order_relaxed)) {
+        job->_state = JobState::PAUSED;
         return;
       }
       Defer update_progress([&]() { job->_current_item_index++; });

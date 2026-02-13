@@ -188,12 +188,19 @@ inline std::string job_type_to_string(JobInstructions::Type type) {
 struct JobProgressBar {
   bool      _has_running_job = false;
   Component cancel_button;
+  Component pause_button;
 
   JobProgressBar() {
     cancel_button = Button(" Cancel ", [] {
       auto jobinfo = file_operations().get_running_job();
       if (jobinfo.job && !jobinfo.job->is_stopped()) {
         file_operations().cancel_job(jobinfo.job.get());
+      }
+    });
+    pause_button = Button(" Pause ", [] {
+      auto jobinfo = file_operations().get_running_job();
+      if (jobinfo.job && !jobinfo.job->is_stopped()) {
+        file_operations().pause_job(jobinfo.job.get());
       }
     });
   }
@@ -211,6 +218,7 @@ struct JobProgressBar {
     const int64_t  items_total = job->item_count();
 
     auto cancel_el = cancel_button->Render();
+    auto pause_el  = pause_button->Render();
 
     switch (job->_type) {
     case JobInstructions::Type::COPY: {
@@ -224,10 +232,12 @@ struct JobProgressBar {
         text("|"),
         bgGaugeLeft(job->_current_item.percentage / 100, theme().size_gauge_full, theme().size_gauge_empty, text(curr_info)) | xflex_grow | theme().progress_current,
         text("|"),
+        pause_el,
         cancel_el,
       });
     } break;
     case JobInstructions::Type::MOVE: {
+      // just _current_item_index is being updated
       float       item_percentage = std::max(0.0, std::min(100.0, job->_current_item_index * 100.0 / items_total));
       std::string count_info      = std::format(" [{:3}] {}/{} items ", std::lround(item_percentage), std::lround(job->_current_item_index), items_total);
       return hbox({
@@ -235,6 +245,7 @@ struct JobProgressBar {
         text("|"),
         bgGaugeLeft(item_percentage / 100, theme().size_gauge_full, theme().size_gauge_empty, text(count_info)) | xflex_grow | theme().progress_current,
         text("|"),
+        pause_el,
         cancel_el,
       });
     } break;
@@ -250,6 +261,7 @@ struct JobProgressBar {
         text("|"),
         bgGaugeLeft(byte_percentage / 100, theme().size_gauge_full, theme().size_gauge_empty, text(count_info)) | xflex_grow | theme().progress_current,
         text("|"),
+        pause_el,
         cancel_el,
       });
     }
@@ -298,9 +310,10 @@ class FileCommander : public DialogOverlay {
     split.separator_func  = [this]() -> Element { return ::ftxui::separatorDouble(); };
     Component both_panels = CatchEvent(ResizableSplit(split), global_shortcuts);
 
-    // Cancel button is focusable only when a job is running
+    // Pause/Cancel buttons are focusable only when a job is running
+    auto maybe_pause  = Maybe(progress_bar.pause_button, &progress_bar._has_running_job);
     auto maybe_cancel = Maybe(progress_bar.cancel_button, &progress_bar._has_running_job);
-    auto panels_with_cancel = Container::Vertical({both_panels, maybe_cancel});
+    auto panels_with_cancel = Container::Vertical({both_panels, maybe_pause, maybe_cancel});
 
     navigation->Add(panels_with_cancel);
     _overlay_dialogs["ErrorList"] = std::make_shared<ErrorListDialog>(_close_dialog);
@@ -316,6 +329,7 @@ class FileCommander : public DialogOverlay {
       Elements el;
       auto     jobinfo = file_operations().get_running_job();
       // Two panels side by side
+      // el.push_back(hbox({left.render() | xflex_grow, right.render() | xflex_grow}) | yflex | bgcolor(theme().default_bg) | color(theme().default_fg));
       el.push_back(both_panels->Render() | yflex | bgcolor(theme().default_bg) | color(theme().default_fg));
       // Progress bar if there is a job running
       if (jobinfo.job && false == jobinfo.job->is_stopped()) { el.push_back(progress_bar.render()); }

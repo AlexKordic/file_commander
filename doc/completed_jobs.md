@@ -1171,21 +1171,57 @@ its failed items now belong to the new retry job.
 
 ## 14. Implementation Order
 
-1. **Add `JobState`, `_job_id`, cancel/pause flags** to `JobSpec`
-   - No behavioral change yet; just adding fields
+### Steps 1–3: DONE
 
-2. **Add `_completed_queue` and `drain_completed_jobs()`**
-   - Worker pushes to queue instead of keeping `_job`
-   - UI drains in render loop
-   - Existing `get_running_job()` reads `_active_job` (renamed from `_job`)
+1. **Add `JobState`, `_job_id`, cancel/pause flags** to `JobSpec` ✅
+   - `JobState` enum added to `file_io_jobs.hpp` (QUEUED, RUNNING, PAUSED, CANCELLED, COMPLETED, COMPLETED_WITH_ERRORS)
+   - `std::atomic<JobState> _state` in `JobStats`, `uint64_t _job_id` in `JobSpec`
+   - `std::atomic<bool> _cancel_requested`, `_pause_requested` in `JobSpec`
+   - `#include <atomic>` added
 
-3. **Implement cancel**
-   - Add flag check in `run_copy`/`run_move`/`run_delete` loops
-   - Wire cancel action from progress bar UI (e.g. Esc while job is displayed)
+2. **Add `_completed_queue` and `drain_completed_jobs()`** ✅
+   - Renamed `_job` → `_active_job` in `ThreadedFileJobs`
+   - Added `_completed_queue` (`FifoQueue<shared_ptr<JobSpec>>`) for worker → UI transfer
+   - Added `_next_job_id` atomic counter (starts at 1)
+   - `add_job()` now assigns `_job_id` and returns `uint64_t` (was `FifoError`)
+   - `run()` sets `_state = RUNNING`, determines final state (COMPLETED / COMPLETED_WITH_ERRORS), pushes to `_completed_queue`
+   - `drain_completed_jobs()` added to `FileJobs` interface and `ThreadedFileJobs`
+   - Drain called from `handle_global_shortcuts` on `Event::Custom` (event phase, not render phase)
+   - `_active_job` kept after completion (backward compat with scripting poll)
 
-4. **Implement pause**
-   - Add flag check in loops
-   - Wire pause action from progress bar UI
+3. **Implement cancel** ✅
+   - `_cancel_requested` check at top of each item in `run_copy`, `run_move`, `run_delete`
+   - `run_delete`: closes discovery FifoQueue on cancel to stop the discovery thread
+   - `run_copy`: boost `copy_file_options.cancel_requested` enables mid-file cancellation;
+     ECANCELED return detected and handled cleanly (no spurious error, partial file removed by boost)
+   - `cancel_job()` implemented (sets `_cancel_requested = true`)
+   - Cancel button added to `JobProgressBar` as a proper FTXUI `Button` Component,
+     wrapped with `Maybe(&_has_running_job)`, added to component tree via `Container::Vertical`
+   - `_transfer_rate` fixed from `volatile` to `std::atomic<uint64_t>`
+
+   **Lua API added (early, for testing):**
+   - `fc.set_transfer_rate(bytes_per_second)` — global transfer rate limit
+   - `fc.cancel_job()` — cancel the currently running job
+   - `fc.state().jobs.state` — job state field (running/completed/cancelled/etc.)
+
+   **Test added:**
+   - Test 29 (`test_cancel_copy`): 10×1MB files at 2MB/s rate, cancel after 2.5s,
+     verifies partial copy, state=="cancelled", no errors
+
+4. **Implement pause** ✅
+   - `_pause_requested` check added at top of each item loop in `run_copy`, `run_move`, `run_delete`
+   - Check is between items only — does NOT interrupt mid-file copy (no `pause_requested` in `copy_file_options`)
+   - Cancel takes priority: cancel check comes before pause check in all loops
+   - `run_delete`: closes discovery FifoQueue on pause to stop the discovery thread
+   - `pause_job()` added to `FileJobs` interface and `ThreadedFileJobs`
+   - Pause button added to `JobProgressBar` alongside cancel, both wrapped with `Maybe(&_has_running_job)`
+   - `fc.pause_job()` exposed in Lua scripting
+
+   **Test added:**
+   - Test 30 (`test_pause_copy`): 10×1MB files at 2MB/s, pause after 2.5s,
+     verifies partial copy, state=="paused", no errors
+
+### Steps 5–10: TODO
 
 5. **Implement resume**
    - Adjust copy/move/delete loops to start from `_current_item_index`
@@ -1202,7 +1238,6 @@ its failed items now belong to the new retry job.
 
 8. **Add `_last_job_id` to Dialog base and `accept()` wrappers**
    - Add `std::optional<uint64_t> _last_job_id` to `Dialog`, clear in `OnShow()`
-   - Change `add_job()` to return `uint64_t` (the assigned job ID)
    - Add `_last_job_id = file_operations().add_job(job)` to existing `run_copy()`, `ok()` (one line each)
    - Add thin `accept()` overrides that call existing confirm methods and return `_last_job_id`
 
@@ -1216,7 +1251,7 @@ its failed items now belong to the new retry job.
      - `fc.job_errors(id)` — per-job error list
      - `fc.job_items(id, offset, limit)` — item slice for inspectable jobs
      - `fc.job_history()` — all jobs summary
-     - `fc.cancel_job(id)` — signal cancel
+     - `fc.cancel_job(id)` — signal cancel (upgrade existing to accept job ID)
      - `fc.pause_job(id)` — signal pause
      - `fc.resume_job(id)` — re-queue paused job
    - Add `fc.run_and_wait()`, `fc.copy_and_wait()` to `fc_framework.lua`

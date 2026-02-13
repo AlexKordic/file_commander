@@ -123,6 +123,7 @@ class FileJobs {
   // Add a new job to the queue. Returns assigned job ID.
   virtual uint64_t add_job(std::shared_ptr<JobSpec> job) = 0;
   virtual JobError cancel_job(JobSpec* job)              = 0;
+  virtual JobError pause_job(JobSpec* job)               = 0;
 
   virtual RunningJobsInfo get_running_job() = 0;
 

@@ -154,6 +154,7 @@ bool LuaScripting::setup(const std::string& script_path) {
   reg("sleep",             l_sleep);
   reg("set_transfer_rate", l_set_transfer_rate);
   reg("cancel_job",        l_cancel_job);
+  reg("pause_job",         l_pause_job);
   // clang-format on
 
   lua_setglobal(_lua, "fc");
@@ -691,6 +692,18 @@ int LuaScripting::l_cancel_job(lua_State* L) {
   auto jobinfo = file_operations().get_running_job();
   if (jobinfo.job && !jobinfo.job->is_stopped()) {
     file_operations().cancel_job(jobinfo.job.get());
+    lua_pushboolean(L, 1);
+  } else {
+    lua_pushboolean(L, 0);
+  }
+  return 1;
+}
+
+// fc.pause_job() — pause the currently running job (takes effect between items)
+int LuaScripting::l_pause_job(lua_State* L) {
+  auto jobinfo = file_operations().get_running_job();
+  if (jobinfo.job && !jobinfo.job->is_stopped()) {
+    file_operations().pause_job(jobinfo.job.get());
     lua_pushboolean(L, 1);
   } else {
     lua_pushboolean(L, 0);
