@@ -295,6 +295,9 @@ class FileCommander : public DialogOverlay {
         _left_size   = screen_w / 2;
       }
 
+      // Drain completed jobs from the worker→UI queue
+      file_operations().drain_completed_jobs();
+
       Elements el;
       auto     jobinfo = file_operations().get_running_job();
       // Two panels side by side
@@ -348,6 +351,15 @@ class FileCommander : public DialogOverlay {
       // we let this event through when it's not a full sequence or it's not in time window
     } else {
       clear_errors_sequence.clear();
+    }
+
+    // Cancel running job with Escape (only when no dialog is active)
+    if (event == Event::Escape && !dialog_active()) {
+      auto jobinfo = file_operations().get_running_job();
+      if (jobinfo.job && !jobinfo.job->is_stopped()) {
+        file_operations().cancel_job(jobinfo.job.get());
+        return true;
+      }
     }
 
     // Tab between panels

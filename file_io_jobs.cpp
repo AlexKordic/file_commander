@@ -228,21 +228,33 @@ class ThreadedFileJobs : public FileJobs {
     _queue.close();
     _thread.join();
   }
-  FifoError add_job(std::shared_ptr<JobSpec> job) override {
+  uint64_t add_job(std::shared_ptr<JobSpec> job) override {
+    uint64_t id    = _next_job_id.fetch_add(1);
+    job->_job_id   = id;
     job->_queued_time = now();
-    return _queue.push(std::move(job));
+    _queue.push(std::move(job));
+    return id;
   }
   JobError cancel_job(JobSpec* job) override {
-    // TODO: implement
+    if (!job) return JobError::NOT_FOUND;
+    job->_cancel_requested = true;
     return JobError::OK;
   }
   RunningJobsInfo get_running_job() override {
     std::shared_ptr<JobSpec> active;
     {
       std::lock_guard lock(_m);
-      active = _job;
+      active = _active_job;
     }
     return {std::move(active), _queue.size()};
+  }
+
+  void drain_completed_jobs() override {
+    std::shared_ptr<JobSpec> job;
+    while (_completed_queue.try_pop(job) == FifoError::OK) {
+      // Step 2: just drain to prevent accumulation.
+      // Future steps add: summaries, inspectable jobs, scripting events.
+    }
   }
 
   std::deque<JobErrorInfo> get_errors(int count) override {
@@ -301,19 +313,28 @@ class ThreadedFileJobs : public FileJobs {
       FifoError                err = _queue.pop(job);
       if (err == FifoError::Destroyed) { break; }
       job->_started_time = now();
+      job->_state        = JobState::RUNNING;
       job->_total        = ProgressInfo();
       {
         std::lock_guard lock(_m);
-        _job = std::move(job);
+        _active_job = std::move(job);
       }
-      _progress_monitor.add_job(_job);
-      switch (_job->_type) {
-      case JobSpec::Type::COPY: run_copy(_job.get()); break;
-      case JobSpec::Type::MOVE: run_move(_job.get()); break;
-      case JobSpec::Type::DELETE: run_delete(_job.get()); break;
+      _progress_monitor.add_job(_active_job);
+      switch (_active_job->_type) {
+      case JobSpec::Type::COPY: run_copy(_active_job.get()); break;
+      case JobSpec::Type::MOVE: run_move(_active_job.get()); break;
+      case JobSpec::Type::DELETE: run_delete(_active_job.get()); break;
       }
-      _job->_finished_time = now();  // why not within job->_m mutex ??
-      _job->updated();
+      _active_job->_finished_time = now();
+      // Determine final state (if not already set by pause/cancel in future steps)
+      if (_active_job->_state == JobState::RUNNING) {
+        _active_job->_state = _active_job->_errors.empty()
+          ? JobState::COMPLETED
+          : JobState::COMPLETED_WITH_ERRORS;
+      }
+      // Transfer to completed queue for UI to drain
+      _completed_queue.push(_active_job);
+      _active_job->updated();
     }
   }
 
@@ -351,6 +372,11 @@ class ThreadedFileJobs : public FileJobs {
     DelayedUpdateDelete update;
     error_code          ec;
     while (true) {
+      if (job->_cancel_requested.load(std::memory_order_relaxed)) {
+        job->_state = JobState::CANCELLED;
+        files.close();  // signal discovery thread to stop
+        break;
+      }
       DirItem   item("", boost::filesystem::file_type::status_error, boost::filesystem::perms::no_perms);
       FifoError err = files.pop(item);
       if (err == FifoError::Destroyed) { break; }
@@ -369,6 +395,10 @@ class ThreadedFileJobs : public FileJobs {
   void run_move(JobSpec* job) {
     DelayedUpdate update;
     for (int i = 0; i < job->_items.size(); i++) {
+      if (job->_cancel_requested.load(std::memory_order_relaxed)) {
+        job->_state = JobState::CANCELLED;
+        return;
+      }
       auto&      item = job->_items.at(i);
       error_code ec;
       boost::filesystem::rename(item.path_ref(), *item.symlink_ref(), ec);
@@ -411,9 +441,12 @@ class ThreadedFileJobs : public FileJobs {
   void run_copy(JobSpec* job) {
     error_code       ec;
     std::unique_lock lock(job->_m);
-    // Defer            update_job_duration([&]() { _job->_finished_time = now(); });
     // _job->_items is not to be modified by other threads
     for (auto& item : job->_items) {
+      if (job->_cancel_requested.load(std::memory_order_relaxed)) {
+        job->_state = JobState::CANCELLED;
+        return;
+      }
       Defer update_progress([&]() { job->_current_item_index++; });
       // if type is dir path is to be mkdired
       // if type is link path is where to place link and symlink_ref is link target
@@ -477,8 +510,10 @@ class ThreadedFileJobs : public FileJobs {
     }
   }
 
-  std::shared_ptr<JobSpec>                   _job;
+  std::shared_ptr<JobSpec>                   _active_job;
   Perun::FifoQueue<std::shared_ptr<JobSpec>> _queue;
+  Perun::FifoQueue<std::shared_ptr<JobSpec>> _completed_queue;
+  std::atomic<uint64_t>                      _next_job_id{1};
   std::deque<JobErrorInfo>                   _errors;
   int64_t                                    _err_last_access_index = 0;
 
