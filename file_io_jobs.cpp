@@ -537,7 +537,7 @@ class ThreadedFileJobs : public FileJobs {
   std::thread _thread;
   std::mutex  _m;
 
-  volatile uint64_t _transfer_rate = 0;
+  std::atomic<uint64_t> _transfer_rate{0};
 };
 
 FileJobs& file_operations() {

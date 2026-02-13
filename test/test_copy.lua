@@ -846,6 +846,90 @@ local function test_symlink_outside_tree()
 end
 
 -- =========================================================================
+-- 29. Cancel copy mid-job
+-- =========================================================================
+
+local function test_cancel_copy()
+  local src = h.tmpdir("cancel_src")
+  local dst = h.tmpdir("cancel_dst")
+  h.mkdir(src)
+  h.mkdir(dst)
+
+  -- Create 10 files of 1MB each = 10MB total
+  local file_count = 10
+  local file_size = 1024 * 1024  -- 1MB
+  for i = 1, file_count do
+    h.create_file_sized(src .. string.format("/file_%02d.bin", i), file_size)
+  end
+
+  -- Set transfer rate to 2MB/s → full copy ~5s, cancel after ~2.5s
+  local rate = 2 * 1024 * 1024
+  fc.set_transfer_rate(rate)
+
+  fc.left_cd(src)
+  fc.right_cd(dst)
+  fc.sleep(100)
+
+  local errs_before = #fc.errors()
+
+  -- Select all files in left panel
+  local left_path = fc.left_path()
+  local function try_select()
+    fc.key("cA")
+    local sel = fc.selected()
+    if #sel == 0 then return false end
+    if sel[1]:sub(1, #left_path) == left_path then return true end
+    fc.key("cA")  -- deselect wrong panel
+    return false
+  end
+  if not try_select() then
+    fc.key("tab")
+    fc.sleep(50)
+    assert(try_select(), "cancel test: failed to select in left panel")
+  end
+
+  -- Open copy dialog and wait for discovery
+  fc.key("f5")
+  fc.wait_event("discovery_completed", 10000)
+
+  -- Confirm the copy (navigate to COPY button and press)
+  fc.key({"<-", "ret"})
+
+  -- Sleep to allow ~half the files to copy
+  -- At 2MB/s with 1MB files, each file ~0.5s. Sleep 2.5s → ~5 files.
+  fc.sleep(2500)
+
+  -- Cancel the running job
+  local cancelled = fc.cancel_job()
+  check(cancelled, "29: cancel_job returned true")
+
+  -- Wait for the job to finish (cancel triggers job_completed event)
+  fc.wait_for_jobs()
+
+  -- Reset transfer rate for subsequent tests
+  fc.set_transfer_rate(0)
+
+  -- Check that the job state is "cancelled"
+  local s = fc.state()
+  check(s.jobs.state == "cancelled", "29: job state is cancelled, got %s", tostring(s.jobs.state))
+
+  -- Count files actually copied to destination
+  local copied_count = h.count_items(dst)
+
+  -- Should be partial: more than 0 but less than all 10
+  check(copied_count > 0,          "29: some files were copied: got %d", copied_count)
+  check(copied_count < file_count, "29: not all files copied: got %d/%d", copied_count, file_count)
+
+  -- No new errors (cancel is clean, not an error)
+  local errs_after = #fc.errors()
+  local new_errs = errs_after - errs_before
+  check(new_errs == 0, "29: no new errors from cancel, got %d", new_errs)
+
+  h.cleanup(src, dst)
+  test_pass("29_cancel_copy")
+end
+
+-- =========================================================================
 -- Run all tests
 -- =========================================================================
 
@@ -877,6 +961,7 @@ test_dir_of_symlinks()
 test_dangling_relative_symlink()
 test_three_way_circular()
 test_symlink_outside_tree()
+test_cancel_copy()
 
 test_pass("ALL COPY TESTS PASSED")
 fc.quit()

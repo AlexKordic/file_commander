@@ -140,18 +140,20 @@ bool LuaScripting::setup(const std::string& script_path) {
   };
 
   // clang-format off
-  reg("key",        l_key);
-  reg("quit",       l_quit);
-  reg("left_cd",    l_left_cd);
-  reg("right_cd",   l_right_cd);
-  reg("left_path",  l_left_path);
-  reg("right_path", l_right_path);
-  reg("focused",    l_focused);
-  reg("selected",   l_selected);
-  reg("errors",     l_errors);
-  reg("state",      l_state);
-  reg("wait_event", l_wait_event);
-  reg("sleep",      l_sleep);
+  reg("key",               l_key);
+  reg("quit",              l_quit);
+  reg("left_cd",           l_left_cd);
+  reg("right_cd",          l_right_cd);
+  reg("left_path",         l_left_path);
+  reg("right_path",        l_right_path);
+  reg("focused",           l_focused);
+  reg("selected",          l_selected);
+  reg("errors",            l_errors);
+  reg("state",             l_state);
+  reg("wait_event",        l_wait_event);
+  reg("sleep",             l_sleep);
+  reg("set_transfer_rate", l_set_transfer_rate);
+  reg("cancel_job",        l_cancel_job);
   // clang-format on
 
   lua_setglobal(_lua, "fc");
@@ -564,6 +566,20 @@ int LuaScripting::l_state(lua_State* L) {
   bool has_job = jobinfo.job && !jobinfo.job->is_stopped();
   lua_pushboolean(L, has_job);
   lua_setfield(L, -2, "active");
+  if (jobinfo.job) {
+    // Job state — available for both active and stopped jobs
+    const char* state_str = "unknown";
+    switch (jobinfo.job->_state.load()) {
+    case Perun::JobState::QUEUED:               state_str = "queued"; break;
+    case Perun::JobState::RUNNING:              state_str = "running"; break;
+    case Perun::JobState::PAUSED:               state_str = "paused"; break;
+    case Perun::JobState::CANCELLED:            state_str = "cancelled"; break;
+    case Perun::JobState::COMPLETED:            state_str = "completed"; break;
+    case Perun::JobState::COMPLETED_WITH_ERRORS: state_str = "completed_with_errors"; break;
+    }
+    lua_pushstring(L, state_str);
+    lua_setfield(L, -2, "state");
+  }
   if (has_job) {
     const char* jtype = "?";
     switch (jobinfo.job->_type) {
@@ -661,4 +677,23 @@ int LuaScripting::l_sleep(lua_State* L) {
   self->_pending_wait = PendingWait{{}, deadline, true};
   self->_scheduler.schedule_at(deadline);
   return lua_yield(L, 0);
+}
+
+// fc.set_transfer_rate(bytes_per_second)
+int LuaScripting::l_set_transfer_rate(lua_State* L) {
+  uint64_t bps = (uint64_t)luaL_checknumber(L, 1);
+  file_operations().set_transfer_rate(bps);
+  return 0;
+}
+
+// fc.cancel_job() — cancel the currently running job
+int LuaScripting::l_cancel_job(lua_State* L) {
+  auto jobinfo = file_operations().get_running_job();
+  if (jobinfo.job && !jobinfo.job->is_stopped()) {
+    file_operations().cancel_job(jobinfo.job.get());
+    lua_pushboolean(L, 1);
+  } else {
+    lua_pushboolean(L, 0);
+  }
+  return 1;
 }
