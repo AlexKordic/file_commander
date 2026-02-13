@@ -1,184 +1,562 @@
 
-# What
+# File Commander
 
-An orthodox file manager. Exploring directories to run commands on selected files.
+An orthodox file manager built with FTXUI and C++. Two-panel interface for navigating
+directories and running file operations on selected items, with multithreaded execution
+and real-time progress reporting.
 
-Bugs:
-+ DataSource concept for vertical menu
-+ instead of redraw() I could use active interactive screen
-- Copy dir into itself !!
-- MacOS mounted flash disk does not trigger inotify events.
-  - external mkdir does not trigger inotify events.
-+ Test move across disks
-+ Performance fix for large number of displayed errors
+---
 
-Design goals:
-- UI is always responsive, displaying what job machinery is doing.
-  - Separate Discovery and Execution threads. 
-    - JobSpec to become job when posted to file_operations
-    - discovery thread to start when spec parameters are set
-    - discovery stops when JobSpec is canceled
-    - execution stops when JobSpec is canceled
-    - execution to start when posted to file_operations and discovery thread is attached to JobSpec
-    - JobSpec can be posted by UI ok button even before discovery is completed
-    - UI displays discovery progress while dialog is open
-    - task UI displays execution progress
-    - UI can pause/resume execution
-    - UI can cancel execution
-    - UI cancels discovery by creating new JobSpec without posting old one to file_operations
-- Design machinery first, then place UI as observer, issuing commands to machinery.
+## Design Goals
 
-Initial Features:
-- keep focused item according to path. `selected` as index will *move* when `FileChangeFunnel` adds/removes item from `Dir`.
-- glob select & deselect - popup
-+ try ResizableSplitRight between panels
-+ prepend char to item render
-  + dir marked with `/`
-  + symlink takes 2 rows `-> real path` 
-  + executable file colored green
-+ monitor dir changes and real-time updates
-  + Macos
-  - Linux inotify
-  - Windows ??
-+ Left and Right panel
-- Panel having multiple tabs
-  - new tab to inherit configuration from focused tab: (dir, columns, sort, filter, selection)
-  - Do not refresh UI if changes are inside not-shown tab
-+ tab contains file list allowing selection ?with undo-selection-action?
-+ esc clears selection
-+ If no item selected then item under the cursor is considered selected
-+ List can be sorted on any column ASC/DESC
-+ Target for the command is always other-panel-selected-tab. Some commands ignore target dir and files.
-- Command search like vscode-F1 with option to update key-shorcut on the spot
-- Easily add new commands 
-- Show single panel full-width, with visible other panel path, toggle on key-event
-+ All commands happen in separate thread, like TC copy in background.
-+ Command progress panel TBD
-+ FileList implement vscroll_indicator & yframe and create Element's for only visible items.
-- Dir Bookmarks
-- Inc/Dec columns in tab 
-- Keep state across runs
-- mouse/trackpad only usage
+### 1. UI is Always Responsive
 
-Initial commands:
-+ mkdir
-+ copy & confirm popup
-  - replace/update/skip checkboxes as overrite option
-+ move & confirm popup
-+ delete & confirm popup
-+ rename
-+ multi-rename
-+ names to clipboard
-+ paths to clipboard
-- Find files, breadth-first-search, creates new tab for results
-  - `Result-TABS`: Allow Dir to contain empty-path(no parent dir) but contain file list to work on
-  - store ignore list for each dir in settings
-- allow defining custom command
-  - 7z compress & extract
-  - tar/gz extract
-  - open in installed editor app
-- new tab from selected items
-+ enter focused dir in target tab
-- Back <> Forward navigation tree
-  - remembering `Result-TABS` state
-  - Display navigation tree - new dialog
-  - move through navigation tree nodes - new dialog
-  - Delete navigation and associated `Dir`s on key-event
+File operations never block the UI thread. Every operation follows this pipeline:
 
-## Extra
+1. **Selection** - User navigates and selects files via keyboard/mouse.
+2. **Command dispatch** - A shortcut key opens a confirmation dialog.
+3. **Discovery** - A background thread recursively enumerates all files that will be
+   affected, building an operation queue. The dialog shows live discovery progress.
+4. **Confirmation** - User reviews the file list and confirms (even before discovery
+   completes).
+5. **Execution** - A worker thread processes the queue. A `ProgressMonitor` thread
+   periodically samples file sizes and calculates throughput (Mbps).
+6. **Feedback** - The progress bar updates in real-time. Errors accumulate in a log.
 
-Drag and drop to other apps:
-- https://github.com/rkevin-arch/CLIdrag
-  Would be good as external `action`. Call it action because it should be triggered by mouse drag.
-  Make it as command and allow command key to be `mouse-drag`.
-  Implement as shared-library? Allowing to be used by all instances of the app and shut-down when last instance is closed. 
-  ? Also consider usage over ssh. Is this just a desktop environment thing ?
+The UI thread only does rendering and event routing. All filesystem I/O happens on
+background threads, with state updates posted back via `screen.Post()`.
 
-- Allow multiple commands to have same shortcut. In this case a latest-recently-used list is maintained. When command is invoked from command menu, it is moved to the top of the list.
+### 2. Machinery First, UI as Observer
 
-- Extract mouse click to be command key.
-  Focus is now internal command that can be mapped to mouse click ?
-  Select is now internal command that can be mapped to mouse click ?
-  ? Or is this different mechanic requiring settings dialog ?
+The data model (`Dir`, `DirItem`, `CommandArgs`, `JobSpec`, `FileJobs`) is designed
+independently of FTXUI. The UI layer observes and issues commands to this machinery.
 
-Clipboard support
-+ text paste works good
-- text copy is not possible when mouse is captured
-- https://stackoverflow.com/questions/65840288/monitor-clipboard-changes-c-for-all-applications-windows
+- `Dir` owns the file listing, sorting, filtering, and selection state.
+- `FileJobs` / `ThreadedFileJobs` owns the job queue and execution threads.
+- `PanelSharedState` bridges the data model to the FTXUI component tree.
+- Dialogs read from and write to `CommandArgs`, then post `JobSpec` to `FileJobs`.
 
-Usability:
-  https://www.redhat.com/en/blog/midnight-commander-file-manager#:~:text=To%20copy%20or%20move%20a,in%20the%20non%2Dactive%20panel.
+### 3. Extensible Command System
 
-Performance:
-  https://unix.stackexchange.com/questions/771238/linux-syscalls-advantage-of-copy-file-range-over-sendfile  
+Commands are registered in a central `Commands` struct mapping keyboard shortcuts to
+dialog names. Adding a new command means:
+1. Define a `Dialog` subclass with `navigation`, `renderer`, and `OnShow()`.
+2. Register it in `Panel`'s `_overlay_dialogs` map.
+3. Add its shortcut + dialog name to `Commands::Commands()`.
 
+### 4. Scriptable via LuaJIT
 
-Extended key events allowing shift+left, alt+enter, etc.
+A `fc` Lua module exposes `post_event(key)`, `sleep(ms)`, and `quit()` for
+automation and testing. Scripts run in a background thread, posting events to the
+active screen. Usage: `./file_commander run script.lua`.
 
-Builtin editor: https://github.com/howl-editor/howl https://howl.io/
+### 5. Cross-Platform (Planned)
 
-# History
+Currently macOS only. Filesystem monitoring uses `FSEvents`. The architecture
+isolates platform-specific code behind `FileChangeFunnel::create()`.
 
-## Reasons for creating this tool
+---
 
-Ortodox file manager such as norton commander is just a cool software to start with. What would be possible to create in 2025?
+## Architecture Overview
 
-vscode-like command pallete (https://code.visualstudio.com/docs/getstarted/userinterface#_command-palette) is awesome:
-- Single key to remember for accessing all commands and shortcuts, noone used f1 key to read help pages of an app!
-- fuzzy search to find command is very helpfull
-- latest used commands are moved to the top of the list
-- key shortcuts is immediately visible and can be updated on the spot
-- key shortcuts have specified condition when they apply, for example only when specified dialog is focused.
+```
+main.cpp
+  FileCommander : DialogOverlay
+    Panel (left) : DialogOverlay
+      Dir                 -- data model: items, sort, filter, selection
+      PanelSharedState    -- bridge between Dir and FTXUI components
+      Files (Dialog)      -- main file list view (DBMenu + filter + sort buttons)
+      overlay dialogs     -- Mkdir, Rename, Copy, Move, Delete, Find, Clipboard
+      FileChangeFunnel    -- FSEvents watcher, posts changes via FifoQueue
+    Panel (right) : DialogOverlay
+      (same structure)
+    JobProgressBar        -- renders progress for running job
+    ErrorListDialog       -- fullscreen scrollable error history
+    ResizableSplit        -- draggable divider between panels
 
-Terminal UI is awesome:
-- FTXUI is great library
-- Accesible over ssh
-- Can look awesome in colored terminal
+file_io_jobs.cpp
+  ThreadedFileJobs : FileJobs
+    FifoQueue<JobSpec>    -- FIFO job queue
+    worker thread         -- pops jobs, runs copy/move/delete
+    ProgressMonitor       -- separate thread, samples file sizes, calculates Mbps
+```
 
-Multithreading for file operations. This alone is huge move toward modern app look and feel.
-Usual workflow looks like this:
-- Use UI to navigate and issue commands. This part is slow mainly waiting for key strokes.
-- When command is issued, selection is now promoted to file job input list.
-- Additional dialog is displayed to confirm action and tune available parameters.
-- Based on initial parameters an recursive discovery process runs in background to compile list of required commands to complete the job.
-- Any change in action parameters by UI causes new discovery process to be started in place of current one.
-- UI can confirm action, promoting it to a job. Even when discovery is not completed.
-- Execution process starts in background.
-- Execution progress can be monitored by UI.
-- UI can choose to pause, resume or cancel execution of any running job.
+### Key Types
 
-Loading settings from HTTP url is quick way to continue working on any machine.
+| Type | File | Role |
+|------|------|------|
+| `DirItem` | commander.hpp | Single file/dir entry with path, type, perms, size, time, selection, visibility |
+| `Dir` | commander.hpp | Directory listing: items vector, sort order, filter, selection stats |
+| `CommandArgs` | commander.hpp | Selected files + focused item + origin/target paths passed to dialogs |
+| `PanelSharedState` | shared_state.hpp | Shared state between Panel and FTXUI dialogs: Dir*, filter, actions, callbacks |
+| `Dialog` | dialogs.hpp | Base class for all dialogs: holds `navigation` + `renderer` Components, `OnShow()` |
+| `DialogOverlay` | main.cpp | Manages `Container::Tab` + `dbox` overlay pattern for showing dialogs |
+| `Panel` | main.cpp | One side of the twin-panel layout: Dir + Files + dialogs + FileChangeFunnel |
+| `FileCommander` | main.cpp | Top-level: two Panels + ResizableSplit + global shortcuts + error overlay |
+| `JobSpec` | file_io_jobs.hpp | Combines JobInstructions (type + items) + JobStats (progress) + JobInterface (mutex + callback) |
+| `ThreadedFileJobs` | file_io_jobs.cpp | Job queue + worker thread + progress monitor |
+| `FileChangeFunnel` | commander.hpp | Abstract FS watcher. macOS impl uses FSEvents in `file_change_funnel.cpp` |
+| `Theme` | theme.hpp | All colors, decorators, and key bindings in one place |
+| `DataSource` / `DBMenu` | alex_ftxui | Virtualized scrollable list: only renders visible rows |
 
-File list filter by typing.
+---
 
-No integrated terminal.
+## What Is Implemented
 
-Custom commands are easily implemented using luajit.
+### Core UI
 
-Multi rename dialog. Where find next command is easily implemented using luajit. Also add lua implementation of totalcmd multirename.
+- **Twin panel layout** with `ResizableSplit` and a draggable double-line separator.
+  Panels auto-resize to 50/50 on terminal width change.
+- **File list** using custom `DBMenu` (DataSource-driven virtualized Menu). Only visible
+  rows are rendered, enabling directories with thousands of items.
+- **Sort buttons** (Name, Size, Date) toggle ASC/DESC. Directories always sort before files.
+- **Filter by typing** - substring match (case-insensitive). The filter input doubles as
+  the path display (placeholder shows current path, typed text filters).
+- **Selection** - Space toggles, Ctrl+A selects all visible, Esc clears. Selection bar
+  shows count and byte totals.
+- **Focus-as-fallback** - if nothing is selected, the focused item is used for commands.
+- **Dialog overlay system** - `DialogOverlay` base class manages `Container::Tab` for
+  focus routing and `dbox` + `clear_under_colors` for visual stacking.
 
-Easily adding new commands.
-- TBD...
-Easy integration with other apps, like text editors, image viewers, etc.
-- TBD...
+### Navigation
 
+- **Enter directory** (Return) and **leave directory** (?). On leaving, the previous
+  directory is focused in the parent listing.
+- **Tab** switches focus between left and right panels.
+- **Ctrl+Right / Ctrl+Left** navigates the target panel to the focused item's directory.
+- **Ctrl+R** refreshes the current directory listing.
 
-## What are baseline requirements for ortodox file manager
+### File Operations
 
-basic commands: copy, move, delete, rename, mkdir
+- **Mkdir** (F7) - text input dialog, validates name conflicts.
+- **Rename** (F2) - multi-file rename. Each selected item gets an editable Input field.
+  Successfully renamed items are removed from the list; failed ones stay for retry.
+- **Copy** (F5) - background `CopyDiscoveryProcess` recursively enumerates source files
+  in a separate thread. Handles symlinks (follow/preserve-relative/cyclic detection).
+  Shows live discovery progress (byte count, dir count, file count). Uses
+  `boost::filesystem::copy_file` with `overwrite_existing`.
+- **Move** (F6) - uses `boost::filesystem::rename`. Falls back to copy+delete for
+  cross-device moves (`EXDEV` / `cross_device_link` error).
+- **Delete** (F8) - separate discovery and execution threads via `FifoQueue<DirItem>`.
+  Discovery recursively enumerates, execution deletes as items arrive.
+- **Names to clipboard** (Ctrl+N) / **Paths to clipboard** (Ctrl+P) - copies via `pbcopy`.
 
-Twin panel layout.
+### Job System
 
-colums for: name, size, date, permissions, owner, group
+- `ThreadedFileJobs` manages a FIFO queue of `JobSpec` objects.
+- One worker thread processes jobs sequentially.
+- `ProgressMonitor` runs in a separate thread, periodically (200ms) sampling destination
+  file sizes for large files (>10MB) to calculate per-file and total Mbps.
+- `JobProgressBar` renders: `[queued] [TYPE] | [total%] avg_Mbps items | [item%] Mbps path`
+- Errors from job execution are reported to the global error log.
 
-## TODO:
+### Real-Time Directory Monitoring
 
-Some platform differences.
+- macOS: `FSEvents` via `DirEvents` class. Watches the current directory per panel.
+  Events are filtered to only include direct children (not recursive subdirectories).
+- Changes are batched into `UpdatedFiles` and posted to the UI thread via
+  `FifoQueue + screen.Post()`. `Dir::partial_refresh()` applies changes incrementally
+  (add new items, update existing, remove deleted).
+- On directory change (`move_to`), the old watcher is replaced with a new one.
 
-Dir change notifications.
+### Error Management
 
-boost::filesystem limitations.
+- Global error log in `ThreadedFileJobs._errors` with monotonically increasing timestamps.
+- Quick preview: bottom of screen shows last N errors (configurable `max_errors_to_show`).
+- **Error list dialog** (Ctrl+E) - fullscreen scrollable list using `DBMenu`.
+- **Clear errors** - triple-press Esc within 1 second clears all errors.
 
-immediate gui limitations when creating file list.
+### Theme System
 
-Spacing 
+- `Theme` struct holds all colors, decorators, and key bindings.
+- Pre-built `Decorator` values for direct `|` application (e.g., `theme().files_selected`).
+- File type colors: directories (turquoise), symlinks (magenta), executables (green blend),
+  regular files (white), plus colors for block/character/fifo/socket/reparse/unknown.
+- Size-relative background gauge (`BgGaugeLeft`) behind filenames shows relative file size.
+- `ColoredInt` renders numbers with different colors per 3-digit group.
+
+### Custom FTXUI Extensions
+
+- `DBMenu` - DataSource-driven virtualized menu (in alex_ftxui fork).
+- `ColoredInt` - custom Node for colored number rendering.
+- `BgGaugeLeft` - NodeDecorator for partial background fill.
+- `ShowInputCursor` - NodeDecorator that inverts pixel at cursor position.
+- `ClearUnder` - NodeDecorator that clears background before rendering (for dialog overlays).
+- `LogAdapter` - redirects log output through `WithRestoredIO` while FTXUI is active.
+- `event_from_string` - maps string tokens to FTXUI Event values for CLI automation.
+
+### LuaJIT Scripting
+
+- `./file_commander run script.lua` runs a Lua script in a background thread.
+- Available API: `fc.post_event("ret")`, `fc.sleep(500)`, `fc.quit()`.
+- Errors from Lua scripts are reported to the error log.
+
+---
+
+## Known Bugs
+
+| Bug | Details |
+|-----|---------|
+| Copy dir into itself | No guard when source and destination overlap at directory level. The per-file `equivalent()` check catches file-to-self but not subtree containment. |
+| macOS mounted volumes | External filesystem changes (e.g., `mkdir` on a mounted flash disk) may not trigger FSEvents. |
+| Focused item drift | `focused_id` is an index into `Dir::items`. When `partial_refresh` inserts/removes items, the focused index may point to a different file. Should track by path instead. |
+
+---
+
+## What Is Left To Do
+
+### Priority 1: Complete Core Operations
+
+#### 1.1 Copy Overwrite Options (replace / update / skip)
+
+Currently all copies use `overwrite_existing`. Need conflict resolution UI.
+
+**Steps:**
+1. Add `CopyConflict` enum (already defined: `Replace`, `Update`, `Skip`) to `CopyDialog`.
+2. Add a `Radiobox` or three `Checkbox` components to CopyDialog for selecting conflict mode.
+3. Pass the selected mode through `CopyDiscoveryProcess` to the job items. Store it in
+   `JobSpec` or per-item metadata.
+4. In `ThreadedFileJobs::run_copy()`, before `copy_file()`:
+   - `Skip`: check if destination exists, skip if it does.
+   - `Update`: check if destination exists AND source is newer, skip if not.
+   - `Replace`: current behavior (overwrite).
+5. Add `destination_path` input back to CopyDialog (currently commented out) so users can
+   edit the target path.
+
+#### 1.2 Job Cancellation
+
+`cancel_job()` exists but is a no-op. Jobs have no cancellation token.
+
+**Steps:**
+1. Add `std::atomic<bool> _cancelled{false}` to `JobSpec`.
+2. In `ThreadedFileJobs::run_copy/move/delete`, check `_cancelled` before processing each
+   item. Break the loop if true. Set `_finished_time`.
+3. In `CopyDiscoveryProcess::_discover`, check `_running` before processing each item
+   (partially done already).
+4. Implement `cancel_job()` in `ThreadedFileJobs`: set the flag, optionally remove from queue
+   if not yet started.
+5. Add a cancel button/shortcut to the progress bar or a new task management dialog.
+
+#### 1.3 Job Pause / Resume
+
+**Steps:**
+1. Add `std::atomic<bool> _paused{false}` and a `std::condition_variable` to `JobSpec`.
+2. In the worker loop, after each item: if `_paused`, wait on the condition variable.
+3. Add pause/resume controls to `JobProgressBar` or a task management dialog.
+4. `ProgressMonitor` should skip paused jobs (don't sample file sizes).
+
+#### 1.4 Focused Item Tracking by Path
+
+Currently `focused_id` is an index. When `Dir::partial_refresh` adds/removes items,
+the index silently shifts to a different file.
+
+**Steps:**
+1. Store a `Filepath _focused_path` alongside `focused_id` in `DataSource`.
+2. After `partial_refresh` + `_sort()`, scan `Dir::items` to find `_focused_path` and
+   update `focused_id` to its new index.
+3. If the focused file was deleted, move focus to the nearest visible neighbor.
+
+---
+
+### Priority 2: Panel Features
+
+#### 2.1 Panel Tabs
+
+Each panel should support multiple tabs, each with its own Dir, sort, filter, and selection.
+
+**Steps:**
+1. Uncomment and implement the `DirCollection` struct in `commander.hpp`:
+   ```cpp
+   struct DirCollection {
+     std::vector<Dir> tabs;
+     int selected_tab = 0;
+   };
+   ```
+2. Change `Panel` to hold a `DirCollection` instead of a single `Dir`.
+3. Add tab bar rendering above the file list (horizontal list of dir names).
+4. Add key bindings for new-tab (inherit config from current), close-tab, switch-tab.
+5. Only create/update `FileChangeFunnel` for the active tab. Deferred refresh for
+   background tabs.
+6. Each `Files` dialog instance needs its own `DataSource`, filter input, and sort state.
+
+#### 2.2 Single Panel Full-Width Mode
+
+**Steps:**
+1. Add a `bool _single_panel_mode` flag to `FileCommander`.
+2. Add a toggle shortcut (e.g., Ctrl+O) in `handle_global_shortcuts`.
+3. In the renderer lambda: when single-panel, render only the focused panel at full
+   width. Show the other panel's path in a small header/footer bar.
+4. `ResizableSplit` should be bypassed in single-panel mode.
+
+#### 2.3 Glob Select / Deselect
+
+**Steps:**
+1. Create a `GlobSelectDialog : Dialog` with an Input for the glob pattern and
+   OK/Cancel buttons.
+2. On OK, iterate `Dir::items` and toggle selection for items matching the glob
+   (use `boost::filesystem::path::extension()` or a simple glob matcher).
+3. Register the dialog in `Panel::_overlay_dialogs` with a key shortcut (e.g., `+` for
+   select, `-` for deselect, matching Norton Commander convention).
+
+#### 2.4 Directory Bookmarks
+
+**Steps:**
+1. Create a `BookmarksDialog : Dialog` that shows a list of saved paths.
+2. Store bookmarks in a `std::vector<Filepath>` on `Theme` or a dedicated config struct.
+3. Allow adding current dir as bookmark, removing bookmarks, and navigating to a bookmark.
+4. Integrate with "Keep state across runs" (see 3.3) for persistence.
+
+---
+
+### Priority 3: Extensibility
+
+#### 3.1 Command Palette (vscode-like F1)
+
+This is the flagship UX feature: a fuzzy-search overlay for all commands.
+
+**Steps:**
+1. Create a `CommandPaletteDialog : Dialog` with a filter Input and a scrollable menu
+   of available commands.
+2. Each command entry shows: description, current shortcut key, and last-used rank.
+3. Implement fuzzy matching on command name/description.
+4. On selection, invoke the command (call `show_dialog` with the command's dialog name,
+   or execute directly for non-dialog commands).
+5. Maintain a most-recently-used order. Each invocation moves the command to the top.
+6. Register at `FileCommander` level (global overlay) with a shortcut (e.g., F1 or Ctrl+Shift+P).
+
+**Command struct expansion:**
+```cpp
+struct Command {
+  Event       key;
+  std::string dialog;
+  std::string description;  // NEW: human-readable name
+  int         use_count;    // NEW: for MRU sorting
+};
+```
+
+#### 3.2 Custom Commands via LuaJIT
+
+Allow users to define custom file operations in Lua scripts.
+
+**Steps:**
+1. Expand the `fc` Lua module with functions:
+   - `fc.get_selected()` - returns list of selected file paths.
+   - `fc.get_focused()` - returns focused file path.
+   - `fc.get_origin()` / `fc.get_target()` - panel paths.
+   - `fc.run_command(cmd)` - shell command execution.
+   - `fc.report_error(msg)` - post error to error log.
+2. Create a `LuaCommandDialog` that lists `.lua` files from a commands directory.
+3. Selecting a script runs it in a background thread with the current selection context.
+4. Add built-in scripts for common tasks:
+   - `7z_compress.lua` / `7z_extract.lua`
+   - `tar_gz_extract.lua`
+   - `open_in_editor.lua` (uses `$EDITOR` or configurable path)
+5. Register custom commands in the command palette alongside built-in ones.
+
+#### 3.3 Persist State Across Runs
+
+**Steps:**
+1. Define a settings file location (e.g., `~/.config/file_commander/settings.json`).
+2. On exit, serialize: panel paths, tab states, sort orders, bookmarks, window size,
+   key binding overrides, command MRU order.
+3. On startup, load and apply. Fall back to defaults for missing fields.
+4. Optionally support loading settings from HTTP URL (fetch JSON on startup).
+
+#### 3.4 Shortcut Rebinding
+
+The `Theme` struct already holds all key bindings. Need a UI to change them.
+
+**Steps:**
+1. In the command palette, add an "edit shortcut" action per command.
+2. Show a "press new key" capture dialog (a `CatchEvent` that records the next event).
+3. Update `Theme` in memory and persist to settings file.
+4. Handle conflicts: warn if a key is already bound to another command.
+
+---
+
+### Priority 4: Find Files
+
+#### 4.1 Find Dialog with BFS
+
+**Steps:**
+1. Create `FindDialog : Dialog` with inputs for: search path, filename pattern (glob or
+   regex), content search (optional).
+2. Run a breadth-first traversal in a background thread (reuse `FifoQueue` pattern from
+   delete discovery).
+3. Results accumulate in a virtual `Dir` with an empty parent path ("Result-Tab" concept).
+4. Allow the `Dir` to contain items from different parent directories.
+5. Show results in a `DBMenu` with live updates as the search progresses.
+6. On completion, the result becomes a new tab in the source panel.
+
+#### 4.2 Result-Tabs Concept
+
+A `Dir` that holds a mixed set of files from various directories.
+
+**Steps:**
+1. Allow `Dir::path` to be empty (sentinel for result-tab mode).
+2. In result-tab mode, `partial_refresh` is a no-op (no FS watcher).
+3. `leave_dir()` on a result-tab should close the tab.
+4. File operations on result-tab items use each item's actual parent path.
+5. Store per-directory ignore lists in settings (for future find-in-project use).
+
+---
+
+### Priority 5: Navigation History
+
+#### 5.1 Back / Forward Navigation Tree
+
+**Steps:**
+1. Add a `NavigationHistory` class per panel:
+   ```cpp
+   struct NavigationNode {
+     Filepath path;
+     int focused_index;
+     std::string filter;
+   };
+   struct NavigationHistory {
+     std::vector<NavigationNode> nodes;
+     int current = 0;
+     void push(NavigationNode);
+     NavigationNode* back();
+     NavigationNode* forward();
+   };
+   ```
+2. On every `move_to`, push the current state before navigating.
+3. Add shortcut keys (e.g., Alt+Left for back, Alt+Right for forward).
+4. Restore focused item index and filter when navigating back/forward.
+5. Result-tabs should also be stored in navigation history.
+
+#### 5.2 Navigation Tree Dialog
+
+**Steps:**
+1. Create `NavigationTreeDialog : Dialog` showing the full history as a scrollable list.
+2. Allow jumping to any node.
+3. Allow deleting history entries.
+
+---
+
+### Priority 6: Platform Support
+
+#### 6.1 Linux inotify
+
+**Steps:**
+1. Create `LinuxDirEvents : FileChangeFunnel` using `inotify_init`, `inotify_add_watch`.
+2. Run an `epoll` loop in a background thread.
+3. Map `IN_CREATE`, `IN_DELETE`, `IN_MOVED_FROM`, `IN_MOVED_TO`, `IN_MODIFY` to
+   `DirItemUpdated::Event`.
+4. Guard with `#ifdef __linux__` in `FileChangeFunnel::create()`.
+
+#### 6.2 Windows ReadDirectoryChangesW
+
+**Steps:**
+1. Create `WindowsDirEvents : FileChangeFunnel` using `ReadDirectoryChangesW`.
+2. Map `FILE_ACTION_ADDED`, `FILE_ACTION_REMOVED`, `FILE_ACTION_MODIFIED`,
+   `FILE_ACTION_RENAMED_OLD_NAME` / `NEW_NAME` to `DirItemUpdated::Event`.
+3. Guard with `#ifdef _WIN32`.
+4. Clipboard: replace `pbcopy` with Win32 clipboard API.
+
+---
+
+### Priority 7: Polish
+
+#### 7.1 Mouse / Trackpad Support
+
+- FTXUI already provides mouse events. `DBMenu` supports `WheelUp`/`WheelDown`.
+- Add mouse click to available key bindings. FOr example: click-to-focus, click-to-select, drag-to-select-range.
+- Click on sort buttons already works. Click on most controls moves focus.
+
+#### 7.2 Extended Key Events
+
+- FTXUI supports some extended sequences (Ctrl+arrows, etc.).
+- Need: Shift+Arrow for selection extension, Alt+Enter for properties dialog.
+- May require terminal-specific escape sequence handling.
+
+#### 7.3 Additional Columns
+
+Currently showing: name, size (colored), date. Need to add:
+- Permissions (octal or rwx display)
+- Owner / Group
+- Configurable column visibility and order per tab.
+
+**Steps:**
+1. Add `perms_string()` and `owner_string()` methods to `DirItem`.
+2. Store column configuration in `Dir` or `PanelSharedState`.
+3. Modify `filelist_transform` to render enabled columns.
+4. Add column toggle shortcuts or a column picker dialog.
+
+#### 7.4 Drag and Drop to External Apps
+
+- Investigate `CLIdrag` (https://github.com/rkevin-arch/CLIdrag).
+- Implement as a command triggered by mouse-drag event.
+- Consider shared-library approach for multi-instance coordination.
+- Note: not feasible over SSH.
+
+---
+
+### Priority 8: Integration
+
+#### Text editor
+
+Integrate https://github.com/sinelaw/fresh https://getfresh.dev/
+- code is at ../editor-fresh
+
+---
+
+## Baseline Requirements for Orthodox File Manager
+
+| Requirement | Status |
+|-------------|--------|
+| Twin panel layout | Done |
+| Copy | Done (missing overwrite options) |
+| Move | Done (with cross-device fallback) |
+| Delete | Done (with discovery+execution threads) |
+| Rename / Multi-rename | Done |
+| Mkdir | Done |
+| Columns: name, size, date | Done |
+| Columns: permissions, owner, group | Not yet |
+| Sort on any column | Done (name, size, date) |
+| File type indication | Done (colors + `/` prefix for dirs) |
+| Symlink display | Done (shows `->` target on second row) |
+| Directory change notifications | Done (macOS), missing (Linux, Windows) |
+| Background operations | Done |
+| Progress display | Done |
+
+---
+
+## History
+
+### Motivation
+
+An orthodox file manager (Norton Commander style) reimagined for 2025 with:
+
+- **Command palette** (vscode-like) - single key to access all commands, fuzzy search,
+  MRU ordering, visible shortcuts, edit shortcuts in-place.
+- **Terminal UI via FTXUI** - accessible over SSH, beautiful with 256-color terminals,
+  no GUI dependencies.
+- **Multithreaded file operations** - the single biggest difference from traditional
+  terminal file managers. File operations never freeze the UI. Discovery and execution
+  happen concurrently with live progress.
+- **Filter by typing** - no separate search mode; just type to filter the current listing.
+- **LuaJIT scripting** - custom commands without recompilation.
+- **No integrated terminal** - focused tool, not a terminal multiplexer.
+
+### Workflow
+
+1. Navigate directories in the twin-panel view.
+2. Select files (Space / Ctrl+A / glob).
+3. Press a command key (F5=Copy, F6=Move, F7=Mkdir, F8=Delete, F2=Rename).
+4. A dialog opens showing the operation parameters and a preview of affected files.
+5. Background discovery enumerates all files recursively (for Copy/Delete).
+6. Confirm the operation. It runs in a background thread.
+7. Progress bar shows live throughput and item counts.
+8. Continue working in the panels while operations execute.
+
+---
+
+## Links
+
+- [Midnight Commander reference](https://www.redhat.com/en/blog/midnight-commander-file-manager)
+- [copy_file_range vs sendfile performance](https://unix.stackexchange.com/questions/771238/linux-syscalls-advantage-of-copy-file-range-over-sendfile)
+- [CLIdrag for terminal drag-and-drop](https://github.com/rkevin-arch/CLIdrag)
+- [Howl editor (potential builtin editor)](https://howl.io/)
+- [Clipboard monitoring on Windows](https://stackoverflow.com/questions/65840288/monitor-clipboard-changes-c-for-all-applications-windows)

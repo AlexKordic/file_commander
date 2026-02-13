@@ -1,0 +1,13 @@
+{
+  "folders": [
+    {
+      "path": "."
+    },
+    {
+      "path": "../alex_ftxui"
+    },
+    {
+      "path": "../luajit"
+    }
+  ]
+}

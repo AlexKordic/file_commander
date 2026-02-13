@@ -26,6 +26,12 @@
 
 #include <boost/filesystem.hpp>
 
+extern "C" {
+#include <lua.h>
+#include <lualib.h>
+#include <lauxlib.h>
+}
+
 using namespace ftxui;
 using namespace Perun;
 
@@ -400,6 +406,62 @@ class LogAdapter {
 
 void set_console_size(int width, int height) { std::cout << "\e[8;" << height << ";" << width << "t"; }
 
+// --- LuaJIT scripting support ---
+
+static int lua_fc_post_event(lua_State* L) {
+  const char* event_str = luaL_checkstring(L, 1);
+  auto*       screen    = ScreenInteractive::Active();
+  if (screen) {
+    auto e = event_from_string(std::string(event_str));
+    screen->Post(e);
+  }
+  return 0;
+}
+
+static int lua_fc_sleep(lua_State* L) {
+  int ms = (int)luaL_checknumber(L, 1);
+  std::this_thread::sleep_for(std::chrono::milliseconds(ms));
+  return 0;
+}
+
+static int lua_fc_quit(lua_State* L) {
+  auto* screen = ScreenInteractive::Active();
+  if (screen) { screen->Exit(); }
+  return 0;
+}
+
+static void run_lua_script(const std::string& script_path) {
+  // Wait for screen to become active
+  for (;;) {
+    std::this_thread::sleep_for(std::chrono::milliseconds(16));
+    if (ScreenInteractive::Active()) break;
+  }
+
+  lua_State* L = luaL_newstate();
+  luaL_openlibs(L);
+
+  // Register 'fc' module: fc.post_event(), fc.sleep(), fc.quit()
+  lua_newtable(L);
+  lua_pushcfunction(L, lua_fc_post_event);
+  lua_setfield(L, -2, "post_event");
+  lua_pushcfunction(L, lua_fc_sleep);
+  lua_setfield(L, -2, "sleep");
+  lua_pushcfunction(L, lua_fc_quit);
+  lua_setfield(L, -2, "quit");
+  lua_setglobal(L, "fc");
+
+  if (luaL_dofile(L, script_path.c_str()) != 0) {
+    const char* err = lua_tostring(L, -1);
+    file_operations().report_error(std::string("[Lua] ") + (err ? err : "unknown error"));
+    auto* screen = ScreenInteractive::Active();
+    if (screen) screen->Post(Event::Custom);
+    lua_pop(L, 1);
+  }
+  lua_close(L);
+}
+
+// --- end LuaJIT scripting support ---
+
 int main(int argc, char** argv) {
   // For debugging
   // set_console_size(140, 60);
@@ -418,9 +480,14 @@ int main(int argc, char** argv) {
   //   }
   // }).detach();
 
-  auto cwd        = boost::filesystem::current_path();
-  auto left_path  = argc > 1 ? argv[1] : cwd;
-  auto right_path = argc > 2 ? argv[2] : cwd;
+  auto cwd = boost::filesystem::current_path();
+
+  // Check for "run script.lua" mode
+  const bool        lua_mode = argc > 2 && std::string(argv[1]) == "run";
+  const std::string lua_script_path = lua_mode ? argv[2] : "";
+
+  auto left_path  = (!lua_mode && argc > 1) ? boost::filesystem::path(argv[1]) : cwd;
+  auto right_path = (!lua_mode && argc > 2) ? boost::filesystem::path(argv[2]) : cwd;
 
   auto exec = [&screen](std::function<void()> f) -> void {
     screen.Post(f);
@@ -432,19 +499,10 @@ int main(int argc, char** argv) {
 
   LogAdapter adapt_logs(screen);
 
-  // Pass keyboard events from commandline to screen
-  std::thread([argc, argv]() {
-    ScreenInteractive* screen;
-    for (;;) {
-      std::this_thread::sleep_for(std::chrono::milliseconds(16));
-      screen = ScreenInteractive::Active();
-      if(screen) break;
-    }
-    for (int i = 3; i < argc; i++) {
-      auto e = event_from_string(std::string(argv[i]));
-      screen->Post(e);
-    }
-  }).detach();
+  // Run lua script in background thread if "run script.lua" was specified
+  if (lua_mode) {
+    std::thread([lua_script_path]() { run_lua_script(lua_script_path); }).detach();
+  }
 
   // screen.TrackMouse(false);
 
