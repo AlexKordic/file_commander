@@ -438,6 +438,10 @@ class ThreadedFileJobs : public FileJobs {
     }
   }
 
+  void set_transfer_rate(uint64_t bytes_per_second) override {
+    _transfer_rate = bytes_per_second;
+  }
+
   void run_copy(JobSpec* job) {
     error_code       ec;
     std::unique_lock lock(job->_m);
@@ -489,8 +493,18 @@ class ThreadedFileJobs : public FileJobs {
       // this operation is blocking. progress will be updated by separate thread.
       job->_current_item = ProgressInfo();
       lock.unlock();
-      copy_options op = copy_options::overwrite_existing;
-      boost::filesystem::copy_file(item.path_ref(), *item.symlink_ref(), op, ec);
+      boost::filesystem::copy_file_options cfo;
+      cfo.options = copy_options::overwrite_existing;
+      cfo.bytes_per_second = _transfer_rate;  // TODO: make configurable per-job
+      cfo.cancel_requested = &job->_cancel_requested;
+      boost::filesystem::copy_file(item.path_ref(), *item.symlink_ref(), cfo, ec);
+      if (ec.failed() && job->_cancel_requested.load(std::memory_order_relaxed)) {
+        // Cancel during copy_file — boost already removed partial dest file.
+        // Don't report as an error; set CANCELLED and exit.
+        lock.lock();
+        job->_state = JobState::CANCELLED;
+        return;
+      }
       if (ec.failed()) file_operations().report_error("[Copy] " + item.path_ref().native());
       lock.lock();
       if (ec.failed()) {
@@ -522,6 +536,8 @@ class ThreadedFileJobs : public FileJobs {
   // TODO: use map of thread pools, with configured sizes for each device. NVMe devices should have more threads than HDDs.
   std::thread _thread;
   std::mutex  _m;
+
+  volatile uint64_t _transfer_rate = 0;
 };
 
 FileJobs& file_operations() {

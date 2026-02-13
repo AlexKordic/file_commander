@@ -23,6 +23,8 @@
 #include <boost/detail/bitmask.hpp>
 #include <boost/system/error_code.hpp>
 #include <boost/cstdint.hpp>
+#include <atomic>
+#include <cstdint>
 #include <ctime>
 #include <string>
 
@@ -65,6 +67,14 @@ enum class copy_options : unsigned int
 
 BOOST_BITMASK(copy_options)
 
+//! Extended options for copy_file with transfer rate limiting and cancellation support.
+struct copy_file_options
+{
+    copy_options options = copy_options::none;
+    uint64_t bytes_per_second = 0;              // 0 = unlimited
+    std::atomic<bool>* cancel_requested = nullptr; // null = no cancel support
+};
+
 //--------------------------------------------------------------------------------------//
 //                             implementation details                                   //
 //--------------------------------------------------------------------------------------//
@@ -91,6 +101,8 @@ BOOST_FILESYSTEM_DECL
 void copy(path const& from, path const& to, copy_options options, system::error_code* ec = nullptr);
 BOOST_FILESYSTEM_DECL
 bool copy_file(path const& from, path const& to, copy_options options, system::error_code* ec = nullptr);
+BOOST_FILESYSTEM_DECL
+bool copy_file(path const& from, path const& to, copy_file_options const& opts, system::error_code* ec = nullptr);
 BOOST_FILESYSTEM_DECL
 void copy_symlink(path const& existing_symlink, path const& new_symlink, system::error_code* ec = nullptr);
 BOOST_FILESYSTEM_DECL
@@ -371,6 +383,16 @@ inline bool copy_file(path const& from, path const& to, copy_options options)
 inline bool copy_file(path const& from, path const& to, copy_options options, system::error_code& ec) noexcept
 {
     return detail::copy_file(from, to, options, &ec);
+}
+
+inline bool copy_file(path const& from, path const& to, copy_file_options const& opts)
+{
+    return detail::copy_file(from, to, opts);
+}
+
+inline bool copy_file(path const& from, path const& to, copy_file_options const& opts, system::error_code& ec) noexcept
+{
+    return detail::copy_file(from, to, opts, &ec);
 }
 
 inline void copy_symlink(path const& existing_symlink, path const& new_symlink)

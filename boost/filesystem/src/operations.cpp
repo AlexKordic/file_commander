@@ -25,9 +25,12 @@
 #include <boost/cstdint.hpp>
 #include <boost/assert.hpp>
 #include <new> // std::bad_alloc, std::nothrow
+#include <atomic>
+#include <chrono>
 #include <limits>
 #include <memory>
 #include <string>
+#include <thread>
 #include <utility>
 #include <cstddef>
 #include <cstdlib> // for malloc, free
@@ -612,6 +615,16 @@ file_status symlink_status_impl
 
 namespace {
 
+//! Thread-local context for copy_file throttling and cancellation.
+//! When non-null, copy_file_data implementations check for rate limiting and cancellation.
+struct copy_file_context
+{
+    uint64_t bytes_per_second;       // 0 = unlimited
+    std::atomic<bool>* cancel_requested; // null = no cancel support
+};
+
+static thread_local copy_file_context* tls_copy_ctx = nullptr;
+
 //! Flushes buffered data and attributes written to the file to permanent storage
 inline int full_sync(int fd)
 {
@@ -731,11 +744,22 @@ int copy_file_data_read_write_impl(int infile, int outfile, char* buf, std::size
     ::posix_fadvise(infile, 0, 0, POSIX_FADV_SEQUENTIAL);
 #endif
 
+    copy_file_context* tctx = tls_copy_ctx;
+    typedef std::chrono::steady_clock clock_type;
+    clock_type::time_point throttle_start;
+    uint64_t throttle_bytes = 0;
+    if (tctx && tctx->bytes_per_second > 0)
+        throttle_start = clock_type::now();
+
     // Don't use file size to limit the amount of data to copy since some filesystems, like procfs or sysfs,
     // provide files with generated content and indicate that their size is zero or 4096. Just copy as much data
     // as we can read from the input file.
     while (true)
     {
+        // Check for cancellation
+        if (tctx && tctx->cancel_requested && tctx->cancel_requested->load(std::memory_order_relaxed))
+            return ECANCELED;
+
         ssize_t sz_read = ::read(infile, buf, buf_size);
         if (sz_read == 0)
             break;
@@ -761,6 +785,22 @@ int copy_file_data_read_write_impl(int infile, int outfile, char* buf, std::size
             }
 
             sz_wrote += sz;
+        }
+
+        // Rate limiting: sleep to maintain target bytes_per_second
+        if (tctx && tctx->bytes_per_second > 0)
+        {
+            throttle_bytes += static_cast< uint64_t >(sz_read);
+            double expected = static_cast< double >(throttle_bytes) / static_cast< double >(tctx->bytes_per_second);
+            double elapsed = std::chrono::duration< double >(clock_type::now() - throttle_start).count();
+            if (expected > elapsed)
+                std::this_thread::sleep_for(std::chrono::duration< double >(expected - elapsed));
+            // Reset window periodically to avoid precision drift on large transfers
+            if (throttle_bytes >= tctx->bytes_per_second)
+            {
+                throttle_start = clock_type::now();
+                throttle_bytes = 0;
+            }
         }
     }
 
@@ -820,16 +860,47 @@ struct copy_file_data_sendfile
         // sendfile will not send more than this amount of data in one call
         BOOST_CONSTEXPR_OR_CONST std::size_t max_batch_size = 0x7ffff000u;
         uintmax_t offset = 0u;
+
+        copy_file_context* tctx = tls_copy_ctx;
+        typedef std::chrono::steady_clock clock_type;
+        clock_type::time_point throttle_start;
+        if (tctx && tctx->bytes_per_second > 0)
+            throttle_start = clock_type::now();
+
         while (offset < size)
         {
+            // Check for cancellation
+            if (tctx && tctx->cancel_requested && tctx->cancel_requested->load(std::memory_order_relaxed))
+                return ECANCELED;
+
             uintmax_t size_left = size - offset;
             std::size_t size_to_copy = max_batch_size;
             if (size_left < static_cast< uintmax_t >(max_batch_size))
                 size_to_copy = static_cast< std::size_t >(size_left);
+
+            // Limit batch size for responsive cancellation and smooth rate limiting
+            if (tctx && tctx->bytes_per_second > 0)
+            {
+                uint64_t batch_limit = tctx->bytes_per_second; // ~1 second worth of data per batch
+                if (batch_limit < 65536u)
+                    batch_limit = 65536u;
+                if (static_cast< uint64_t >(size_to_copy) > batch_limit)
+                    size_to_copy = static_cast< std::size_t >(batch_limit);
+            }
+
             ssize_t sz = ::sendfile(outfile, infile, nullptr, size_to_copy);
             if (BOOST_LIKELY(sz > 0))
             {
                 offset += sz;
+
+                // Rate limiting
+                if (tctx && tctx->bytes_per_second > 0)
+                {
+                    double expected = static_cast< double >(offset) / static_cast< double >(tctx->bytes_per_second);
+                    double elapsed = std::chrono::duration< double >(clock_type::now() - throttle_start).count();
+                    if (expected > elapsed)
+                        std::this_thread::sleep_for(std::chrono::duration< double >(expected - elapsed));
+                }
             }
             else if (sz < 0)
             {
@@ -879,18 +950,49 @@ struct copy_file_data_copy_file_range
         // that size_t is not overflown in case if off_t is larger and the file size does not fit in size_t.
         BOOST_CONSTEXPR_OR_CONST std::size_t max_batch_size = 0x7ffff000u;
         uintmax_t offset = 0u;
+
+        copy_file_context* tctx = tls_copy_ctx;
+        typedef std::chrono::steady_clock clock_type;
+        clock_type::time_point throttle_start;
+        if (tctx && tctx->bytes_per_second > 0)
+            throttle_start = clock_type::now();
+
         while (offset < size)
         {
+            // Check for cancellation
+            if (tctx && tctx->cancel_requested && tctx->cancel_requested->load(std::memory_order_relaxed))
+                return ECANCELED;
+
             uintmax_t size_left = size - offset;
             std::size_t size_to_copy = max_batch_size;
             if (size_left < static_cast< uintmax_t >(max_batch_size))
                 size_to_copy = static_cast< std::size_t >(size_left);
+
+            // Limit batch size for responsive cancellation and smooth rate limiting
+            if (tctx && tctx->bytes_per_second > 0)
+            {
+                uint64_t batch_limit = tctx->bytes_per_second; // ~1 second worth of data per batch
+                if (batch_limit < 65536u)
+                    batch_limit = 65536u;
+                if (static_cast< uint64_t >(size_to_copy) > batch_limit)
+                    size_to_copy = static_cast< std::size_t >(batch_limit);
+            }
+
             // Note: Use syscall directly to avoid depending on libc version. copy_file_range is added in glibc 2.27.
             // uClibc-ng does not have copy_file_range as of the time of this writing (the latest uClibc-ng release is 1.0.33).
             loff_t sz = ::syscall(__NR_copy_file_range, infile, (loff_t*)nullptr, outfile, (loff_t*)nullptr, size_to_copy, (unsigned int)0u);
             if (BOOST_LIKELY(sz > 0))
             {
                 offset += sz;
+
+                // Rate limiting
+                if (tctx && tctx->bytes_per_second > 0)
+                {
+                    double expected = static_cast< double >(offset) / static_cast< double >(tctx->bytes_per_second);
+                    double elapsed = std::chrono::duration< double >(clock_type::now() - throttle_start).count();
+                    if (expected > elapsed)
+                        std::this_thread::sleep_for(std::chrono::duration< double >(expected - elapsed));
+                }
             }
             else if (sz < 0)
             {
@@ -3347,6 +3449,61 @@ bool copy_file(path const& from, path const& to, copy_options options, error_cod
     }
 
     return true;
+
+#endif // defined(BOOST_POSIX_API)
+}
+
+BOOST_FILESYSTEM_DECL
+bool copy_file(path const& from, path const& to, copy_file_options const& opts, error_code* ec)
+{
+    // Fast path: no throttle/cancel, delegate directly to the standard implementation
+    if (opts.bytes_per_second == 0 && opts.cancel_requested == nullptr)
+        return copy_file(from, to, opts.options, ec);
+
+#if defined(BOOST_POSIX_API)
+
+    // Set thread-local context so copy_file_data implementations pick up throttle/cancel
+    copy_file_context ctx;
+    ctx.bytes_per_second = opts.bytes_per_second;
+    ctx.cancel_requested = opts.cancel_requested;
+
+    copy_file_context* prev = tls_copy_ctx;
+    tls_copy_ctx = &ctx;
+
+    error_code local_ec;
+    bool result = copy_file(from, to, opts.options, &local_ec);
+
+    tls_copy_ctx = prev;
+
+    if (local_ec)
+    {
+        bool was_cancelled = (local_ec.value() == ECANCELED);
+        if (!was_cancelled && opts.cancel_requested)
+            was_cancelled = opts.cancel_requested->load(std::memory_order_relaxed);
+
+        if (was_cancelled)
+        {
+            // Remove partial destination file
+            error_code cleanup_ec;
+            remove(to, &cleanup_ec);
+        }
+
+        if (ec)
+        {
+            *ec = local_ec;
+            return false;
+        }
+        BOOST_FILESYSTEM_THROW(filesystem_error("boost::filesystem::copy_file", from, to, local_ec));
+    }
+
+    if (ec)
+        ec->clear();
+    return result;
+
+#else // defined(BOOST_POSIX_API)
+
+    // Windows: delegate to standard implementation (throttle/cancel not yet supported via TLS)
+    return copy_file(from, to, opts.options, ec);
 
 #endif // defined(BOOST_POSIX_API)
 }

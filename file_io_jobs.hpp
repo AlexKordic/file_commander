@@ -129,6 +129,8 @@ class FileJobs {
   /// Drain completed jobs from the worker→UI queue.
   /// Called by the UI thread each frame/tick.
   virtual void drain_completed_jobs() = 0;
+  // TODO: review later
+  virtual void set_transfer_rate(uint64_t bytes_per_second) = 0;
 
   virtual std::deque<JobErrorInfo> get_errors(int count) = 0;
 

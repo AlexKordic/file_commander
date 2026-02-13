@@ -186,6 +186,18 @@ inline std::string job_type_to_string(JobInstructions::Type type) {
 }
 
 struct JobProgressBar {
+  bool      _has_running_job = false;
+  Component cancel_button;
+
+  JobProgressBar() {
+    cancel_button = Button(" Cancel ", [] {
+      auto jobinfo = file_operations().get_running_job();
+      if (jobinfo.job && !jobinfo.job->is_stopped()) {
+        file_operations().cancel_job(jobinfo.job.get());
+      }
+    });
+  }
+
   Element render() {
     auto  jobinfo = file_operations().get_running_job();
     auto& job     = jobinfo.job;
@@ -198,23 +210,24 @@ struct JobProgressBar {
     const DirItem& item        = job->_items.at(job->_current_item_index);
     const int64_t  items_total = job->item_count();
 
+    auto cancel_el = cancel_button->Render();
+
     switch (job->_type) {
     case JobInstructions::Type::COPY: {
       if (!item.symlink_ref()) return text(task_info + " [item target missing]") | theme().progress_operation;
       std::string total_info = std::format(" [{:3}] {:5}[{:5}] Mbps {}/{} items ", std::lround(job->_total.percentage), std::lround(job->_total.Mbps), std::lround(job->_total.average_Mbps), job->_current_item_index + 1, items_total);
       std::string curr_info  = std::format(" [{:3}] {:5}Mbps {} ", std::lround(job->_current_item.percentage), std::lround(job->_current_item.Mbps), item.path_ref().native());
       return hbox({
-        // TODO: implement DELETE, MOVE
         text(task_info) | theme().progress_operation,
         text("|"),
         bgGaugeLeft(job->_total.percentage / 100, theme().size_gauge_full, theme().size_gauge_empty, text(total_info)) | theme().progress_total,
         text("|"),
         bgGaugeLeft(job->_current_item.percentage / 100, theme().size_gauge_full, theme().size_gauge_empty, text(curr_info)) | xflex_grow | theme().progress_current,
         text("|"),
+        cancel_el,
       });
     } break;
     case JobInstructions::Type::MOVE: {
-      // just _current_item_index is being updated
       float       item_percentage = std::max(0.0, std::min(100.0, job->_current_item_index * 100.0 / items_total));
       std::string count_info      = std::format(" [{:3}] {}/{} items ", std::lround(item_percentage), std::lround(job->_current_item_index), items_total);
       return hbox({
@@ -222,6 +235,7 @@ struct JobProgressBar {
         text("|"),
         bgGaugeLeft(item_percentage / 100, theme().size_gauge_full, theme().size_gauge_empty, text(count_info)) | xflex_grow | theme().progress_current,
         text("|"),
+        cancel_el,
       });
     } break;
     case JobInstructions::Type::DELETE: {
@@ -230,13 +244,13 @@ struct JobProgressBar {
       std::string byte_info       = std::format(" [{:3}] {}/{} bytes ", std::lround(byte_percentage), std::lround(job->_bytes_processed), std::lround(job->_bytes_total));
       std::string count_info      = std::format(" [{:3}] {}/{} items ", std::lround(item_percentage), std::lround(job->_current_item_index), items_total);
       return hbox({
-        // TODO: implement DELETE, MOVE
         text(task_info) | theme().progress_operation,
         text("|"),
         bgGaugeLeft(item_percentage / 100, theme().size_gauge_full, theme().size_gauge_empty, text(byte_info)) | theme().progress_total,
         text("|"),
         bgGaugeLeft(byte_percentage / 100, theme().size_gauge_full, theme().size_gauge_empty, text(count_info)) | xflex_grow | theme().progress_current,
         text("|"),
+        cancel_el,
       });
     }
     }
@@ -284,7 +298,11 @@ class FileCommander : public DialogOverlay {
     split.separator_func  = [this]() -> Element { return ::ftxui::separatorDouble(); };
     Component both_panels = CatchEvent(ResizableSplit(split), global_shortcuts);
 
-    navigation->Add(both_panels);
+    // Cancel button is focusable only when a job is running
+    auto maybe_cancel = Maybe(progress_bar.cancel_button, &progress_bar._has_running_job);
+    auto panels_with_cancel = Container::Vertical({both_panels, maybe_cancel});
+
+    navigation->Add(panels_with_cancel);
     _overlay_dialogs["ErrorList"] = std::make_shared<ErrorListDialog>(_close_dialog);
     renderer                      = Renderer(navigation, [=, this]() -> Element {
       // TODO: different when single panel layout is active
@@ -295,13 +313,9 @@ class FileCommander : public DialogOverlay {
         _left_size   = screen_w / 2;
       }
 
-      // Drain completed jobs from the worker→UI queue
-      file_operations().drain_completed_jobs();
-
       Elements el;
       auto     jobinfo = file_operations().get_running_job();
       // Two panels side by side
-      // el.push_back(hbox({left.render() | xflex_grow, right.render() | xflex_grow}) | yflex | bgcolor(theme().default_bg) | color(theme().default_fg));
       el.push_back(both_panels->Render() | yflex | bgcolor(theme().default_bg) | color(theme().default_fg));
       // Progress bar if there is a job running
       if (jobinfo.job && false == jobinfo.job->is_stopped()) { el.push_back(progress_bar.render()); }
@@ -326,10 +340,14 @@ class FileCommander : public DialogOverlay {
 
 
   bool handle_global_shortcuts(Event event) {
-    // if (event == Event::Special("startup")) {
-    //   handle_pending_commandline_events();
-    //   return true;
-    // }
+    // Drain completed jobs and update progress bar visibility on Custom events
+    // (worker thread posts Event::Custom on job progress/completion)
+    if (event == Event::Custom) {
+      file_operations().drain_completed_jobs();
+      auto jobinfo = file_operations().get_running_job();
+      progress_bar._has_running_job = jobinfo.job && !jobinfo.job->is_stopped();
+      return false;  // don't consume — Custom events also trigger re-render
+    }
 
     if (event == theme().key_toggle_error_details && !dialog_active()) {
       show_dialog("ErrorList");
@@ -351,15 +369,6 @@ class FileCommander : public DialogOverlay {
       // we let this event through when it's not a full sequence or it's not in time window
     } else {
       clear_errors_sequence.clear();
-    }
-
-    // Cancel running job with Escape (only when no dialog is active)
-    if (event == Event::Escape && !dialog_active()) {
-      auto jobinfo = file_operations().get_running_job();
-      if (jobinfo.job && !jobinfo.job->is_stopped()) {
-        file_operations().cancel_job(jobinfo.job.get());
-        return true;
-      }
     }
 
     // Tab between panels
