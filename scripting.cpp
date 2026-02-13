@@ -255,23 +255,35 @@ void LuaScripting::poll_async_events() {
   }
 
   // Copy discovery completion — check both panels
-  bool discovery_running = false;
-  bool has_discovery = false;
+  bool  discovery_running = false;
+  void* current_discovery = nullptr;
   for (auto* panel : {&_app.get_left(), &_app.get_right()}) {
     auto copy_dlg = std::dynamic_pointer_cast<CopyDialog>(panel->get_overlay_dialog("Copy"));
     if (copy_dlg && copy_dlg->_discovery_process) {
-      has_discovery = true;
+      current_discovery = copy_dlg->_discovery_process.get();
       if (copy_dlg->_discovery_process->_running) {
         discovery_running = true;
       }
     }
   }
   if (_poll_count <= 5 || (_poll_count % 20 == 0)) {
-    log("poll #" + std::to_string(_poll_count) + ": has_disc=" + std::to_string(has_discovery) + " disc_run=" + std::to_string(discovery_running) + " had_disc=" + std::to_string(_had_discovery));
+    log("poll #" + std::to_string(_poll_count) + ": disc_ptr=" +
+        std::to_string(current_discovery != nullptr) + " disc_run=" +
+        std::to_string(discovery_running) + " had_disc=" + std::to_string(_had_discovery));
   }
-  if (_had_discovery && !discovery_running) {
-    log("poll: discovery_completed");
-    fire_event("discovery_completed", "");
+  // Fire discovery_completed when:
+  // 1. Normal case: we previously saw a running discovery, now it's done
+  // 2. Fast-completion case: a new discovery process exists but already finished
+  //    (completed between polls — track by process pointer identity)
+  if (current_discovery && !discovery_running) {
+    if (_had_discovery || current_discovery != _last_discovery_ptr) {
+      log("poll: discovery_completed");
+      fire_event("discovery_completed", "");
+      _last_discovery_ptr = current_discovery;
+    }
+  }
+  if (!current_discovery) {
+    _last_discovery_ptr = nullptr;  // reset when process is cleared
   }
   _had_discovery = discovery_running;
 }
@@ -287,7 +299,9 @@ void LuaScripting::handle_resume_status(int status) {
   } else {
     // Error
     const char* err = lua_tostring(_lua_co, -1);
-    file_operations().report_error(std::string("[Lua] ") + (err ? err : "unknown error"));
+    std::string errmsg = std::string("[Lua] ") + (err ? err : "unknown error");
+    log("ERROR: " + errmsg);
+    file_operations().report_error(errmsg);
     _finished = true;
     // Post Custom to refresh error display
     auto* screen = ScreenInteractive::Active();
@@ -377,8 +391,10 @@ int LuaScripting::l_key(lua_State* L) {
 int LuaScripting::l_quit(lua_State* L) {
   auto* self = from_lua(L);
   self->log("fc.quit() called");
-  self->cleanup();
-  _exit(0);
+  self->_finished = true;
+  // Exit the FTXUI event loop gracefully
+  auto* screen = ScreenInteractive::Active();
+  if (screen) screen->Exit();
   return 0;
 }
 

@@ -117,6 +117,7 @@ private:
   // --- Async poll state (replaces g_had_running_job, etc.) ---
   bool   _had_running_job = false;
   bool   _had_discovery   = false;
+  void*  _last_discovery_ptr = nullptr;  // track process identity for fast-completion detection
   int    _poll_count = 0;
   double _last_job_finished_time = -1;
   double _last_job_started_time  = -1;

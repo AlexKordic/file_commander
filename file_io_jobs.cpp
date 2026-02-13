@@ -440,7 +440,10 @@ class ThreadedFileJobs : public FileJobs {
           continue;
         }
         lock.unlock();
-        boost::filesystem::create_symlink(item.path_ref(), *item.symlink_ref(), ec);
+        // create_symlink(target, link_path): creates link_path pointing to target
+        // item.path_ref()    = where to create the new symlink (link_path)
+        // item.symlink_ref() = what the symlink points to (target)
+        boost::filesystem::create_symlink(*item.symlink_ref(), item.path_ref(), ec);
         if (ec.failed()) file_operations().report_error("[symlink] " + item.path_ref().native());
         lock.lock();
         if (ec.failed()) {

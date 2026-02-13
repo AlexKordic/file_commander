@@ -96,6 +96,12 @@ int main(int argc, char** argv) {
     while (!loop.HasQuitted()) {
       loop.RunOnceBlocking();
       scripting.tick();   // first call starts coroutine; thereafter checks waits
+      if (scripting.finished()) {
+        // Lua script completed (success or error) — exit loop
+        // Give one more frame for error display, then quit
+        screen.Post(ftxui::Event::Custom);
+        screen.Exit();
+      }
     }
     scripting.cleanup();
   } else {
