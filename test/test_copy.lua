@@ -862,8 +862,8 @@ local function test_cancel_copy()
     h.create_file_sized(src .. string.format("/file_%02d.bin", i), file_size)
   end
 
-  -- Set transfer rate to 2MB/s → full copy ~5s, cancel after ~2.5s
-  local rate = 2 * 1024 * 1024
+  -- Set transfer rate to 20MB/s → full copy ~5s, cancel after ~0.25s
+  local rate = 20 * 1024 * 1024
   fc.set_transfer_rate(rate)
 
   fc.left_cd(src)
@@ -897,7 +897,7 @@ local function test_cancel_copy()
 
   -- Sleep to allow ~half the files to copy
   -- At 2MB/s with 1MB files, each file ~0.5s. Sleep 2.5s → ~5 files.
-  fc.sleep(2500)
+  fc.sleep(250)
 
   -- Cancel the running job
   local cancelled = fc.cancel_job()
@@ -946,8 +946,8 @@ local function test_pause_copy()
     h.create_file_sized(src .. string.format("/file_%02d.bin", i), file_size)
   end
 
-  -- Set transfer rate to 2MB/s → full copy ~5s, pause after ~2.5s
-  local rate = 2 * 1024 * 1024
+  -- Set transfer rate to 20MB/s → full copy ~5s, pause after ~0.25s
+  local rate = 20 * 1024 * 1024
   fc.set_transfer_rate(rate)
 
   fc.left_cd(src)
@@ -981,7 +981,7 @@ local function test_pause_copy()
 
   -- Sleep to allow ~half the files to copy
   -- At 2MB/s with 1MB files, each file ~0.5s. Sleep 2.5s → ~5 files.
-  fc.sleep(2500)
+  fc.sleep(250)
 
   -- Pause the running job
   local paused = fc.pause_job()
@@ -1012,6 +1012,55 @@ local function test_pause_copy()
 
   h.cleanup(src, dst)
   test_pass("30_pause_copy")
+end
+
+-- =========================================================================
+-- Test 31: Job history - verify completed and paused jobs appear in history
+-- =========================================================================
+
+local function test_job_history()
+  local src = h.tmpdir("hist_src")
+  local dst = h.tmpdir("hist_dst")
+  h.mkdir(src)
+  h.mkdir(dst)
+
+  -- Create a few small files for a fast copy
+  for i = 1, 3 do
+    h.create_file_sized(src .. string.format("/file_%02d.bin", i), 1024)
+  end
+
+  fc.left_cd(src)
+  fc.right_cd(dst)
+  fc.sleep(100)
+
+  -- Check history is initially empty (or has previous test jobs)
+  local hist_before = fc.job_history()
+  local hist_count_before = #hist_before
+
+  -- Run a normal copy
+  h.do_copy()
+  fc.wait_for_jobs()
+  fc.sleep(100)
+
+  -- Check job history has a new entry
+  local hist_after = fc.job_history()
+  check(#hist_after == hist_count_before + 1, "31: history grew by 1, got %d (was %d)", #hist_after, hist_count_before)
+
+  local last_job = hist_after[#hist_after]
+  check(last_job.type == "copy", "31: last job type is copy, got %s", tostring(last_job.type))
+  check(last_job.state == "completed", "31: last job state is completed, got %s", tostring(last_job.state))
+  check(last_job.items_done == 3, "31: 3 items done, got %d", last_job.items_done)
+
+  -- Open job list dialog with F4
+  fc.key("f4")
+  fc.sleep(100)
+
+  -- Close it with Escape
+  fc.key("esc")
+  fc.sleep(50)
+
+  h.cleanup(src, dst)
+  test_pass("31_job_history")
 end
 
 -- =========================================================================
@@ -1048,6 +1097,7 @@ test_three_way_circular()
 test_symlink_outside_tree()
 test_cancel_copy()
 test_pause_copy()
+test_job_history()
 
 test_pass("ALL COPY TESTS PASSED")
 fc.quit()

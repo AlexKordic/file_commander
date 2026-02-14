@@ -153,6 +153,7 @@ private:
   static int l_set_transfer_rate(lua_State* L);
   static int l_cancel_job(lua_State* L);
   static int l_pause_job(lua_State* L);
+  static int l_job_history(lua_State* L);
 
   // --- Helpers ---
   static void push_panel_state(lua_State* L, Panel& panel);

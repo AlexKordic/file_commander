@@ -127,9 +127,11 @@ class FileJobs {
 
   virtual RunningJobsInfo get_running_job() = 0;
 
-  /// Drain completed jobs from the worker→UI queue.
-  /// Called by the UI thread each frame/tick.
-  virtual void drain_completed_jobs() = 0;
+  /// Get all jobs in history (completed, paused, cancelled, errored).
+  virtual std::vector<std::shared_ptr<JobSpec>> get_job_history() = 0;
+
+  /// Dismiss (remove) a job from history by ID.
+  virtual void dismiss_job(uint64_t job_id) = 0;
   // TODO: review later
   virtual void set_transfer_rate(uint64_t bytes_per_second) = 0;
 

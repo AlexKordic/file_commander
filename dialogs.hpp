@@ -2,6 +2,7 @@
 #define _PERUN_FC_DIALOGS_
 
 #include "commander.hpp"
+#include "file_io_jobs.hpp"
 #include "shared_state.hpp"
 
 #include <cstdint>
@@ -236,6 +237,47 @@ struct ErrorListDialog : Dialog {
   DataSource _data_source;
 
   std::function<void()> close_dialog;
+};
+
+struct JobListDialog : Dialog {
+  JobListDialog(std::function<void()> close_dialog);
+  void OnShow() override;
+  void cancel();
+
+  // List view
+  int                                    selected_job = 0;
+  std::vector<std::string>               job_entries;
+  std::vector<std::shared_ptr<Perun::JobSpec>>  jobs;  // parallel to job_entries
+  Component                              job_menu;
+  Component                              button_close;
+  Component                              button_dismiss_all;
+
+  // Detail view
+  bool                    in_detail = false;
+  int                     view_mode = 0;  // 0=list, 1=detail
+  std::shared_ptr<Perun::JobSpec> detail_job;
+  int                     detail_error_selected = 0;
+  std::vector<std::string> detail_error_entries;
+  Component                detail_error_menu;
+  Component                detail_back_button;
+  Component                detail_close_button;
+
+  Component tab;
+
+  std::function<void()> close_dialog;
+
+  void    open_detail();
+  void    close_detail();
+  void    dismiss_selected();
+  void    dismiss_all_clean();
+  void    rebuild_list();
+  Element render_list();
+  Element render_detail();
+
+  static std::string format_job_entry(const std::shared_ptr<Perun::JobSpec>& job);
+  static std::string state_icon(Perun::JobState state);
+  static std::string format_duration(double seconds);
+  static std::string format_bytes(double bytes);
 };
 
 }  // namespace ftxui

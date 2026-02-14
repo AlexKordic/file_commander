@@ -17,6 +17,8 @@
 #include <ftxui/component/screen_interactive.hpp>
 #include <ftxui/dom/elements.hpp>
 
+#include <cmath>
+#include <format>
 #include <memory>
 #include <string>
 
@@ -26,7 +28,9 @@ using boost::filesystem::file_status;
 using boost::system::error_code;
 
 using Perun::file_operations;
+using Perun::JobInstructions;
 using Perun::JobSpec;
+using Perun::JobState;
 
 std::string time_to_string(double time);
 
@@ -1117,6 +1121,293 @@ void ErrorListDialog::OnShow() {
   _data_source.min_y      = std::round(theme().errorlist_height_screen_portion * dimy);
   const bool initial_show = _data_source.focused_id == 0;
   if (initial_show) { _data_source.focused_id = _data_source.dataset_size().starting_id; }
+}
+
+//
+// JobListDialog
+//
+
+std::string JobListDialog::state_icon(JobState state) {
+  switch (state) {
+  case JobState::QUEUED:               return "..";
+  case JobState::RUNNING:              return ">>";
+  case JobState::PAUSED:               return "||";
+  case JobState::CANCELLED:            return "XX";
+  case JobState::COMPLETED:            return "OK";
+  case JobState::COMPLETED_WITH_ERRORS: return "!!";
+  }
+  return "??";
+}
+
+std::string JobListDialog::format_duration(double seconds) {
+  if (seconds < 0) return "-";
+  if (seconds < 1.0) return std::format("{:.0f}ms", seconds * 1000);
+  if (seconds < 60.0) return std::format("{:.1f}s", seconds);
+  return std::format("{:.0f}m {:.0f}s", std::floor(seconds / 60), std::fmod(seconds, 60));
+}
+
+std::string JobListDialog::format_bytes(double bytes) {
+  if (bytes < 1024) return std::format("{:.0f} B", bytes);
+  if (bytes < 1024 * 1024) return std::format("{:.1f} KB", bytes / 1024);
+  if (bytes < 1024 * 1024 * 1024) return std::format("{:.1f} MB", bytes / (1024 * 1024));
+  return std::format("{:.1f} GB", bytes / (1024 * 1024 * 1024));
+}
+
+std::string JobListDialog::format_job_entry(const std::shared_ptr<JobSpec>& job) {
+  const char* type_str = "?";
+  switch (job->_type) {
+  case JobInstructions::Type::COPY:   type_str = "COPY"; break;
+  case JobInstructions::Type::MOVE:   type_str = "MOVE"; break;
+  case JobInstructions::Type::DELETE: type_str = "DEL "; break;
+  }
+  auto state = job->_state.load();
+  std::string icon = state_icon(state);
+
+  int items_done  = job->_current_item_index;
+  int items_total = static_cast<int>(job->item_count());
+  int errors      = static_cast<int>(job->_errors.size());
+
+  std::string duration = "-";
+  if (job->_started_time > 0) {
+    double end = job->_finished_time > 0 ? job->_finished_time : Perun::now();
+    duration = format_duration(end - job->_started_time);
+  }
+
+  std::string size_str = format_bytes(job->_bytes_total);
+
+  std::string detail;
+  if (state == JobState::COMPLETED) {
+    detail = std::format("{} files  {}  {}", items_total, size_str, duration);
+  } else if (state == JobState::COMPLETED_WITH_ERRORS) {
+    detail = std::format("{}/{} files  {} errors", items_done, items_total, errors);
+  } else if (state == JobState::PAUSED) {
+    detail = std::format("{}/{} files  paused", items_done, items_total);
+  } else if (state == JobState::CANCELLED) {
+    detail = std::format("{}/{} files  cancelled", items_done, items_total);
+  } else if (state == JobState::RUNNING) {
+    detail = std::format("{}/{} files  running", items_done, items_total);
+  } else {
+    detail = "queued";
+  }
+
+  return std::format("[#{}] {}  {}  {}", job->_job_id, type_str, icon, detail);
+}
+
+void JobListDialog::rebuild_list() {
+  // Get current running job + history
+  jobs.clear();
+  job_entries.clear();
+
+  auto jobinfo = file_operations().get_running_job();
+  if (jobinfo.job && !jobinfo.job->is_stopped()) {
+    jobs.push_back(jobinfo.job);
+  }
+
+  auto history = file_operations().get_job_history();
+  // Show most recent first
+  for (auto it = history.rbegin(); it != history.rend(); ++it) {
+    jobs.push_back(*it);
+  }
+
+  for (auto& j : jobs) {
+    job_entries.push_back(format_job_entry(j));
+  }
+
+  if (selected_job >= static_cast<int>(job_entries.size())) {
+    selected_job = std::max(0, static_cast<int>(job_entries.size()) - 1);
+  }
+}
+
+void JobListDialog::open_detail() {
+  if (jobs.empty() || selected_job < 0 || selected_job >= static_cast<int>(jobs.size())) return;
+  detail_job = jobs[selected_job];
+  in_detail  = true;
+  view_mode  = 1;
+
+  // Build error entries
+  detail_error_entries.clear();
+  detail_error_selected = 0;
+  if (detail_job) {
+    std::lock_guard lock(detail_job->_m);
+    for (auto& err_item : detail_job->_errors) {
+      std::string warning = err_item.warning_ref().value_or("unknown error");
+      detail_error_entries.push_back("  X " + err_item.path_ref().native() + "\n    " + warning);
+    }
+  }
+
+  detail_back_button->TakeFocus();
+}
+
+void JobListDialog::close_detail() {
+  in_detail = false;
+  view_mode = 0;
+  detail_job.reset();
+  rebuild_list();
+  job_menu->TakeFocus();
+}
+
+void JobListDialog::dismiss_selected() {
+  if (jobs.empty() || selected_job < 0 || selected_job >= static_cast<int>(jobs.size())) return;
+  auto& job = jobs[selected_job];
+  // Only dismiss stopped jobs
+  if (job->is_stopped()) {
+    file_operations().dismiss_job(job->_job_id);
+    rebuild_list();
+  }
+}
+
+void JobListDialog::dismiss_all_clean() {
+  auto history = file_operations().get_job_history();
+  for (auto& j : history) {
+    auto s = j->_state.load();
+    if (s == JobState::COMPLETED) {
+      file_operations().dismiss_job(j->_job_id);
+    }
+  }
+  rebuild_list();
+}
+
+JobListDialog::JobListDialog(std::function<void()> close_dialog) : Dialog(nullptr), close_dialog(close_dialog) {
+  ButtonOption ascii_button;
+  ascii_button.transform = ascii_button_transform();
+
+  // --- List view components ---
+  button_close       = Button(" Close ", close_dialog, ascii_button);
+  button_dismiss_all = Button(" Dismiss All Clean ", [this] { this->dismiss_all_clean(); }, ascii_button);
+
+  MenuOption menu_opt;
+  menu_opt.on_enter = [this] { this->open_detail(); };
+  job_menu = Menu(&job_entries, &selected_job, menu_opt);
+
+  auto list_view = Container::Vertical({
+    Container::Horizontal({button_dismiss_all, button_close}),
+    job_menu,
+  });
+
+  // --- Detail view components ---
+  detail_back_button  = Button(" Back ", [this] { this->close_detail(); }, ascii_button);
+  detail_close_button = Button(" Close ", close_dialog, ascii_button);
+  detail_error_menu   = Menu(&detail_error_entries, &detail_error_selected);
+
+  auto detail_view = Container::Vertical({
+    Container::Horizontal({detail_back_button, detail_close_button}),
+    detail_error_menu,
+  });
+
+  // --- Tab to switch views ---
+  tab = Container::Tab({list_view, detail_view}, &view_mode);
+
+  navigation = CatchEvent(tab, [this](Event e) -> bool {
+    if (e == theme().key_cancel_dialog) {
+      if (in_detail) {
+        close_detail();
+      } else {
+        this->cancel();
+      }
+      return true;
+    }
+    // 'd' to dismiss selected job in list view
+    if (!in_detail && e == Event::Character('d')) {
+      dismiss_selected();
+      return true;
+    }
+    return false;
+  });
+
+  renderer = Renderer(navigation, [this]() -> Element {
+    if (in_detail && detail_job) {
+      return render_detail();
+    }
+    return render_list();
+  });
+}
+
+// Separate render methods (declared as lambdas would be cleaner, but let's keep it readable)
+// We'll use helper methods via the renderer lambda
+
+void JobListDialog::cancel() { this->close_dialog(); }
+
+void JobListDialog::OnShow() {
+  view_mode = 0;
+  in_detail = false;
+  detail_job.reset();
+  rebuild_list();
+}
+
+Element JobListDialog::render_list() {
+  auto title = text(" Job History [" + std::to_string(jobs.size()) + "] ") | bold | hcenter;
+
+  Elements rows;
+  if (jobs.empty()) {
+    rows.push_back(text("  No jobs.") | dim);
+  }
+
+  auto content = vbox({
+    hbox({
+      button_dismiss_all->Render() | hcenter | xflex_grow,
+      separator(),
+      button_close->Render() | hcenter | xflex_grow,
+    }),
+    separator(),
+    job_menu->Render() | vscroll_indicator | yframe | yflex,
+  });
+
+  return window(title, content, BorderStyle::DOUBLE);
+}
+
+Element JobListDialog::render_detail() {
+  if (!detail_job) return text("No job selected");
+
+  auto  state    = detail_job->_state.load();
+  auto  icon     = state_icon(state);
+  const char* type_str = "?";
+  switch (detail_job->_type) {
+  case JobInstructions::Type::COPY:   type_str = "COPY"; break;
+  case JobInstructions::Type::MOVE:   type_str = "MOVE"; break;
+  case JobInstructions::Type::DELETE: type_str = "DELETE"; break;
+  }
+
+  int items_done  = detail_job->_current_item_index;
+  int items_total = static_cast<int>(detail_job->item_count());
+  int errors      = static_cast<int>(detail_job->_errors.size());
+  int remaining   = items_total - items_done;
+
+  std::string duration = "-";
+  if (detail_job->_started_time > 0) {
+    double end = detail_job->_finished_time > 0 ? detail_job->_finished_time : Perun::now();
+    duration = format_duration(end - detail_job->_started_time);
+  }
+
+  auto title_text = std::format(" Job #{} -- {} {} ", detail_job->_job_id, type_str, icon);
+  if (errors > 0) title_text += std::format("{} errors ", errors);
+
+  Elements info;
+  info.push_back(text(std::format("  Items:   {} total, {} done, {} remaining", items_total, items_done, remaining)));
+  info.push_back(text(std::format("  Bytes:   {} / {}", format_bytes(detail_job->_bytes_processed), format_bytes(detail_job->_bytes_total))));
+  info.push_back(text(std::format("  Time:    {}", duration)));
+  info.push_back(text(std::format("  Errors:  {}", errors)));
+  info.push_back(separator());
+
+  Elements error_section;
+  if (!detail_error_entries.empty()) {
+    error_section.push_back(text("  -- Errors --") | bold);
+    error_section.push_back(detail_error_menu->Render() | vscroll_indicator | yframe | yflex);
+  } else {
+    error_section.push_back(text("  No errors.") | dim);
+  }
+
+  auto content = vbox({
+    hbox({
+      detail_back_button->Render() | hcenter | xflex_grow,
+      separator(),
+      detail_close_button->Render() | hcenter | xflex_grow,
+    }),
+    separator(),
+    vbox(std::move(info)),
+    vbox(std::move(error_section)) | yflex,
+  });
+
+  return window(text(title_text) | bold | hcenter, content, BorderStyle::DOUBLE);
 }
 
 //

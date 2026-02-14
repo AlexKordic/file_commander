@@ -419,22 +419,22 @@ on job state.
 **Errored job — shows error details and retry option:**
 
 ```
-╔════════════ Job #4 — COPY ⚠ 2 errors ═══════════════════╗
+╔════════════ Job #4 — COPY ⚠ 2 errors ════════════════════════╗
 ║                                                           ║
 ║  Source:  /home/user/documents/                           ║
 ║  Dest:    /backup/documents/                              ║
-║  Items:   40 total, 38 done, 2 failed                    ║
-║  Bytes:   1.2 GB / 1.3 GB                                ║
+║  Items:   40 total, 38 done, 2 failed                     ║
+║  Bytes:   1.2 GB / 1.3 GB                                 ║
 ║  Time:    12.4s                                           ║
 ║                                                           ║
-║  ── Errors ──────────────────────────────────────────     ║
-║  ✕ /home/user/documents/locked.pdf                       ║
+║  ── Errors ─────────────────────────────────────────          ║
+║  ✕ /home/user/documents/locked.pdf                        ║
 ║    Failed to copy file: Permission denied                 ║
-║  ✕ /home/user/documents/broken_link                      ║
+║  ✕ /home/user/documents/broken_link                       ║
 ║    Failed to create symlink: File exists                  ║
 ║                                                           ║
 ║                         [Retry Failed] [Dismiss] [Close]  ║
-╚═══════════════════════════════════════════════════════════╝
+╚═════════════════════════════════════════════════════════════════╝
 ```
 
 **Paused job — shows progress, remaining items, and resume option:**
@@ -1221,27 +1221,44 @@ its failed items now belong to the new retry job.
    - Test 30 (`test_pause_copy`): 10×1MB files at 2MB/s, pause after 2.5s,
      verifies partial copy, state=="paused", no errors
 
-### Steps 5–10: TODO
+5. **Job history storage and Job List dialog** ✅ (merged steps 5-7 scope)
+   - `drain_completed_jobs()` now stores jobs in `_job_history` vector (was discarding)
+   - `get_job_history()` and `dismiss_job(id)` added to `FileJobs` interface
+   - `_job_history` member added to `ThreadedFileJobs`, protected by `_m` mutex
+   - `key_toggle_job_list = F4` shortcut added to Theme
+   - `JobListDialog` created in `dialogs.hpp/cpp`:
+     - **List view**: scrollable `Menu` of all jobs (running + history, most recent first)
+       Each row: `[#id] TYPE  icon  items/progress`
+       Icons: `>>` running, `OK` completed, `!!` errors, `||` paused, `XX` cancelled
+       Buttons: Dismiss All Clean, Close
+       Press Enter on a row to open detail view
+       Press `d` to dismiss selected stopped job
+     - **Detail view**: job info header + error list
+       Shows: items total/done/remaining, bytes, duration, errors
+       Error list with file path and error message
+       Buttons: Back, Close
+     - Two-view switching via `Container::Tab`, Esc goes back/closes
+   - Wired into `FileCommander`: registered as `_overlay_dialogs["JobList"]`,
+     F4 shortcut in `handle_global_shortcuts`
+   - `fc.job_history()` exposed in Lua scripting — returns array of
+     `{id, type, state, items_done, items_total, errors, bytes_done, bytes_total}`
 
-5. **Implement resume**
+   **Test added:**
+   - Test 31 (`test_job_history`): runs a copy, verifies job appears in
+     `fc.job_history()` with correct type/state/items_done, opens F4 dialog and closes
+
+### Steps 6–10: TODO
+
+6. **Implement resume**
    - Adjust copy/move/delete loops to start from `_current_item_index`
    - Wire resume action from Job History dialog
 
-6. **Add `JobSummary` and two-tier history storage**
-   - Compact completed-no-error jobs into summaries
-   - Keep full `JobSpec` for inspectable jobs
-
-7. **Implement `JobHistoryDialog`**
-   - List view with all jobs
-   - Inspect view for errored/paused/cancelled jobs
-   - Actions: Resume, Cancel, Dismiss, Retry Failed
-
-8. **Add `_last_job_id` to Dialog base and `accept()` wrappers**
+7. **Add `_last_job_id` to Dialog base and `accept()` wrappers**
    - Add `std::optional<uint64_t> _last_job_id` to `Dialog`, clear in `OnShow()`
    - Add `_last_job_id = file_operations().add_job(job)` to existing `run_copy()`, `ok()` (one line each)
    - Add thin `accept()` overrides that call existing confirm methods and return `_last_job_id`
 
-9. **Update scripting integration**
+8. **Update scripting integration**
    - Replace polling with drain-based event firing
    - Add job detail to events
    - Register all new Lua functions:
@@ -1250,15 +1267,13 @@ its failed items now belong to the new retry job.
      - `fc.job_status(id)` — non-blocking job query
      - `fc.job_errors(id)` — per-job error list
      - `fc.job_items(id, offset, limit)` — item slice for inspectable jobs
-     - `fc.job_history()` — all jobs summary
      - `fc.cancel_job(id)` — signal cancel (upgrade existing to accept job ID)
-     - `fc.pause_job(id)` — signal pause
+     - `fc.pause_job(id)` — signal pause (upgrade existing to accept job ID)
      - `fc.resume_job(id)` — re-queue paused job
    - Add `fc.run_and_wait()`, `fc.copy_and_wait()` to `fc_framework.lua`
 
-10. **Update tests**
-    - Migrate existing tests from key-simulation to `fc.run_dialog()` / `fc.run_and_wait()`
-    - Add tests for cancel/pause/resume via `fc.cancel_job()` / `fc.pause_job()` / `fc.resume_job()`
-    - Add tests for `fc.job_status()` and `fc.job_errors()` inspection
-    - Verify job history inspection via `fc.job_history()`
-    - Verify retry-failed workflow
+9. **Update tests**
+   - Migrate existing tests from key-simulation to `fc.run_dialog()` / `fc.run_and_wait()`
+   - Add tests for cancel/pause/resume via `fc.cancel_job()` / `fc.pause_job()` / `fc.resume_job()`
+   - Add tests for `fc.job_status()` and `fc.job_errors()` inspection
+   - Verify retry-failed workflow

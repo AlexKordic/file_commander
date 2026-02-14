@@ -5,6 +5,7 @@
 
 #include <ftxui/component/screen_interactive.hpp>
 
+#include <algorithm>
 #include <condition_variable>
 #include <cstdint>
 #include <mutex>
@@ -254,12 +255,17 @@ class ThreadedFileJobs : public FileJobs {
     return {std::move(active), _queue.size()};
   }
 
-  void drain_completed_jobs() override {
-    std::shared_ptr<JobSpec> job;
-    while (_completed_queue.try_pop(job) == FifoError::OK) {
-      // Step 2: just drain to prevent accumulation.
-      // Future steps add: summaries, inspectable jobs, scripting events.
-    }
+  std::vector<std::shared_ptr<JobSpec>> get_job_history() override {
+    std::lock_guard lock(_m);
+    return _job_history;
+  }
+
+  void dismiss_job(uint64_t job_id) override {
+    std::lock_guard lock(_m);
+    _job_history.erase(
+      std::remove_if(_job_history.begin(), _job_history.end(),
+        [job_id](const auto& j) { return j->_job_id == job_id; }),
+      _job_history.end());
   }
 
   std::deque<JobErrorInfo> get_errors(int count) override {
@@ -337,8 +343,11 @@ class ThreadedFileJobs : public FileJobs {
           ? JobState::COMPLETED
           : JobState::COMPLETED_WITH_ERRORS;
       }
-      // Transfer to completed queue for UI to drain
-      _completed_queue.push(_active_job);
+      // Store in job history directly (under _m, which we already use for _active_job)
+      {
+        std::lock_guard lock(_m);
+        _job_history.push_back(_active_job);
+      }
       _active_job->updated();
     }
   }
@@ -544,8 +553,8 @@ class ThreadedFileJobs : public FileJobs {
 
   std::shared_ptr<JobSpec>                   _active_job;
   Perun::FifoQueue<std::shared_ptr<JobSpec>> _queue;
-  Perun::FifoQueue<std::shared_ptr<JobSpec>> _completed_queue;
   std::atomic<uint64_t>                      _next_job_id{1};
+  std::vector<std::shared_ptr<JobSpec>>      _job_history;  // drained completed/paused/cancelled jobs
   std::deque<JobErrorInfo>                   _errors;
   int64_t                                    _err_last_access_index = 0;
 

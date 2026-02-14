@@ -96,12 +96,14 @@ int main(int argc, char** argv) {
     while (!loop.HasQuitted()) {
       loop.RunOnceBlocking();
       scripting.tick();   // first call starts coroutine; thereafter checks waits
-      if (scripting.finished()) {
-        // Lua script completed (success or error) — exit loop
-        // Give one more frame for error display, then quit
-        screen.Post(ftxui::Event::Custom);
-        screen.Exit();
-      }
+      // // // if (scripting.finished()) {
+      // // //   // Lua script completed (success or error) — exit loop
+      // // //   // Give one more frame for error display, then quit
+      // // //   screen.Post(ftxui::Event::Custom);
+      // // //   screen.Exit();
+      // // // }
+      // Note: fc.quit() calls screen.Exit() directly.
+      // When script finishes without fc.quit(), app stays open for manual use.
     }
     scripting.cleanup();
   } else {

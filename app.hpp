@@ -317,6 +317,7 @@ class FileCommander : public DialogOverlay {
 
     navigation->Add(panels_with_cancel);
     _overlay_dialogs["ErrorList"] = std::make_shared<ErrorListDialog>(_close_dialog);
+    _overlay_dialogs["JobList"]   = std::make_shared<JobListDialog>(_close_dialog);
     renderer                      = Renderer(navigation, [=, this]() -> Element {
       // TODO: different when single panel layout is active
       // check for resize:
@@ -354,10 +355,9 @@ class FileCommander : public DialogOverlay {
 
 
   bool handle_global_shortcuts(Event event) {
-    // Drain completed jobs and update progress bar visibility on Custom events
+    // Update progress bar visibility on Custom events
     // (worker thread posts Event::Custom on job progress/completion)
     if (event == Event::Custom) {
-      file_operations().drain_completed_jobs();
       auto jobinfo = file_operations().get_running_job();
       progress_bar._has_running_job = jobinfo.job && !jobinfo.job->is_stopped();
       return false;  // don't consume — Custom events also trigger re-render
@@ -365,6 +365,10 @@ class FileCommander : public DialogOverlay {
 
     if (event == theme().key_toggle_error_details && !dialog_active()) {
       show_dialog("ErrorList");
+      return true;
+    }
+    if (event == theme().key_toggle_job_list && !dialog_active()) {
+      show_dialog("JobList");
       return true;
     }
 

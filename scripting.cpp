@@ -155,6 +155,7 @@ bool LuaScripting::setup(const std::string& script_path) {
   reg("set_transfer_rate", l_set_transfer_rate);
   reg("cancel_job",        l_cancel_job);
   reg("pause_job",         l_pause_job);
+  reg("job_history",       l_job_history);
   // clang-format on
 
   lua_setglobal(_lua, "fc");
@@ -707,6 +708,58 @@ int LuaScripting::l_pause_job(lua_State* L) {
     lua_pushboolean(L, 1);
   } else {
     lua_pushboolean(L, 0);
+  }
+  return 1;
+}
+
+// fc.job_history() — return array of {id, type, state, items_done, items_total, errors, bytes_done, bytes_total}
+int LuaScripting::l_job_history(lua_State* L) {
+  auto history = file_operations().get_job_history();
+  lua_newtable(L);
+  int idx = 1;
+  for (auto& job : history) {
+    lua_newtable(L);
+
+    lua_pushinteger(L, static_cast<int>(job->_job_id));
+    lua_setfield(L, -2, "id");
+
+    const char* type_str = "?";
+    switch (job->_type) {
+    case JobInstructions::Type::COPY:   type_str = "copy"; break;
+    case JobInstructions::Type::MOVE:   type_str = "move"; break;
+    case JobInstructions::Type::DELETE: type_str = "delete"; break;
+    }
+    lua_pushstring(L, type_str);
+    lua_setfield(L, -2, "type");
+
+    const char* state_str = "unknown";
+    switch (job->_state.load()) {
+    case Perun::JobState::QUEUED:               state_str = "queued"; break;
+    case Perun::JobState::RUNNING:              state_str = "running"; break;
+    case Perun::JobState::PAUSED:               state_str = "paused"; break;
+    case Perun::JobState::CANCELLED:            state_str = "cancelled"; break;
+    case Perun::JobState::COMPLETED:            state_str = "completed"; break;
+    case Perun::JobState::COMPLETED_WITH_ERRORS: state_str = "completed_with_errors"; break;
+    }
+    lua_pushstring(L, state_str);
+    lua_setfield(L, -2, "state");
+
+    lua_pushinteger(L, job->_current_item_index);
+    lua_setfield(L, -2, "items_done");
+
+    lua_pushinteger(L, static_cast<int>(job->item_count()));
+    lua_setfield(L, -2, "items_total");
+
+    lua_pushinteger(L, static_cast<int>(job->_errors.size()));
+    lua_setfield(L, -2, "errors");
+
+    lua_pushnumber(L, job->_bytes_processed);
+    lua_setfield(L, -2, "bytes_done");
+
+    lua_pushnumber(L, job->_bytes_total);
+    lua_setfield(L, -2, "bytes_total");
+
+    lua_rawseti(L, -2, idx++);
   }
   return 1;
 }
