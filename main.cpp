@@ -45,18 +45,6 @@ int main(int argc, char** argv) {
   // -------------
 
   auto screen = ScreenInteractive::Fullscreen();
-
-  // for (int i = 0; i < 50; ++i) {
-  //   file_operations().report_error("[DBG] " + std::to_string(i) + " INITIAL single line item");
-  // }
-  // std::thread([&]() {
-  //   for (int i = 0; true; ++i) {
-  //     std::this_thread::sleep_for(std::chrono::seconds(1));
-  //     file_operations().report_error("[LIVE DBG] " + std::to_string(i) + " single line item");
-  //     screen.Post(Event::Custom);
-  //   }
-  // }).detach();
-
   auto cwd = boost::filesystem::current_path();
 
   // Check for "run script.lua" mode
@@ -76,7 +64,7 @@ int main(int argc, char** argv) {
 
   LogAdapter adapt_logs(screen);
 
-  screen.TrackMouse(false);
+  // screen.TrackMouse(false);
 
   if (lua_mode) {
     LuaScripting scripting(app, app.renderer);

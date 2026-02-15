@@ -22,7 +22,7 @@ Summary of staged changes across 8 files (+457 / -145 lines).
 
 ## Command-Line Key Simulation
 
-**main.cpp, file_panel.cpp, file_panel.hpp**
+**main.cpp, custom_controls.cpp, custom_controls.hpp**
 
 - Added `event_from_string()` to map strings to FTXUI `Event` values.
 - Supports arrows, backspace, delete, escape, return, tab, F1–F12, Ctrl+A–Z, Alt+A–Z (e.g. `<-`, `->`, `cA`, `aB`).

@@ -3,7 +3,7 @@
 #include "bfs.hpp"
 #include "commander.hpp"
 #include "file_io_jobs.hpp"
-#include "file_panel.hpp"
+#include "custom_controls.hpp"
 #include "log.hpp"
 #include "shared_state.hpp"
 #include "theme.hpp"
@@ -581,10 +581,13 @@ CopyDialog::CopyDialog(PanelSharedState::P d) : Dialog(std::move(d)) {
   //   return filelist_handle_filter(app.get(), data_source, ctx);
   // };
 
-  _filelist_wrapper = Renderer([this](bool focused) -> Element {
-    if (_discovery_process) { return _discovery_process->_files->Render(); }
-    return text("No files to copy");
-  });
+  // Use Container::Vertical so events (arrow keys, mouse wheel) are properly
+  // forwarded to the dynamically added _files child. Renderer(bool) overrides
+  // OnEvent() and never delegates to children, which blocks scrolling.
+  // The Render() of this container is never called — CopyDialog::render()
+  // renders _files directly via the outer Renderer(navigation, lambda).
+  _filelist_wrapper = Container::Vertical({});
+  // // // _filelist_wrapper = _discovery_process ? _discovery_process->_files : Container::Vertical({});
 
   navigation = CatchEvent(Container::Vertical({
                             // input_destination_path,
@@ -675,15 +678,22 @@ CopyDiscoveryProcess::CopyDiscoveryProcess(CopyDialog* parent, Filepath target) 
   _state->filter = Input(&_state->filter_txt, &(_dir->path_txt), filelist_filter_opt(parent->filter_cursor_pos));
   _files         = DBMenu(&_data_source);
   setup_filelist_datasource(_state, _data_source);
+  // Override dataset_size: discovery adds items directly to _dir->items without calling
+  // Dir::_calculate(), so stats() would always return 0. Read items.size() directly.
+  _data_source.dataset_size = [dir = _dir.get()]() -> DataSize {
+    auto sz = (int64_t)dir->items.size();
+    return {sz, 0, std::max(0LL, sz - 1)};
+  };
   _data_source.on_event = [app = _state, data_source = &_data_source](DSEventContext ctx) -> bool {
     // handle filter only
     return filelist_handle_filter(app.get(), data_source, ctx);
   };
-  // Set minimum height of file list
+  // Set minimum height of file list directly on DataSource (PanelSharedState::set_min_y
+  // is not wired to _data_source.min_y here, unlike the Files dialog)
   size_t min_y  = 20;
   auto   screen = ScreenInteractive::Active();
   if (screen) { min_y = theme().copyfiles_height_screen_portion * screen->dimy(); }
-  _state->set_min_y(std::min(min_y, _dir->items.size()));
+  _data_source.min_y = min_y;
   // start thread
   _thread = std::thread([this]() { this->_run(); });
 }
@@ -1153,50 +1163,8 @@ std::string JobListDialog::format_bytes(double bytes) {
   return std::format("{:.1f} GB", bytes / (1024 * 1024 * 1024));
 }
 
-std::string JobListDialog::format_job_entry(const std::shared_ptr<JobSpec>& job) {
-  const char* type_str = "?";
-  switch (job->_type) {
-  case JobInstructions::Type::COPY:   type_str = "COPY"; break;
-  case JobInstructions::Type::MOVE:   type_str = "MOVE"; break;
-  case JobInstructions::Type::DELETE: type_str = "DEL "; break;
-  }
-  auto state = job->_state.load();
-  std::string icon = state_icon(state);
-
-  int items_done  = job->_current_item_index;
-  int items_total = static_cast<int>(job->item_count());
-  int errors      = static_cast<int>(job->_errors.size());
-
-  std::string duration = "-";
-  if (job->_started_time > 0) {
-    double end = job->_finished_time > 0 ? job->_finished_time : Perun::now();
-    duration = format_duration(end - job->_started_time);
-  }
-
-  std::string size_str = format_bytes(job->_bytes_total);
-
-  std::string detail;
-  if (state == JobState::COMPLETED) {
-    detail = std::format("{} files  {}  {}", items_total, size_str, duration);
-  } else if (state == JobState::COMPLETED_WITH_ERRORS) {
-    detail = std::format("{}/{} files  {} errors", items_done, items_total, errors);
-  } else if (state == JobState::PAUSED) {
-    detail = std::format("{}/{} files  paused", items_done, items_total);
-  } else if (state == JobState::CANCELLED) {
-    detail = std::format("{}/{} files  cancelled", items_done, items_total);
-  } else if (state == JobState::RUNNING) {
-    detail = std::format("{}/{} files  running", items_done, items_total);
-  } else {
-    detail = "queued";
-  }
-
-  return std::format("[#{}] {}  {}  {}", job->_job_id, type_str, icon, detail);
-}
-
 void JobListDialog::rebuild_list() {
-  // Get current running job + history
   jobs.clear();
-  job_entries.clear();
 
   auto jobinfo = file_operations().get_running_job();
   if (jobinfo.job && !jobinfo.job->is_stopped()) {
@@ -1209,32 +1177,26 @@ void JobListDialog::rebuild_list() {
     jobs.push_back(*it);
   }
 
-  for (auto& j : jobs) {
-    job_entries.push_back(format_job_entry(j));
-  }
-
-  if (selected_job >= static_cast<int>(job_entries.size())) {
-    selected_job = std::max(0, static_cast<int>(job_entries.size()) - 1);
+  // Clamp focused_id to valid range
+  if (!jobs.empty()) {
+    _job_data_source.focused_id = std::clamp(_job_data_source.focused_id, 0LL, (int64_t)jobs.size() - 1);
+  } else {
+    _job_data_source.focused_id = 0;
   }
 }
 
 void JobListDialog::open_detail() {
-  if (jobs.empty() || selected_job < 0 || selected_job >= static_cast<int>(jobs.size())) return;
-  detail_job = jobs[selected_job];
+  auto focused = _job_data_source.focused_id;
+  if (jobs.empty() || focused < 0 || focused >= (int64_t)jobs.size()) return;
+  detail_job = jobs[focused];
   in_detail  = true;
   view_mode  = 1;
 
-  // Build error entries
-  detail_error_entries.clear();
-  detail_error_selected = 0;
-  if (detail_job) {
-    std::lock_guard lock(detail_job->_m);
-    for (auto& err_item : detail_job->_errors) {
-      std::string warning = err_item.warning_ref().value_or("unknown error");
-      detail_error_entries.push_back("  X " + err_item.path_ref().native() + "\n    " + warning);
-    }
-  }
+  if (!detail_job) { detail_back_button->TakeFocus(); return; }
 
+  // Start detail items view at current processing point
+  _detail_items_data_source.focused_id  = std::max(0, detail_job->_current_item_index);
+  _detail_errors_data_source.focused_id = 0;
   detail_back_button->TakeFocus();
 }
 
@@ -1243,12 +1205,13 @@ void JobListDialog::close_detail() {
   view_mode = 0;
   detail_job.reset();
   rebuild_list();
-  job_menu->TakeFocus();
+  _job_list->TakeFocus();
 }
 
 void JobListDialog::dismiss_selected() {
-  if (jobs.empty() || selected_job < 0 || selected_job >= static_cast<int>(jobs.size())) return;
-  auto& job = jobs[selected_job];
+  auto focused = _job_data_source.focused_id;
+  if (jobs.empty() || focused < 0 || focused >= (int64_t)jobs.size()) return;
+  auto& job = jobs[focused];
   // Only dismiss stopped jobs
   if (job->is_stopped()) {
     file_operations().dismiss_job(job->_job_id);
@@ -1271,30 +1234,160 @@ JobListDialog::JobListDialog(std::function<void()> close_dialog) : Dialog(nullpt
   ButtonOption ascii_button;
   ascii_button.transform = ascii_button_transform();
 
-  // --- List view components ---
+  // ── Job list view ──────────────────────────────────────────────────
   button_close       = Button(" Close ", close_dialog, ascii_button);
   button_dismiss_all = Button(" Dismiss All Clean ", [this] { this->dismiss_all_clean(); }, ascii_button);
 
-  MenuOption menu_opt;
-  menu_opt.on_enter = [this] { this->open_detail(); };
-  job_menu = Menu(&job_entries, &selected_job, menu_opt);
+  _job_data_source.dataset_size = [this]() -> DataSize {
+    auto sz = (int64_t)jobs.size();
+    return {sz, 0, std::max(0LL, sz - 1)};
+  };
+  _job_data_source.move_id_by = [this](int64_t& id, int64_t delta) -> bool {
+    int64_t old_id = id;
+    int64_t max_id = std::max(0LL, (int64_t)jobs.size() - 1);
+    id = std::clamp(id + delta, 0LL, max_id);
+    return id != old_id;
+  };
+  _job_data_source.count_items_before = [](int64_t id) -> int64_t { return id; };
+  _job_data_source.on_event = [this](DSEventContext ctx) -> bool {
+    if (ctx.event == Event::Return) {
+      open_detail();
+      return true;
+    }
+    return ctx.handled;
+  };
+  _job_data_source.transform = [this](DSRenderContext& ctx) -> Element {
+    if (ctx.id < 0 || ctx.id >= (int64_t)jobs.size()) return text("<invalid>");
+    auto& job   = jobs[ctx.id];
+    auto  state = job->_state.load();
+
+    const char* type_str = "?";
+    switch (job->_type) {
+    case JobInstructions::Type::COPY:   type_str = "COPY"; break;
+    case JobInstructions::Type::MOVE:   type_str = "MOVE"; break;
+    case JobInstructions::Type::DELETE: type_str = "DEL "; break;
+    }
+
+    std::string icon    = state_icon(state);
+    int items_done      = job->_current_item_index;
+    int items_total     = static_cast<int>(job->item_count());
+    int errors          = static_cast<int>(job->_errors.size());
+
+    std::string duration = "-";
+    if (job->_started_time > 0) {
+      double end = job->_finished_time > 0 ? job->_finished_time : Perun::now();
+      duration   = format_duration(end - job->_started_time);
+    }
+    std::string size_str = format_bytes(job->_bytes_total);
+
+    std::string detail;
+    if (state == JobState::COMPLETED)            detail = std::format("{} files  {}  {}", items_total, size_str, duration);
+    else if (state == JobState::COMPLETED_WITH_ERRORS) detail = std::format("{}/{} files  {} errors", items_done, items_total, errors);
+    else if (state == JobState::PAUSED)          detail = std::format("{}/{} files  paused", items_done, items_total);
+    else if (state == JobState::CANCELLED)       detail = std::format("{}/{} files  cancelled", items_done, items_total);
+    else if (state == JobState::RUNNING)         detail = std::format("{}/{} files  running", items_done, items_total);
+    else                                         detail = "queued";
+
+    auto row = hbox({
+      text(std::format("[#{}] ", job->_job_id)),
+      text(std::string(type_str) + "  " + icon + "  "),
+      text(detail) | xflex_grow,
+    });
+
+    if (ctx.focused) {
+      row |= ctx.component_focused ? bgcolor(Color::DarkBlue) : bgcolor(Color::GrayDark);
+      row |= ftxui::focus;
+    }
+    return row;
+  };
+  _job_data_source.min_y = 5;
+  _job_list = DBMenu(&_job_data_source);
 
   auto list_view = Container::Vertical({
     Container::Horizontal({button_dismiss_all, button_close}),
-    job_menu,
+    _job_list,
   });
 
-  // --- Detail view components ---
+  // ── Detail view ────────────────────────────────────────────────────
   detail_back_button  = Button(" Back ", [this] { this->close_detail(); }, ascii_button);
   detail_close_button = Button(" Close ", close_dialog, ascii_button);
-  detail_error_menu   = Menu(&detail_error_entries, &detail_error_selected);
+
+  // Detail items DataSource — shows ALL items; done items are dimmed
+  _detail_items_data_source.dataset_size = [this]() -> DataSize {
+    if (!detail_job) return {0, 0, 0};
+    auto sz = (int64_t)detail_job->_items.size();
+    return {sz, 0, std::max(0LL, sz - 1)};
+  };
+  _detail_items_data_source.move_id_by = [this](int64_t& id, int64_t delta) -> bool {
+    if (!detail_job) return false;
+    int64_t old_id = id;
+    int64_t max_id = std::max(0LL, (int64_t)detail_job->_items.size() - 1);
+    id = std::clamp(id + delta, 0LL, max_id);
+    return id != old_id;
+  };
+  _detail_items_data_source.count_items_before = [](int64_t id) -> int64_t { return id; };
+  _detail_items_data_source.transform = [this](DSRenderContext& ctx) -> Element {
+    if (!detail_job || ctx.id < 0 || ctx.id >= (int64_t)detail_job->_items.size()) return text("<invalid>");
+    auto& item   = detail_job->_items[ctx.id];
+    bool is_done = ctx.id < detail_job->_current_item_index;
+
+    Element name;
+    if (item.type() == boost::filesystem::directory_file) {
+      name = text("  / " + item.path_ref().native());
+    } else {
+      std::string line = "  . " + item.path_ref().native() + "  " + format_bytes(std::max(0LL, item.size()));
+      if (item.symlink_ref()) line += "  -> " + item.symlink_ref()->native();
+      name = text(line);
+    }
+    if (is_done) name |= dim;
+
+    if (ctx.focused) {
+      name |= ctx.component_focused ? bgcolor(Color::DarkBlue) : bgcolor(Color::GrayDark);
+      name |= ftxui::focus;
+    }
+    return name;
+  };
+  _detail_items_data_source.min_y = 5;
+  _detail_items = DBMenu(&_detail_items_data_source);
+
+  // Detail errors DataSource
+  _detail_errors_data_source.dataset_size = [this]() -> DataSize {
+    if (!detail_job) return {0, 0, 0};
+    auto sz = (int64_t)detail_job->_errors.size();
+    return {sz, 0, std::max(0LL, sz - 1)};
+  };
+  _detail_errors_data_source.move_id_by = [this](int64_t& id, int64_t delta) -> bool {
+    if (!detail_job) return false;
+    int64_t old_id = id;
+    int64_t max_id = std::max(0LL, (int64_t)detail_job->_errors.size() - 1);
+    id = std::clamp(id + delta, 0LL, max_id);
+    return id != old_id;
+  };
+  _detail_errors_data_source.count_items_before = [](int64_t id) -> int64_t { return id; };
+  _detail_errors_data_source.transform = [this](DSRenderContext& ctx) -> Element {
+    if (!detail_job || ctx.id < 0 || ctx.id >= (int64_t)detail_job->_errors.size()) return text("<invalid>");
+    auto& err = detail_job->_errors[ctx.id];
+    std::string warning = err.warning_ref().value_or("unknown error");
+    auto row = vbox({
+      text("  X " + err.path_ref().native()),
+      text("    " + warning) | dim,
+    });
+    if (ctx.focused) {
+      row |= ctx.component_focused ? bgcolor(Color::DarkBlue) : bgcolor(Color::GrayDark);
+      row |= ftxui::focus;
+    }
+    return row;
+  };
+  _detail_errors_data_source.min_y = 3;
+  _detail_errors = DBMenu(&_detail_errors_data_source);
 
   auto detail_view = Container::Vertical({
     Container::Horizontal({detail_back_button, detail_close_button}),
-    detail_error_menu,
+    _detail_items,
+    _detail_errors,
   });
 
-  // --- Tab to switch views ---
+  // ── Tab to switch views ────────────────────────────────────────────
   tab = Container::Tab({list_view, detail_view}, &view_mode);
 
   navigation = CatchEvent(tab, [this](Event e) -> bool {
@@ -1322,9 +1415,6 @@ JobListDialog::JobListDialog(std::function<void()> close_dialog) : Dialog(nullpt
   });
 }
 
-// Separate render methods (declared as lambdas would be cleaner, but let's keep it readable)
-// We'll use helper methods via the renderer lambda
-
 void JobListDialog::cancel() { this->close_dialog(); }
 
 void JobListDialog::OnShow() {
@@ -1337,11 +1427,6 @@ void JobListDialog::OnShow() {
 Element JobListDialog::render_list() {
   auto title = text(" Job History [" + std::to_string(jobs.size()) + "] ") | bold | hcenter;
 
-  Elements rows;
-  if (jobs.empty()) {
-    rows.push_back(text("  No jobs.") | dim);
-  }
-
   auto content = vbox({
     hbox({
       button_dismiss_all->Render() | hcenter | xflex_grow,
@@ -1349,7 +1434,7 @@ Element JobListDialog::render_list() {
       button_close->Render() | hcenter | xflex_grow,
     }),
     separator(),
-    job_menu->Render() | vscroll_indicator | yframe | yflex,
+    jobs.empty() ? (text("  No jobs.") | dim) : _job_list->Render(),
   });
 
   return window(title, content, BorderStyle::DOUBLE);
@@ -1388,12 +1473,18 @@ Element JobListDialog::render_detail() {
   info.push_back(text(std::format("  Errors:  {}", errors)));
   info.push_back(separator());
 
+  // Items section — all items shown; done items are dimmed by transform
+  Elements items_section;
+  if (!detail_job->_items.empty()) {
+    items_section.push_back(text(std::format("  -- Items ({} total, {} remaining) --", items_total, remaining)) | bold);
+    items_section.push_back(_detail_items->Render());
+  }
+
+  // Errors section
   Elements error_section;
-  if (!detail_error_entries.empty()) {
-    error_section.push_back(text("  -- Errors --") | bold);
-    error_section.push_back(detail_error_menu->Render() | vscroll_indicator | yframe | yflex);
-  } else {
-    error_section.push_back(text("  No errors.") | dim);
+  if (!detail_job->_errors.empty()) {
+    error_section.push_back(text(std::format("  -- Errors ({}) --", errors)) | bold);
+    error_section.push_back(_detail_errors->Render());
   }
 
   auto content = vbox({
@@ -1404,6 +1495,7 @@ Element JobListDialog::render_detail() {
     }),
     separator(),
     vbox(std::move(info)),
+    vbox(std::move(items_section)) | yflex,
     vbox(std::move(error_section)) | yflex,
   });
 

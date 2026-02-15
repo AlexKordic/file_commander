@@ -8,7 +8,7 @@
 #include "commander.hpp"
 #include "dialogs.hpp"
 #include "file_io_jobs.hpp"
-#include "file_panel.hpp"
+#include "custom_controls.hpp"
 #include "log.hpp"
 #include "theme.hpp"
 
@@ -90,6 +90,7 @@ class DialogOverlay {
   }
 };
 
+// DialogOverlay supports drawing overlay dialogs on top of this Panel.
 class Panel : public DialogOverlay {
  public:
   Dir        dir;

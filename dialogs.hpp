@@ -244,23 +244,23 @@ struct JobListDialog : Dialog {
   void OnShow() override;
   void cancel();
 
-  // List view
-  int                                    selected_job = 0;
-  std::vector<std::string>               job_entries;
-  std::vector<std::shared_ptr<Perun::JobSpec>>  jobs;  // parallel to job_entries
-  Component                              job_menu;
-  Component                              button_close;
-  Component                              button_dismiss_all;
+  // Job list view (DataSource-backed)
+  std::vector<std::shared_ptr<Perun::JobSpec>> jobs;
+  DataSource _job_data_source;
+  Component  _job_list;
+  Component  button_close;
+  Component  button_dismiss_all;
 
-  // Detail view
-  bool                    in_detail = false;
-  int                     view_mode = 0;  // 0=list, 1=detail
+  // Detail view (DataSource-backed)
+  bool                            in_detail = false;
+  int                             view_mode = 0;  // 0=list, 1=detail
   std::shared_ptr<Perun::JobSpec> detail_job;
-  int                     detail_error_selected = 0;
-  std::vector<std::string> detail_error_entries;
-  Component                detail_error_menu;
-  Component                detail_back_button;
-  Component                detail_close_button;
+  DataSource                      _detail_items_data_source;
+  Component                       _detail_items;
+  DataSource                      _detail_errors_data_source;
+  Component                       _detail_errors;
+  Component                       detail_back_button;
+  Component                       detail_close_button;
 
   Component tab;
 
@@ -274,7 +274,6 @@ struct JobListDialog : Dialog {
   Element render_list();
   Element render_detail();
 
-  static std::string format_job_entry(const std::shared_ptr<Perun::JobSpec>& job);
   static std::string state_icon(Perun::JobState state);
   static std::string format_duration(double seconds);
   static std::string format_bytes(double bytes);

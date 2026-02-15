@@ -1,5 +1,4 @@
-
-#include "file_panel.hpp"
+#include "custom_controls.hpp"
 #include "theme.hpp"
 
 #include <ftxui/component/component.hpp>

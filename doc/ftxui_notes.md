@@ -741,6 +741,161 @@ class LogAdapter {
 };
 ```
 
+### Pattern 9: Rendering Only Visible Items Using DataSource
+
+The left and right file panels can display directories with thousands of items without
+creating thousands of FTXUI Components or Elements. Instead, the custom `DBMenu` component
+(from the alex_ftxui fork) renders **only the rows currently visible on screen**. The key
+to this is the `DataSource` struct, which decouples the data (file entries) from the
+rendering (Element creation).
+
+#### The DataSource Struct
+
+`DataSource` (defined in `alex_ftxui/include/ftxui/component/component_options.hpp`) is a
+configuration struct that holds rendering state and four callback functions:
+
+```cpp
+struct DataSource {
+  // Visible item context
+  int64_t focused_id         = 0;   // Which item has focus
+  int64_t hovered_id         = -1;  // Which item the mouse hovers
+  int64_t estimated_start_id = 0;   // First visible item (set by Render)
+  int64_t real_start_id      = 0;   // Actual first visible (set by DataSourceReflect)
+  int64_t items_visible      = 0;   // How many items fit on screen
+
+  RedrawVariables v;  // tracks component_height, screen_height, items_produced, items_total
+
+  // Data access callbacks (set by the application)
+  std::function<DataSize()>          dataset_size;       // Total item count
+  std::function<bool(int64_t&, int64_t)> move_id_by;    // Navigate by offset (skip hidden items)
+  std::function<int64_t(int64_t)>   count_items_before;  // How many items before this id
+  std::function<Element(DSRenderContext&)> transform;     // Produce Element for one item
+  std::function<bool(DSEventContext)>      on_event;      // Override event handling
+};
+```
+
+`DataSource` does **not** hold any item data — it holds callbacks that reach into the
+application's data model (`Dir::items`) on demand. The `Files` dialog owns a `_data_source`
+member and wires these callbacks to the current `Dir`:
+
+```cpp
+// In setup_filelist_datasource():
+data_source.dataset_size       = [state]() -> DataSize {
+  return {state->dir->stats().items_visible, 0, state->dir->stats().items_total - 1};
+};
+data_source.move_id_by         = filelist_move_id_by(app);    // uses Dir::offset_vissible()
+data_source.count_items_before = filelist_count_items_before(app);
+data_source.transform          = filelist_transform(app);     // builds Element for one file row
+```
+
+#### How DBMenu Renders Only Visible Rows
+
+`DBMenu(&_data_source)` creates a `VerticalMenu` component. On each `Render()` call,
+`VerticalMenu` does the following:
+
+1. **Determine component height.** A companion `DataSourceReflect` node measures the
+   actual screen rectangle assigned to the component during the Element rendering pipeline
+   (`SetBox`), storing the result in `data_source.v.component_height`. This is the number
+   of rows that physically fit on screen.
+
+2. **Find the start item.** `find_start_id()` begins at `focused_id` and walks backward
+   by `component_height / 2` items (using `move_id_by`), centering the focused item in
+   the visible window.
+
+3. **Produce only visible Elements.** A loop calls `transform` for at most
+   `component_height` items, advancing via `move_id_by(id, +1)`:
+
+   ```cpp
+   Element Render() override {
+     data_->v.items_total = data_->dataset_size().total;
+     data_->estimated_start_id = find_start_id();
+
+     DSRenderContext row_info;
+     row_info.id = data_->estimated_start_id;
+     Elements elements;
+     while (elements.size() < data_->v.component_height) {
+       row_info.focused = (data_->focused_id == row_info.id);
+       row_info.hovered = (data_->hovered_id == row_info.id);
+       elements.push_back(data_->transform(row_info));
+       if (!data_->move_id_by(row_info.id, 1)) break;  // no more items
+     }
+     data_->v.items_produced = elements.size();
+     return vbox(std::move(elements));
+   }
+   ```
+
+   If the directory has 10,000 files but the terminal is 40 rows tall, `transform` is
+   called only ~40 times — not 10,000. No Components or Elements are created for
+   off-screen items.
+
+4. **Post-render visibility check.** `DataSourceReflect::Render()` runs after the Element
+   tree is rendered to screen. It checks whether the produced items actually fit (some
+   items may be multi-line, e.g. symlinks with a second row showing the target). If fewer
+   items are visible than expected, it triggers a redraw to adjust.
+
+#### The transform Callback (File Row Rendering)
+
+`filelist_transform` receives a `DSRenderContext` with the item's index, focus state, and
+hover state. It reads the `DirItem` directly from `Dir::items` by index and builds the
+Element for that single row:
+
+```cpp
+// In filelist_transform():
+const DirItem& data = state->dir->items.at(ctx.id);
+Element n = text(data.filename_ref());
+n = n | xflex_grow | bgGaugeLeft(size_ratio);  // size-relative background bar
+if (ctx.focused) n |= bgGaugeLeft(...focused_colors...);
+if (selected)    n |= theme().files_selected;
+
+Element row = hbox({n, coloredInt(data.size()), separatorLight(), text(data.get_time())});
+if (ctx.focused) row |= ftxui::focus;  // tell frame to scroll here
+if (data.symlink_ref()) {
+  row = vbox({row, text(" -> " + data.symlink_ref()->native())});  // multi-line item
+}
+return row;
+```
+
+#### Navigating Through Filtered Items
+
+When a filter is active, some items in `Dir::items` have `visible() == false`. The
+`move_id_by` callback uses `Dir::offset_vissible()` to skip hidden items:
+
+```cpp
+// filelist_move_id_by():
+return [state](int64_t& index, int64_t offset) -> bool {
+  int64_t old = index;
+  index = state->dir->offset_vissible(index, offset);  // skips non-visible items
+  return old != index;
+};
+```
+
+This means `DBMenu` never encounters hidden items — it iterates only through the visible
+subset, and the transform callback is called only for items that pass the filter.
+
+#### Reuse Across the Project
+
+The same `DataSource` + `DBMenu` pattern is used in three places:
+
+| Usage | DataSource Owner | Data Model |
+|-------|-----------------|------------|
+| **Left/Right file panels** (`Files` dialog) | `Files::_data_source` | `Dir::items` via `PanelSharedState` |
+| **Copy dialog file preview** (`CopyDiscoveryProcess`) | `CopyDiscoveryProcess::_data_source` | Separate `Dir` for discovered files |
+| **Error list dialog** (`ErrorListDialog`) | `ErrorListDialog::_data_source` | `ThreadedFileJobs::_errors` |
+
+Each wires the same four callbacks (`dataset_size`, `move_id_by`, `count_items_before`,
+`transform`) to its own data model, and creates a `DBMenu` with a pointer to its
+`_data_source`. The file panels and copy dialog share the `setup_filelist_datasource()`
+helper since they both render `DirItem` entries. The error list sets up its callbacks
+directly against the error log.
+
+#### Why This Matters
+
+Without virtualization, a directory with 10,000 files would create 10,000 Elements
+(each containing multiple child Elements for name, size, date) on every single frame.
+With `DataSource` + `DBMenu`, the cost per frame is proportional to the terminal height
+(typically 30-50 rows), regardless of directory size. This keeps rendering fast and
+memory usage constant even for very large directories.
+
 ---
 
 ## Event Handling
