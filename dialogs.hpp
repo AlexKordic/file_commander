@@ -19,14 +19,35 @@ Element screen_render_time();
 
 Decorator filetype_color(const DirItem& item);
 
+enum class CommandScope {
+  PANEL,
+  GLOBAL,
+};
+
+enum class CommandKind {
+  SHOW_DIALOG,
+  EXECUTE_CALLBACK,
+};
+
 struct Command {
+  std::string id;
   Event       key;
   std::string dialog;
+  std::string description;
+  CommandScope scope = CommandScope::PANEL;
+  CommandKind  kind  = CommandKind::SHOW_DIALOG;
+  int          use_count = 0;
 };
 
 struct Commands {
   std::vector<Command> available;
   Commands();
+
+  const Command* find_by_id(const std::string& id) const;
+  Command*       find_by_id(const std::string& id);
+  bool           increment_use_count(const std::string& id);
+  const Command* find_panel_dialog_by_key(const Event& key) const;
+  std::vector<Command> list_all() const;
 };
 
 Commands& commands();
@@ -277,6 +298,34 @@ struct JobListDialog : Dialog {
   static std::string state_icon(Perun::JobState state);
   static std::string format_duration(double seconds);
   static std::string format_bytes(double bytes);
+};
+
+struct CommandPaletteDialog : Dialog {
+  CommandPaletteDialog(
+    std::function<void()> close_dialog,
+    std::function<std::vector<Command>()> list_commands,
+    std::function<void(const std::string&)> execute_command
+  );
+  void OnShow() override;
+  void cancel();
+
+  std::function<void()> close_dialog;
+  std::function<std::vector<Command>()> list_commands;
+  std::function<void(const std::string&)> execute_command;
+
+  std::string filter_txt;
+  int         filter_cursor_pos = 0;
+  DataSource  _data_source;
+  Component   input_filter;
+  Component   list_menu;
+  Component   button_close;
+  Component   button_run;
+
+  std::vector<Command> commands_all;
+  std::vector<int64_t> visible_ids;
+
+  void apply_filter();
+  void run_selected();
 };
 
 }  // namespace ftxui

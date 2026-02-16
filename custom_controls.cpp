@@ -111,6 +111,68 @@ Event event_from_string(std::string s) {
   return Event::Custom;
 }
 
+std::string event_to_string(const Event& e) {
+  if (e == Event::ArrowLeft) return "<-";
+  if (e == Event::ArrowRight) return "->";
+  if (e == Event::ArrowUp) return "Up";
+  if (e == Event::ArrowDown) return "Down";
+  if (e == Event::ArrowLeftCtrl) return "Ctrl+<-";
+  if (e == Event::ArrowRightCtrl) return "Ctrl+->";
+  if (e == Event::ArrowUpCtrl) return "Ctrl+Up";
+  if (e == Event::ArrowDownCtrl) return "Ctrl+Down";
+  if (e == Event::Backspace) return "Backspace";
+  if (e == Event::Delete) return "Delete";
+  if (e == Event::Escape) return "Esc";
+  if (e == Event::Return) return "Enter";
+  if (e == Event::Tab) return "Tab";
+  if (e == Event::TabReverse) return "Shift+Tab";
+
+  if (e == Event::F1) return "F1";
+  if (e == Event::F2) return "F2";
+  if (e == Event::F3) return "F3";
+  if (e == Event::F4) return "F4";
+  if (e == Event::F5) return "F5";
+  if (e == Event::F6) return "F6";
+  if (e == Event::F7) return "F7";
+  if (e == Event::F8) return "F8";
+  if (e == Event::F9) return "F9";
+  if (e == Event::F10) return "F10";
+  if (e == Event::F11) return "F11";
+  if (e == Event::F12) return "F12";
+
+  if (e == Event::Character(' ')) return "Space";
+  if (e == Event::Character('?')) return "?";
+
+  if (e == Event::CtrlA) return "Ctrl+A";
+  if (e == Event::CtrlB) return "Ctrl+B";
+  if (e == Event::CtrlC) return "Ctrl+C";
+  if (e == Event::CtrlD) return "Ctrl+D";
+  if (e == Event::CtrlE) return "Ctrl+E";
+  if (e == Event::CtrlF) return "Ctrl+F";
+  if (e == Event::CtrlG) return "Ctrl+G";
+  if (e == Event::CtrlH) return "Ctrl+H";
+  if (e == Event::CtrlI) return "Ctrl+I";
+  if (e == Event::CtrlJ) return "Ctrl+J";
+  if (e == Event::CtrlK) return "Ctrl+K";
+  if (e == Event::CtrlL) return "Ctrl+L";
+  if (e == Event::CtrlM) return "Ctrl+M";
+  if (e == Event::CtrlN) return "Ctrl+N";
+  if (e == Event::CtrlO) return "Ctrl+O";
+  if (e == Event::CtrlP) return "Ctrl+P";
+  if (e == Event::CtrlQ) return "Ctrl+Q";
+  if (e == Event::CtrlR) return "Ctrl+R";
+  if (e == Event::CtrlS) return "Ctrl+S";
+  if (e == Event::CtrlT) return "Ctrl+T";
+  if (e == Event::CtrlU) return "Ctrl+U";
+  if (e == Event::CtrlV) return "Ctrl+V";
+  if (e == Event::CtrlW) return "Ctrl+W";
+  if (e == Event::CtrlX) return "Ctrl+X";
+  if (e == Event::CtrlY) return "Ctrl+Y";
+  if (e == Event::CtrlZ) return "Ctrl+Z";
+
+  return "?";
+}
+
 namespace {
 
 // Helper class.

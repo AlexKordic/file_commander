@@ -18,6 +18,7 @@
 #include <ftxui/dom/elements.hpp>
 
 #include <cmath>
+#include <cctype>
 #include <format>
 #include <memory>
 #include <string>
@@ -195,22 +196,21 @@ bool filelist_handle_commands(PanelSharedState* app, DataSource* data_source, DS
     return false;
   }
 
-  // check for registered actions
-  for (const auto& action : commands().available) {
-    if (ctx.event == action.key) {
-      app->action.dialog            = action.dialog;
-      app->action.arguments         = app->dir->take_selected();
-      app->action.arguments->origin = app->dir->path;
-      const bool no_items           = app->dir->items.empty();
-      if (no_items) {
-        // no items for selected to point to
-        app->action.arguments->focused = Filepath();
-      } else {
-        app->action.arguments->focused = app->dir->items.at(data_source->focused_id).path_ref();
-      }
-      app->action.show_dialog();
-      return true;
+  // check for registered panel dialog actions
+  const Command* action = commands().find_panel_dialog_by_key(ctx.event);
+  if (action) {
+    app->action.dialog            = action->dialog;
+    app->action.arguments         = app->dir->take_selected();
+    app->action.arguments->origin = app->dir->path;
+    const bool no_items           = app->dir->items.empty();
+    if (no_items) {
+      // no items for selected to point to
+      app->action.arguments->focused = Filepath();
+    } else {
+      app->action.arguments->focused = app->dir->items.at(data_source->focused_id).path_ref();
     }
+    app->action.show_dialog();
+    return true;
   }
   return false;
 }
@@ -1502,21 +1502,227 @@ Element JobListDialog::render_detail() {
   return window(text(title_text) | bold | hcenter, content, BorderStyle::DOUBLE);
 }
 
+namespace {
+
+std::string to_lower_ascii(std::string s) {
+  for (char& c : s) {
+    c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+  }
+  return s;
+}
+
+int fuzzy_score(const std::string& query_lower, const std::string& text_lower) {
+  if (query_lower.empty()) return 0;
+  int  score         = 0;
+  int  qpos          = 0;
+  int  last_match_id = -2;
+  bool has_prefix    = false;
+  for (int i = 0; i < static_cast<int>(text_lower.size()) && qpos < static_cast<int>(query_lower.size()); ++i) {
+    if (text_lower[i] != query_lower[qpos]) continue;
+    if (qpos == 0 && i == 0) {
+      has_prefix = true;
+      score += 20;
+    }
+    const bool contiguous = i == last_match_id + 1;
+    score += contiguous ? 10 : 3;
+    const bool word_start = i == 0 || text_lower[i - 1] == ' ' || text_lower[i - 1] == '_' || text_lower[i - 1] == '-';
+    if (word_start) score += 4;
+    last_match_id = i;
+    qpos++;
+  }
+  if (qpos != static_cast<int>(query_lower.size())) return -1;
+  if (has_prefix) score += 10;
+  return score;
+}
+
+}  // namespace
+
+//
+// CommandPaletteDialog
+//
+
+CommandPaletteDialog::CommandPaletteDialog(
+  std::function<void()> close_dialog,
+  std::function<std::vector<Command>()> list_commands,
+  std::function<void(const std::string&)> execute_command
+) : Dialog(nullptr),
+    close_dialog(std::move(close_dialog)),
+    list_commands(std::move(list_commands)),
+    execute_command(std::move(execute_command)) {
+  ButtonOption ascii_button;
+  ascii_button.transform = ascii_button_transform();
+  button_run             = Button(" Run ", [this] { run_selected(); }, ascii_button);
+  button_close           = Button(" Close ", [this] { cancel(); }, ascii_button);
+
+  InputOption input_opt;
+  input_opt.multiline       = false;
+  input_opt.cursor_position = &filter_cursor_pos;
+  input_opt.on_change       = [this]() { apply_filter(); };
+  input_opt.on_enter        = [this]() { run_selected(); };
+  input_filter              = Input(&filter_txt, "Search command", input_opt) | showInputCursor(&filter_cursor_pos);
+
+  _data_source.dataset_size = [this]() -> DataSize {
+    auto sz = static_cast<int64_t>(visible_ids.size());
+    return {sz, 0, std::max(0LL, sz - 1)};
+  };
+  _data_source.move_id_by = [this](int64_t& id, int64_t delta) -> bool {
+    int64_t old = id;
+    int64_t max = std::max(0LL, static_cast<int64_t>(visible_ids.size()) - 1);
+    id = std::clamp(id + delta, 0LL, max);
+    return id != old;
+  };
+  _data_source.count_items_before = [](int64_t id) -> int64_t { return id; };
+  _data_source.on_event = [this](DSEventContext c) -> bool {
+    if (c.event == Event::Return) {
+      run_selected();
+      return true;
+    }
+    return c.handled;
+  };
+  _data_source.transform = [this](DSRenderContext& c) -> Element {
+    if (c.id < 0 || c.id >= static_cast<int64_t>(visible_ids.size())) return text("<invalid>");
+    const Command& cmd = commands_all.at(visible_ids.at(c.id));
+    auto row = hbox({
+      text(" " + cmd.description) | xflex_grow,
+      text(" " + event_to_string(cmd.key) + " ") | dim,
+    });
+    if (c.focused) {
+      row |= c.component_focused ? bgcolor(Color::DarkBlue) : bgcolor(Color::GrayDark);
+      row |= ftxui::focus;
+    }
+    return row;
+  };
+  _data_source.min_y = 12;
+  list_menu          = DBMenu(&_data_source);
+
+  navigation = CatchEvent(Container::Vertical({
+                            Container::Horizontal({button_run, button_close}),
+                            input_filter,
+                            list_menu,
+                          }),
+                          close_on_esc(this));
+  renderer   = Renderer(navigation, [this]() -> Element {
+    auto title = text(" Command Palette [" + std::to_string(visible_ids.size()) + "] ") | bold | hcenter;
+    auto content = vbox({
+      hbox({
+        button_run->Render() | hcenter | xflex_grow,
+        separator(),
+        button_close->Render() | hcenter | xflex_grow,
+      }),
+      separator(),
+      input_filter->Render(),
+      separator(),
+      visible_ids.empty() ? (text("  No commands.") | dim) : (list_menu->Render() | yflex),
+    });
+    return window(title, content, BorderStyle::DOUBLE);
+  });
+}
+
+void CommandPaletteDialog::cancel() { close_dialog(); }
+
+void CommandPaletteDialog::OnShow() {
+  commands_all = list_commands ? list_commands() : std::vector<Command>();
+  filter_txt.clear();
+  filter_cursor_pos = 0;
+  apply_filter();
+  auto screen = ScreenInteractive::Active();
+  if (screen) _data_source.min_y = std::max(12, static_cast<int>(0.8 * screen->dimy()));
+  input_filter->TakeFocus();
+}
+
+void CommandPaletteDialog::apply_filter() {
+  struct RankedItem {
+    int64_t index;
+    int     score;
+  };
+  std::vector<RankedItem> ranked;
+  ranked.reserve(commands_all.size());
+
+  const std::string query = to_lower_ascii(filter_txt);
+  for (int64_t i = 0; i < static_cast<int64_t>(commands_all.size()); ++i) {
+    const Command& cmd  = commands_all.at(i);
+    const std::string searchable = to_lower_ascii(cmd.id + " " + cmd.description);
+    int score = fuzzy_score(query, searchable);
+    if (query.empty()) score = 0;
+    if (score < 0) continue;
+    ranked.push_back({i, score});
+  }
+
+  std::sort(ranked.begin(), ranked.end(), [this](const RankedItem& a, const RankedItem& b) {
+    if (a.score != b.score) return a.score > b.score;
+    const Command& ca = commands_all.at(a.index);
+    const Command& cb = commands_all.at(b.index);
+    if (ca.use_count != cb.use_count) return ca.use_count > cb.use_count;
+    return ca.description < cb.description;
+  });
+
+  visible_ids.clear();
+  visible_ids.reserve(ranked.size());
+  for (const auto& x : ranked) visible_ids.push_back(x.index);
+
+  if (visible_ids.empty()) {
+    _data_source.focused_id = 0;
+  } else {
+    _data_source.focused_id = std::clamp(_data_source.focused_id, 0LL, static_cast<int64_t>(visible_ids.size()) - 1);
+  }
+}
+
+void CommandPaletteDialog::run_selected() {
+  if (visible_ids.empty()) return;
+  const int64_t focused = std::clamp(_data_source.focused_id, 0LL, static_cast<int64_t>(visible_ids.size()) - 1);
+  const Command& cmd = commands_all.at(visible_ids.at(focused));
+  if (execute_command) execute_command(cmd.id);
+}
+
 //
 // Commands
 //
 
 Commands::Commands() {
-  available.reserve(100);
-  // TODO: extract info from structure instead of hardcoded here
-  available.push_back({theme().key_mkdir, "Mkdir"});
-  available.push_back({theme().key_rename, "Rename"});
-  available.push_back({theme().key_copy, "Copy"});
-  available.push_back({theme().key_move, "Move"});
-  available.push_back({theme().key_delete, "Delete"});
-  available.push_back({theme().key_names_to_clipboard, "NameToClipboard"});
-  available.push_back({theme().key_paths_to_clipboard, "PathToClipboard"});
-  available.push_back({theme().key_find, "Find"});
+  available.reserve(64);
+  available.push_back({"copy", theme().key_copy, "Copy", "Copy", CommandScope::PANEL, CommandKind::SHOW_DIALOG});
+  available.push_back({"move", theme().key_move, "Move", "Move", CommandScope::PANEL, CommandKind::SHOW_DIALOG});
+  available.push_back({"delete", theme().key_delete, "Delete", "Delete", CommandScope::PANEL, CommandKind::SHOW_DIALOG});
+  available.push_back({"rename", theme().key_rename, "Rename", "Rename", CommandScope::PANEL, CommandKind::SHOW_DIALOG});
+  available.push_back({"mkdir", theme().key_mkdir, "Mkdir", "Make Directory", CommandScope::PANEL, CommandKind::SHOW_DIALOG});
+  available.push_back({"find", theme().key_find, "Find", "Find", CommandScope::PANEL, CommandKind::SHOW_DIALOG});
+  available.push_back({"names_to_clipboard", theme().key_names_to_clipboard, "NameToClipboard", "Names to Clipboard", CommandScope::PANEL, CommandKind::SHOW_DIALOG});
+  available.push_back({"paths_to_clipboard", theme().key_paths_to_clipboard, "PathToClipboard", "Paths to Clipboard", CommandScope::PANEL, CommandKind::SHOW_DIALOG});
+
+  available.push_back({"switch_panel", theme().key_switch_focused_panel, "", "Switch Focused Panel", CommandScope::GLOBAL, CommandKind::EXECUTE_CALLBACK});
+  available.push_back({"refresh_dir", theme().key_refresh_dir, "", "Refresh Directory", CommandScope::GLOBAL, CommandKind::EXECUTE_CALLBACK});
+  available.push_back({"target_right", theme().key_target_dir_to_focused_item_right, "", "Target Right Panel to Focused Item", CommandScope::GLOBAL, CommandKind::EXECUTE_CALLBACK});
+  available.push_back({"target_left", theme().key_target_dir_to_focused_item_left, "", "Target Left Panel to Focused Item", CommandScope::GLOBAL, CommandKind::EXECUTE_CALLBACK});
+  available.push_back({"toggle_errors", theme().key_toggle_error_details, "ErrorList", "Toggle Error List", CommandScope::GLOBAL, CommandKind::SHOW_DIALOG});
+  available.push_back({"toggle_job_list", theme().key_toggle_job_list, "JobList", "Toggle Job List", CommandScope::GLOBAL, CommandKind::SHOW_DIALOG});
+}
+
+const Command* Commands::find_by_id(const std::string& id) const {
+  auto it = std::find_if(available.begin(), available.end(), [&id](const Command& c) { return c.id == id; });
+  return it == available.end() ? nullptr : &(*it);
+}
+
+Command* Commands::find_by_id(const std::string& id) {
+  auto it = std::find_if(available.begin(), available.end(), [&id](const Command& c) { return c.id == id; });
+  return it == available.end() ? nullptr : &(*it);
+}
+
+bool Commands::increment_use_count(const std::string& id) {
+  auto* c = find_by_id(id);
+  if (!c) return false;
+  c->use_count++;
+  return true;
+}
+
+const Command* Commands::find_panel_dialog_by_key(const Event& key) const {
+  auto it = std::find_if(available.begin(), available.end(), [&key](const Command& c) {
+    return c.key == key && c.scope == CommandScope::PANEL && c.kind == CommandKind::SHOW_DIALOG;
+  });
+  return it == available.end() ? nullptr : &(*it);
+}
+
+std::vector<Command> Commands::list_all() const {
+  return available;
 }
 
 Commands& commands() {

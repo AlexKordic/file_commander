@@ -20,6 +20,7 @@ Theme::Theme() {
   key_clear_errors         = Event::Escape;
   key_toggle_error_details = Event::CtrlE;
   key_toggle_job_list      = Event::F4;
+  key_command_palette      = Event::F1;
 
   filesize_colors  = {Color::White, Color::White, Color::Yellow, Color::IndianRed1, Color::Plum3};
   debuginfo_colors = {Color::Black, Color::Yellow, Color::IndianRed1, Color::Plum3};

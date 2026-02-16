@@ -35,15 +35,27 @@ set(BOOST_INCLUDE_LIBRARIES
 )
 set(BOOST_ENABLE_CMAKE ON)
 
-# Download and extract the boost library from GitHub (deps only, ~131 MB cmake tarball)
-message(STATUS "Downloading and extracting boost library sources. This will take some time...")
-Set(FETCHCONTENT_QUIET FALSE) # Needed to print downloading progress
-FetchContent_Declare(
-    Boost
-    URL https://github.com/boostorg/boost/releases/download/boost-1.90.0/boost-1.90.0-cmake.tar.gz
-    USES_TERMINAL_DOWNLOAD TRUE
-    DOWNLOAD_NO_EXTRACT FALSE
-)
+# Use local boost tarball if present in repo root, otherwise download from GitHub.
+# To avoid repeated downloads on full rebuilds, download once:
+#   curl -LO https://github.com/boostorg/boost/releases/download/boost-1.90.0/boost-1.90.0-cmake.tar.gz
+set(_boost_local_tarball "${CMAKE_CURRENT_SOURCE_DIR}/boost-1.90.0-cmake.tar.gz")
+if(EXISTS "${_boost_local_tarball}")
+  message(STATUS "Using local boost tarball: ${_boost_local_tarball}")
+  FetchContent_Declare(
+      Boost
+      URL "file://${_boost_local_tarball}"
+      DOWNLOAD_NO_EXTRACT FALSE
+  )
+else()
+  message(STATUS "Local boost tarball not found. Downloading from GitHub (this will take some time)...")
+  Set(FETCHCONTENT_QUIET FALSE) # Needed to print downloading progress
+  FetchContent_Declare(
+      Boost
+      URL https://github.com/boostorg/boost/releases/download/boost-1.90.0/boost-1.90.0-cmake.tar.gz
+      USES_TERMINAL_DOWNLOAD TRUE
+      DOWNLOAD_NO_EXTRACT FALSE
+  )
+endif()
 
 # Boost deps must be available before alex_ftxui (it uses boost::local_shared_ptr) and our filesystem
 FetchContent_MakeAvailable(Boost)

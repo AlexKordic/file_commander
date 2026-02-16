@@ -27,6 +27,7 @@
 #include <memory>
 #include <string>
 #include <utility>
+#include <vector>
 
 #include <boost/filesystem.hpp>
 
@@ -62,13 +63,14 @@ class DialogOverlay {
   bool dialog_active() { return _active_dialog > 0; }
 
   void close_dialog() {
+    std::string closed_dialog_name = _active_dialog_name;
     // Move navigation to main document
     _active_dialog = 0;
     _active_dialog_name.clear();
     _overlay_renderer.reset();
     // Remove all dialogs, child index > 0
     while (navigation->ChildCount() > 1) { navigation->ChildAt(navigation->ChildCount() - 1)->Detach(); }
-    if (on_event) on_event("dialog_closed", "");
+    if (on_event) on_event("dialog_closed", closed_dialog_name);
   }
   void show_dialog(std::string name) {
     if (!_overlay_dialogs.contains(name)) {
@@ -166,6 +168,21 @@ class Panel : public DialogOverlay {
     if (!ec.failed() && isdir) return *focused;
     // dir.path would be root of the shown dir, but we want to support list of files all from different dirs, for ex. search result.
     return focused->parent_path();
+  }
+
+  void execute_dialog_command(const std::string& dialog_name) {
+    _state->action.dialog            = dialog_name;
+    _state->action.arguments         = dir.take_selected();
+    _state->action.arguments->origin = dir.path;
+
+    if (dir.items.empty()) {
+      _state->action.arguments->focused = Filepath();
+    } else {
+      int focused_index = _state->get_focused_index ? _state->get_focused_index() : 0;
+      focused_index = dir.offset_vissible(focused_index, 0);
+      _state->action.arguments->focused = dir.items.at(focused_index).path_ref();
+    }
+    _state->action.show_dialog();
   }
 
   void set_debug_info(std::function<Element()> info) { _files->debug_info = info; }
@@ -286,6 +303,56 @@ class FileCommander : public DialogOverlay {
 
   Panel& get_left() { return left; }
   Panel& get_right() { return right; }
+  Panel& focused_panel() {
+    if (left.navigation->Focused()) return left;
+    return right;
+  }
+
+  std::vector<Command> list_palette_commands() { return commands().list_all(); }
+
+  void execute_palette_command(const std::string& id) {
+    Command* command = commands().find_by_id(id);
+    if (!command) return;
+    command->use_count++;
+
+    // If palette triggered this action, close it first.
+    if (_active_dialog_name == "CommandPalette") { close_dialog(); }
+
+    if (command->scope == CommandScope::PANEL) {
+      if (command->kind == CommandKind::SHOW_DIALOG) {
+        focused_panel().execute_dialog_command(command->dialog);
+      }
+      return;
+    }
+
+    if (command->scope == CommandScope::GLOBAL && command->kind == CommandKind::SHOW_DIALOG) {
+      show_dialog(command->dialog);
+      return;
+    }
+
+    if (id == "switch_panel") {
+      if (left.navigation->Focused()) {
+        right.navigation->TakeFocus();
+      } else {
+        left.navigation->TakeFocus();
+      }
+      return;
+    }
+    if (id == "refresh_dir") {
+      focused_panel().dir.refresh();
+      return;
+    }
+    if (id == "target_right") {
+      Filepath where = focused_panel().focused_dir();
+      right.move_to(where);
+      return;
+    }
+    if (id == "target_left") {
+      Filepath where = focused_panel().focused_dir();
+      left.move_to(where);
+      return;
+    }
+  }
 
   FileCommander(Filepath l, Filepath r, ExecuteOnUiThread exec, std::function<int()> dimx) : left(l, get_target(), exec), right(r, get_target(), exec), _get_dimx(dimx) {
     _close_dialog         = [this]() { close_dialog(); };
@@ -319,7 +386,12 @@ class FileCommander : public DialogOverlay {
     navigation->Add(panels_with_cancel);
     _overlay_dialogs["ErrorList"] = std::make_shared<ErrorListDialog>(_close_dialog);
     _overlay_dialogs["JobList"]   = std::make_shared<JobListDialog>(_close_dialog);
-    renderer                      = Renderer(navigation, [=, this]() -> Element {
+    _overlay_dialogs["CommandPalette"] = std::make_shared<CommandPaletteDialog>(
+      _close_dialog,
+      [this]() { return this->list_palette_commands(); },
+      [this](const std::string& id) { this->execute_palette_command(id); }
+    );
+    renderer = Renderer(navigation, [=, this]() -> Element {
       // TODO: different when single panel layout is active
       // check for resize:
       int screen_w = _get_dimx();
@@ -362,6 +434,14 @@ class FileCommander : public DialogOverlay {
       auto jobinfo = file_operations().get_running_job();
       progress_bar._has_running_job = jobinfo.job && !jobinfo.job->is_stopped();
       return false;  // don't consume — Custom events also trigger re-render
+    }
+
+    if (event == theme().key_command_palette) {
+      if (!dialog_active() || _active_dialog_name == "CommandPalette") {
+        show_dialog("CommandPalette");
+        return true;
+      }
+      return false;
     }
 
     if (event == theme().key_toggle_error_details && !dialog_active()) {

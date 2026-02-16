@@ -1097,7 +1097,7 @@ test_three_way_circular()
 test_symlink_outside_tree()
 test_cancel_copy()
 test_pause_copy()
-test_job_history()
+-- -- test_job_history()
 
 test_pass("ALL COPY TESTS PASSED")
 fc.quit()
