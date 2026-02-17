@@ -287,35 +287,35 @@ void LuaScripting::poll_async_events() {
   }
 
   // Copy discovery completion — check both panels
-  bool  discovery_running = false;
-  void* current_discovery = nullptr;
+  bool     discovery_running = false;
+  uint64_t current_discovery_id = 0;
   for (auto* panel : {&_app.get_left(), &_app.get_right()}) {
     auto copy_dlg = std::dynamic_pointer_cast<CopyDialog>(panel->get_overlay_dialog("Copy"));
     if (copy_dlg && copy_dlg->_discovery_process) {
-      current_discovery = copy_dlg->_discovery_process.get();
+      current_discovery_id = copy_dlg->_discovery_process->_sequence_id;
       if (copy_dlg->_discovery_process->_running) {
         discovery_running = true;
       }
     }
   }
   if (_poll_count <= 5 || (_poll_count % 20 == 0)) {
-    log("poll #" + std::to_string(_poll_count) + ": disc_ptr=" +
-        std::to_string(current_discovery != nullptr) + " disc_run=" +
+    log("poll #" + std::to_string(_poll_count) + ": disc_id=" +
+        std::to_string(current_discovery_id) + " disc_run=" +
         std::to_string(discovery_running) + " had_disc=" + std::to_string(_had_discovery));
   }
   // Fire discovery_completed when:
   // 1. Normal case: we previously saw a running discovery, now it's done
   // 2. Fast-completion case: a new discovery process exists but already finished
   //    (completed between polls — track by process pointer identity)
-  if (current_discovery && !discovery_running) {
-    if (_had_discovery || current_discovery != _last_discovery_ptr) {
+  if (current_discovery_id != 0 && !discovery_running) {
+    if (_had_discovery || current_discovery_id != _last_discovery_id) {
       log("poll: discovery_completed");
       fire_event("discovery_completed", "");
-      _last_discovery_ptr = current_discovery;
+      _last_discovery_id = current_discovery_id;
     }
   }
-  if (!current_discovery) {
-    _last_discovery_ptr = nullptr;  // reset when process is cleared
+  if (current_discovery_id == 0) {
+    _last_discovery_id = 0;  // reset when process is cleared
   }
   _had_discovery = discovery_running;
 
@@ -732,6 +732,7 @@ int LuaScripting::l_state(lua_State* L) {
     case JobInstructions::Type::COPY: jtype = "copy"; break;
     case JobInstructions::Type::MOVE: jtype = "move"; break;
     case JobInstructions::Type::DELETE: jtype = "delete"; break;
+    case JobInstructions::Type::ARCHIVE_CREATE: jtype = "archive_create"; break;
     }
     lua_pushstring(L, jtype);
     lua_setfield(L, -2, "type");
@@ -873,6 +874,7 @@ int LuaScripting::l_job_history(lua_State* L) {
     case JobInstructions::Type::COPY:   type_str = "copy"; break;
     case JobInstructions::Type::MOVE:   type_str = "move"; break;
     case JobInstructions::Type::DELETE: type_str = "delete"; break;
+    case JobInstructions::Type::ARCHIVE_CREATE: type_str = "archive_create"; break;
     }
     lua_pushstring(L, type_str);
     lua_setfield(L, -2, "type");

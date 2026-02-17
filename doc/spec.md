@@ -75,8 +75,13 @@ main.cpp
 file_io_jobs.cpp
   ThreadedFileJobs : FileJobs
     FifoQueue<JobSpec>    -- FIFO job queue
-    worker thread         -- pops jobs, runs copy/move/delete
+    worker thread         -- pops jobs, runs copy/move/delete/archive-create
     ProgressMonitor       -- separate thread, samples file sizes, calculates Mbps
+
+archive.cpp
+  ArchiveService
+    archive create        -- builds `.7z` from selected sources via local `7zr`
+    archive extract cache -- extracts `.7z` to temp cache for virtual browsing
 ```
 
 ### Key Types
@@ -92,6 +97,7 @@ file_io_jobs.cpp
 | `Panel` | app.hpp | One side of the twin-panel layout: Dir + Files + dialogs + FileChangeFunnel |
 | `FileCommander` | app.hpp | Top-level: two Panels + ResizableSplit + global shortcuts + overlays |
 | `EditorManager` | editor_manager.hpp | Manages Fresh sessions, open/attach flow, and in-session editor MRU |
+| `ArchiveService` | archive.hpp | Archive create/extract orchestration and extraction cache management |
 | `JobSpec` | file_io_jobs.hpp | Combines JobInstructions (type + items) + JobStats (progress) + JobInterface (mutex + callback) |
 | `ThreadedFileJobs` | file_io_jobs.cpp | Job queue + worker thread + progress monitor |
 | `FileChangeFunnel` | commander.hpp | Abstract FS watcher. macOS impl uses FSEvents in `file_change_funnel.cpp` |
@@ -121,6 +127,8 @@ file_io_jobs.cpp
 
 - **Enter directory** (Return) and **leave directory** (?). On leaving, the previous
   directory is focused in the parent listing.
+- Entering a focused `.7z` item opens a virtual archive directory view.
+- Leaving from archive-root (`?`) returns to archive parent and focuses the archive file.
 - **Tab** switches focus between left and right panels.
 - **Ctrl+Right / Ctrl+Left** navigates the target panel to the focused item's directory.
 - **Ctrl+R** refreshes the current directory listing.
@@ -163,6 +171,19 @@ file_io_jobs.cpp
 - **Delete** (F8) - separate discovery and execution threads via `FifoQueue<DirItem>`.
   Discovery recursively enumerates, execution deletes as items arrive.
 - **Names to clipboard** (Ctrl+N) / **Paths to clipboard** (Ctrl+P) - copies via `pbcopy`.
+
+### Archive Support
+
+- Archive format support for this phase: `.7z`.
+- **Create archive**: in Copy dialog, when destination path ends with `.7z`, operation
+  is dispatched as an `ARCHIVE_CREATE` job instead of file-copy.
+- **Browse archive as directory**: pressing Return on a `.7z` file extracts it to a
+  temp cache and navigates panel into extracted contents.
+- **Extract from archive**: copy from virtual archive view to a normal directory uses
+  existing Copy dialog flow (same UX as normal file copy).
+- Extraction cache is keyed by archive identity (`canonical path + size + mtime`) and
+  reused in-session when unchanged.
+- Archive tooling defaults to local `7zr` built from `../lzma2600` (see build section).
 
 ### Job System
 
@@ -658,6 +679,7 @@ Deferred:
 | Progress display | Done |
 | Global command palette | Done (`F1`, fuzzy search, execute, MRU) |
 | Fresh editor handoff | Done (local Fresh build + runtime attach/switch) |
+| Archive create/extract (`.7z`) | Done (create via Copy dialog, browse virtual dir, extract via copy) |
 
 ---
 

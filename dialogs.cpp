@@ -1,5 +1,6 @@
 
 #include "dialogs.hpp"
+#include "archive.hpp"
 #include "bfs.hpp"
 #include "commander.hpp"
 #include "file_io_jobs.hpp"
@@ -43,6 +44,10 @@ using Perun::JobState;
 std::string time_to_string(double time);
 
 namespace ftxui {
+
+namespace {
+std::atomic<uint64_t> g_copy_discovery_sequence{1};
+}
 
 Element screen_render_time() {
   double seconds = 0;
@@ -205,6 +210,10 @@ bool filelist_handle_commands(PanelSharedState* app, DataSource* data_source, DS
       return true;
     }
     if (action->id == "leave_dir") {
+      if (app->leave_virtual_dir && app->leave_virtual_dir(data_source->focused_id)) {
+        app->filter_txt.clear();
+        return true;
+      }
       const Filepath old_path   = app->dir->path;
       const Filepath parent_dir = app->dir->path.parent_path();
       app->move_to(parent_dir);
@@ -222,7 +231,14 @@ bool filelist_handle_commands(PanelSharedState* app, DataSource* data_source, DS
     if (action->id == "enter_dir") {
       if (app->dir->items.empty()) return false;
       DirItem& where = app->dir->items.at(data_source->focused_id);
-      if (!where.is_dir()) return false;
+      if (!where.is_dir()) {
+        if (!app->enter_archive) return false;
+        const bool entered_archive = app->enter_archive(where.path_ref());
+        if (!entered_archive) return false;
+        data_source->focused_id = app->dir->offset_vissible(0, 0);
+        app->filter_txt.clear();
+        return true;
+      }
       app->move_to(where.path_ref());
       data_source->focused_id = app->dir->offset_vissible(0, 0);
       app->filter_txt.clear();
@@ -835,6 +851,24 @@ void CopyDialog::cancel() {
 void CopyDialog::run_copy() {
   if (!_discovery_process) return;
   _conflict = copy_conflict_from_index(conflict_mode_selected);
+
+  Filepath target(destination_path);
+  if (target.empty()) target = app->action.arguments->target;
+  if (is_archive_file_path(target)) {
+    std::vector<DirItem> items;
+    items.reserve(app->action.arguments->selected.size());
+    for (const auto& source : app->action.arguments->selected) {
+      auto& item = items.emplace_back(source);
+      item._set_symlink_target(target);
+    }
+    auto job = std::make_shared<JobSpec>(JobSpec::Type::ARCHIVE_CREATE, std::move(items));
+    _clear_operation_state();
+    file_operations().add_job(job);
+    app->dir->clear_selection();
+    app->action.close_dialog();
+    return;
+  }
+
   auto job = std::make_shared<JobSpec>(JobSpec::Type::COPY,
                                        std::move(_discovery_process->_dir->items),
                                        to_job_copy_conflict(_conflict));
@@ -896,6 +930,7 @@ CopyDiscoveryProcess::~CopyDiscoveryProcess() {
 }
 
 CopyDiscoveryProcess::CopyDiscoveryProcess(CopyDialog* parent, Filepath target) {
+  _sequence_id             = g_copy_discovery_sequence.fetch_add(1, std::memory_order_relaxed);
   _input_paths             = parent->app->action.arguments;
   _target                  = target;
   _follow_links            = parent->b_follow_links;
@@ -1128,6 +1163,7 @@ void CopyDialog::OnShow() {
     return;
   }
   destination_path       = app->action.arguments->target.native();
+  destination_cursor_pos = static_cast<int>(destination_path.size());
   conflict_mode_selected = copy_conflict_to_index(_conflict);
   _start_new_discovery();
 }
@@ -1806,6 +1842,7 @@ JobListDialog::JobListDialog(std::function<void()> close_dialog) : Dialog(nullpt
     case JobInstructions::Type::COPY:   type_str = "COPY"; break;
     case JobInstructions::Type::MOVE:   type_str = "MOVE"; break;
     case JobInstructions::Type::DELETE: type_str = "DEL "; break;
+    case JobInstructions::Type::ARCHIVE_CREATE: type_str = "ARCH"; break;
     }
 
     std::string icon    = state_icon(state);
@@ -1990,6 +2027,7 @@ Element JobListDialog::render_detail() {
   case JobInstructions::Type::COPY:   type_str = "COPY"; break;
   case JobInstructions::Type::MOVE:   type_str = "MOVE"; break;
   case JobInstructions::Type::DELETE: type_str = "DELETE"; break;
+  case JobInstructions::Type::ARCHIVE_CREATE: type_str = "ARCHIVE"; break;
   }
 
   int items_done  = detail_job->_current_item_index;

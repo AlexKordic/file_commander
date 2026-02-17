@@ -5,6 +5,7 @@
 
 #include <ftxui/component/component.hpp>
 
+#include <cstdint>
 #include <functional>
 #include <memory>
 
@@ -43,6 +44,8 @@ struct PanelSharedState {
 
   // std::function<ftxui::Element(RowInfo&)> transform;
   std::function<void(Filepath)>           move_to;
+  std::function<bool(const Filepath&)>    enter_archive;
+  std::function<bool(int64_t&)>           leave_virtual_dir;
   std::function<void(int)>                set_min_y;
   std::function<Filepath const*()>        get_focused_item;
   std::function<void(int)>                set_focused_index;

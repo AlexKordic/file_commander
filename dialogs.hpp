@@ -179,6 +179,7 @@ struct CopyDiscoveryProcess {
   bool         _follow_links            = false;
   bool         _preserve_relative_links = true;
   CopyConflict _conflict                = CopyConflict::Replace;
+  uint64_t     _sequence_id             = 0;
   DataSource   _data_source;
   int64_t      _bytes_total = 0;
   bool         _completed   = false;

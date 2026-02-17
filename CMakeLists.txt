@@ -16,6 +16,8 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 option(FC_BUILD_FRESH "Build local Fresh editor alongside file_commander" ON)
 set(FC_FRESH_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../editor-fresh" CACHE PATH "Path to local Fresh source checkout")
+option(FC_BUILD_LZMA_TOOL "Build local 7zr from LZMA SDK" ON)
+set(FC_LZMA_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../lzma2600" CACHE PATH "Path to local LZMA SDK checkout")
 
 include(FetchContent)
 
@@ -83,7 +85,7 @@ set_target_properties(luajit PROPERTIES
   INTERFACE_INCLUDE_DIRECTORIES ${LUAJIT_DIR}/src
 )
 
-add_executable(fc main.cpp scripting.cpp log.cpp err.cpp commander.cpp theme.cpp custom_controls.cpp dialogs.cpp shared_state.cpp file_change_funnel.cpp file_io_jobs.cpp editor_manager.cpp)
+add_executable(fc main.cpp scripting.cpp log.cpp err.cpp commander.cpp theme.cpp custom_controls.cpp dialogs.cpp shared_state.cpp file_change_funnel.cpp file_io_jobs.cpp editor_manager.cpp archive.cpp)
 target_link_libraries(fc PRIVATE ftxui::component Boost::filesystem luajit "-framework CoreServices")
 
 set(_fc_fresh_default_bin "fresh")
@@ -113,6 +115,32 @@ if(FC_BUILD_FRESH)
 endif()
 
 target_compile_definitions(fc PRIVATE FC_FRESH_DEFAULT_BIN="${_fc_fresh_default_bin}")
+
+set(_fc_archive_default_bin "7zr")
+if(FC_BUILD_LZMA_TOOL)
+  set(_lzma_makefile_dir "${FC_LZMA_SOURCE_DIR}/CPP/7zip/Bundles/Alone7z")
+  set(_lzma_makefile "${_lzma_makefile_dir}/makefile.gcc")
+  set(_lzma_obj_dir "${CMAKE_BINARY_DIR}/third_party/lzma/_o")
+  set(_lzma_bin "${_lzma_obj_dir}/7zr")
+  if(EXISTS "${_lzma_makefile}")
+    add_custom_command(
+      OUTPUT "${_lzma_bin}"
+      COMMAND ${CMAKE_COMMAND} -E make_directory "${_lzma_obj_dir}"
+      COMMAND ${CMAKE_COMMAND} -E env CXX=${CMAKE_CXX_COMPILER} CC=${CMAKE_C_COMPILER} make -f makefile.gcc O="${_lzma_obj_dir}" -C "${_lzma_makefile_dir}"
+      DEPENDS "${_lzma_makefile}"
+      WORKING_DIRECTORY "${_lzma_makefile_dir}"
+      COMMENT "Building 7zr from local LZMA SDK"
+      VERBATIM
+    )
+    add_custom_target(lzma_7zr ALL DEPENDS "${_lzma_bin}")
+    add_dependencies(fc lzma_7zr)
+    set(_fc_archive_default_bin "${_lzma_bin}")
+  else()
+    message(WARNING "FC_BUILD_LZMA_TOOL=ON but LZMA makefile is missing at: ${_lzma_makefile}. Falling back to PATH lookup for 7zr.")
+  endif()
+endif()
+
+target_compile_definitions(fc PRIVATE FC_ARCHIVE_TOOL_DEFAULT="${_fc_archive_default_bin}")
 
 # add_executable(playground playground.cpp log.cpp err.cpp commander.cpp theme.cpp custom_controls.cpp dialogs.cpp shared_state.cpp file_change_funnel.cpp file_io_jobs.cpp)
 # target_link_libraries(playground PRIVATE ftxui::component ftxui::dom ftxui::screen Boost::filesystem "-framework CoreServices")

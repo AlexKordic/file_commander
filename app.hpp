@@ -5,6 +5,7 @@
 // Extracted from main.cpp so that scripting.cpp can access Panel & FileCommander members.
 
 #include "bfs.hpp"
+#include "archive.hpp"
 #include "commander.hpp"
 #include "dialogs.hpp"
 #include "editor_manager.hpp"
@@ -265,12 +266,18 @@ class DialogOverlay {
 // DialogOverlay supports drawing overlay dialogs on top of this Panel.
 class Panel : public DialogOverlay {
  public:
+  struct ArchiveView {
+    Filepath archive_file;
+    Filepath extracted_root;
+  };
+
   struct TabState {
     Dir         dir;
     int         focused_index = 0;
     std::string filter_txt;
     bool        show_permissions_column = false;
     bool        show_owner_group_column = false;
+    std::vector<ArchiveView> archive_stack;
   };
 
   Dir        dir;
@@ -285,6 +292,8 @@ class Panel : public DialogOverlay {
     _state                      = std::make_shared<PanelSharedState>(&dir);
     navigation                  = Container::Tab({}, &_active_dialog);
     _state->move_to             = [this](Filepath where) { this->move_to(where); };
+    _state->enter_archive       = [this](const Filepath& where) { return this->enter_archive(where); };
+    _state->leave_virtual_dir   = [this](int64_t& focused_id) { return this->leave_virtual_dir(focused_id); };
     _state->action.close_dialog = [this]() { close_dialog(); };
     _state->action.show_dialog  = [this]() {
       _state->action.arguments->target = this->get_target(this);
@@ -388,6 +397,7 @@ class Panel : public DialogOverlay {
       file_operations().report_error("[Panel move_to] " + err.steps.front());
       return;
     }
+    _prune_archive_stack(where);
     if (same_directory_refresh) {
       _restore_focus_after_update(focused_path_before, focused_index_before);
     }
@@ -417,6 +427,54 @@ class Panel : public DialogOverlay {
     if (!ec.failed() && isdir) return *focused;
     // dir.path would be root of the shown dir, but we want to support list of files all from different dirs, for ex. search result.
     return focused->parent_path();
+  }
+
+  bool enter_archive(const Filepath& archive_candidate) {
+    if (!is_archive_file_path(archive_candidate)) return false;
+
+    Filepath extracted_root;
+    Err      err = archive_service().extract_to_cache(archive_candidate, extracted_root);
+    if (!err.ok()) {
+      file_operations().report_error("[Archive extract] " + err.steps.front());
+      return false;
+    }
+
+    Filepath archive_file = archive_candidate.lexically_normal();
+    boost::system::error_code canonical_ec;
+    Filepath canonical_archive = boost::filesystem::canonical(archive_candidate, canonical_ec);
+    if (!canonical_ec.failed()) archive_file = canonical_archive;
+
+    _archive_stack.push_back(ArchiveView{
+      .archive_file = archive_file,
+      .extracted_root = extracted_root.lexically_normal(),
+    });
+
+    Filepath where = extracted_root;
+    move_to(where);
+    if (dir.path.lexically_normal() != extracted_root.lexically_normal()) {
+      _archive_stack.pop_back();
+      return false;
+    }
+    return true;
+  }
+
+  bool leave_virtual_dir(int64_t& focused_id) {
+    if (_archive_stack.empty()) return false;
+    const ArchiveView top = _archive_stack.back();
+    if (dir.path.lexically_normal() != top.extracted_root.lexically_normal()) return false;
+
+    _archive_stack.pop_back();
+    Filepath parent = top.archive_file.parent_path();
+    move_to(parent);
+
+    focused_id = dir.offset_vissible(0, 0);
+    for (int i = 0; i < static_cast<int>(dir.items.size()); ++i) {
+      if (dir.items[i].path_ref() == top.archive_file) {
+        focused_id = i;
+        break;
+      }
+    }
+    return true;
   }
 
   void execute_dialog_command(const std::string& dialog_name) {
@@ -477,9 +535,15 @@ class Panel : public DialogOverlay {
       tab.show_permissions_column = _state->show_permissions_column;
       tab.show_owner_group_column = _state->show_owner_group_column;
     }
+    tab.archive_stack = _archive_stack;
   }
 
   void start_watcher(const Filepath& where) {
+    if (in_archive_view(where)) {
+      pending_changes.erase_if([this](const UpdatedFiles&) -> bool { return true; });
+      update_funnel.reset();
+      return;
+    }
     pending_changes.erase_if([this](const UpdatedFiles&) -> bool { return true; });
     update_funnel = FileChangeFunnel::create(where, [this](UpdatedFiles changes) {
       pending_changes.push(std::move(changes));
@@ -509,6 +573,8 @@ class Panel : public DialogOverlay {
     if (_tabs.empty() || _active_tab < 0 || _active_tab >= static_cast<int>(_tabs.size())) return;
     const TabState& tab = _tabs[_active_tab];
     dir = tab.dir;
+    _archive_stack = tab.archive_stack;
+    _prune_archive_stack(dir.path);
     if (_state) {
       _state->filter_txt = tab.filter_txt.empty() ? dir.filter.phrase : tab.filter_txt;
       dir.apply_filter(_state->filter_txt);
@@ -552,9 +618,22 @@ class Panel : public DialogOverlay {
     _state->set_focused_index(restore_index);
   }
 
+  bool in_archive_view(const Filepath& path) const {
+    if (_archive_stack.empty()) return false;
+    return path_is_under(_archive_stack.back().extracted_root, path.lexically_normal());
+  }
+
+  void _prune_archive_stack(const Filepath& path) {
+    const Filepath normalized = path.lexically_normal();
+    while (!_archive_stack.empty() && !path_is_under(_archive_stack.back().extracted_root, normalized)) {
+      _archive_stack.pop_back();
+    }
+  }
+
   PanelSharedState::P    _state;
   std::shared_ptr<Files> _files;
   std::vector<TabState>  _tabs;
+  std::vector<ArchiveView> _archive_stack;
   mutable std::vector<Box> _tab_boxes;
   int                    _active_tab = 0;
 };
@@ -564,6 +643,7 @@ inline std::string job_type_to_string(JobInstructions::Type type) {
   case JobInstructions::Type::COPY: return "COPY";
   case JobInstructions::Type::MOVE: return "MOVE";
   case JobInstructions::Type::DELETE: return "DELETE";
+  case JobInstructions::Type::ARCHIVE_CREATE: return "ARCHIVE";
   default: return "?";
   }
 }
@@ -647,8 +727,21 @@ struct JobProgressBar {
         pause_el,
         cancel_el,
       });
+    } break;
+    case JobInstructions::Type::ARCHIVE_CREATE: {
+      float       item_percentage = std::max(0.0, std::min(100.0, items_total > 0 ? job->_current_item_index * 100.0 / items_total : 100.0));
+      std::string count_info      = std::format(" [{:3}] indexing {}/{} items ", std::lround(item_percentage), std::lround(job->_current_item_index), items_total);
+      return hbox({
+        text(task_info) | theme().progress_operation,
+        text("|"),
+        bgGaugeLeft(item_percentage / 100, theme().size_gauge_full, theme().size_gauge_empty, text(count_info)) | xflex_grow | theme().progress_current,
+        text("|"),
+        pause_el,
+        cancel_el,
+      });
+    } break;
     }
-    }
+    return text(task_info) | theme().progress_operation;
   }
 };
 

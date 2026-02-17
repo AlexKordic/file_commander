@@ -1061,8 +1061,8 @@ local function test_job_history()
   )
   check(matching.items_done == 3, "31: 3 items done, got %d", matching.items_done)
 
-  -- Open job list dialog with F4
-  fc.key("f4")
+  -- Open job list dialog with F9
+  fc.key("f9")
   h.wait_event("dialog_opened", 2000, "31: expected job list open")
 
   -- Close it with Escape

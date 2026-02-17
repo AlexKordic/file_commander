@@ -45,7 +45,7 @@ struct ProgressInfo {
 };
 
 struct JobInstructions {
-  enum class Type { COPY, MOVE, DELETE };
+  enum class Type { COPY, MOVE, DELETE, ARCHIVE_CREATE };
 
   Type                 _type;
   std::vector<DirItem> _items;

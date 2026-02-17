@@ -1,5 +1,6 @@
 
 #include "file_io_jobs.hpp"
+#include "archive.hpp"
 #include "fifo_queue.hpp"
 #include "log.hpp"
 
@@ -361,6 +362,7 @@ class ThreadedFileJobs : public FileJobs {
       case JobSpec::Type::COPY: run_copy(_active_job.get()); break;
       case JobSpec::Type::MOVE: run_move(_active_job.get()); break;
       case JobSpec::Type::DELETE: run_delete(_active_job.get()); break;
+      case JobSpec::Type::ARCHIVE_CREATE: run_archive_create(_active_job.get()); break;
       }
       _active_job->_finished_time = now();
       // Determine final state (if not already set by pause/cancel in future steps)
@@ -487,6 +489,46 @@ class ThreadedFileJobs : public FileJobs {
 
   void set_transfer_rate(uint64_t bytes_per_second) override {
     _transfer_rate = bytes_per_second;
+  }
+
+  void run_archive_create(JobSpec* job) {
+    if (job->_items.empty()) {
+      job->_state = JobState::COMPLETED_WITH_ERRORS;
+      return;
+    }
+
+    Filepath archive_path;
+    if (job->_items.front().symlink_ref()) archive_path = *job->_items.front().symlink_ref();
+    if (archive_path.empty()) {
+      file_operations().report_error("[Archive create] destination missing");
+      std::lock_guard lock(job->_m);
+      job->report_error(job->_items.front(), "Archive destination not set");
+      return;
+    }
+
+    std::vector<Filepath> sources;
+    sources.reserve(job->_items.size());
+    for (const auto& item : job->_items) {
+      if (job->_cancel_requested.load(std::memory_order_relaxed)) {
+        job->_state = JobState::CANCELLED;
+        return;
+      }
+      if (!wait_for_resume(job)) return;
+      sources.push_back(item.path_ref());
+      {
+        std::lock_guard lock(job->_m);
+        job->_current_item_index = static_cast<int>(sources.size()) - 1;
+      }
+      job->updated();
+    }
+
+    Filepath preferred_cwd = sources.front().parent_path();
+    Err      err = archive_service().create_archive(archive_path, sources, preferred_cwd);
+    if (!err.ok()) {
+      file_operations().report_error("[Archive create] " + err.steps.front());
+      std::lock_guard lock(job->_m);
+      job->report_error(job->_items.front(), err.steps.front());
+    }
   }
 
   void run_copy(JobSpec* job) {
