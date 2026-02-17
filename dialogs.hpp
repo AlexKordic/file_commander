@@ -9,9 +9,12 @@
 #include <ftxui/component/component.hpp>
 #include <ftxui/component/event.hpp>
 
+#include <atomic>
 #include <memory>
+#include <mutex>
 #include <string>
 #include <thread>
+#include <vector>
 
 namespace ftxui {
 
@@ -259,6 +262,41 @@ struct DeleteDialog : Dialog {
   void      cancel();
 
   PanelSharedState::P _operation_state;
+};
+
+struct FindDialog : Dialog {
+  FindDialog(PanelSharedState::P s);
+  ~FindDialog();
+  void OnShow() override;
+
+  std::string root_path;
+  std::string pattern;
+  std::string status;
+  int         root_cursor_pos    = 0;
+  int         pattern_cursor_pos = 0;
+
+  Component input_root;
+  Component input_pattern;
+  Component button_find;
+  Component button_open;
+  Component button_close;
+  Component results_menu;
+
+  DataSource _data_source;
+
+  std::vector<Filepath> _results;
+  std::mutex            _results_mutex;
+  std::thread           _worker;
+  std::atomic<bool>     _running{false};
+  std::atomic<bool>     _completed{false};
+  std::atomic<int64_t>  _dirs_scanned{0};
+  std::atomic<int64_t>  _files_scanned{0};
+  std::atomic<int64_t>  _errors{0};
+
+  void start_search();
+  void stop_search();
+  void open_selected();
+  void cancel();
 };
 
 struct Nyi : Dialog {

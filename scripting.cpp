@@ -418,30 +418,34 @@ void LuaScripting::check_waits() {
 int LuaScripting::l_key(lua_State* L) {
   auto* self = from_lua(L);
   if (!self->_root) return luaL_error(L, "fc not initialized");
+  auto dispatch_name = [self](const std::string& name) {
+    if (name.size() == 1) {
+      self->_root->OnEvent(Event::Character(name[0]));
+      return;
+    }
+    if (name.size() >= 3) {
+      const Command* action = commands().find_by_id(name);
+      if (action) {
+        self->_app.execute_palette_command(name);
+        return;
+      }
+    }
+    self->_root->OnEvent(event_from_string(name));
+  };
   // Handle table argument: process each element
   if (lua_istable(L, 1)) {
     int n = (int)lua_objlen(L, 1);
     for (int i = 1; i <= n; i++) {
       lua_rawgeti(L, 1, i);
       const char* name = luaL_checkstring(L, -1);
-      size_t      len  = strlen(name);
-      if (len == 1) {
-        self->_root->OnEvent(Event::Character(name[0]));
-      } else {
-        self->_root->OnEvent(event_from_string(std::string(name)));
-      }
+      dispatch_name(name);
       lua_pop(L, 1);
     }
     return 0;
   }
   // Single string argument
   const char* name = luaL_checkstring(L, 1);
-  size_t      len  = strlen(name);
-  if (len == 1) {
-    self->_root->OnEvent(Event::Character(name[0]));
-  } else {
-    self->_root->OnEvent(event_from_string(std::string(name)));
-  }
+  dispatch_name(name);
   return 0;
 }
 
@@ -488,8 +492,7 @@ int LuaScripting::l_right_path(lua_State* L) {
 
 // Helper: get the focused panel
 Panel& LuaScripting::get_focused_panel() {
-  if (_app.get_left().navigation->Focused()) return _app.get_left();
-  return _app.get_right();
+  return _app.focused_panel();
 }
 
 // fc.focused()
@@ -615,6 +618,9 @@ int LuaScripting::l_state(lua_State* L) {
   // right panel
   push_panel_state(L, self->_app.get_right());
   lua_setfield(L, -2, "right");
+
+  lua_pushboolean(L, self->_app.single_panel_mode());
+  lua_setfield(L, -2, "single_panel_mode");
 
   // jobs
   lua_newtable(L);

@@ -19,9 +19,12 @@
 
 #include <cmath>
 #include <cctype>
+#include <deque>
 #include <format>
+#include <mutex>
 #include <memory>
 #include <string>
+#include <thread>
 
 using boost::filesystem::directory_entry;
 using boost::filesystem::directory_iterator;
@@ -1279,6 +1282,268 @@ Element ToClipboardDialog::render() {
     | border;
 }
 
+namespace {
+
+bool wildcard_match_casefold(const std::string& pattern, const std::string& value) {
+  auto fold = [](char c) { return static_cast<char>(std::tolower(static_cast<unsigned char>(c))); };
+  size_t p = 0, v = 0;
+  size_t star = std::string::npos;
+  size_t match = 0;
+  while (v < value.size()) {
+    if (p < pattern.size() && (pattern[p] == '?' || fold(pattern[p]) == fold(value[v]))) {
+      ++p;
+      ++v;
+      continue;
+    }
+    if (p < pattern.size() && pattern[p] == '*') {
+      star = p++;
+      match = v;
+      continue;
+    }
+    if (star != std::string::npos) {
+      p = star + 1;
+      v = ++match;
+      continue;
+    }
+    return false;
+  }
+  while (p < pattern.size() && pattern[p] == '*') ++p;
+  return p == pattern.size();
+}
+
+}  // namespace
+
+//
+// FindDialog
+//
+
+FindDialog::FindDialog(PanelSharedState::P s) : Dialog(std::move(s)) {
+  ButtonOption ascii_button;
+  ascii_button.transform = ascii_button_transform();
+
+  InputOption root_opt;
+  root_opt.multiline       = false;
+  root_opt.cursor_position = &root_cursor_pos;
+
+  InputOption pattern_opt;
+  pattern_opt.multiline       = false;
+  pattern_opt.cursor_position = &pattern_cursor_pos;
+  pattern_opt.on_enter        = [this]() { start_search(); };
+
+  input_root    = Input(&root_path, "Search path", root_opt) | showInputCursor(&root_cursor_pos);
+  input_pattern = Input(&pattern, "Pattern (*, ?)", pattern_opt) | showInputCursor(&pattern_cursor_pos);
+  button_find   = Button(" Find ", [this] { start_search(); }, ascii_button);
+  button_open   = Button(" Open ", [this] { open_selected(); }, ascii_button);
+  button_close  = Button(" Close ", [this] { cancel(); }, ascii_button);
+
+  _data_source.dataset_size = [this]() -> DataSize {
+    std::lock_guard lock(_results_mutex);
+    int64_t         total = static_cast<int64_t>(_results.size());
+    return {total, 0, std::max(0LL, total - 1)};
+  };
+  _data_source.move_id_by = [this](int64_t& id, int64_t delta) -> bool {
+    std::lock_guard lock(_results_mutex);
+    const int64_t   old = id;
+    const int64_t   max = std::max(0LL, static_cast<int64_t>(_results.size()) - 1);
+    id = std::clamp(id + delta, 0LL, max);
+    return id != old;
+  };
+  _data_source.count_items_before = [](int64_t id) -> int64_t { return id; };
+  _data_source.on_event = [this](DSEventContext c) -> bool {
+    if (c.event == Event::Return) {
+      open_selected();
+      return true;
+    }
+    return c.handled;
+  };
+  _data_source.transform = [this](DSRenderContext& c) -> Element {
+    std::lock_guard lock(_results_mutex);
+    if (c.id < 0 || c.id >= static_cast<int64_t>(_results.size())) return text("<invalid>");
+    Element row = text(" " + _results.at(c.id).native());
+    if (c.focused) {
+      row |= c.component_focused ? bgcolor(Color::DarkBlue) : bgcolor(Color::GrayDark);
+      row |= ftxui::focus;
+    }
+    return row;
+  };
+  _data_source.min_y = 12;
+  results_menu       = DBMenu(&_data_source);
+
+  navigation = CatchEvent(Container::Vertical({
+                            Container::Horizontal({button_find, button_open, button_close}),
+                            input_root,
+                            input_pattern,
+                            results_menu,
+                          }),
+                          close_on_esc(this));
+  renderer   = Renderer(navigation, [this]() -> Element {
+    const std::string title_txt = _running.load(std::memory_order_relaxed)
+      ? " Find (running) "
+      : " Find ";
+    auto title = text(title_txt) | bold | hcenter;
+    int64_t matches = 0;
+    {
+      std::lock_guard lock(_results_mutex);
+      matches = static_cast<int64_t>(_results.size());
+    }
+    std::string info = std::format(" Dirs:{}  Files:{}  Matches:{}  Errors:{} ",
+      _dirs_scanned.load(std::memory_order_relaxed),
+      _files_scanned.load(std::memory_order_relaxed),
+      matches,
+      _errors.load(std::memory_order_relaxed));
+    if (!status.empty()) info += " | " + status;
+    auto content = vbox({
+      hbox({
+        button_find->Render() | hcenter | xflex_grow,
+        separator(),
+        button_open->Render() | hcenter | xflex_grow,
+        separator(),
+        button_close->Render() | hcenter | xflex_grow,
+      }),
+      separator(),
+      hbox({text("Root: "), input_root->Render() | xflex}),
+      hbox({text("Mask: "), input_pattern->Render() | xflex}),
+      separator(),
+      text(info) | dim,
+      separator(),
+      results_menu->Render() | yflex,
+    });
+    return window(title, content, BorderStyle::DOUBLE);
+  });
+}
+
+FindDialog::~FindDialog() {
+  stop_search();
+}
+
+void FindDialog::OnShow() {
+  stop_search();
+  root_path = app->dir ? app->dir->path.native() : "";
+  pattern.clear();
+  status.clear();
+  {
+    std::lock_guard lock(_results_mutex);
+    _results.clear();
+  }
+  _dirs_scanned.store(0, std::memory_order_relaxed);
+  _files_scanned.store(0, std::memory_order_relaxed);
+  _errors.store(0, std::memory_order_relaxed);
+  _data_source.focused_id = 0;
+  input_pattern->TakeFocus();
+}
+
+void FindDialog::stop_search() {
+  _running.store(false, std::memory_order_relaxed);
+  if (_worker.joinable()) _worker.join();
+}
+
+void FindDialog::start_search() {
+  stop_search();
+
+  Filepath root(root_path);
+  if (root.empty()) {
+    status = "Root path is empty";
+    return;
+  }
+  boost::system::error_code ec;
+  const bool root_exists = boost::filesystem::exists(root, ec);
+  const bool root_is_dir = root_exists && !ec.failed() && boost::filesystem::is_directory(root, ec);
+  if (ec.failed() || !root_exists || !root_is_dir) {
+    status = "Root path must be an existing directory";
+    return;
+  }
+
+  const std::string local_pattern = pattern.empty() ? "*" : pattern;
+  {
+    std::lock_guard lock(_results_mutex);
+    _results.clear();
+  }
+  _data_source.focused_id = 0;
+  _dirs_scanned.store(0, std::memory_order_relaxed);
+  _files_scanned.store(0, std::memory_order_relaxed);
+  _errors.store(0, std::memory_order_relaxed);
+  status.clear();
+  _completed.store(false, std::memory_order_relaxed);
+  _running.store(true, std::memory_order_relaxed);
+
+  _worker = std::thread([this, root, local_pattern]() {
+    std::deque<Filepath> queue;
+    queue.push_back(root);
+
+    while (_running.load(std::memory_order_relaxed) && !queue.empty()) {
+      Filepath current = queue.front();
+      queue.pop_front();
+      _dirs_scanned.fetch_add(1, std::memory_order_relaxed);
+
+      boost::system::error_code it_ec;
+      boost::filesystem::directory_iterator end;
+      for (boost::filesystem::directory_iterator it(current, it_ec); it != end && !it_ec; it.increment(it_ec)) {
+        if (!_running.load(std::memory_order_relaxed)) break;
+        const auto entry = *it;
+        const auto p = entry.path();
+
+        boost::system::error_code status_ec;
+        const auto fs = entry.status(status_ec);
+        if (status_ec.failed()) {
+          _errors.fetch_add(1, std::memory_order_relaxed);
+          continue;
+        }
+
+        if (fs.type() == boost::filesystem::file_type::directory_file) {
+          queue.push_back(p);
+        } else {
+          _files_scanned.fetch_add(1, std::memory_order_relaxed);
+        }
+
+        const std::string name = p.filename().native();
+        if (wildcard_match_casefold(local_pattern, name)) {
+          std::lock_guard lock(_results_mutex);
+          _results.push_back(p);
+        }
+      }
+
+      if (it_ec.failed()) _errors.fetch_add(1, std::memory_order_relaxed);
+      auto* screen = ScreenInteractive::Active();
+      if (screen) screen->Post(Event::Custom);
+    }
+
+    _running.store(false, std::memory_order_relaxed);
+    _completed.store(true, std::memory_order_relaxed);
+    auto* screen = ScreenInteractive::Active();
+    if (screen) screen->Post(Event::Custom);
+  });
+}
+
+void FindDialog::open_selected() {
+  Filepath selected;
+  {
+    std::lock_guard lock(_results_mutex);
+    if (_results.empty()) return;
+    const int64_t focused = std::clamp(_data_source.focused_id, 0LL, static_cast<int64_t>(_results.size()) - 1);
+    selected = _results.at(focused);
+  }
+
+  Filepath parent = selected.parent_path();
+  app->move_to(parent);
+  app->filter_txt.clear();
+  app->dir->apply_filter(app->filter_txt);
+
+  if (app->set_focused_index) {
+    for (int i = 0; i < static_cast<int>(app->dir->items.size()); ++i) {
+      if (app->dir->items.at(i).path_ref() == selected) {
+        app->set_focused_index(i);
+        break;
+      }
+    }
+  }
+  app->action.close_dialog();
+}
+
+void FindDialog::cancel() {
+  stop_search();
+  app->action.close_dialog();
+}
+
 //
 // NYI
 //
@@ -2067,6 +2332,7 @@ Commands::Commands() {
   available.push_back({"paths_to_clipboard", theme().key_paths_to_clipboard, "PathToClipboard", "Paths to Clipboard", CommandScope::PANEL, CommandKind::SHOW_DIALOG});
 
   available.push_back({"switch_panel", theme().key_switch_focused_panel, "", "Switch Focused Panel", CommandScope::GLOBAL, CommandKind::EXECUTE_CALLBACK});
+  available.push_back({"toggle_single_panel_mode", theme().key_toggle_single_panel_mode, "", "Toggle Single Panel Full Width", CommandScope::GLOBAL, CommandKind::EXECUTE_CALLBACK});
   available.push_back({"refresh_dir", theme().key_refresh_dir, "", "Refresh Directory", CommandScope::GLOBAL, CommandKind::EXECUTE_CALLBACK});
   available.push_back({"target_right", theme().key_target_dir_to_focused_item_right, "", "Target Right Panel to Focused Item", CommandScope::GLOBAL, CommandKind::EXECUTE_CALLBACK});
   available.push_back({"target_left", theme().key_target_dir_to_focused_item_left, "", "Target Left Panel to Focused Item", CommandScope::GLOBAL, CommandKind::EXECUTE_CALLBACK});

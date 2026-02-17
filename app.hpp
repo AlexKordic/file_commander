@@ -122,7 +122,7 @@ class Panel : public DialogOverlay {
     _overlay_dialogs["Copy"]            = std::make_shared<CopyDialog>(_state);
     _overlay_dialogs["Move"]            = std::make_shared<MoveDialog>(_state);
     _overlay_dialogs["Delete"]          = std::make_shared<DeleteDialog>(_state);
-    _overlay_dialogs["Find"]            = std::make_shared<Nyi>(_state);
+    _overlay_dialogs["Find"]            = std::make_shared<FindDialog>(_state);
     _overlay_dialogs["GlobSelect"]      = std::make_shared<GlobSelectDialog>(_state, true);
     _overlay_dialogs["GlobDeselect"]    = std::make_shared<GlobSelectDialog>(_state, false);
     _overlay_dialogs["NameToClipboard"] = std::make_shared<ToClipboardDialog>(_state);
@@ -348,6 +348,8 @@ class FileCommander : public DialogOverlay {
   std::deque<double> clear_errors_sequence;
   std::vector<Filepath> _bookmarks;
   bool _last_main_focus_left = true;
+  bool _single_panel_mode = false;
+  int  _main_panels_mode  = 0;  // 0=split, 1=single
 
   std::function<void()> _close_dialog;
   std::function<int()>  _get_dimx;
@@ -359,7 +361,11 @@ class FileCommander : public DialogOverlay {
 
   Panel& get_left() { return left; }
   Panel& get_right() { return right; }
+  bool single_panel_mode() const { return _single_panel_mode; }
   Panel& focused_panel() {
+    if (_single_panel_mode) {
+      return _last_main_focus_left ? left : right;
+    }
     if (left.navigation->Focused()) {
       _last_main_focus_left = true;
       return left;
@@ -401,6 +407,19 @@ class FileCommander : public DialogOverlay {
     add_bookmark(focused_panel().dir.path);
   }
 
+  void set_single_panel_mode(bool enabled) {
+    if (enabled && !_single_panel_mode) {
+      if (left.navigation->Focused()) _last_main_focus_left = true;
+      else if (right.navigation->Focused()) _last_main_focus_left = false;
+    }
+    _single_panel_mode = enabled;
+    _main_panels_mode  = _single_panel_mode ? 1 : 0;
+    if (!_single_panel_mode) {
+      if (_last_main_focus_left) left.navigation->TakeFocus();
+      else right.navigation->TakeFocus();
+    }
+  }
+
   void execute_palette_command(const std::string& id) {
     Command* command = commands().find_by_id(id);
     if (!command) return;
@@ -422,10 +441,13 @@ class FileCommander : public DialogOverlay {
     }
 
     if (id == "switch_panel") {
-      if (left.navigation->Focused()) {
+      Panel& current = focused_panel();
+      if (&current == &left) {
         right.navigation->TakeFocus();
+        _last_main_focus_left = false;
       } else {
         left.navigation->TakeFocus();
+        _last_main_focus_left = true;
       }
       return;
     }
@@ -433,6 +455,10 @@ class FileCommander : public DialogOverlay {
       Panel& panel = focused_panel();
       auto   where = panel.dir.path;
       panel.move_to(where);
+      return;
+    }
+    if (id == "toggle_single_panel_mode") {
+      set_single_panel_mode(!_single_panel_mode);
       return;
     }
     if (id == "target_right") {
@@ -469,12 +495,27 @@ class FileCommander : public DialogOverlay {
     split.main_size       = &(this->_left_size);
     split.direction       = ftxui::Direction::Right;
     split.separator_func  = [this]() -> Element { return ::ftxui::separatorDouble(); };
-    Component both_panels = CatchEvent(ResizableSplit(split), global_shortcuts);
+    Component both_panels = ResizableSplit(split);
+    Component single_panel = CatchEvent(Renderer([this]() -> Element {
+      Panel& focused = focused_panel();
+      Panel& hidden  = (&focused == &left) ? right : left;
+      const std::string hidden_label = (&focused == &left) ? "Right" : "Left";
+      return vbox({
+        text(" Hidden " + hidden_label + ": " + hidden.dir.path.native() + " ") | dim,
+        separatorDouble(),
+        focused.render() | yflex,
+      });
+    }),
+                                        [this](Event event) -> bool {
+                                          if (this->handle_global_shortcuts(event)) return true;
+                                          return this->focused_panel().navigation->OnEvent(event);
+                                        });
+    Component main_panels = Container::Tab({both_panels, single_panel}, &_main_panels_mode);
 
     // Pause/Cancel buttons are focusable only when a job is running
     auto maybe_pause  = Maybe(progress_bar.pause_button, &progress_bar._has_running_job);
     auto maybe_cancel = Maybe(progress_bar.cancel_button, &progress_bar._has_running_job);
-    auto panels_with_cancel = Container::Vertical({both_panels, maybe_pause, maybe_cancel});
+    auto panels_with_cancel = CatchEvent(Container::Vertical({main_panels, maybe_pause, maybe_cancel}), global_shortcuts);
 
     navigation->Add(panels_with_cancel);
     _overlay_dialogs["ErrorList"] = std::make_shared<ErrorListDialog>(_close_dialog);
@@ -492,7 +533,6 @@ class FileCommander : public DialogOverlay {
       [this](const std::string& id) { this->execute_palette_command(id); }
     );
     renderer = Renderer(navigation, [=, this]() -> Element {
-      // TODO: different when single panel layout is active
       // check for resize:
       int screen_w = _get_dimx();
       if (screen_w != _screen_dimx) {
@@ -502,9 +542,7 @@ class FileCommander : public DialogOverlay {
 
       Elements el;
       auto     jobinfo = file_operations().get_running_job();
-      // Two panels side by side
-      // el.push_back(hbox({left.render() | xflex_grow, right.render() | xflex_grow}) | yflex | bgcolor(theme().default_bg) | color(theme().default_fg));
-      el.push_back(both_panels->Render() | yflex | bgcolor(theme().default_bg) | color(theme().default_fg));
+      el.push_back(main_panels->Render() | yflex | bgcolor(theme().default_bg) | color(theme().default_fg));
       // Progress bar if there is a job running
       if (jobinfo.job && false == jobinfo.job->is_stopped()) { el.push_back(progress_bar.render()); }
       // Quick preview of latest errors
@@ -543,6 +581,10 @@ class FileCommander : public DialogOverlay {
       }
       return false;
     }
+    if (event == theme().key_toggle_single_panel_mode && !dialog_active()) {
+      set_single_panel_mode(!_single_panel_mode);
+      return true;
+    }
 
     if (event == theme().key_toggle_error_details && !dialog_active()) {
       show_dialog("ErrorList");
@@ -576,38 +618,37 @@ class FileCommander : public DialogOverlay {
 
     // Tab between panels
     if (event == theme().key_switch_focused_panel) {
-      // switch focus to target pannel
-      if (left.navigation->Focused()) {
+      Panel& current = focused_panel();
+      if (&current == &left) {
         right.navigation->TakeFocus();
+        _last_main_focus_left = false;
       } else {
         left.navigation->TakeFocus();
+        _last_main_focus_left = true;
       }
       return true;
     }
     if (event == theme().key_refresh_dir) {
-      if (left.navigation->Focused()) {
-        auto where = left.dir.path;
-        left.move_to(where);
-      } else {
-        auto where = right.dir.path;
-        right.move_to(where);
-      }
+      Panel& panel = focused_panel();
+      auto where = panel.dir.path;
+      panel.move_to(where);
       return true;
     }
     // Move target to selected dir.
     // Do not apply if dialog is active on the source panel. When rename is open we want ctrl+right/left to move cursor by entire word.
-    const bool change_right = event == theme().key_target_dir_to_focused_item_right && left.navigation->Focused();
-    const bool change_left  = event == theme().key_target_dir_to_focused_item_left && right.navigation->Focused();
+    Panel& source = focused_panel();
+    const bool change_right = event == theme().key_target_dir_to_focused_item_right && (&source == &left);
+    const bool change_left  = event == theme().key_target_dir_to_focused_item_left && (&source == &right);
     if (change_right) {
-      const bool dialog_active = left._active_dialog > 0;
+      const bool dialog_active = source._active_dialog > 0;
       if (dialog_active) return false;
-      Filepath where = left.focused_dir();
+      Filepath where = source.focused_dir();
       right.move_to(where);
       return true;
     } else if (change_left) {
-      const bool dialog_active = right._active_dialog > 0;
+      const bool dialog_active = source._active_dialog > 0;
       if (dialog_active) return false;
-      Filepath where = right.focused_dir();
+      Filepath where = source.focused_dir();
       left.move_to(where);
       return true;
     }
