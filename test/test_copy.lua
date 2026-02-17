@@ -18,9 +18,7 @@ local h = dofile("test/helpers.lua")
 --- src and dst must already exist.
 --- opts is passed to h.do_copy() for checkbox toggling.
 local function run_copy_test(src, dst, opts)
-  fc.left_cd(src)
-  fc.right_cd(dst)
-  fc.sleep(100) -- let panels refresh
+  h.cd(src, dst)
 
   check(fc.left_path() == src,  "left panel at source: got %s", fc.left_path())
   check(fc.right_path() == dst, "right panel at dest: got %s",  fc.right_path())
@@ -30,6 +28,18 @@ local function run_copy_test(src, dst, opts)
   local errs_after = #fc.errors()
 
   return errs_after - errs_before
+end
+
+local function wait_until_job_items_done(min_items_done, timeout_ms)
+  local deadline = os.clock() + ((timeout_ms or 5000) / 1000.0)
+  while os.clock() < deadline do
+    local s = fc.state()
+    if s.jobs.items_done >= min_items_done then
+      return true
+    end
+    fc.wait_event("job_progress", 250)
+  end
+  return false
 end
 
 -- =========================================================================
@@ -866,38 +876,23 @@ local function test_cancel_copy()
   local rate = 20 * 1024 * 1024
   fc.set_transfer_rate(rate)
 
-  fc.left_cd(src)
-  fc.right_cd(dst)
-  fc.sleep(100)
+  h.cd(src, dst)
 
   local errs_before = #fc.errors()
 
   -- Select all files in left panel
-  local left_path = fc.left_path()
-  local function try_select()
-    fc.key("cA")
-    local sel = fc.selected()
-    if #sel == 0 then return false end
-    if sel[1]:sub(1, #left_path) == left_path then return true end
-    fc.key("cA")  -- deselect wrong panel
-    return false
-  end
-  if not try_select() then
-    fc.key("tab")
-    fc.sleep(50)
-    assert(try_select(), "cancel test: failed to select in left panel")
-  end
+  h.ensure_left_focus()
+  fc.key("cA")
 
   -- Open copy dialog and wait for discovery
   fc.key("f5")
-  fc.wait_event("discovery_completed", 10000)
+  h.wait_event("discovery_completed", 10000, "expected discovery in cancel test")
 
   -- Confirm the copy (navigate to COPY button and press)
   fc.key({"<-", "ret"})
 
-  -- Sleep to allow ~half the files to copy
-  -- At 2MB/s with 1MB files, each file ~0.5s. Sleep 2.5s → ~5 files.
-  fc.sleep(250)
+  -- Wait until at least one file is copied, then cancel.
+  check(wait_until_job_items_done(1, 8000), "29: expected job progress before cancel")
 
   -- Cancel the running job
   local cancelled = fc.cancel_job()
@@ -950,38 +945,23 @@ local function test_pause_copy()
   local rate = 20 * 1024 * 1024
   fc.set_transfer_rate(rate)
 
-  fc.left_cd(src)
-  fc.right_cd(dst)
-  fc.sleep(100)
+  h.cd(src, dst)
 
   local errs_before = #fc.errors()
 
   -- Select all files in left panel
-  local left_path = fc.left_path()
-  local function try_select()
-    fc.key("cA")
-    local sel = fc.selected()
-    if #sel == 0 then return false end
-    if sel[1]:sub(1, #left_path) == left_path then return true end
-    fc.key("cA")  -- deselect wrong panel
-    return false
-  end
-  if not try_select() then
-    fc.key("tab")
-    fc.sleep(50)
-    assert(try_select(), "pause test: failed to select in left panel")
-  end
+  h.ensure_left_focus()
+  fc.key("cA")
 
   -- Open copy dialog and wait for discovery
   fc.key("f5")
-  fc.wait_event("discovery_completed", 10000)
+  h.wait_event("discovery_completed", 10000, "expected discovery in pause test")
 
   -- Confirm the copy (navigate to COPY button and press)
   fc.key({"<-", "ret"})
 
-  -- Sleep to allow ~half the files to copy
-  -- At 2MB/s with 1MB files, each file ~0.5s. Sleep 2.5s → ~5 files.
-  fc.sleep(250)
+  -- Wait until at least one file is copied, then pause.
+  check(wait_until_job_items_done(1, 8000), "30: expected job progress before pause")
 
   -- Pause the running job
   local paused = fc.pause_job()
@@ -990,12 +970,12 @@ local function test_pause_copy()
   -- Pause state should become visible quickly.
   local saw_paused = false
   for _ = 1, 30 do
+    fc.wait_event("job_state_changed", 500)
     local state = fc.state()
     if state.jobs.state == "paused" then
       saw_paused = true
       break
     end
-    fc.sleep(100)
   end
   check(saw_paused, "30: expected paused state")
 
@@ -1045,9 +1025,7 @@ local function test_job_history()
     h.create_file_sized(src .. string.format("/file_%02d.bin", i), 1024)
   end
 
-  fc.left_cd(src)
-  fc.right_cd(dst)
-  fc.sleep(100)
+  h.cd(src, dst)
 
   -- Check history is initially empty (or has previous test jobs)
   local hist_before = fc.job_history()
@@ -1056,7 +1034,6 @@ local function test_job_history()
   -- Run a normal copy
   h.do_copy()
   fc.wait_for_jobs()
-  fc.sleep(100)
 
   -- Check job history has at least one new entry
   local hist_after = fc.job_history()
@@ -1081,11 +1058,11 @@ local function test_job_history()
 
   -- Open job list dialog with F4
   fc.key("f4")
-  fc.sleep(100)
+  h.wait_event("dialog_opened", 2000, "31: expected job list open")
 
   -- Close it with Escape
   fc.key("esc")
-  fc.sleep(50)
+  h.wait_event("dialog_closed", 2000, "31: expected job list close")
 
   h.cleanup(src, dst)
   test_pass("31_job_history")

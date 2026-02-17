@@ -10,32 +10,13 @@ h.mkdir(dst)
 h.create_file(src .. "/a.txt", "a\n")
 h.create_file(src .. "/b.txt", "b\n")
 
-fc.left_cd(src)
-fc.right_cd(dst)
-fc.sleep(120)
+h.cd(src, dst)
 
 local function drain_events()
   fc.wait_event("__drain__", 20)
 end
 
-local function ensure_left_focus()
-  local left = fc.left_path()
-  local function probe()
-    fc.key("cA")
-    local sel = fc.selected()
-    if #sel == 0 then return false end
-    local ok = sel[1]:sub(1, #left) == left
-    fc.key("cA")
-    return ok
-  end
-  if not probe() then
-    fc.key("tab")
-    fc.sleep(60)
-    check(probe(), "failed to focus left panel")
-  end
-end
-
-ensure_left_focus()
+h.ensure_left_focus()
 
 -- 1) selection_changed
 

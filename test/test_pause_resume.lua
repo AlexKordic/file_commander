@@ -11,28 +11,8 @@ h.mkdir(src)
 h.mkdir(dst)
 h.create_file_sized(src .. "/big.bin", 512 * 1024)
 
-fc.left_cd(src)
-fc.right_cd(dst)
-fc.sleep(120)
-
-local function ensure_left_focus()
-  local left_path = fc.left_path()
-  local function probe_left()
-    fc.key("cA")
-    local sel = fc.selected()
-    if #sel == 0 then return false end
-    local ok = sel[1]:sub(1, #left_path) == left_path
-    fc.key("esc")
-    return ok
-  end
-  if not probe_left() then
-    fc.key("tab")
-    fc.sleep(60)
-    check(probe_left(), "failed to focus left panel")
-  end
-end
-
-ensure_left_focus()
+h.cd(src, dst)
+h.ensure_left_focus()
 
 -- Slow down copy so pause state is observable in test.
 fc.set_transfer_rate(100 * 1024)
@@ -48,12 +28,12 @@ fc.pause_job() -- pause
 
 local paused = false
 for _ = 1, 20 do
+  fc.wait_event("job_state_changed", 500)
   local s = fc.state()
   if s.jobs.state == "paused" then
     paused = true
     break
   end
-  fc.sleep(100)
 end
 check(paused, "expected job state to become paused")
 

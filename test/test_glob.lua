@@ -14,26 +14,7 @@ h.create_file(src .. "/banana.txt", "banana\n")
 h.create_file(src .. "/cherry.log", "cherry\n")
 h.create_file(src .. "/delta.md", "delta\n")
 
-fc.left_cd(src)
-fc.right_cd(dst)
-fc.sleep(120)
-
-local function ensure_left_focus()
-  local left_path = fc.left_path()
-  local function probe_left()
-    fc.key("cA")
-    local sel = fc.selected()
-    if #sel == 0 then return false end
-    local ok = sel[1]:sub(1, #left_path) == left_path
-    fc.key("esc")
-    return ok
-  end
-  if not probe_left() then
-    fc.key("tab")
-    fc.sleep(60)
-    check(probe_left(), "failed to focus left panel")
-  end
-end
+h.cd(src, dst)
 
 local function contains_path_suffix(paths, suffix)
   for _, p in ipairs(paths) do
@@ -42,7 +23,7 @@ local function contains_path_suffix(paths, suffix)
   return false
 end
 
-ensure_left_focus()
+h.ensure_left_focus()
 fc.key("esc")
 
 -- 1) '+' opens select dialog and selects matching files.

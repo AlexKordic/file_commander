@@ -13,9 +13,7 @@ h.create_file(src .. "/left_a.txt", "left\n")
 h.create_file(src .. "/left_b.txt", "left\n")
 h.create_file(dst .. "/right_a.txt", "right\n")
 
-fc.left_cd(src)
-fc.right_cd(dst)
-fc.sleep(120)
+h.cd(src, dst)
 
 local function select_all_from_focused_panel()
   fc.key("cA")
@@ -29,7 +27,7 @@ local sel = select_all_from_focused_panel()
 if sel[1]:sub(1, #src) ~= src then
   fc.key("cA")
   fc.key("tab")
-  fc.sleep(50)
+  h.wait_event("focus_changed", 2000, "expected focus_changed to left panel")
   sel = select_all_from_focused_panel()
   check(sel[1]:sub(1, #src) == src, "failed to move focus to left panel")
 end
@@ -55,7 +53,7 @@ fc.key("cA")
 fc.key("f1")
 check(fc.wait_event("dialog_opened", 2000), "expected palette to re-open")
 fc.key({"s", "w", "i", "t", "c", "h", "ret"})
-fc.sleep(120)
+check(fc.wait_event("focus_changed", 2000), "expected focus_changed after switch panel command")
 
 local after = select_all_from_focused_panel()
 local after_is_left = after[1]:sub(1, #src) == src

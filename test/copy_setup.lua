@@ -39,9 +39,9 @@ local function setup_copy_test()
 
   fc.left_cd("/tmp/fc_test_copy_src_1771147462_81478")
   fc.right_cd("/tmp/fc_test_copy_dst_1771147462_72896")
-  fc.sleep(100)
+  fc.wait_event("dir_changed", 2000)
+  fc.wait_event("dir_changed", 2000)
   fc.key("cA")
-  fc.sleep(100)
   fc.key("f5")
 end
 

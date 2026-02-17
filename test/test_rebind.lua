@@ -11,9 +11,7 @@ h.mkdir(src)
 h.mkdir(dst)
 h.create_file(src .. "/alpha.txt", "alpha\n")
 
-fc.left_cd(src)
-fc.right_cd(dst)
-fc.sleep(120)
+h.cd(src, dst)
 
 -- Rebind copy from F5 to F9 using command palette rebind mode.
 fc.key("f1")
@@ -21,7 +19,6 @@ check(fc.wait_event("dialog_opened", 2000), "expected command palette open")
 fc.key({"c", "o", "p", "y"})
 fc.key("cK")
 fc.key("f9")
-fc.sleep(100)
 fc.key("esc")
 check(fc.wait_event("dialog_closed", 2000), "expected command palette close")
 

@@ -14,38 +14,7 @@ h.create_file(left_a .. "/a.txt", "a\n")
 h.create_file(left_b .. "/b.txt", "b\n")
 h.create_file(right_dir .. "/r.txt", "r\n")
 
-fc.left_cd(left_a)
-fc.right_cd(right_dir)
-fc.sleep(120)
-
-local function focused_side()
-  local focused = fc.focused()
-  if focused and focused:sub(1, #left_a) == left_a then return "left" end
-  if focused and focused:sub(1, #left_b) == left_b then return "left" end
-  if focused and focused:sub(1, #right_dir) == right_dir then return "right" end
-  return "unknown"
-end
-
-local function ensure_left_focus()
-  local left_path = fc.left_path()
-
-  local function selected_in_left()
-    fc.key("cA")
-    local sel = fc.selected()
-    if #sel == 0 then return false end
-    local ok = sel[1]:sub(1, #left_path) == left_path
-    fc.key("esc")
-    return ok
-  end
-
-  if selected_in_left() then return end
-  for _ = 1, 2 do
-    fc.key("tab")
-    fc.sleep(80)
-    if selected_in_left() then return end
-  end
-  check(false, "failed to focus left panel")
-end
+h.cd(left_a, right_dir)
 
 local function count_tabs(side_state)
   return #side_state.tabs
@@ -58,7 +27,7 @@ local function active_tab_path(side_state)
   return nil
 end
 
-ensure_left_focus()
+h.ensure_left_focus()
 
 local st = fc.state()
 check(count_tabs(st.left) == 1, "left should start with one tab")
@@ -66,7 +35,7 @@ check(active_tab_path(st.left) == left_a, "initial left tab path should be left_
 
 -- 1) Create tab from current path.
 fc.key("tab_new")
-fc.sleep(120)
+check(fc.wait_event("tab_created", 2000), "expected tab_created")
 st = fc.state()
 check(
   count_tabs(st.left) == 2,
@@ -78,25 +47,25 @@ check(active_tab_path(st.left) == left_a, "new tab should clone current director
 
 -- 2) Move active tab to a different path.
 fc.left_cd(left_b)
-fc.sleep(120)
+check(fc.wait_event("dir_changed", 2000), "expected dir_changed after left_cd(left_b)")
 st = fc.state()
 check(active_tab_path(st.left) == left_b, "active tab should move to left_b")
 check(st.left.tabs[1].path == left_a, "first tab should keep original path")
 
 -- 3) Switch back/forward tabs.
 fc.key("tab_prev")
-fc.sleep(120)
+check(fc.wait_event("tab_switched", 2000), "expected tab_switched (prev)")
 st = fc.state()
 check(active_tab_path(st.left) == left_a, "tab_prev should switch back to left_a")
 
 fc.key("tab_next")
-fc.sleep(120)
+check(fc.wait_event("tab_switched", 2000), "expected tab_switched (next)")
 st = fc.state()
 check(active_tab_path(st.left) == left_b, "tab_next should switch to left_b")
 
 -- 4) Close active tab and ensure fallback tab is focused.
 fc.key("tab_close")
-fc.sleep(120)
+check(fc.wait_event("tab_closed", 2000), "expected tab_closed")
 st = fc.state()
 check(count_tabs(st.left) == 1, "left should have one tab after tab_close")
 check(active_tab_path(st.left) == left_a, "closing second tab should return to first")

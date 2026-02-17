@@ -127,6 +127,12 @@ private:
   int    _last_left_selected_count = -1;
   int    _last_right_selected_count = -1;
   int    _last_error_count = -1;
+  int    _last_job_items_done = -1;
+  std::string _last_job_state_name;
+  std::string _last_focus_side;
+  bool   _last_single_panel_mode = false;
+  bool   _had_find = false;
+  void*  _last_find_ptr = nullptr;
 
   // --- Timer thread (replaces g_poll_active + detached thread) ---
   ScheduledUpdates _scheduler;

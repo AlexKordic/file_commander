@@ -3,6 +3,48 @@
 
 local M = {}
 
+function M.wait_event(name, timeout_ms, message)
+  local ok = fc.wait_event(name, timeout_ms or 2000)
+  check(ok, message or ("expected event: " .. tostring(name)))
+end
+
+function M.cd(left_path, right_path)
+  if left_path then
+    fc.left_cd(left_path)
+    M.wait_event("dir_changed", 2000, "expected dir_changed after left_cd")
+    check(fc.left_path() == left_path, "left path mismatch: expected %s got %s", left_path, fc.left_path())
+  end
+  if right_path then
+    fc.right_cd(right_path)
+    M.wait_event("dir_changed", 2000, "expected dir_changed after right_cd")
+    check(fc.right_path() == right_path, "right path mismatch: expected %s got %s", right_path, fc.right_path())
+  end
+end
+
+function M.ensure_left_focus()
+  local left_path = fc.left_path()
+  local function probe_left()
+    fc.key("cA")
+    local sel = fc.selected()
+    if #sel == 0 then return false end
+    local ok = sel[1]:sub(1, #left_path) == left_path
+    if ok then
+      fc.key("esc")
+    else
+      fc.key("cA")
+    end
+    return ok
+  end
+
+  if probe_left() then return end
+  for _ = 1, 2 do
+    fc.key("tab")
+    M.wait_event("focus_changed", 2000, "expected focus_changed after tab")
+    if probe_left() then return end
+  end
+  check(false, "failed to focus left panel")
+end
+
 --- Generate a unique temp directory path.
 function M.tmpdir(name)
   return "/tmp/fc_test_" .. name .. "_" .. tostring(os.time()) .. "_" .. tostring(math.random(10000, 99999))
@@ -128,9 +170,6 @@ function M.do_copy(opts)
   local confirm_with_copy_hotkey = false
 
   -- Ensure left panel has focus.
-  -- fc.selected() returns selected items from the focused panel.
-  -- We try selecting, check if selected paths are under left_path,
-  -- if not, toggle focus and retry.
   local left_path = fc.left_path()
   local left_real = M.realpath(left_path)
 
@@ -141,31 +180,16 @@ function M.do_copy(opts)
     return path_real ~= nil and path_real:sub(1, #left_real) == left_real
   end
 
-  local function try_select()
-    fc.key("cA")
-    local sel = fc.selected()
-    if #sel == 0 then return false end
-    -- Check if selected items are under the left panel's path
-    if path_under_left(sel[1]) then return true end
-    -- Selected from wrong panel — deselect and toggle
-    fc.key("cA")  -- toggle off
-    return false
-  end
-
-  if not try_select() then
-    for _ = 1, 2 do
-      fc.key("tab")
-      fc.sleep(50)
-      if try_select() then break end
-      if _ == 2 then
-        error("do_copy: no items selected in left panel after toggle — left_path=" .. left_path)
-      end
-    end
+  M.ensure_left_focus()
+  fc.key("cA")
+  local sel = fc.selected()
+  if #sel == 0 or not path_under_left(sel[1]) then
+    error("do_copy: no items selected in left panel — left_path=" .. left_path)
   end
 
   -- Open copy dialog (F5) and wait for discovery
   fc.key("f5")
-  fc.wait_event("discovery_completed", 10000)
+  M.wait_event("discovery_completed", 10000, "expected copy discovery completed")
 
   -- Toggle checkboxes if requested
   -- Dialog focus starts on Cancel button (OnShow calls button_cancel->TakeFocus())
@@ -174,7 +198,7 @@ function M.do_copy(opts)
     -- Navigate from Cancel to Follow Links checkbox (down), toggle with return
     fc.key({"down", "ret"})
     -- Discovery restarts on checkbox change — wait again
-    fc.wait_event("discovery_completed", 10000)
+    M.wait_event("discovery_completed", 10000, "expected discovery after follow-links toggle")
     -- Navigate back up to button row
     fc.key("up")
   end
@@ -183,7 +207,7 @@ function M.do_copy(opts)
     -- Navigate from Cancel to Keep relative links checkbox (down, down), toggle
     fc.key({"down", "down", "ret"})
     -- Discovery restarts on checkbox change — wait again
-    fc.wait_event("discovery_completed", 10000)
+    M.wait_event("discovery_completed", 10000, "expected discovery after preserve-relative toggle")
     -- Navigate back up to button row
     fc.key({"up", "up"})
   end
@@ -205,7 +229,7 @@ function M.do_copy(opts)
   end
 
   -- Wait for background copy job to complete
-  fc.wait_for_jobs()
+  check(fc.wait_for_jobs(30000), "expected copy job completion")
 end
 
 --- Setup for the basic copy test.

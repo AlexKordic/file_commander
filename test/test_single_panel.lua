@@ -11,9 +11,7 @@ h.mkdir(right_dir)
 h.create_file(left_dir .. "/left.txt", "left\n")
 h.create_file(right_dir .. "/right.txt", "right\n")
 
-fc.left_cd(left_dir)
-fc.right_cd(right_dir)
-fc.sleep(120)
+h.cd(left_dir, right_dir)
 
 local function focused_side()
   local focused = fc.focused()
@@ -23,35 +21,27 @@ local function focused_side()
   return "unknown"
 end
 
-local function ensure_left_focus()
-  if focused_side() ~= "left" then
-    fc.key("tab")
-    fc.sleep(80)
-    check(focused_side() == "left", "failed to focus left panel")
-  end
-end
-
-ensure_left_focus()
+h.ensure_left_focus()
 
 local st = fc.state()
 check(st.single_panel_mode == false, "single_panel_mode should be false at startup")
 
 -- 1) Direct shortcut toggle.
 fc.key("toggle_single_panel_mode")
-fc.sleep(120)
+check(fc.wait_event("single_panel_mode_changed", 2000), "expected single_panel_mode_changed")
 st = fc.state()
 check(st.single_panel_mode == true, "single_panel_mode should be true after toggle action")
 
 -- Switch-panel command still works while single-panel mode is active.
 local before = focused_side()
 fc.key("switch_panel")
-fc.sleep(120)
+check(fc.wait_event("focus_changed", 2000), "expected focus_changed after switch command")
 local after = focused_side()
 check(before ~= after, "switch command should change focused side in single mode")
 
 -- 2) Palette toggle command.
 fc.key("toggle_single_panel_mode")
-fc.sleep(120)
+check(fc.wait_event("single_panel_mode_changed", 2000), "expected single_panel_mode_changed (off)")
 st = fc.state()
 check(st.single_panel_mode == false, "single_panel_mode should be false after second toggle action")
 

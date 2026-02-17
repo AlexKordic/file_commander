@@ -238,8 +238,32 @@ void LuaScripting::cleanup() {
 
 void LuaScripting::poll_async_events() {
   _poll_count++;
+  auto focused_side = [&]() -> std::string {
+    if (_app.get_left().navigation->Focused()) return "left";
+    if (_app.get_right().navigation->Focused()) return "right";
+    Panel& focused = _app.focused_panel();
+    return (&focused == &_app.get_left()) ? "left" : "right";
+  };
+  auto job_state_name = [](const std::shared_ptr<JobSpec>& job) -> std::string {
+    if (!job) return "none";
+    switch (job->_state.load()) {
+    case Perun::JobState::QUEUED: return "queued";
+    case Perun::JobState::RUNNING: return "running";
+    case Perun::JobState::PAUSED: return "paused";
+    case Perun::JobState::CANCELLED: return "cancelled";
+    case Perun::JobState::COMPLETED: return "completed";
+    case Perun::JobState::COMPLETED_WITH_ERRORS: return "completed_with_errors";
+    }
+    return "unknown";
+  };
+
+  const std::string current_focus_side = focused_side();
+  const bool        current_single_panel_mode = _app.single_panel_mode();
+
   // Job start/completion — detect by timestamps to avoid missing fast jobs
   auto jobinfo = file_operations().get_running_job();
+  int  current_job_items_done = -1;
+  std::string current_job_state = job_state_name(jobinfo.job);
   if (jobinfo.job) {
     // Detect job start
     if (jobinfo.job->_started_time > 0 && jobinfo.job->_started_time != _last_job_started_time) {
@@ -252,6 +276,10 @@ void LuaScripting::poll_async_events() {
       _last_job_finished_time = jobinfo.job->_finished_time;
       log("poll: job_completed");
       fire_event("job_completed", "");
+    }
+    {
+      std::lock_guard lock(jobinfo.job->_m);
+      current_job_items_done = jobinfo.job->_current_item_index;
     }
     _had_running_job = !jobinfo.job->is_stopped();
   } else {
@@ -291,6 +319,30 @@ void LuaScripting::poll_async_events() {
   }
   _had_discovery = discovery_running;
 
+  // Find dialog completion — event-driven replacement for fixed sleeps.
+  bool  find_running = false;
+  bool  find_completed = false;
+  void* current_find = nullptr;
+  for (auto* panel : {&_app.get_left(), &_app.get_right()}) {
+    if (panel->_active_dialog_name != "Find") continue;
+    auto find_dlg = std::dynamic_pointer_cast<FindDialog>(panel->get_overlay_dialog("Find"));
+    if (!find_dlg) continue;
+    current_find = find_dlg.get();
+    find_running = find_dlg->_running.load();
+    find_completed = find_dlg->_completed.load();
+    break;
+  }
+  if (current_find && !find_running && find_completed) {
+    if (_had_find || current_find != _last_find_ptr) {
+      fire_event("find_completed", "");
+      _last_find_ptr = current_find;
+    }
+  }
+  if (!current_find) {
+    _last_find_ptr = nullptr;
+  }
+  _had_find = find_running;
+
   auto count_selected = [](Panel& panel) -> int {
     int selected = 0;
     for (const auto& item : panel.dir.items) {
@@ -311,7 +363,24 @@ void LuaScripting::poll_async_events() {
     _last_left_selected_count   = left_selected_count;
     _last_right_selected_count  = right_selected_count;
     _last_error_count           = error_count;
+    _last_focus_side            = current_focus_side;
+    _last_single_panel_mode     = current_single_panel_mode;
+    _last_job_state_name        = current_job_state;
+    _last_job_items_done        = current_job_items_done;
     return;
+  }
+
+  if (current_focus_side != _last_focus_side) {
+    fire_event("focus_changed", current_focus_side);
+  }
+  if (current_single_panel_mode != _last_single_panel_mode) {
+    fire_event("single_panel_mode_changed", current_single_panel_mode ? "on" : "off");
+  }
+  if (current_job_state != _last_job_state_name) {
+    fire_event("job_state_changed", current_job_state);
+  }
+  if (current_job_items_done >= 0 && current_job_items_done != _last_job_items_done) {
+    fire_event("job_progress", std::to_string(current_job_items_done));
   }
 
   const bool left_items_changed  = left_item_count != _last_left_item_count;
@@ -344,6 +413,10 @@ void LuaScripting::poll_async_events() {
   _last_left_selected_count  = left_selected_count;
   _last_right_selected_count = right_selected_count;
   _last_error_count          = error_count;
+  _last_focus_side           = current_focus_side;
+  _last_single_panel_mode    = current_single_panel_mode;
+  _last_job_state_name       = current_job_state;
+  _last_job_items_done       = current_job_items_done;
 }
 
 // --- handle_resume_status ---

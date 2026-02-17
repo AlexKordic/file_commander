@@ -15,24 +15,17 @@ h.mkdir(dst)
 h.create_file(src .. "/b.txt", "b\n")
 h.create_file(src .. "/c.txt", "c\n")
 
-fc.left_cd(src)
-fc.right_cd(dst)
-fc.sleep(150)
+h.cd(src, dst)
 
 -- Ensure focused panel is left.
 local left_norm = norm(src)
+h.ensure_left_focus()
 local focused = fc.focused()
-if not focused or not norm(focused):find(left_norm, 1, true) then
-  fc.key("tab")
-  fc.sleep(80)
-  focused = fc.focused()
-end
 check(focused ~= nil, "focused item exists")
 check(norm(focused):find(left_norm, 1, true) ~= nil, "left panel focused")
 
 -- Move focus from b.txt -> c.txt.
 fc.key("down")
-fc.sleep(80)
 local focused_before = fc.focused()
 check(focused_before ~= nil, "focused_before exists")
 check(norm(focused_before) == norm(src .. "/c.txt"),
@@ -43,7 +36,7 @@ h.create_file(src .. "/a.txt", "a\n")
 
 -- Trigger explicit refresh (Ctrl+R) for deterministic test behavior.
 fc.key("cR")
-fc.sleep(120)
+check(fc.wait_event("items_updated", 2000), "expected items_updated after refresh")
 
 local state = fc.state()
 check(state.left.item_count >= 3, "expected refreshed item_count >= 3, got %d", state.left.item_count)

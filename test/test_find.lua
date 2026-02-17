@@ -15,34 +15,14 @@ h.create_file(src .. "/nested/deeper/needle.txt", "needle\n")
 h.create_file(src .. "/nested/deeper/other.log", "other\n")
 h.create_file(src .. "/top.txt", "top\n")
 
-fc.left_cd(src)
-fc.right_cd(dst)
-fc.sleep(120)
-
-local function ensure_left_focus()
-  local left_path = fc.left_path()
-  local function probe_left()
-    fc.key("cA")
-    local sel = fc.selected()
-    if #sel == 0 then return false end
-    local ok = sel[1]:sub(1, #left_path) == left_path
-    fc.key("esc")
-    return ok
-  end
-  if not probe_left() then
-    fc.key("tab")
-    fc.sleep(60)
-    check(probe_left(), "failed to focus left panel")
-  end
-end
-
-ensure_left_focus()
+h.cd(src, dst)
+h.ensure_left_focus()
 
 fc.key("f3")
 check(fc.wait_event("dialog_opened", 2000), "expected find dialog to open")
 
 fc.key({"n", "e", "e", "d", "l", "e", ".", "t", "x", "t", "ret"})
-fc.sleep(350)
+check(fc.wait_event("find_completed", 10000), "expected find completed")
 
 fc.key({"down", "ret"})
 check(fc.wait_event("dialog_closed", 2000), "expected find dialog to close after opening result")
