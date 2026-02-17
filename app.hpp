@@ -350,6 +350,19 @@ class Panel : public DialogOverlay {
     switch_to_tab(next);
   }
 
+  int tab_index_at_mouse(Event event) const {
+    if (!event.is_mouse()) return -1;
+    const auto m = event.mouse();
+    if (m.button != Mouse::Left || m.motion != Mouse::Pressed) return -1;
+    for (int i = 0; i < static_cast<int>(_tab_boxes.size()); ++i) {
+      const auto& box = _tab_boxes[i];
+      if (m.x >= box.x_min && m.x <= box.x_max && m.y >= box.y_min && m.y <= box.y_max) {
+        return i;
+      }
+    }
+    return -1;
+  }
+
   void switch_to_tab(int index) {
     if (index < 0 || index >= static_cast<int>(_tabs.size())) return;
     if (index == _active_tab) return;
@@ -427,6 +440,9 @@ class Panel : public DialogOverlay {
 
  private:
   Element render_tabs() const {
+    _tab_boxes.clear();
+    _tab_boxes.resize(_tabs.size());
+
     Elements tabs;
     tabs.reserve(_tabs.size() * 2 + 1);
     tabs.push_back(text(" Tabs "));
@@ -443,6 +459,7 @@ class Panel : public DialogOverlay {
       } else {
         cell |= dim;
       }
+      cell |= reflect(_tab_boxes[i]);
       tabs.push_back(std::move(cell));
     }
     tabs.push_back(filler());
@@ -538,6 +555,7 @@ class Panel : public DialogOverlay {
   PanelSharedState::P    _state;
   std::shared_ptr<Files> _files;
   std::vector<TabState>  _tabs;
+  mutable std::vector<Box> _tab_boxes;
   int                    _active_tab = 0;
 };
 
@@ -1350,6 +1368,25 @@ class FileCommander : public DialogOverlay {
       auto jobinfo = file_operations().get_running_job();
       progress_bar._has_running_job = jobinfo.job && !jobinfo.job->is_stopped();
       return false;  // don't consume — Custom events also trigger re-render
+    }
+
+    if (!dialog_active() && event.is_mouse()) {
+      auto click_in_panel_tabs = [&](Panel& panel, bool left_side) -> bool {
+        const int idx = panel.tab_index_at_mouse(event);
+        if (idx < 0) return false;
+        panel.switch_to_tab(idx);
+        panel.navigation->TakeFocus();
+        _last_main_focus_left = left_side;
+        return true;
+      };
+
+      if (_single_panel_mode) {
+        Panel& shown = _last_main_focus_left ? left : right;
+        if (click_in_panel_tabs(shown, _last_main_focus_left)) return true;
+      } else {
+        if (click_in_panel_tabs(left, true)) return true;
+        if (click_in_panel_tabs(right, false)) return true;
+      }
     }
 
     if (event == theme().key_command_palette) {
