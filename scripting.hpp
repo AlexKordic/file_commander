@@ -134,6 +134,10 @@ private:
   bool   _had_find = false;
   void*  _last_find_ptr = nullptr;
 
+  // --- Per-test watchdog (hard timeout window between heartbeats) ---
+  double _test_timeout_window_sec = 6.0;
+  double _test_deadline = -1.0;
+
   // --- Timer thread (replaces g_poll_active + detached thread) ---
   ScheduledUpdates _scheduler;
 
@@ -146,6 +150,8 @@ private:
   void poll_async_events();     // detect job_started/completed, discovery_completed
   void handle_resume_status(int status);  // handle lua_resume return code
   void check_waits();           // called from tick(): check event log + timeout, resume if met
+  void heartbeat_test_timeout();
+  bool check_test_timeout_and_abort();
 
   // --- Lua C callbacks: access 'this' via registry, not globals ---
   static LuaScripting* from_lua(lua_State* L);  // extract 'this' from registry
@@ -166,6 +172,7 @@ private:
   static int l_cancel_job(lua_State* L);
   static int l_pause_job(lua_State* L);
   static int l_job_history(lua_State* L);
+  static int l_test_heartbeat(lua_State* L);
 
   // --- Helpers ---
   static void push_panel_state(lua_State* L, Panel& panel);

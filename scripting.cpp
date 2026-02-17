@@ -156,6 +156,7 @@ bool LuaScripting::setup(const std::string& script_path) {
   reg("cancel_job",        l_cancel_job);
   reg("pause_job",         l_pause_job);
   reg("job_history",       l_job_history);
+  reg("test_heartbeat",    l_test_heartbeat);
   // clang-format on
 
   lua_setglobal(_lua, "fc");
@@ -191,6 +192,7 @@ bool LuaScripting::setup(const std::string& script_path) {
 
   // Start the scheduler thread (idles on cv until something is scheduled)
   _scheduler.start();
+  heartbeat_test_timeout();
 
   return true;
 }
@@ -199,6 +201,7 @@ bool LuaScripting::setup(const std::string& script_path) {
 
 void LuaScripting::tick() {
   if (_finished) return;
+  if (check_test_timeout_and_abort()) return;
 
   // First call: start the Lua coroutine
   if (!_started && _lua_co) {
@@ -214,6 +217,29 @@ void LuaScripting::tick() {
   if (_pending_wait) {
     check_waits();
   }
+}
+
+void LuaScripting::heartbeat_test_timeout() {
+  _test_deadline = now() + _test_timeout_window_sec;
+  _scheduler.schedule_at(_test_deadline);
+}
+
+bool LuaScripting::check_test_timeout_and_abort() {
+  if (_finished) return true;
+  if (_test_deadline <= 0.0) return false;
+  if (now() <= _test_deadline) return false;
+
+  std::string msg = "[Lua] FAIL: hard timeout exceeded 6s";
+  log("ERROR: " + msg);
+  file_operations().report_error(msg);
+  _pending_wait.reset();
+  _finished = true;
+  auto* screen = ScreenInteractive::Active();
+  if (screen) {
+    screen->Post(Event::Custom);
+    screen->Exit();
+  }
+  return true;
 }
 
 // --- fire_event ---
@@ -444,6 +470,7 @@ void LuaScripting::handle_resume_status(int status) {
 
 void LuaScripting::check_waits() {
   if (!_pending_wait || _finished) return;
+  if (check_test_timeout_and_abort()) return;
 
   // Poll for async events
   poll_async_events();
@@ -811,6 +838,9 @@ int LuaScripting::l_wait_event(lua_State* L) {
 
   // Not yet — set up wait and yield
   double deadline = now() + timeout_ms / 1000.0;
+  if (self->_test_deadline > 0.0 && deadline > self->_test_deadline) {
+    deadline = self->_test_deadline;
+  }
   self->_pending_wait = PendingWait{std::move(names), deadline, false};
   self->_event_cursor = self->_event_log.size();
   self->_scheduler.schedule_at(deadline);
@@ -822,6 +852,9 @@ int LuaScripting::l_sleep(lua_State* L) {
   auto* self = from_lua(L);
   int ms = (int)luaL_checknumber(L, 1);
   double deadline = now() + ms / 1000.0;
+  if (self->_test_deadline > 0.0 && deadline > self->_test_deadline) {
+    deadline = self->_test_deadline;
+  }
   self->_pending_wait = PendingWait{{}, deadline, true};
   self->_scheduler.schedule_at(deadline);
   return lua_yield(L, 0);
@@ -909,4 +942,11 @@ int LuaScripting::l_job_history(lua_State* L) {
     lua_rawseti(L, -2, idx++);
   }
   return 1;
+}
+
+int LuaScripting::l_test_heartbeat(lua_State* L) {
+  (void)L;
+  auto* self = from_lua(L);
+  self->heartbeat_test_timeout();
+  return 0;
 }

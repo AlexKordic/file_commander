@@ -6,6 +6,9 @@ local _cpp_context = nil
 
 function __framework_init(context)
   _cpp_context = context
+  if fc.test_heartbeat then
+    fc.test_heartbeat()
+  end
 end
 
 -- Wrap fc.key to accept tables (sequences of keys)
@@ -18,6 +21,11 @@ fc.key = function(name_or_list)
   else
     _raw_key(name_or_list)
   end
+end
+
+-- Explicit command dispatch by stable command id (bypasses key binding dependence).
+fc.cmd = function(command_id)
+  _raw_key(command_id)
 end
 
 -- Shorthand: wait for all background jobs to finish
@@ -35,4 +43,7 @@ end
 -- Print pass marker (visible in fc error bar via report_error, or stdout)
 function test_pass(name)
   print("[PASS] " .. name)
+  if fc.test_heartbeat then
+    fc.test_heartbeat()
+  end
 end
