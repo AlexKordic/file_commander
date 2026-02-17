@@ -585,6 +585,20 @@ Filepath resolve_symlink(Filepath path) {
   }
 }
 
+bool is_subpath(Filepath parent, Filepath child) {
+  parent = parent.lexically_normal();
+  child  = child.lexically_normal();
+  const std::string parent_text = parent.native();
+  const std::string child_text  = child.native();
+  if (parent_text.empty()) return false;
+  if (child_text == parent_text) return true;
+  std::string prefix = parent_text;
+  if (prefix.back() != boost::filesystem::path::preferred_separator) {
+    prefix.push_back(boost::filesystem::path::preferred_separator);
+  }
+  return child_text.rfind(prefix, 0) == 0;
+}
+
 /*
 TODO:
   - Encapsulate _virtual_dir, _operational_state, _data_source, _files into discovery process
@@ -903,6 +917,23 @@ void CopyDiscoveryProcess::_discover(const std::vector<DirItem>& files, Filepath
     }
     // Act on directory
     if (item.type() == boost::filesystem::directory_file) {
+      error_code src_ec;
+      Filepath   source_dir = boost::filesystem::canonical(item.path_ref(), src_ec);
+      if (!src_ec.failed()) {
+        error_code dst_ec;
+        Filepath   destination_dir;
+        Filepath   parent_path = new_record_path.parent_path();
+        Filepath   resolved_parent = boost::filesystem::canonical(parent_path, dst_ec);
+        if (!dst_ec.failed()) {
+          destination_dir = resolved_parent / new_record_path.filename();
+        } else {
+          destination_dir = boost::filesystem::absolute(new_record_path, dst_ec);
+        }
+        if (!dst_ec.failed() && is_subpath(source_dir, destination_dir)) {
+          _queue_error(item, new_record_path, "Copy dir into itself");
+          return;
+        }
+      }
       const bool valid = _queue_dir(item, new_record_path);
       if (!valid) return;
       // Recurse into subdir

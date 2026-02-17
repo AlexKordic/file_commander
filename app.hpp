@@ -21,6 +21,7 @@
 #include <ftxui/dom/table.hpp>
 
 #include <cmath>
+#include <algorithm>
 #include <format>
 #include <functional>
 #include <map>
@@ -126,6 +127,16 @@ class Panel : public DialogOverlay {
     _overlay_dialogs["PathToClipboard"] = std::make_shared<ToClipboardDialog>(_state);
   }
   void move_to(Filepath& where) {
+    int      focused_index_before = 0;
+    Filepath focused_path_before;
+    const bool same_directory_refresh = _state && (where == dir.path);
+    if (same_directory_refresh) {
+      if (_state->get_focused_index) { focused_index_before = _state->get_focused_index(); }
+      if (_state->get_focused_item) {
+        const Filepath* focused = _state->get_focused_item();
+        if (focused) focused_path_before = *focused;
+      }
+    }
     // clear old updates that don't matter any more
     pending_changes.erase_if([this](const UpdatedFiles& x) -> bool { return true; });
 
@@ -133,6 +144,9 @@ class Panel : public DialogOverlay {
     if (!err.ok()) {
       file_operations().report_error("[Panel move_to] " + err.steps.front());
       return;
+    }
+    if (same_directory_refresh) {
+      _restore_focus_after_update(focused_path_before, focused_index_before);
     }
     update_funnel = FileChangeFunnel::create(where, [this](UpdatedFiles changes) {
       // record changes
@@ -143,7 +157,17 @@ class Panel : public DialogOverlay {
           UpdatedFiles batch;
           FifoError    err = this->pending_changes.try_pop(batch);
           if (FifoError::OK != err) return;
+          int      focused_index_before = 0;
+          Filepath focused_path_before;
+          if (_state) {
+            if (_state->get_focused_index) { focused_index_before = _state->get_focused_index(); }
+            if (_state->get_focused_item) {
+              const Filepath* focused = _state->get_focused_item();
+              if (focused) focused_path_before = *focused;
+            }
+          }
           this->dir.partial_refresh(std::move(batch));
+          _restore_focus_after_update(focused_path_before, focused_index_before);
         }
       });
     });
@@ -190,6 +214,34 @@ class Panel : public DialogOverlay {
   PanelSharedState::P get_shared_state() const { return _state; }
 
  private:
+  void _restore_focus_after_update(const Filepath& focused_path_before, int focused_index_before) {
+    if (!_state || this->dir.items.empty() || !_state->set_focused_index) return;
+    int restore_index = -1;
+    if (!focused_path_before.empty()) {
+      for (int i = 0; i < this->dir.items.size(); ++i) {
+        if (this->dir.items[i].path_ref() == focused_path_before) {
+          restore_index = i;
+          break;
+        }
+      }
+      if (restore_index == -1) {
+        const std::string focused_name = focused_path_before.filename().native();
+        for (int i = 0; i < this->dir.items.size(); ++i) {
+          if (this->dir.items[i].filename_ref() == focused_name) {
+            restore_index = i;
+            break;
+          }
+        }
+      }
+    }
+    if (restore_index == -1) {
+      int max_index = static_cast<int>(this->dir.items.size()) - 1;
+      restore_index = std::clamp(focused_index_before, 0, max_index);
+    }
+    restore_index = this->dir.offset_vissible(restore_index, 0);
+    _state->set_focused_index(restore_index);
+  }
+
   PanelSharedState::P    _state;
   std::shared_ptr<Files> _files;
 };
@@ -339,7 +391,9 @@ class FileCommander : public DialogOverlay {
       return;
     }
     if (id == "refresh_dir") {
-      focused_panel().dir.refresh();
+      Panel& panel = focused_panel();
+      auto   where = panel.dir.path;
+      panel.move_to(where);
       return;
     }
     if (id == "target_right") {
@@ -482,9 +536,11 @@ class FileCommander : public DialogOverlay {
     }
     if (event == theme().key_refresh_dir) {
       if (left.navigation->Focused()) {
-        left.dir.refresh();
+        auto where = left.dir.path;
+        left.move_to(where);
       } else {
-        right.dir.refresh();
+        auto where = right.dir.path;
+        right.move_to(where);
       }
       return true;
     }

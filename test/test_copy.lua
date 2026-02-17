@@ -1115,6 +1115,27 @@ local function test_conflict_update()
 end
 
 -- =========================================================================
+-- Test 34: Guard copy directory into its own subtree
+-- =========================================================================
+
+local function test_copy_dir_into_subdir_guard()
+  local parent = h.tmpdir("copy_into_self_parent")
+  local src = parent .. "/src"
+  local dst = src .. "/dest"
+  h.mkdir(src .. "/nested")
+  h.mkdir(dst)
+  h.create_file(src .. "/nested/file.txt", "payload\n")
+
+  -- Left panel on parent (selects src), right panel inside src subtree.
+  local new_errs = run_copy_test(parent, dst)
+  check(new_errs == 0, "34: no new global errors, got %d", new_errs)
+  check(not h.dir_exists(dst .. "/src"), "34: src was not copied into its own subtree")
+
+  h.cleanup(parent)
+  test_pass("34_copy_dir_into_subdir_guard")
+end
+
+-- =========================================================================
 -- Run all tests
 -- =========================================================================
 
@@ -1150,6 +1171,7 @@ test_cancel_copy()
 test_pause_copy()
 test_conflict_skip()
 test_conflict_update()
+test_copy_dir_into_subdir_guard()
 -- -- test_job_history()
 
 test_pass("ALL COPY TESTS PASSED")
