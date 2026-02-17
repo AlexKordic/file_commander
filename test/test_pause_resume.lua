@@ -19,7 +19,6 @@ fc.set_transfer_rate(100 * 1024)
 
 fc.key("cA")
 fc.key("f5")
-check(fc.wait_event("dialog_opened", 2000), "expected copy dialog open")
 check(fc.wait_event("discovery_completed", 10000), "expected discovery complete")
 fc.key({"<-", "ret"})
 

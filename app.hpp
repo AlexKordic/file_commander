@@ -267,6 +267,8 @@ class Panel : public DialogOverlay {
     Dir         dir;
     int         focused_index = 0;
     std::string filter_txt;
+    bool        show_permissions_column = false;
+    bool        show_owner_group_column = false;
   };
 
   Dir        dir;
@@ -453,6 +455,8 @@ class Panel : public DialogOverlay {
     if (_state) {
       tab.filter_txt = _state->filter_txt;
       if (_state->get_focused_index) tab.focused_index = _state->get_focused_index();
+      tab.show_permissions_column = _state->show_permissions_column;
+      tab.show_owner_group_column = _state->show_owner_group_column;
     }
   }
 
@@ -490,6 +494,8 @@ class Panel : public DialogOverlay {
       _state->filter_txt = tab.filter_txt.empty() ? dir.filter.phrase : tab.filter_txt;
       dir.apply_filter(_state->filter_txt);
       if (_state->set_focused_index) _state->set_focused_index(tab.focused_index);
+      _state->show_permissions_column = tab.show_permissions_column;
+      _state->show_owner_group_column = tab.show_owner_group_column;
     }
     if (!dir.path.empty()) {
       start_watcher(dir.path);

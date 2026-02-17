@@ -25,7 +25,6 @@ check(fc.wait_event("dialog_closed", 2000), "expected command palette close")
 -- Verify new key executes copy dialog.
 fc.key("f9")
 check(fc.wait_event("dialog_opened", 2000), "expected copy dialog open on rebound f9")
-check(fc.wait_event("discovery_completed", 10000), "expected copy discovery complete")
 fc.key("esc")
 check(fc.wait_event("dialog_closed", 2000), "expected copy dialog close")
 

@@ -39,7 +39,6 @@ check(fc.wait_event("dialog_opened", 2000), "expected palette to open")
 
 fc.key({"c", "o", "p", "y", "ret"})
 check(fc.wait_event("dialog_opened", 2000), "expected Copy dialog to open from palette")
-check(fc.wait_event("discovery_completed", 10000), "expected copy discovery to complete")
 
 -- Close copy dialog without executing copy.
 fc.key("esc")

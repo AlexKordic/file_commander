@@ -668,6 +668,11 @@ void LuaScripting::push_panel_state(lua_State* L, Panel& panel) {
     lua_pushstring(L, panel._active_dialog_name.c_str());
   }
   lua_setfield(L, -2, "active_dialog");
+  // column visibility
+  lua_pushboolean(L, state->show_permissions_column);
+  lua_setfield(L, -2, "show_permissions_column");
+  lua_pushboolean(L, state->show_owner_group_column);
+  lua_setfield(L, -2, "show_owner_group_column");
   // tabs
   lua_newtable(L);  // tabs array
   const auto tabs = panel.tab_paths();
