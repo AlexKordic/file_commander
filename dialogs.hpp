@@ -49,6 +49,8 @@ struct Commands {
   const Command* find_by_id(const std::string& id) const;
   Command*       find_by_id(const std::string& id);
   bool           increment_use_count(const std::string& id);
+  bool           set_use_count(const std::string& id, int use_count);
+  bool           set_key(const std::string& id, const Event& key);
   const Command* find_panel_dialog_by_key(const Event& key) const;
   std::vector<Command> list_all() const;
 };
@@ -397,7 +399,8 @@ struct CommandPaletteDialog : Dialog {
   CommandPaletteDialog(
     std::function<void()> close_dialog,
     std::function<std::vector<Command>()> list_commands,
-    std::function<void(const std::string&)> execute_command
+    std::function<void(const std::string&)> execute_command,
+    std::function<bool(const std::string&, const Event&, std::string&)> rebind_command
   );
   void OnShow() override;
   void cancel();
@@ -405,6 +408,7 @@ struct CommandPaletteDialog : Dialog {
   std::function<void()> close_dialog;
   std::function<std::vector<Command>()> list_commands;
   std::function<void(const std::string&)> execute_command;
+  std::function<bool(const std::string&, const Event&, std::string&)> rebind_command;
 
   std::string filter_txt;
   int         filter_cursor_pos = 0;
@@ -413,12 +417,17 @@ struct CommandPaletteDialog : Dialog {
   Component   list_menu;
   Component   button_close;
   Component   button_run;
+  Component   button_rebind;
 
   std::vector<Command> commands_all;
   std::vector<int64_t> visible_ids;
+  std::string          status_message;
+  bool                 capture_key_mode = false;
 
   void apply_filter();
   void run_selected();
+  void start_rebind();
+  bool capture_rebind_key(const Event& e);
 };
 
 }  // namespace ftxui

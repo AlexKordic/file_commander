@@ -2184,14 +2184,17 @@ int fuzzy_score(const std::string& query_lower, const std::string& text_lower) {
 CommandPaletteDialog::CommandPaletteDialog(
   std::function<void()> close_dialog,
   std::function<std::vector<Command>()> list_commands,
-  std::function<void(const std::string&)> execute_command
+  std::function<void(const std::string&)> execute_command,
+  std::function<bool(const std::string&, const Event&, std::string&)> rebind_command
 ) : Dialog(nullptr),
     close_dialog(std::move(close_dialog)),
     list_commands(std::move(list_commands)),
-    execute_command(std::move(execute_command)) {
+    execute_command(std::move(execute_command)),
+    rebind_command(std::move(rebind_command)) {
   ButtonOption ascii_button;
   ascii_button.transform = ascii_button_transform();
   button_run             = Button(" Run ", [this] { run_selected(); }, ascii_button);
+  button_rebind          = Button(" Rebind ", [this] { start_rebind(); }, ascii_button);
   button_close           = Button(" Close ", [this] { cancel(); }, ascii_button);
 
   InputOption input_opt;
@@ -2236,21 +2239,33 @@ CommandPaletteDialog::CommandPaletteDialog(
   list_menu          = DBMenu(&_data_source);
 
   navigation = CatchEvent(Container::Vertical({
-                            Container::Horizontal({button_run, button_close}),
+                            Container::Horizontal({button_run, button_rebind, button_close}),
                             input_filter,
                             list_menu,
                           }),
-                          close_on_esc(this));
+                          [this](Event e) -> bool {
+                            if (capture_key_mode) return capture_rebind_key(e);
+                            if (e == Event::CtrlK) {
+                              start_rebind();
+                              return true;
+                            }
+                            return close_on_esc(this)(e);
+                          });
   renderer   = Renderer(navigation, [this]() -> Element {
     auto title = text(" Command Palette [" + std::to_string(visible_ids.size()) + "] ") | bold | hcenter;
     auto content = vbox({
       hbox({
         button_run->Render() | hcenter | xflex_grow,
         separator(),
+        button_rebind->Render() | hcenter | xflex_grow,
+        separator(),
         button_close->Render() | hcenter | xflex_grow,
       }),
       separator(),
       input_filter->Render(),
+      separator(),
+      capture_key_mode ? (text(" Press new key for selected command (Esc to cancel) ") | dim) : (text(" Press Ctrl+K or use Rebind button to change selected shortcut ") | dim),
+      !status_message.empty() ? (text(" " + status_message + " ") | dim) : text(""),
       separator(),
       visible_ids.empty() ? (text("  No commands.") | dim) : (list_menu->Render() | yflex),
     });
@@ -2264,6 +2279,8 @@ void CommandPaletteDialog::OnShow() {
   commands_all = list_commands ? list_commands() : std::vector<Command>();
   filter_txt.clear();
   filter_cursor_pos = 0;
+  status_message.clear();
+  capture_key_mode = false;
   apply_filter();
   auto screen = ScreenInteractive::Active();
   if (screen) _data_source.min_y = std::max(12, static_cast<int>(0.8 * screen->dimy()));
@@ -2314,6 +2331,44 @@ void CommandPaletteDialog::run_selected() {
   if (execute_command) execute_command(cmd.id);
 }
 
+void CommandPaletteDialog::start_rebind() {
+  if (visible_ids.empty()) return;
+  status_message = "Waiting for new shortcut key...";
+  capture_key_mode = true;
+}
+
+bool CommandPaletteDialog::capture_rebind_key(const Event& e) {
+  if (e == Event::Escape) {
+    capture_key_mode = false;
+    status_message   = "Shortcut rebinding canceled";
+    return true;
+  }
+  if (e == Event::Custom || e.is_mouse() || e.is_cursor_position()) return true;
+  if (visible_ids.empty()) {
+    capture_key_mode = false;
+    return true;
+  }
+
+  const int64_t focused = std::clamp(_data_source.focused_id, 0LL, static_cast<int64_t>(visible_ids.size()) - 1);
+  const Command cmd = commands_all.at(visible_ids.at(focused));
+  capture_key_mode = false;
+  if (!rebind_command) {
+    status_message = "Rebinding callback is not available";
+    return true;
+  }
+
+  std::string err;
+  const bool ok = rebind_command(cmd.id, e, err);
+  if (ok) {
+    status_message = "Updated '" + cmd.description + "' to " + event_to_string(e);
+    commands_all = list_commands ? list_commands() : std::vector<Command>();
+    apply_filter();
+  } else {
+    status_message = err.empty() ? "Failed to rebind shortcut" : err;
+  }
+  return true;
+}
+
 //
 // Commands
 //
@@ -2355,6 +2410,20 @@ bool Commands::increment_use_count(const std::string& id) {
   auto* c = find_by_id(id);
   if (!c) return false;
   c->use_count++;
+  return true;
+}
+
+bool Commands::set_use_count(const std::string& id, int use_count) {
+  auto* c = find_by_id(id);
+  if (!c) return false;
+  c->use_count = std::max(0, use_count);
+  return true;
+}
+
+bool Commands::set_key(const std::string& id, const Event& key) {
+  auto* c = find_by_id(id);
+  if (!c) return false;
+  c->key = key;
   return true;
 }
 

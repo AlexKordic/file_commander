@@ -175,6 +175,70 @@ std::string event_to_string(const Event& e) {
   return "?";
 }
 
+std::string event_to_token(const Event& e) {
+  if (e == Event::ArrowLeft) return "<-";
+  if (e == Event::ArrowRight) return "->";
+  if (e == Event::ArrowUp) return "up";
+  if (e == Event::ArrowDown) return "down";
+  if (e == Event::ArrowLeftCtrl) return "c<-";
+  if (e == Event::ArrowRightCtrl) return "c->";
+  if (e == Event::ArrowUpCtrl) return "cup";
+  if (e == Event::ArrowDownCtrl) return "cdown";
+  if (e == Event::Backspace) return "back";
+  if (e == Event::Delete) return "del";
+  if (e == Event::Escape) return "esc";
+  if (e == Event::Return) return "ret";
+  if (e == Event::Tab) return "tab";
+  if (e == Event::TabReverse) return "stab";
+
+  if (e == Event::F1) return "f1";
+  if (e == Event::F2) return "f2";
+  if (e == Event::F3) return "f3";
+  if (e == Event::F4) return "f4";
+  if (e == Event::F5) return "f5";
+  if (e == Event::F6) return "f6";
+  if (e == Event::F7) return "f7";
+  if (e == Event::F8) return "f8";
+  if (e == Event::F9) return "f9";
+  if (e == Event::F10) return "f10";
+  if (e == Event::F11) return "f11";
+  if (e == Event::F12) return "f12";
+
+  if (e == Event::Character(' ')) return " ";
+  if (e == Event::Character('?')) return "?";
+  if (e == Event::Character('+')) return "+";
+  if (e == Event::Character('-')) return "-";
+
+  if (e == Event::CtrlA) return "cA";
+  if (e == Event::CtrlB) return "cB";
+  if (e == Event::CtrlC) return "cC";
+  if (e == Event::CtrlD) return "cD";
+  if (e == Event::CtrlE) return "cE";
+  if (e == Event::CtrlF) return "cF";
+  if (e == Event::CtrlG) return "cG";
+  if (e == Event::CtrlH) return "cH";
+  if (e == Event::CtrlI) return "cI";
+  if (e == Event::CtrlJ) return "cJ";
+  if (e == Event::CtrlK) return "cK";
+  if (e == Event::CtrlL) return "cL";
+  if (e == Event::CtrlM) return "cM";
+  if (e == Event::CtrlN) return "cN";
+  if (e == Event::CtrlO) return "cO";
+  if (e == Event::CtrlP) return "cP";
+  if (e == Event::CtrlQ) return "cQ";
+  if (e == Event::CtrlR) return "cR";
+  if (e == Event::CtrlS) return "cS";
+  if (e == Event::CtrlT) return "cT";
+  if (e == Event::CtrlU) return "cU";
+  if (e == Event::CtrlV) return "cV";
+  if (e == Event::CtrlW) return "cW";
+  if (e == Event::CtrlX) return "cX";
+  if (e == Event::CtrlY) return "cY";
+  if (e == Event::CtrlZ) return "cZ";
+
+  return "";
+}
+
 namespace {
 
 // Helper class.

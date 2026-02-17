@@ -22,10 +22,14 @@
 
 #include <cmath>
 #include <algorithm>
+#include <cstdlib>
+#include <fstream>
 #include <format>
 #include <functional>
 #include <map>
 #include <memory>
+#include <regex>
+#include <sstream>
 #include <string>
 #include <utility>
 #include <vector>
@@ -34,6 +38,169 @@
 
 using namespace ftxui;
 using namespace Perun;
+
+namespace fc_settings_detail {
+
+inline std::string json_escape(const std::string& input) {
+  std::string out;
+  out.reserve(input.size() + 16);
+  for (char c : input) {
+    switch (c) {
+    case '\\': out += "\\\\"; break;
+    case '"': out += "\\\""; break;
+    case '\n': out += "\\n"; break;
+    case '\r': out += "\\r"; break;
+    case '\t': out += "\\t"; break;
+    default: out += c; break;
+    }
+  }
+  return out;
+}
+
+inline std::string json_unescape(const std::string& input) {
+  std::string out;
+  out.reserve(input.size());
+  bool escaped = false;
+  for (char c : input) {
+    if (escaped) {
+      switch (c) {
+      case 'n': out += '\n'; break;
+      case 'r': out += '\r'; break;
+      case 't': out += '\t'; break;
+      case '\\': out += '\\'; break;
+      case '"': out += '"'; break;
+      default: out += c; break;
+      }
+      escaped = false;
+      continue;
+    }
+    if (c == '\\') {
+      escaped = true;
+      continue;
+    }
+    out += c;
+  }
+  return out;
+}
+
+inline bool extract_json_object(const std::string& json, const std::string& key, std::string& object_out) {
+  const std::string quoted_key = "\"" + key + "\"";
+  size_t            key_pos    = json.find(quoted_key);
+  if (key_pos == std::string::npos) return false;
+  size_t brace_pos = json.find('{', key_pos + quoted_key.size());
+  if (brace_pos == std::string::npos) return false;
+  bool   in_string = false;
+  bool   escaped   = false;
+  size_t depth     = 0;
+  for (size_t i = brace_pos; i < json.size(); ++i) {
+    const char c = json[i];
+    if (escaped) {
+      escaped = false;
+      continue;
+    }
+    if (c == '\\') {
+      escaped = true;
+      continue;
+    }
+    if (c == '"') {
+      in_string = !in_string;
+      continue;
+    }
+    if (in_string) continue;
+    if (c == '{') depth++;
+    if (c == '}') {
+      depth--;
+      if (depth == 0) {
+        object_out = json.substr(brace_pos, i - brace_pos + 1);
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+inline bool extract_json_array(const std::string& json, const std::string& key, std::string& array_out) {
+  const std::string quoted_key = "\"" + key + "\"";
+  size_t            key_pos    = json.find(quoted_key);
+  if (key_pos == std::string::npos) return false;
+  size_t bracket_pos = json.find('[', key_pos + quoted_key.size());
+  if (bracket_pos == std::string::npos) return false;
+  bool   in_string = false;
+  bool   escaped   = false;
+  size_t depth     = 0;
+  for (size_t i = bracket_pos; i < json.size(); ++i) {
+    const char c = json[i];
+    if (escaped) {
+      escaped = false;
+      continue;
+    }
+    if (c == '\\') {
+      escaped = true;
+      continue;
+    }
+    if (c == '"') {
+      in_string = !in_string;
+      continue;
+    }
+    if (in_string) continue;
+    if (c == '[') depth++;
+    if (c == ']') {
+      depth--;
+      if (depth == 0) {
+        array_out = json.substr(bracket_pos, i - bracket_pos + 1);
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+inline bool extract_json_string_field(const std::string& json, const std::string& key, std::string& value_out) {
+  const std::regex re("\"" + key + "\"\\s*:\\s*\"((?:\\\\.|[^\"\\\\])*)\"");
+  std::smatch      match;
+  if (!std::regex_search(json, match, re)) return false;
+  if (match.size() < 2) return false;
+  value_out = json_unescape(match[1].str());
+  return true;
+}
+
+inline bool extract_json_bool_field(const std::string& json, const std::string& key, bool& value_out) {
+  const std::regex re("\"" + key + "\"\\s*:\\s*(true|false)");
+  std::smatch      match;
+  if (!std::regex_search(json, match, re)) return false;
+  if (match.size() < 2) return false;
+  value_out = match[1].str() == "true";
+  return true;
+}
+
+inline std::map<std::string, std::string> parse_string_map_object(const std::string& obj_json) {
+  std::map<std::string, std::string> out;
+  const std::regex                   pair_re("\"((?:\\\\.|[^\"\\\\])*)\"\\s*:\\s*\"((?:\\\\.|[^\"\\\\])*)\"");
+  for (auto it = std::sregex_iterator(obj_json.begin(), obj_json.end(), pair_re); it != std::sregex_iterator(); ++it) {
+    out[json_unescape((*it)[1].str())] = json_unescape((*it)[2].str());
+  }
+  return out;
+}
+
+inline std::map<std::string, int> parse_int_map_object(const std::string& obj_json) {
+  std::map<std::string, int> out;
+  const std::regex           pair_re("\"((?:\\\\.|[^\"\\\\])*)\"\\s*:\\s*(-?\\d+)");
+  for (auto it = std::sregex_iterator(obj_json.begin(), obj_json.end(), pair_re); it != std::sregex_iterator(); ++it) {
+    out[json_unescape((*it)[1].str())] = std::stoi((*it)[2].str());
+  }
+  return out;
+}
+
+inline std::vector<std::string> parse_string_array(const std::string& array_json) {
+  std::vector<std::string> out;
+  const std::regex         str_re("\"((?:\\\\.|[^\"\\\\])*)\"");
+  for (auto it = std::sregex_iterator(array_json.begin(), array_json.end(), str_re); it != std::sregex_iterator(); ++it) {
+    out.push_back(json_unescape((*it)[1].str()));
+  }
+  return out;
+}
+
+}  // namespace fc_settings_detail
 
 class Panel;
 
@@ -379,6 +546,182 @@ class FileCommander : public DialogOverlay {
 
   std::vector<Command> list_palette_commands() { return commands().list_all(); }
 
+  bool rebind_palette_command(const std::string& id, const Event& key, std::string& error) {
+    const std::string token = event_to_token(key);
+    if (token.empty()) {
+      error = "Unsupported key for binding";
+      return false;
+    }
+
+    auto available = commands().list_all();
+    for (const auto& c : available) {
+      if (c.id != id && c.key == key) {
+        error = "Key is already bound to '" + c.description + "'";
+        return false;
+      }
+    }
+
+    Event* theme_key = theme_key_for_command(id);
+    if (!theme_key) {
+      error = "Unknown command id: " + id;
+      return false;
+    }
+    *theme_key = key;
+    if (!commands().set_key(id, key)) {
+      error = "Failed to update command binding";
+      return false;
+    }
+    return true;
+  }
+
+  void load_settings(bool restore_paths) {
+    std::ifstream in(settings_file_path());
+    if (!in.good()) return;
+    std::stringstream ss;
+    ss << in.rdbuf();
+    const std::string json = ss.str();
+    if (json.empty()) return;
+
+    std::string left_path_txt;
+    std::string right_path_txt;
+    if (restore_paths && fc_settings_detail::extract_json_string_field(json, "left_path", left_path_txt)) {
+      Filepath p(left_path_txt);
+      boost::system::error_code ec;
+      if (boost::filesystem::is_directory(p, ec) && !ec.failed()) left.move_to(p);
+    }
+    if (restore_paths && fc_settings_detail::extract_json_string_field(json, "right_path", right_path_txt)) {
+      Filepath p(right_path_txt);
+      boost::system::error_code ec;
+      if (boost::filesystem::is_directory(p, ec) && !ec.failed()) right.move_to(p);
+    }
+
+    std::string left_sort_txt;
+    if (fc_settings_detail::extract_json_string_field(json, "left_sort", left_sort_txt)) {
+      if (Orderby parsed; parse_sort_order(left_sort_txt, parsed)) {
+        left.dir.order_by = parsed;
+        left.dir._sort();
+        left.dir._calculate();
+      }
+    }
+    std::string right_sort_txt;
+    if (fc_settings_detail::extract_json_string_field(json, "right_sort", right_sort_txt)) {
+      if (Orderby parsed; parse_sort_order(right_sort_txt, parsed)) {
+        right.dir.order_by = parsed;
+        right.dir._sort();
+        right.dir._calculate();
+      }
+    }
+
+    bool single_mode = false;
+    if (fc_settings_detail::extract_json_bool_field(json, "single_panel_mode", single_mode)) {
+      set_single_panel_mode(single_mode);
+    }
+    std::string focused_side;
+    if (fc_settings_detail::extract_json_string_field(json, "focused_panel", focused_side)) {
+      if (focused_side == "left") {
+        _last_main_focus_left = true;
+        left.navigation->TakeFocus();
+      } else if (focused_side == "right") {
+        _last_main_focus_left = false;
+        right.navigation->TakeFocus();
+      }
+    }
+
+    std::string bookmarks_array_json;
+    if (fc_settings_detail::extract_json_array(json, "bookmarks", bookmarks_array_json)) {
+      _bookmarks.clear();
+      for (const auto& p : fc_settings_detail::parse_string_array(bookmarks_array_json)) {
+        if (p.empty()) continue;
+        Filepath fp(p);
+        boost::system::error_code ec;
+        if (boost::filesystem::exists(fp, ec) && !ec.failed()) add_bookmark(fp);
+      }
+    }
+
+    std::string use_count_obj;
+    if (fc_settings_detail::extract_json_object(json, "command_use_count", use_count_obj)) {
+      const auto counts = fc_settings_detail::parse_int_map_object(use_count_obj);
+      for (const auto& [id, count] : counts) {
+        commands().set_use_count(id, count);
+      }
+    }
+
+    std::string key_bindings_obj;
+    if (fc_settings_detail::extract_json_object(json, "key_bindings", key_bindings_obj)) {
+      const auto bindings = fc_settings_detail::parse_string_map_object(key_bindings_obj);
+      for (const auto& [id, token] : bindings) {
+        Event       e = event_from_string(token);
+        std::string err;
+        if (e == Event::Custom) continue;
+        rebind_palette_command(id, e, err);
+      }
+    }
+  }
+
+  void save_settings() const {
+    const std::string settings = settings_file_path();
+    if (settings.empty()) return;
+
+    const Filepath settings_path(settings);
+    const Filepath settings_dir = settings_path.parent_path();
+    boost::system::error_code mk_ec;
+    boost::filesystem::create_directories(settings_dir, mk_ec);
+
+    std::ofstream out(settings, std::ios::trunc);
+    if (!out.good()) return;
+
+    auto write_quoted = [&out](const std::string& value) {
+      out << "\"" << fc_settings_detail::json_escape(value) << "\"";
+    };
+
+    out << "{\n";
+    out << "  \"version\": 1,\n";
+    out << "  \"left_path\": ";
+    write_quoted(left.dir.path.native());
+    out << ",\n";
+    out << "  \"right_path\": ";
+    write_quoted(right.dir.path.native());
+    out << ",\n";
+    out << "  \"left_sort\": ";
+    write_quoted(sort_order_to_string(left.dir.order_by));
+    out << ",\n";
+    out << "  \"right_sort\": ";
+    write_quoted(sort_order_to_string(right.dir.order_by));
+    out << ",\n";
+    out << "  \"single_panel_mode\": " << (_single_panel_mode ? "true" : "false") << ",\n";
+    out << "  \"focused_panel\": ";
+    write_quoted(_last_main_focus_left ? "left" : "right");
+    out << ",\n";
+
+    out << "  \"bookmarks\": [";
+    for (size_t i = 0; i < _bookmarks.size(); ++i) {
+      if (i > 0) out << ", ";
+      write_quoted(_bookmarks[i].native());
+    }
+    out << "],\n";
+
+    const auto all_commands = commands().list_all();
+    out << "  \"command_use_count\": {\n";
+    for (size_t i = 0; i < all_commands.size(); ++i) {
+      out << "    ";
+      write_quoted(all_commands[i].id);
+      out << ": " << std::max(0, all_commands[i].use_count);
+      out << (i + 1 < all_commands.size() ? ",\n" : "\n");
+    }
+    out << "  },\n";
+
+    out << "  \"key_bindings\": {\n";
+    for (size_t i = 0; i < all_commands.size(); ++i) {
+      out << "    ";
+      write_quoted(all_commands[i].id);
+      out << ": ";
+      write_quoted(event_to_token(all_commands[i].key));
+      out << (i + 1 < all_commands.size() ? ",\n" : "\n");
+    }
+    out << "  }\n";
+    out << "}\n";
+  }
+
   std::vector<Filepath> list_bookmarks() const {
     return _bookmarks;
   }
@@ -530,7 +873,8 @@ class FileCommander : public DialogOverlay {
     _overlay_dialogs["CommandPalette"] = std::make_shared<CommandPaletteDialog>(
       _close_dialog,
       [this]() { return this->list_palette_commands(); },
-      [this](const std::string& id) { this->execute_palette_command(id); }
+      [this](const std::string& id) { this->execute_palette_command(id); },
+      [this](const std::string& id, const Event& key, std::string& error) { return this->rebind_palette_command(id, key, error); }
     );
     renderer = Renderer(navigation, [=, this]() -> Element {
       // check for resize:
@@ -564,6 +908,81 @@ class FileCommander : public DialogOverlay {
     };
   }
 
+ private:
+  static std::string sort_order_to_string(Orderby o) {
+    switch (o) {
+    case Orderby::NAME_ASC: return "NAME_ASC";
+    case Orderby::NAME_DESC: return "NAME_DESC";
+    case Orderby::SIZE_ASC: return "SIZE_ASC";
+    case Orderby::SIZE_DESC: return "SIZE_DESC";
+    case Orderby::TIME_ASC: return "TIME_ASC";
+    case Orderby::TIME_DESC: return "TIME_DESC";
+    }
+    return "NAME_ASC";
+  }
+
+  static bool parse_sort_order(const std::string& txt, Orderby& out) {
+    if (txt == "NAME_ASC") {
+      out = Orderby::NAME_ASC;
+      return true;
+    }
+    if (txt == "NAME_DESC") {
+      out = Orderby::NAME_DESC;
+      return true;
+    }
+    if (txt == "SIZE_ASC") {
+      out = Orderby::SIZE_ASC;
+      return true;
+    }
+    if (txt == "SIZE_DESC") {
+      out = Orderby::SIZE_DESC;
+      return true;
+    }
+    if (txt == "TIME_ASC") {
+      out = Orderby::TIME_ASC;
+      return true;
+    }
+    if (txt == "TIME_DESC") {
+      out = Orderby::TIME_DESC;
+      return true;
+    }
+    return false;
+  }
+
+  static std::string settings_file_path() {
+    const char* xdg = std::getenv("XDG_CONFIG_HOME");
+    if (xdg && *xdg) {
+      return (Filepath(xdg) / "file_commander" / "settings.json").native();
+    }
+    const char* home = std::getenv("HOME");
+    if (!home || !*home) return "";
+    return (Filepath(home) / ".config" / "file_commander" / "settings.json").native();
+  }
+
+  static Event* theme_key_for_command(const std::string& id) {
+    Theme& t = theme();
+    if (id == "copy") return &t.key_copy;
+    if (id == "move") return &t.key_move;
+    if (id == "delete") return &t.key_delete;
+    if (id == "rename") return &t.key_rename;
+    if (id == "mkdir") return &t.key_mkdir;
+    if (id == "find") return &t.key_find;
+    if (id == "glob_select") return &t.key_glob_select;
+    if (id == "glob_deselect") return &t.key_glob_deselect;
+    if (id == "names_to_clipboard") return &t.key_names_to_clipboard;
+    if (id == "paths_to_clipboard") return &t.key_paths_to_clipboard;
+    if (id == "switch_panel") return &t.key_switch_focused_panel;
+    if (id == "toggle_single_panel_mode") return &t.key_toggle_single_panel_mode;
+    if (id == "refresh_dir") return &t.key_refresh_dir;
+    if (id == "target_right") return &t.key_target_dir_to_focused_item_right;
+    if (id == "target_left") return &t.key_target_dir_to_focused_item_left;
+    if (id == "toggle_errors") return &t.key_toggle_error_details;
+    if (id == "toggle_job_list") return &t.key_toggle_job_list;
+    if (id == "open_bookmarks") return &t.key_bookmarks_dialog;
+    return nullptr;
+  }
+
+ public:
 
   bool handle_global_shortcuts(Event event) {
     // Update progress bar visibility on Custom events

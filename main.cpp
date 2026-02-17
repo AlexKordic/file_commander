@@ -61,6 +61,10 @@ int main(int argc, char** argv) {
   // auto          redraw = [&screen]() -> void { screen.Post(Event::Custom); };
   auto          dimx = [&screen]() -> int { return screen.dimx(); };
   FileCommander app(left_path, right_path, exec, dimx);
+  if (!lua_mode) {
+    const bool explicit_panel_paths = argc > 1;
+    app.load_settings(!explicit_panel_paths);
+  }
 
   LogAdapter adapt_logs(screen);
 
@@ -97,6 +101,7 @@ int main(int argc, char** argv) {
   } else {
     // Normal mode — no Lua
     screen.Loop(app.renderer);
+    app.save_settings();
   }
 
   return 0;
