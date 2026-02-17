@@ -444,10 +444,6 @@ end
 
 -- =========================================================================
 -- 15. Follow links mode: symlink → file
--- KNOWN BUG: follow_links mode for file symlinks creates wrong destination
--- path (appends resolved filename under link name as directory). Skipping
--- verification of the followed file. Test verifies no crash and that the
--- original file is still copied.
 -- =========================================================================
 
 local function test_follow_links_file()
@@ -459,23 +455,24 @@ local function test_follow_links_file()
   h.create_file(src .. "/original.txt", "original content\n")
   h.create_symlink("./original.txt", src .. "/link_to_file.txt")
 
-  -- NOTE: follow_links toggle currently has a bug where _discover() recurses
-  -- with the resolved target DirItem, and the recursive call appends the
-  -- resolved filename to the link-name path, creating e.g. dst/link_to_file.txt/original.txt
-  -- instead of dst/link_to_file.txt. This test documents the current behavior.
   local new_errs = run_copy_test(src, dst, {toggle_follow_links = true})
+  check(new_errs == 0, "15: no errors, got %d", new_errs)
 
   -- Original file should still be copied
   check(h.file_exists(dst .. "/original.txt"), "15: original file copied")
   check(h.read_file(dst .. "/original.txt") == "original content\n", "15: original content")
+  -- Follow mode should materialize the symlink entry as a regular file copy.
+  check(h.file_exists(dst .. "/link_to_file.txt"), "15: followed link copied as file")
+  check(not h.is_symlink(dst .. "/link_to_file.txt"), "15: followed link is not a symlink")
+  check(h.read_file(dst .. "/link_to_file.txt") == "original content\n",
+        "15: followed link content")
 
   h.cleanup(src, dst)
-  test_pass("15_follow_links_file (known bug documented)")
+  test_pass("15_follow_links_file")
 end
 
 -- =========================================================================
 -- 16. Follow links mode: symlink → directory
--- Similar issue to test 15 for directory symlinks.
 -- =========================================================================
 
 local function test_follow_links_directory()
@@ -486,15 +483,18 @@ local function test_follow_links_directory()
   h.create_file(src .. "/actual_dir/content.txt", "dir content\n")
   h.create_symlink("./actual_dir", src .. "/link_to_dir")
 
-  -- See test 15 note about follow_links bug.
   local new_errs = run_copy_test(src, dst, {toggle_follow_links = true})
+  check(new_errs == 0, "16: no errors, got %d", new_errs)
 
   -- The actual directory should be fully copied
   check(h.dir_exists(dst .. "/actual_dir"), "16: actual dir copied")
   check(h.file_exists(dst .. "/actual_dir/content.txt"), "16: content inside actual dir")
+  -- Follow mode should make destination content reachable under link_to_dir.
+  check(h.dir_exists(dst .. "/link_to_dir"), "16: followed dir path exists")
+  check(h.file_exists(dst .. "/link_to_dir/content.txt"), "16: followed dir contains content")
 
   h.cleanup(src, dst)
-  test_pass("16_follow_links_directory (known bug documented)")
+  test_pass("16_follow_links_directory")
 end
 
 -- =========================================================================
@@ -1064,6 +1064,57 @@ local function test_job_history()
 end
 
 -- =========================================================================
+-- Test 32: Conflict mode "skip" keeps existing destination files
+-- =========================================================================
+
+local function test_conflict_skip()
+  local src = h.tmpdir("conflict_skip_src")
+  local dst = h.tmpdir("conflict_skip_dst")
+  h.mkdir(src)
+  h.mkdir(dst)
+
+  h.create_file(src .. "/file.txt", "source content\n")
+  h.create_file(dst .. "/file.txt", "destination content\n")
+
+  local new_errs = run_copy_test(src, dst, {conflict_mode = "skip"})
+  check(new_errs == 0, "32: no errors, got %d", new_errs)
+  check(h.read_file(dst .. "/file.txt") == "destination content\n", "32: destination kept in skip mode")
+
+  h.cleanup(src, dst)
+  test_pass("32_conflict_skip")
+end
+
+-- =========================================================================
+-- Test 33: Conflict mode "update" copies only newer source files
+-- =========================================================================
+
+local function test_conflict_update()
+  local src = h.tmpdir("conflict_update_src")
+  local dst = h.tmpdir("conflict_update_dst")
+  h.mkdir(src)
+  h.mkdir(dst)
+
+  h.create_file(src .. "/file.txt", "source older\n")
+  h.create_file(dst .. "/file.txt", "destination newer\n")
+  os.execute("touch -mt 202001010000 '" .. src .. "/file.txt'")
+  os.execute("touch -mt 202401010000 '" .. dst .. "/file.txt'")
+
+  local new_errs = run_copy_test(src, dst, {conflict_mode = "update"})
+  check(new_errs == 0, "33: no errors in update skip phase, got %d", new_errs)
+  check(h.read_file(dst .. "/file.txt") == "destination newer\n", "33: older source skipped")
+
+  h.create_file(src .. "/file.txt", "source newer\n")
+  os.execute("touch -mt 202501010000 '" .. src .. "/file.txt'")
+
+  new_errs = run_copy_test(src, dst, {conflict_mode = "update"})
+  check(new_errs == 0, "33: no errors in update overwrite phase, got %d", new_errs)
+  check(h.read_file(dst .. "/file.txt") == "source newer\n", "33: newer source overwritten")
+
+  h.cleanup(src, dst)
+  test_pass("33_conflict_update")
+end
+
+-- =========================================================================
 -- Run all tests
 -- =========================================================================
 
@@ -1097,6 +1148,8 @@ test_three_way_circular()
 test_symlink_outside_tree()
 test_cancel_copy()
 test_pause_copy()
+test_conflict_skip()
+test_conflict_update()
 -- -- test_job_history()
 
 test_pass("ALL COPY TESTS PASSED")

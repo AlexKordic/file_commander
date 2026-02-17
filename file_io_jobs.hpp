@@ -15,6 +15,12 @@
 
 namespace Perun {
 
+enum class CopyConflictMode {
+  Replace,
+  Update,
+  Skip,
+};
+
 enum class JobState {
   QUEUED,
   RUNNING,
@@ -43,6 +49,7 @@ struct JobInstructions {
   Type                 _type;
   std::vector<DirItem> _items;
   std::vector<DirItem> _errors;
+  CopyConflictMode     _copy_conflict = CopyConflictMode::Replace;
 
   void report_error(DirItem item, std::string message);
 };
@@ -80,7 +87,7 @@ struct JobSpec : JobInstructions, JobStats, JobInterface {
   std::atomic<bool>  _cancel_requested{false};
   std::atomic<bool>  _pause_requested{false};
 
-  JobSpec(Type t, std::vector<DirItem> items);
+  JobSpec(Type t, std::vector<DirItem> items, CopyConflictMode copy_conflict = CopyConflictMode::Replace);
 
   int64_t item_count() const { return _items_pending > 0 ? _items_pending : _items.size(); }
   // Not in FileJobs books

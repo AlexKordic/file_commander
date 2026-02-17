@@ -142,9 +142,10 @@ class ProgressMonitor {
   }
 };
 
-JobSpec::JobSpec(Type t, std::vector<DirItem> items) {
-  _type  = t;
-  _items = std::move(items);
+JobSpec::JobSpec(Type t, std::vector<DirItem> items, CopyConflictMode copy_conflict) {
+  _type          = t;
+  _items         = std::move(items);
+  _copy_conflict = copy_conflict;
   for (DirItem const& item : _items) {
     if (item.type() == boost::filesystem::regular_file) { _bytes_total += item.size(); }
   }
@@ -484,8 +485,14 @@ class ThreadedFileJobs : public FileJobs {
       // else path is source file and symlink_ref is destination file for copy operation
       if (item.type() == boost::filesystem::file_type::status_error) { continue; }
       if (item.type() == boost::filesystem::file_type::directory_file) {
+        ec.clear();
         lock.unlock();
         boost::filesystem::create_directory(item.path_ref(), ec);
+        if (ec.failed()) {
+          error_code check_ec;
+          const bool already_directory = boost::filesystem::is_directory(item.path_ref(), check_ec);
+          if (!check_ec.failed() && already_directory) { ec.clear(); }
+        }
         if (ec.failed()) file_operations().report_error("[mkdir] " + item.path_ref().native());
         lock.lock();
         if (ec.failed()) {
@@ -498,11 +505,10 @@ class ThreadedFileJobs : public FileJobs {
       if (item.type() == boost::filesystem::file_type::symlink_file) {
         if (!item.symlink_ref()) {
           job->report_error(item, "Symlink target not set");
-          lock.unlock();
-          if (ec.failed()) file_operations().report_error("[Symlink target not set] " + item.path_ref().native());
-          lock.lock();
+          file_operations().report_error("[Symlink target not set] " + item.path_ref().native());
           continue;
         }
+        ec.clear();
         lock.unlock();
         // create_symlink(target, link_path): creates link_path pointing to target
         // item.path_ref()    = where to create the new symlink (link_path)
@@ -516,15 +522,53 @@ class ThreadedFileJobs : public FileJobs {
         }
         continue;
       }
+      if (!item.symlink_ref()) {
+        job->report_error(item, "Copy destination not set");
+        continue;
+      }
+      auto skip_current_file = [&]() {
+        job->_bytes_total = std::max(0.0, job->_bytes_total - double(std::max(0LL, item.size())));
+        job->_total.update(job->_bytes_processed, job->_bytes_total);
+      };
+      const Filepath destination_path = *item.symlink_ref();
+      if (job->_copy_conflict != CopyConflictMode::Replace) {
+        error_code exists_ec;
+        const bool destination_exists = boost::filesystem::exists(destination_path, exists_ec);
+        if (exists_ec.failed()) {
+          job->report_error(item, "Failed to check destination: " + exists_ec.message());
+          continue;
+        }
+        bool skip_file = false;
+        if (destination_exists && job->_copy_conflict == CopyConflictMode::Skip) {
+          skip_file = true;
+        } else if (destination_exists && job->_copy_conflict == CopyConflictMode::Update) {
+          error_code src_time_ec;
+          error_code dst_time_ec;
+          auto       src_time = boost::filesystem::last_write_time(item.path_ref(), src_time_ec);
+          auto       dst_time = boost::filesystem::last_write_time(destination_path, dst_time_ec);
+          if (src_time_ec.failed() || dst_time_ec.failed()) {
+            job->report_error(item, "Failed to compare file times");
+            continue;
+          }
+          skip_file = src_time <= dst_time;
+        }
+        if (skip_file) {
+          skip_current_file();
+          continue;
+        }
+      }
       // else path is source file and target is destination file for copy operation
       // this operation is blocking. progress will be updated by separate thread.
       job->_current_item = ProgressInfo();
+      ec.clear();
       lock.unlock();
       boost::filesystem::copy_file_options cfo;
-      cfo.options = copy_options::overwrite_existing;
+      cfo.options = (job->_copy_conflict == CopyConflictMode::Skip)
+        ? copy_options::none
+        : copy_options::overwrite_existing;
       cfo.bytes_per_second = _transfer_rate;  // TODO: make configurable per-job
       cfo.cancel_requested = &job->_cancel_requested;
-      boost::filesystem::copy_file(item.path_ref(), *item.symlink_ref(), cfo, ec);
+      boost::filesystem::copy_file(item.path_ref(), destination_path, cfo, ec);
       if (ec.failed() && job->_cancel_requested.load(std::memory_order_relaxed)) {
         // Cancel during copy_file — boost already removed partial dest file.
         // Don't report as an error; set CANCELLED and exit.
@@ -532,9 +576,13 @@ class ThreadedFileJobs : public FileJobs {
         job->_state = JobState::CANCELLED;
         return;
       }
-      if (ec.failed()) file_operations().report_error("[Copy] " + item.path_ref().native());
       lock.lock();
-      if (ec.failed()) {
+      const bool exists_conflict = ec.failed() && job->_copy_conflict == CopyConflictMode::Skip
+        && ec.value() == boost::system::errc::file_exists;
+      if (exists_conflict) {
+        skip_current_file();
+      } else if (ec.failed()) {
+        file_operations().report_error("[Copy] " + item.path_ref().native());
         job->report_error(item, "Failed to copy file: " + ec.message());
         job->_bytes_total -= item.size();
       } else {

@@ -122,31 +122,44 @@ end
 --- Options:
 ---   toggle_follow_links (bool) — press down+ret to toggle "Follow Links" checkbox
 ---   toggle_preserve_relative (bool) — navigate to and toggle "Keep relative links"
+---   conflict_mode (string) — "replace" (default), "update", or "skip"
 function M.do_copy(opts)
   opts = opts or {}
+  local confirm_with_copy_hotkey = false
 
   -- Ensure left panel has focus.
   -- fc.selected() returns selected items from the focused panel.
   -- We try selecting, check if selected paths are under left_path,
   -- if not, toggle focus and retry.
   local left_path = fc.left_path()
+  local left_real = M.realpath(left_path)
+
+  local function path_under_left(path)
+    if path:sub(1, #left_path) == left_path then return true end
+    if not left_real then return false end
+    local path_real = M.realpath(path)
+    return path_real ~= nil and path_real:sub(1, #left_real) == left_real
+  end
 
   local function try_select()
     fc.key("cA")
     local sel = fc.selected()
     if #sel == 0 then return false end
     -- Check if selected items are under the left panel's path
-    if sel[1]:sub(1, #left_path) == left_path then return true end
+    if path_under_left(sel[1]) then return true end
     -- Selected from wrong panel — deselect and toggle
     fc.key("cA")  -- toggle off
     return false
   end
 
   if not try_select() then
-    fc.key("tab")
-    fc.sleep(50)
-    if not try_select() then
-      error("do_copy: no items selected in left panel after toggle — left_path=" .. left_path)
+    for _ = 1, 2 do
+      fc.key("tab")
+      fc.sleep(50)
+      if try_select() then break end
+      if _ == 2 then
+        error("do_copy: no items selected in left panel after toggle — left_path=" .. left_path)
+      end
     end
   end
 
@@ -175,8 +188,21 @@ function M.do_copy(opts)
     fc.key({"up", "up"})
   end
 
-  -- Navigate from Cancel to COPY button (left) and confirm (return)
-  fc.key({"<-", "ret"})
+  if opts.conflict_mode == "update" then
+    -- Copy dialog supports quick conflict-mode keys: 1=replace, 2=update, 3=skip.
+    fc.key("2")
+    confirm_with_copy_hotkey = true
+  elseif opts.conflict_mode == "skip" then
+    fc.key("3")
+    confirm_with_copy_hotkey = true
+  end
+
+  if confirm_with_copy_hotkey then
+    fc.key("f5")
+  else
+    -- Navigate from Cancel to COPY button (left) and confirm (return)
+    fc.key({"<-", "ret"})
+  end
 
   -- Wait for background copy job to complete
   fc.wait_for_jobs()

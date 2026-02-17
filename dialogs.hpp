@@ -189,9 +189,13 @@ struct CopyDialog : Dialog {
   Component button_cancel, button_ok;
   Component op_follow_links;
   Component op_preserve_relative_links;
+  Component op_conflict_mode;
   Component input_destination_path;
   int       filter_cursor_pos      = 0;
   int       destination_cursor_pos = 0;
+  int       conflict_mode_selected = 0;
+
+  std::vector<std::string> conflict_mode_labels;
 
   Component _filelist_wrapper;
 

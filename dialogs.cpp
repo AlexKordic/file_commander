@@ -29,6 +29,7 @@ using boost::filesystem::file_status;
 using boost::system::error_code;
 
 using Perun::file_operations;
+using Perun::CopyConflictMode;
 using Perun::JobInstructions;
 using Perun::JobSpec;
 using Perun::JobState;
@@ -535,18 +536,52 @@ void RenameDialog::cancel() { app->action.close_dialog(); }
 // Copy
 //
 
+CopyConflict copy_conflict_from_index(int index) {
+  switch (index) {
+  case 1: return CopyConflict::Update;
+  case 2: return CopyConflict::Skip;
+  default: return CopyConflict::Replace;
+  }
+}
+
+int copy_conflict_to_index(CopyConflict conflict) {
+  switch (conflict) {
+  case CopyConflict::Update: return 1;
+  case CopyConflict::Skip: return 2;
+  case CopyConflict::Replace:
+  default: return 0;
+  }
+}
+
+CopyConflictMode to_job_copy_conflict(CopyConflict conflict) {
+  switch (conflict) {
+  case CopyConflict::Update: return CopyConflictMode::Update;
+  case CopyConflict::Skip: return CopyConflictMode::Skip;
+  case CopyConflict::Replace:
+  default: return CopyConflictMode::Replace;
+  }
+}
+
 Filepath resolve_symlink(Filepath path) {
   std::vector<Filepath> chain;
-  error_code            ec;
+  Filepath              current = std::move(path);
   for (;;) {
-    Filepath symlink_target = boost::filesystem::read_symlink(path, ec);
-    if (ec.failed() || symlink_target.empty()) return path;
-    for (Filepath& visited : chain) {
-      error_code ec;
-      if (boost::filesystem::equivalent(visited, symlink_target, ec)) return Filepath();
+    error_code ec;
+    Filepath   symlink_target = boost::filesystem::read_symlink(current, ec);
+    if (ec.failed() || symlink_target.empty()) return current;
+    if (symlink_target.is_relative()) {
+      symlink_target = current.parent_path() / symlink_target;
     }
-    chain.push_back(path);
-    path = symlink_target;
+    symlink_target = symlink_target.lexically_normal();
+    for (const Filepath& visited : chain) {
+      error_code equivalent_ec;
+      const bool same = boost::filesystem::equivalent(visited, symlink_target, equivalent_ec);
+      if ((!equivalent_ec.failed() && same) || (equivalent_ec.failed() && visited == symlink_target)) {
+        return Filepath();
+      }
+    }
+    chain.push_back(current);
+    current = symlink_target;
   }
 }
 
@@ -560,16 +595,20 @@ TODO:
   - Symlink checkbox changes should restart the process
 */
 CopyDialog::CopyDialog(PanelSharedState::P d) : Dialog(std::move(d)) {
-  // [_] follow links `cp -r -L`: always follow symbolic links in SOURCE
-  // input_destination_path = Input(&destination_path, "", filelist_filter_opt(destination_cursor_pos));
+  InputOption destination_opt = filelist_filter_opt(destination_cursor_pos);
+  destination_opt.multiline   = false;
+  destination_opt.on_enter    = [this]() { this->_start_new_discovery(); };
+  input_destination_path      = Input(&destination_path, "Destination path", destination_opt) | showInputCursor(&destination_cursor_pos);
 
   button_ok     = Button("  COPY  ", [this] { this->run_copy(); });
   // TODO: add button "open in new tab ⮂ ↱↱↱ 🆕 tab  "
   button_cancel = Button(" Cancel ", [this] { this->cancel(); });
   CheckboxOption checkbox_opt;
-  checkbox_opt.on_change     = [this]() { this->OnShow(); };
+  checkbox_opt.on_change     = [this]() { this->_start_new_discovery(); };
   op_follow_links            = Checkbox("Follow Links in Source", &b_follow_links, checkbox_opt);
   op_preserve_relative_links = Checkbox("Keep relative links", &b_preserve_relative_links, checkbox_opt);
+  conflict_mode_labels       = {"Replace existing", "Update if newer", "Skip existing"};
+  op_conflict_mode           = Radiobox(&conflict_mode_labels, &conflict_mode_selected);
 
   // _virtual_dir             = std::make_unique<Dir>();
   // _operation_state         = std::make_shared<PanelSharedState>(_virtual_dir.get());
@@ -590,13 +629,39 @@ CopyDialog::CopyDialog(PanelSharedState::P d) : Dialog(std::move(d)) {
   // // // _filelist_wrapper = _discovery_process ? _discovery_process->_files : Container::Vertical({});
 
   navigation = CatchEvent(Container::Vertical({
-                            // input_destination_path,
+                            input_destination_path,
                             Container::Horizontal({button_ok, button_cancel}),
                             op_follow_links,
                             op_preserve_relative_links,
+                            op_conflict_mode,
                             _filelist_wrapper,
                           }),
-                          close_on_esc(this));
+                          [this](Event e) {
+                            if (e == theme().key_cancel_dialog) {
+                              this->cancel();
+                              return true;
+                            }
+                            if (e == Event::Character('1')) {
+                              conflict_mode_selected = 0;
+                              _conflict              = CopyConflict::Replace;
+                              return true;
+                            }
+                            if (e == Event::Character('2')) {
+                              conflict_mode_selected = 1;
+                              _conflict              = CopyConflict::Update;
+                              return true;
+                            }
+                            if (e == Event::Character('3')) {
+                              conflict_mode_selected = 2;
+                              _conflict              = CopyConflict::Skip;
+                              return true;
+                            }
+                            if (e == theme().key_copy) {
+                              this->run_copy();
+                              return true;
+                            }
+                            return false;
+                          });
   renderer   = Renderer(navigation, [this]() -> Element { return this->render(); });
 }
 
@@ -607,7 +672,10 @@ void CopyDialog::cancel() {
 
 void CopyDialog::run_copy() {
   if (!_discovery_process) return;
-  auto job = std::make_shared<JobSpec>(JobSpec::Type::COPY, std::move(_discovery_process->_dir->items));
+  _conflict = copy_conflict_from_index(conflict_mode_selected);
+  auto job = std::make_shared<JobSpec>(JobSpec::Type::COPY,
+                                       std::move(_discovery_process->_dir->items),
+                                       to_job_copy_conflict(_conflict));
   _clear_operation_state();
   file_operations().add_job(job);
   app->dir->clear_selection();
@@ -637,12 +705,13 @@ Element CopyDialog::render() {
   return window(
     text(" Copy " + std::to_string(file_count) + " selected items ") | bold | hcenter,
   vbox({
-            hbox({text(" TO: "), text(destination_path), text(" ")}),
+            hbox({text(" TO: "), input_destination_path->Render() | xflex_grow, text(" ")}),
             separator(),
             hbox({button_ok->Render() | hcenter, button_cancel->Render() | hcenter}) | hcenter,
             separatorHeavy(),
             op_follow_links->Render() | hcenter,
             op_preserve_relative_links->Render() | hcenter,
+            hbox({text("Conflict mode: "), op_conflict_mode->Render()}) | hcenter,
             bytes_filter_row | hcenter,
             separatorHeavy(),
             std::move(file_list) | theme().files_border,
@@ -669,6 +738,7 @@ CopyDiscoveryProcess::CopyDiscoveryProcess(CopyDialog* parent, Filepath target) 
   _target                  = target;
   _follow_links            = parent->b_follow_links;
   _preserve_relative_links = parent->b_preserve_relative_links;
+  _conflict                = parent->_conflict;
 
   _dir           = std::make_unique<Dir>();
   _dir->path     = _target;
@@ -702,10 +772,11 @@ void CopyDiscoveryProcess::_run() {
   std::vector<DirItem> selected;
   selected.reserve(_input_paths->selected.size());
   for (auto& p : _input_paths->selected) {
+    if (!_running) break;
     _stat_file(p);
     selected.emplace_back(p);
   }
-  _discover(selected, _target);
+  if (_running) _discover(selected, _target);
   _running = false;
   // Notify the FTXUI event loop so tick() can detect completion
   auto* screen = ScreenInteractive::Active();
@@ -772,11 +843,12 @@ void CopyDiscoveryProcess::_queue_file(const DirItem& item, Filepath const& new_
 
 // This traversal should be depth first because we want to create tree like depiction in our list
 void CopyDiscoveryProcess::_discover(const std::vector<DirItem>& files, Filepath destination) {
-  std::vector<DirItem>& q              = _dir->items;
+  if (!_running) return;
   // if type is dir path is to be mkdired
   // if type is link path is where to place link and target is link target
   // else path is source file and target is destination file for copy operation
-  auto                  place_on_queue = [this, &destination, &q](const DirItem& item) -> void {
+  auto                  place_on_queue = [this, &destination](const DirItem& item) -> void {
+    if (!_running) return;
     error_code ec;
     const auto new_record_path = destination / item.path_ref().filename();
     const bool copy_to_self    = boost::filesystem::equivalent(item.path_ref(), new_record_path, ec);
@@ -799,8 +871,28 @@ void CopyDiscoveryProcess::_discover(const std::vector<DirItem>& files, Filepath
         return;
       }
       if (_follow_links) {
-        // use symlink_target intstead of item, converting symlink to actual dir item
-        this->_discover({DirItem(symlink_target, item.type(), item.perms())}, new_record_path);
+        error_code  target_ec;
+        file_status target_status = boost::filesystem::status(symlink_target, target_ec);
+        if (target_ec.failed()) {
+          _queue_error(item, new_record_path, "Invalid symlink target");
+          return;
+        }
+        DirItem target_item(symlink_target, target_status.type(), target_status.permissions());
+        if (target_item.type() == boost::filesystem::directory_file) {
+          const bool valid = _queue_dir(target_item, new_record_path);
+          if (!valid) return;
+          std::vector<DirItem> subdir_items;
+          for (directory_entry& subdir_item : directory_iterator(target_item.path_ref(), target_ec)) {
+            if (!_running) return;
+            _stat_file(subdir_item.path());
+            error_code  subdir_ec;
+            file_status fs = subdir_item.status(subdir_ec);
+            subdir_items.emplace_back(subdir_item.path(), fs.type(), fs.permissions());
+          }
+          _discover(subdir_items, new_record_path);
+          return;
+        }
+        _queue_file(target_item, new_record_path);
         return;
       }
       // create absolute symlink
@@ -817,6 +909,7 @@ void CopyDiscoveryProcess::_discover(const std::vector<DirItem>& files, Filepath
       std::vector<DirItem> subdir_items;
       error_code           ec;
       for (directory_entry& subdir_item : directory_iterator(item.path_ref(), ec)) {
+        if (!_running) return;
         _stat_file(subdir_item.path());
         error_code  ec;
         file_status fs = subdir_item.status(ec);
@@ -828,7 +921,8 @@ void CopyDiscoveryProcess::_discover(const std::vector<DirItem>& files, Filepath
     // Act on file
     _queue_file(item, new_record_path);
   };
-  for (auto& item : files) {
+  for (const auto& item : files) {
+    if (!_running) return;
     if (item.type() == boost::filesystem::status_error) {
       _queue_error(item, destination / item.path_ref().filename(), "stat failed");
       continue;
@@ -838,19 +932,24 @@ void CopyDiscoveryProcess::_discover(const std::vector<DirItem>& files, Filepath
 };
 
 void CopyDialog::_start_new_discovery() {
-  _discovery_process = std::make_shared<CopyDiscoveryProcess>(this, app->action.arguments->target);
+  Filepath target(destination_path);
+  if (target.empty()) target = app->action.arguments->target;
+  destination_path           = target.native();
+  app->action.arguments->target = target;
+  _clear_operation_state();
+  _discovery_process = std::make_shared<CopyDiscoveryProcess>(this, target);
   _filelist_wrapper->Add(_discovery_process->_files);
 }
 
 void CopyDialog::OnShow() {
-  _clear_operation_state();
   button_cancel->TakeFocus();
   app->action.arguments->use_focused_as_alternative();
   if (app->action.arguments->selected.empty()) {
     cancel();
     return;
   }
-  destination_path = app->action.arguments->target.native();
+  destination_path       = app->action.arguments->target.native();
+  conflict_mode_selected = copy_conflict_to_index(_conflict);
   _start_new_discovery();
 }
 
