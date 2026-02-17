@@ -11,6 +11,8 @@ Theme::Theme() {
   key_target_dir_to_focused_item_left  = Event::ArrowLeftCtrl;
 
   key_files_select         = Event::Character(' ');
+  key_glob_select          = Event::Character('+');
+  key_glob_deselect        = Event::Character('-');
   key_cancel_dialog        = Event::Escape;
   key_clear_selection      = Event::Escape;
   key_enter_dir            = Event::Return;
@@ -20,6 +22,7 @@ Theme::Theme() {
   key_clear_errors         = Event::Escape;
   key_toggle_error_details = Event::CtrlE;
   key_toggle_job_list      = Event::F4;
+  key_bookmarks_dialog     = Event::CtrlB;
   key_command_palette      = Event::F1;
 
   filesize_colors  = {Color::White, Color::White, Color::Yellow, Color::IndianRed1, Color::Plum3};

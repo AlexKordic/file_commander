@@ -24,6 +24,8 @@ struct Theme {
   ftxui::Event 
     key_switch_focused_panel,
     key_files_select,
+    key_glob_select,
+    key_glob_deselect,
     key_cancel_dialog,
     key_clear_selection,
     key_select_all,
@@ -35,6 +37,7 @@ struct Theme {
     key_clear_errors,
     key_toggle_error_details,
     key_toggle_job_list,
+    key_bookmarks_dialog,
     key_command_palette;
 
   ftxui::Event key_mkdir, key_copy, key_move, key_delete, key_rename, key_names_to_clipboard, key_paths_to_clipboard, key_find;

@@ -121,6 +121,12 @@ private:
   int    _poll_count = 0;
   double _last_job_finished_time = -1;
   double _last_job_started_time  = -1;
+  bool   _event_baseline_initialized = false;
+  int    _last_left_item_count = -1;
+  int    _last_right_item_count = -1;
+  int    _last_left_selected_count = -1;
+  int    _last_right_selected_count = -1;
+  int    _last_error_count = -1;
 
   // --- Timer thread (replaces g_poll_active + detached thread) ---
   ScheduledUpdates _scheduler;

@@ -142,6 +142,8 @@ std::string event_to_string(const Event& e) {
 
   if (e == Event::Character(' ')) return "Space";
   if (e == Event::Character('?')) return "?";
+  if (e == Event::Character('+')) return "+";
+  if (e == Event::Character('-')) return "-";
 
   if (e == Event::CtrlA) return "Ctrl+A";
   if (e == Event::CtrlB) return "Ctrl+B";

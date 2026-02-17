@@ -95,6 +95,24 @@ struct MkdirDialog : Dialog {
   Element render();
 };
 
+struct GlobSelectDialog : Dialog {
+  GlobSelectDialog(PanelSharedState::P s, bool select_mode);
+  void OnShow() override;
+
+  std::string pattern;
+  std::string error;
+  bool        select_mode = true;
+  int         cursor_pos  = 0;
+
+  Component input_pattern;
+  Component button_ok;
+  Component button_close;
+
+  void    ok();
+  void    cancel();
+  Element render();
+};
+
 struct RenameDialog : Dialog {
   RenameDialog(PanelSharedState::P data);
   void OnShow() override;
@@ -302,6 +320,39 @@ struct JobListDialog : Dialog {
   static std::string state_icon(Perun::JobState state);
   static std::string format_duration(double seconds);
   static std::string format_bytes(double bytes);
+};
+
+struct BookmarksDialog : Dialog {
+  BookmarksDialog(
+    std::function<void()> close_dialog,
+    std::function<std::vector<Filepath>()> list_bookmarks,
+    std::function<void()> add_current_dir,
+    std::function<void(const Filepath&)> remove_bookmark,
+    std::function<void(const Filepath&)> open_bookmark
+  );
+  void OnShow() override;
+  void cancel();
+
+  std::function<void()> close_dialog;
+  std::function<std::vector<Filepath>()> list_bookmarks;
+  std::function<void()> add_current_dir;
+  std::function<void(const Filepath&)> remove_bookmark;
+  std::function<void(const Filepath&)> open_bookmark;
+
+  std::vector<Filepath> bookmarks;
+  DataSource            _data_source;
+  Component             list_menu;
+  Component             button_add;
+  Component             button_remove;
+  Component             button_open;
+  Component             button_close;
+
+  void refresh();
+  bool has_selected() const;
+  int64_t selected_index() const;
+  void run_open();
+  void run_add();
+  void run_remove();
 };
 
 struct CommandPaletteDialog : Dialog {

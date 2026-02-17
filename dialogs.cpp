@@ -404,6 +404,114 @@ void MkdirDialog::ok() {
 
 void MkdirDialog::cancel() { app->action.close_dialog(); }
 
+namespace {
+
+bool glob_match_ascii_case_insensitive(const std::string& pattern, const std::string& text) {
+  const auto lower = [](char c) -> char { return static_cast<char>(std::tolower(static_cast<unsigned char>(c))); };
+
+  size_t p = 0;
+  size_t t = 0;
+  size_t star = std::string::npos;
+  size_t match = 0;
+
+  while (t < text.size()) {
+    if (p < pattern.size() && (pattern[p] == '?' || lower(pattern[p]) == lower(text[t]))) {
+      ++p;
+      ++t;
+      continue;
+    }
+    if (p < pattern.size() && pattern[p] == '*') {
+      star  = p++;
+      match = t;
+      continue;
+    }
+    if (star != std::string::npos) {
+      p = star + 1;
+      t = ++match;
+      continue;
+    }
+    return false;
+  }
+  while (p < pattern.size() && pattern[p] == '*') ++p;
+  return p == pattern.size();
+}
+
+}  // namespace
+
+//
+// Glob Select
+//
+
+GlobSelectDialog::GlobSelectDialog(PanelSharedState::P s, bool select_mode) : Dialog(std::move(s)), select_mode(select_mode) {
+  InputOption input_opt;
+  input_opt.multiline       = false;
+  input_opt.cursor_position = &cursor_pos;
+  input_opt.on_change       = [this]() { error.clear(); };
+  input_opt.on_enter        = [this]() { ok(); };
+  input_pattern             = Input(&pattern, "Pattern (e.g. *.txt)", input_opt) | showInputCursor(&cursor_pos);
+
+  button_ok    = Button("   OK   ", [this] { ok(); });
+  button_close = Button(" Cancel ", [this] { cancel(); });
+
+  navigation = CatchEvent(Container::Vertical({
+                            input_pattern,
+                            button_ok,
+                            button_close,
+                          }),
+                          close_on_esc(this));
+  renderer   = Renderer(navigation, [this]() -> Element { return render(); });
+}
+
+void GlobSelectDialog::OnShow() {
+  pattern.clear();
+  error.clear();
+  cursor_pos = 0;
+  input_pattern->TakeFocus();
+}
+
+void GlobSelectDialog::ok() {
+  if (pattern.empty()) {
+    error = "Pattern is empty";
+    return;
+  }
+
+  bool any_match = false;
+  for (int i = 0; i < static_cast<int>(app->dir->items.size()); ++i) {
+    const bool matches = glob_match_ascii_case_insensitive(pattern, app->dir->items.at(i).filename_ref());
+    if (!matches) continue;
+    any_match = true;
+    if (select_mode && !app->dir->items.at(i).selected()) {
+      app->dir->item_toggle_select(i);
+    } else if (!select_mode && app->dir->items.at(i).selected()) {
+      app->dir->item_toggle_select(i);
+    }
+  }
+  if (!any_match) {
+    error = "No items match pattern";
+    return;
+  }
+  app->action.close_dialog();
+}
+
+void GlobSelectDialog::cancel() { app->action.close_dialog(); }
+
+Element GlobSelectDialog::render() {
+  const std::string title = select_mode ? " Select by Glob " : " Deselect by Glob ";
+  const std::string hint  = select_mode ? "Select items matching wildcard pattern" : "Deselect items matching wildcard pattern";
+
+  Elements children = {
+    paragraphAlignCenter(hint),
+    separator(),
+    input_pattern->Render(),
+  };
+  if (!error.empty()) { children.push_back(text(error) | theme().mkdir_errortxt); }
+  children.push_back(text("Wildcards: * matches many chars, ? matches one char") | dim);
+  children.push_back(filler());
+  children.push_back(button_ok->Render() | hcenter);
+  children.push_back(button_close->Render() | hcenter);
+  return window(text(title) | bold | hcenter, vbox(std::move(children)), BorderStyle::DOUBLE);
+}
+
 //
 // Rename
 //
@@ -1632,6 +1740,143 @@ Element JobListDialog::render_detail() {
   return window(text(title_text) | bold | hcenter, content, BorderStyle::DOUBLE);
 }
 
+//
+// BookmarksDialog
+//
+
+BookmarksDialog::BookmarksDialog(
+  std::function<void()> close_dialog,
+  std::function<std::vector<Filepath>()> list_bookmarks,
+  std::function<void()> add_current_dir,
+  std::function<void(const Filepath&)> remove_bookmark,
+  std::function<void(const Filepath&)> open_bookmark
+) : Dialog(nullptr),
+    close_dialog(std::move(close_dialog)),
+    list_bookmarks(std::move(list_bookmarks)),
+    add_current_dir(std::move(add_current_dir)),
+    remove_bookmark(std::move(remove_bookmark)),
+    open_bookmark(std::move(open_bookmark)) {
+  ButtonOption ascii_button;
+  ascii_button.transform = ascii_button_transform();
+  button_add             = Button(" Add Current ", [this] { run_add(); }, ascii_button);
+  button_remove          = Button(" Remove ", [this] { run_remove(); }, ascii_button);
+  button_open            = Button(" Open ", [this] { run_open(); }, ascii_button);
+  button_close           = Button(" Close ", [this] { cancel(); }, ascii_button);
+
+  _data_source.dataset_size = [this]() -> DataSize {
+    int64_t size = static_cast<int64_t>(bookmarks.size());
+    return {size, 0, std::max(0LL, size - 1)};
+  };
+  _data_source.move_id_by = [this](int64_t& id, int64_t delta) -> bool {
+    int64_t old = id;
+    int64_t max = std::max(0LL, static_cast<int64_t>(bookmarks.size()) - 1);
+    id = std::clamp(id + delta, 0LL, max);
+    return id != old;
+  };
+  _data_source.count_items_before = [](int64_t id) -> int64_t { return id; };
+  _data_source.transform = [this](DSRenderContext& c) -> Element {
+    if (c.id < 0 || c.id >= static_cast<int64_t>(bookmarks.size())) return text("<invalid>");
+    Element row = text(" " + bookmarks.at(c.id).native());
+    if (c.focused) {
+      row |= c.component_focused ? bgcolor(Color::DarkBlue) : bgcolor(Color::GrayDark);
+      row |= ftxui::focus;
+    }
+    return row;
+  };
+  _data_source.on_event = [this](DSEventContext c) -> bool {
+    if (c.event == Event::Return) {
+      run_open();
+      return true;
+    }
+    if (c.event == Event::Delete || c.event == Event::Backspace || c.event == Event::Character('d')) {
+      run_remove();
+      return true;
+    }
+    return c.handled;
+  };
+  _data_source.min_y = 10;
+  list_menu          = DBMenu(&_data_source);
+
+  navigation = CatchEvent(Container::Vertical({
+                            Container::Horizontal({button_add, button_remove, button_open, button_close}),
+                            list_menu,
+                          }),
+                          [this](Event e) -> bool {
+                            if (e == theme().key_cancel_dialog) {
+                              cancel();
+                              return true;
+                            }
+                            if (e == Event::Character('a')) {
+                              run_add();
+                              return true;
+                            }
+                            return false;
+                          });
+  renderer   = Renderer(navigation, [this]() -> Element {
+    auto title = text(" Bookmarks [" + std::to_string(bookmarks.size()) + "] ") | bold | hcenter;
+    auto content = vbox({
+      hbox({
+        button_add->Render() | hcenter | xflex_grow,
+        separator(),
+        button_remove->Render() | hcenter | xflex_grow,
+        separator(),
+        button_open->Render() | hcenter | xflex_grow,
+        separator(),
+        button_close->Render() | hcenter | xflex_grow,
+      }),
+      separator(),
+      bookmarks.empty() ? (text("  No bookmarks. Press 'a' to add current directory.") | dim) : (list_menu->Render() | yflex),
+    });
+    return window(title, content, BorderStyle::DOUBLE);
+  });
+}
+
+void BookmarksDialog::OnShow() {
+  refresh();
+  list_menu->TakeFocus();
+}
+
+void BookmarksDialog::cancel() { close_dialog(); }
+
+void BookmarksDialog::refresh() {
+  bookmarks = list_bookmarks ? list_bookmarks() : std::vector<Filepath>();
+  if (bookmarks.empty()) {
+    _data_source.focused_id = 0;
+  } else {
+    _data_source.focused_id = std::clamp(_data_source.focused_id, 0LL, static_cast<int64_t>(bookmarks.size()) - 1);
+  }
+}
+
+bool BookmarksDialog::has_selected() const {
+  return !bookmarks.empty() && _data_source.focused_id >= 0 && _data_source.focused_id < static_cast<int64_t>(bookmarks.size());
+}
+
+int64_t BookmarksDialog::selected_index() const {
+  if (!has_selected()) return -1;
+  return _data_source.focused_id;
+}
+
+void BookmarksDialog::run_open() {
+  const int64_t index = selected_index();
+  if (index < 0) return;
+  const Filepath selected = bookmarks.at(index);
+  if (open_bookmark) open_bookmark(selected);
+  close_dialog();
+}
+
+void BookmarksDialog::run_add() {
+  if (add_current_dir) add_current_dir();
+  refresh();
+}
+
+void BookmarksDialog::run_remove() {
+  const int64_t index = selected_index();
+  if (index < 0) return;
+  const Filepath selected = bookmarks.at(index);
+  if (remove_bookmark) remove_bookmark(selected);
+  refresh();
+}
+
 namespace {
 
 std::string to_lower_ascii(std::string s) {
@@ -1816,6 +2061,8 @@ Commands::Commands() {
   available.push_back({"rename", theme().key_rename, "Rename", "Rename", CommandScope::PANEL, CommandKind::SHOW_DIALOG});
   available.push_back({"mkdir", theme().key_mkdir, "Mkdir", "Make Directory", CommandScope::PANEL, CommandKind::SHOW_DIALOG});
   available.push_back({"find", theme().key_find, "Find", "Find", CommandScope::PANEL, CommandKind::SHOW_DIALOG});
+  available.push_back({"glob_select", theme().key_glob_select, "GlobSelect", "Select by Glob", CommandScope::PANEL, CommandKind::SHOW_DIALOG});
+  available.push_back({"glob_deselect", theme().key_glob_deselect, "GlobDeselect", "Deselect by Glob", CommandScope::PANEL, CommandKind::SHOW_DIALOG});
   available.push_back({"names_to_clipboard", theme().key_names_to_clipboard, "NameToClipboard", "Names to Clipboard", CommandScope::PANEL, CommandKind::SHOW_DIALOG});
   available.push_back({"paths_to_clipboard", theme().key_paths_to_clipboard, "PathToClipboard", "Paths to Clipboard", CommandScope::PANEL, CommandKind::SHOW_DIALOG});
 
@@ -1825,6 +2072,7 @@ Commands::Commands() {
   available.push_back({"target_left", theme().key_target_dir_to_focused_item_left, "", "Target Left Panel to Focused Item", CommandScope::GLOBAL, CommandKind::EXECUTE_CALLBACK});
   available.push_back({"toggle_errors", theme().key_toggle_error_details, "ErrorList", "Toggle Error List", CommandScope::GLOBAL, CommandKind::SHOW_DIALOG});
   available.push_back({"toggle_job_list", theme().key_toggle_job_list, "JobList", "Toggle Job List", CommandScope::GLOBAL, CommandKind::SHOW_DIALOG});
+  available.push_back({"open_bookmarks", theme().key_bookmarks_dialog, "Bookmarks", "Open Bookmarks", CommandScope::GLOBAL, CommandKind::SHOW_DIALOG});
 }
 
 const Command* Commands::find_by_id(const std::string& id) const {

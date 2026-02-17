@@ -123,6 +123,8 @@ class Panel : public DialogOverlay {
     _overlay_dialogs["Move"]            = std::make_shared<MoveDialog>(_state);
     _overlay_dialogs["Delete"]          = std::make_shared<DeleteDialog>(_state);
     _overlay_dialogs["Find"]            = std::make_shared<Nyi>(_state);
+    _overlay_dialogs["GlobSelect"]      = std::make_shared<GlobSelectDialog>(_state, true);
+    _overlay_dialogs["GlobDeselect"]    = std::make_shared<GlobSelectDialog>(_state, false);
     _overlay_dialogs["NameToClipboard"] = std::make_shared<ToClipboardDialog>(_state);
     _overlay_dialogs["PathToClipboard"] = std::make_shared<ToClipboardDialog>(_state);
   }
@@ -344,6 +346,8 @@ class FileCommander : public DialogOverlay {
   Panel              left, right;
   JobProgressBar     progress_bar;
   std::deque<double> clear_errors_sequence;
+  std::vector<Filepath> _bookmarks;
+  bool _last_main_focus_left = true;
 
   std::function<void()> _close_dialog;
   std::function<int()>  _get_dimx;
@@ -356,11 +360,46 @@ class FileCommander : public DialogOverlay {
   Panel& get_left() { return left; }
   Panel& get_right() { return right; }
   Panel& focused_panel() {
-    if (left.navigation->Focused()) return left;
-    return right;
+    if (left.navigation->Focused()) {
+      _last_main_focus_left = true;
+      return left;
+    }
+    if (right.navigation->Focused()) {
+      _last_main_focus_left = false;
+      return right;
+    }
+    return _last_main_focus_left ? left : right;
   }
 
   std::vector<Command> list_palette_commands() { return commands().list_all(); }
+
+  std::vector<Filepath> list_bookmarks() const {
+    return _bookmarks;
+  }
+
+  void add_bookmark(const Filepath& path) {
+    Filepath normalized = path.lexically_normal();
+    auto it = std::find(_bookmarks.begin(), _bookmarks.end(), normalized);
+    if (it == _bookmarks.end()) {
+      _bookmarks.push_back(normalized);
+      std::sort(_bookmarks.begin(), _bookmarks.end(), [](const Filepath& a, const Filepath& b) { return a.native() < b.native(); });
+    }
+  }
+
+  void remove_bookmark(const Filepath& path) {
+    Filepath normalized = path.lexically_normal();
+    _bookmarks.erase(std::remove(_bookmarks.begin(), _bookmarks.end(), normalized), _bookmarks.end());
+  }
+
+  void open_bookmark(const Filepath& path) {
+    Panel& panel = focused_panel();
+    auto   where = path;
+    panel.move_to(where);
+  }
+
+  void add_current_focused_dir_bookmark() {
+    add_bookmark(focused_panel().dir.path);
+  }
 
   void execute_palette_command(const std::string& id) {
     Command* command = commands().find_by_id(id);
@@ -440,6 +479,13 @@ class FileCommander : public DialogOverlay {
     navigation->Add(panels_with_cancel);
     _overlay_dialogs["ErrorList"] = std::make_shared<ErrorListDialog>(_close_dialog);
     _overlay_dialogs["JobList"]   = std::make_shared<JobListDialog>(_close_dialog);
+    _overlay_dialogs["Bookmarks"] = std::make_shared<BookmarksDialog>(
+      _close_dialog,
+      [this]() { return this->list_bookmarks(); },
+      [this]() { this->add_current_focused_dir_bookmark(); },
+      [this](const Filepath& path) { this->remove_bookmark(path); },
+      [this](const Filepath& path) { this->open_bookmark(path); }
+    );
     _overlay_dialogs["CommandPalette"] = std::make_shared<CommandPaletteDialog>(
       _close_dialog,
       [this]() { return this->list_palette_commands(); },
@@ -504,6 +550,10 @@ class FileCommander : public DialogOverlay {
     }
     if (event == theme().key_toggle_job_list && !dialog_active()) {
       show_dialog("JobList");
+      return true;
+    }
+    if (event == theme().key_bookmarks_dialog && !dialog_active()) {
+      show_dialog("Bookmarks");
       return true;
     }
 

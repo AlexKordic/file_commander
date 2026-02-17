@@ -290,6 +290,60 @@ void LuaScripting::poll_async_events() {
     _last_discovery_ptr = nullptr;  // reset when process is cleared
   }
   _had_discovery = discovery_running;
+
+  auto count_selected = [](Panel& panel) -> int {
+    int selected = 0;
+    for (const auto& item : panel.dir.items) {
+      if (item.selected()) selected++;
+    }
+    return selected;
+  };
+  const int left_item_count      = static_cast<int>(_app.get_left().dir._calculated.items_visible);
+  const int right_item_count     = static_cast<int>(_app.get_right().dir._calculated.items_visible);
+  const int left_selected_count  = count_selected(_app.get_left());
+  const int right_selected_count = count_selected(_app.get_right());
+  const int error_count          = static_cast<int>(file_operations().dataset_size().total);
+
+  if (!_event_baseline_initialized) {
+    _event_baseline_initialized = true;
+    _last_left_item_count       = left_item_count;
+    _last_right_item_count      = right_item_count;
+    _last_left_selected_count   = left_selected_count;
+    _last_right_selected_count  = right_selected_count;
+    _last_error_count           = error_count;
+    return;
+  }
+
+  const bool left_items_changed  = left_item_count != _last_left_item_count;
+  const bool right_items_changed = right_item_count != _last_right_item_count;
+  if (left_items_changed || right_items_changed) {
+    std::string detail = "both";
+    if (left_items_changed && !right_items_changed) detail = "left";
+    if (!left_items_changed && right_items_changed) detail = "right";
+    fire_event("items_updated", detail);
+  }
+
+  if (left_selected_count != _last_left_selected_count) {
+    fire_event("selection_changed", "left:" + std::to_string(left_selected_count));
+  }
+  if (right_selected_count != _last_right_selected_count) {
+    fire_event("selection_changed", "right:" + std::to_string(right_selected_count));
+  }
+
+  if (error_count > _last_error_count) {
+    for (int i = _last_error_count; i < error_count; ++i) {
+      JobErrorInfo e = file_operations().get_error(i);
+      fire_event("error_reported", e.valid() ? e.message : "");
+    }
+  } else if (error_count < _last_error_count) {
+    fire_event("errors_cleared", std::to_string(error_count));
+  }
+
+  _last_left_item_count      = left_item_count;
+  _last_right_item_count     = right_item_count;
+  _last_left_selected_count  = left_selected_count;
+  _last_right_selected_count = right_selected_count;
+  _last_error_count          = error_count;
 }
 
 // --- handle_resume_status ---
