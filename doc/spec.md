@@ -38,17 +38,15 @@ independently of FTXUI. The UI layer observes and issues commands to this machin
 
 ### 3. Extensible Command System
 
-Commands are registered in a central `Commands` struct mapping keyboard shortcuts to
-dialog names. Adding a new command means:
-1. Define a `Dialog` subclass with `navigation`, `renderer`, and `OnShow()`.
-2. Register it in `Panel`'s `_overlay_dialogs` map.
-3. Add its shortcut + dialog name to `Commands::Commands()`.
+Commands are registered in a central `Commands` catalog with stable IDs and metadata
+(`id`, key, description, scope, kind, MRU count). Both direct shortcuts and the command
+palette dispatch through this catalog.
 
 ### 4. Scriptable via LuaJIT
 
-A `fc` Lua module exposes `post_event(key)`, `sleep(ms)`, and `quit()` for
-automation and testing. Scripts run in a background thread, posting events to the
-active screen. Usage: `./file_commander run script.lua`.
+A `fc` Lua module exposes key dispatch, state/query helpers, event waits, job waits,
+and quit controls for automation and end-to-end tests. Scripts run as a UI-thread
+coroutine in `run` mode. Usage: `./build/fc run test/test_copy.lua`.
 
 ### 5. Cross-Platform (Planned)
 
@@ -90,9 +88,10 @@ file_io_jobs.cpp
 | `CommandArgs` | commander.hpp | Selected files + focused item + origin/target paths passed to dialogs |
 | `PanelSharedState` | shared_state.hpp | Shared state between Panel and FTXUI dialogs: Dir*, filter, actions, callbacks |
 | `Dialog` | dialogs.hpp | Base class for all dialogs: holds `navigation` + `renderer` Components, `OnShow()` |
-| `DialogOverlay` | main.cpp | Manages `Container::Tab` + `dbox` overlay pattern for showing dialogs |
-| `Panel` | main.cpp | One side of the twin-panel layout: Dir + Files + dialogs + FileChangeFunnel |
-| `FileCommander` | main.cpp | Top-level: two Panels + ResizableSplit + global shortcuts + error overlay |
+| `DialogOverlay` | app.hpp | Manages `Container::Tab` + `dbox` overlay pattern for showing dialogs |
+| `Panel` | app.hpp | One side of the twin-panel layout: Dir + Files + dialogs + FileChangeFunnel |
+| `FileCommander` | app.hpp | Top-level: two Panels + ResizableSplit + global shortcuts + overlays |
+| `EditorManager` | editor_manager.hpp | Manages Fresh sessions, open/attach flow, and in-session editor MRU |
 | `JobSpec` | file_io_jobs.hpp | Combines JobInstructions (type + items) + JobStats (progress) + JobInterface (mutex + callback) |
 | `ThreadedFileJobs` | file_io_jobs.cpp | Job queue + worker thread + progress monitor |
 | `FileChangeFunnel` | commander.hpp | Abstract FS watcher. macOS impl uses FSEvents in `file_change_funnel.cpp` |
@@ -125,6 +124,30 @@ file_io_jobs.cpp
 - **Tab** switches focus between left and right panels.
 - **Ctrl+Right / Ctrl+Left** navigates the target panel to the focused item's directory.
 - **Ctrl+R** refreshes the current directory listing.
+
+### Command Palette
+
+- **Global command palette** on `F1` with fuzzy matching, command descriptions, and
+  visible key bindings.
+- Supports both panel and global commands.
+- Executes focused result on `Enter`.
+- Tracks command usage (MRU via `use_count`) and persists it in settings.
+- Includes command-key rebinding flow with conflict checks.
+
+### Fresh Editor Integration
+
+- Local Fresh integration is built from `../editor-fresh` when `FC_BUILD_FRESH=ON`.
+- Runtime command set:
+  - `F9`: open focused item(s) in Fresh
+  - `Ctrl+Y`: switch to previous tracked editor session
+  - `Ctrl+U`: switch to next tracked editor session
+  - `F10`: semantic "switch to file commander" command on FC side (no-op while FC is active)
+- Opening policy:
+  - single focused directory -> new Fresh session attach
+  - file(s) -> open in last-used session, then attach
+- Attach runs with restored terminal IO so control cleanly returns when Fresh detaches/exits.
+- Session metadata (`last_editor_session_id`) and binary override (`fresh_binary_path`)
+  are persisted in FC settings.
 
 ### File Operations
 
@@ -187,8 +210,9 @@ file_io_jobs.cpp
 
 ### LuaJIT Scripting
 
-- `./file_commander run script.lua` runs a Lua script in a background thread.
-- Available API: `fc.post_event("ret")`, `fc.sleep(500)`, `fc.quit()`.
+- `./build/fc run script.lua` runs a Lua test script as a coroutine on the UI thread.
+- Available API includes `fc.key(...)`, `fc.state()`, `fc.wait_event(...)`,
+  `fc.wait_for_jobs(...)`, `fc.sleep(...)`, `fc.quit()`.
 - Errors from Lua scripts are reported to the error log.
 
 ---
@@ -312,27 +336,16 @@ Each panel should support multiple tabs, each with its own Dir, sort, filter, an
 
 #### 3.1 Command Palette (vscode-like F1)
 
-This is the flagship UX feature: a fuzzy-search overlay for all commands.
+Status: **Implemented**
 
-**Steps:**
-1. Create a `CommandPaletteDialog : Dialog` with a filter Input and a scrollable menu
-   of available commands.
-2. Each command entry shows: description, current shortcut key, and last-used rank.
-3. Implement fuzzy matching on command name/description.
-4. On selection, invoke the command (call `show_dialog` with the command's dialog name,
-   or execute directly for non-dialog commands).
-5. Maintain a most-recently-used order. Each invocation moves the command to the top.
-6. Register at `FileCommander` level (global overlay) with a shortcut (e.g., F1 or Ctrl+Shift+P).
+Implemented behavior:
+1. `F1` opens global `CommandPaletteDialog`.
+2. Fuzzy search filters panel and global commands.
+3. Rows show description + current key binding.
+4. `Enter` executes focused command.
+5. Usage updates MRU ranking (`use_count`) and persists via settings.
 
-**Command struct expansion:**
-```cpp
-struct Command {
-  Event       key;
-  std::string dialog;
-  std::string description;  // NEW: human-readable name
-  int         use_count;    // NEW: for MRU sorting
-};
-```
+Remaining follow-ups are tracked under registry/persistence/rebinding improvements.
 
 #### 3.2 LuaJIT Testing Framework
 
@@ -571,42 +584,6 @@ A `Dir` that holds a mixed set of files from various directories.
 4. File operations on result-tab items use each item's actual parent path.
 5. Store per-directory ignore lists in settings (for future find-in-project use).
 
----
-
-### Priority 5: Navigation History
-
-#### 5.1 Back / Forward Navigation Tree
-
-**Steps:**
-1. Add a `NavigationHistory` class per panel:
-   ```cpp
-   struct NavigationNode {
-     Filepath path;
-     int focused_index;
-     std::string filter;
-   };
-   struct NavigationHistory {
-     std::vector<NavigationNode> nodes;
-     int current = 0;
-     void push(NavigationNode);
-     NavigationNode* back();
-     NavigationNode* forward();
-   };
-   ```
-2. On every `move_to`, push the current state before navigating.
-3. Add shortcut keys (e.g., Alt+Left for back, Alt+Right for forward).
-4. Restore focused item index and filter when navigating back/forward.
-5. Result-tabs should also be stored in navigation history.
-
-#### 5.2 Navigation Tree Dialog
-
-**Steps:**
-1. Create `NavigationTreeDialog : Dialog` showing the full history as a scrollable list.
-2. Allow jumping to any node.
-3. Allow deleting history entries.
-
----
-
 ### Priority 6: Platform Support
 
 #### 6.1 Linux inotify
@@ -618,30 +595,7 @@ A `Dir` that holds a mixed set of files from various directories.
    `DirItemUpdated::Event`.
 4. Guard with `#ifdef __linux__` in `FileChangeFunnel::create()`.
 
-#### 6.2 Windows ReadDirectoryChangesW
-
-**Steps:**
-1. Create `WindowsDirEvents : FileChangeFunnel` using `ReadDirectoryChangesW`.
-2. Map `FILE_ACTION_ADDED`, `FILE_ACTION_REMOVED`, `FILE_ACTION_MODIFIED`,
-   `FILE_ACTION_RENAMED_OLD_NAME` / `NEW_NAME` to `DirItemUpdated::Event`.
-3. Guard with `#ifdef _WIN32`.
-4. Clipboard: replace `pbcopy` with Win32 clipboard API.
-
----
-
 ### Priority 7: Polish
-
-#### 7.1 Mouse / Trackpad Support
-
-- FTXUI already provides mouse events. `DBMenu` supports `WheelUp`/`WheelDown`.
-- Add mouse click to available key bindings. FOr example: click-to-focus, click-to-select, drag-to-select-range.
-- Click on sort buttons already works. Click on most controls moves focus.
-
-#### 7.2 Extended Key Events
-
-- FTXUI supports some extended sequences (Ctrl+arrows, etc.).
-- Need: Shift+Arrow for selection extension, Alt+Enter for properties dialog.
-- May require terminal-specific escape sequence handling.
 
 #### 7.3 Additional Columns
 
@@ -669,8 +623,18 @@ Currently showing: name, size (colored), date. Need to add:
 
 #### Text editor
 
-Integrate https://github.com/sinelaw/fresh https://getfresh.dev/
-- code is at ../editor-fresh
+Status: **Implemented (Fresh integration)**
+
+Implemented:
+1. Build integration with local source at `../editor-fresh`.
+2. Runtime handoff from FC to Fresh with restored terminal IO.
+3. Session-aware open/switch flows via `EditorManager`.
+4. Palette + shortcut integration for editor commands.
+5. Contract documented in `doc/fresh_cli_contract.md`.
+
+Deferred:
+1. Explicit session-picker dialog UX beyond prev/next shortcuts.
+2. Windows-specific integration path.
 
 ---
 
@@ -692,6 +656,8 @@ Integrate https://github.com/sinelaw/fresh https://getfresh.dev/
 | Directory change notifications | Done (macOS), missing (Linux, Windows) |
 | Background operations | Done |
 | Progress display | Done |
+| Global command palette | Done (`F1`, fuzzy search, execute, MRU) |
+| Fresh editor handoff | Done (local Fresh build + runtime attach/switch) |
 
 ---
 
