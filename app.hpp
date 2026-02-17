@@ -715,6 +715,22 @@ class FileCommander : public DialogOverlay {
 
   std::vector<Command> list_palette_commands() { return commands().list_all(); }
 
+  std::vector<ThemeColorEntry> list_theme_colors() const {
+    std::vector<ThemeColorEntry> out;
+    const auto defs = theme().editable_colors();
+    out.reserve(defs.size());
+    for (const auto& [id, label] : defs) {
+      out.push_back({id, label, theme().color_token(id)});
+    }
+    return out;
+  }
+
+  bool set_theme_color(const std::string& id, const std::string& token, std::string& error) {
+    return theme().set_color_token(id, token, &error);
+  }
+
+  void reset_theme_colors() { theme().reset_color_defaults(); }
+
   bool rebind_palette_command(const std::string& id, const Event& key, std::string& error) {
     const std::string token = event_to_token(key);
     if (token.empty()) {
@@ -744,6 +760,8 @@ class FileCommander : public DialogOverlay {
   }
 
   void load_settings(bool restore_paths) {
+    load_theme_colors();
+
     std::ifstream in(settings_file_path());
     if (!in.good()) return;
     std::stringstream ss;
@@ -854,6 +872,8 @@ class FileCommander : public DialogOverlay {
   }
 
   void save_settings() const {
+    save_theme_colors();
+
     const std::string settings = settings_file_path();
     if (settings.empty()) return;
 
@@ -1127,6 +1147,14 @@ class FileCommander : public DialogOverlay {
       [this](const Filepath& path) { this->remove_bookmark(path); },
       [this](const Filepath& path) { this->open_bookmark(path); }
     );
+    _overlay_dialogs["ThemeColors"] = std::make_shared<ThemeColorsDialog>(
+      _close_dialog,
+      [this]() { return this->list_theme_colors(); },
+      []() { return theme().available_color_tokens(); },
+      [this](const std::string& id, const std::string& token, std::string& error) { return this->set_theme_color(id, token, error); },
+      [this]() { this->reset_theme_colors(); },
+      [this]() { this->save_theme_colors(); }
+    );
     _overlay_dialogs["CommandPalette"] = std::make_shared<CommandPaletteDialog>(
       _close_dialog,
       [this]() { return this->list_palette_commands(); },
@@ -1216,6 +1244,64 @@ class FileCommander : public DialogOverlay {
     return (Filepath(home) / ".config" / "file_commander" / "settings.json").native();
   }
 
+  static std::string theme_colors_file_path() {
+    const char* xdg = std::getenv("XDG_CONFIG_HOME");
+    if (xdg && *xdg) {
+      return (Filepath(xdg) / "file_commander" / "theme_colors.json").native();
+    }
+    const char* home = std::getenv("HOME");
+    if (!home || !*home) return "";
+    return (Filepath(home) / ".config" / "file_commander" / "theme_colors.json").native();
+  }
+
+  static void save_theme_colors() {
+    const std::string settings = theme_colors_file_path();
+    if (settings.empty()) return;
+
+    const Filepath settings_path(settings);
+    const Filepath settings_dir = settings_path.parent_path();
+    boost::system::error_code mk_ec;
+    boost::filesystem::create_directories(settings_dir, mk_ec);
+
+    std::ofstream out(settings, std::ios::trunc);
+    if (!out.good()) return;
+
+    auto write_quoted = [&out](const std::string& value) {
+      out << "\"" << fc_settings_detail::json_escape(value) << "\"";
+    };
+
+    const auto colors = theme().export_color_tokens();
+    out << "{\n";
+    out << "  \"version\": 1,\n";
+    out << "  \"colors\": {\n";
+    size_t i = 0;
+    for (const auto& [id, token] : colors) {
+      out << "    ";
+      write_quoted(id);
+      out << ": ";
+      write_quoted(token);
+      out << (i + 1 < colors.size() ? ",\n" : "\n");
+      i++;
+    }
+    out << "  }\n";
+    out << "}\n";
+  }
+
+  static void load_theme_colors() {
+    theme().reset_color_defaults();
+
+    std::ifstream in(theme_colors_file_path());
+    if (!in.good()) return;
+    std::stringstream ss;
+    ss << in.rdbuf();
+    const std::string json = ss.str();
+    if (json.empty()) return;
+
+    std::string colors_obj;
+    if (!fc_settings_detail::extract_json_object(json, "colors", colors_obj)) return;
+    theme().import_color_tokens(fc_settings_detail::parse_string_map_object(colors_obj));
+  }
+
   static Event* theme_key_for_command(const std::string& id) {
     Theme& t = theme();
     if (id == "select_toggle") return &t.key_files_select;
@@ -1247,6 +1333,7 @@ class FileCommander : public DialogOverlay {
     if (id == "toggle_errors") return &t.key_toggle_error_details;
     if (id == "toggle_job_list") return &t.key_toggle_job_list;
     if (id == "open_bookmarks") return &t.key_bookmarks_dialog;
+    if (id == "edit_theme_colors") return &t.key_theme_colors;
     if (id == "open_in_editor") return &t.key_open_in_editor;
     if (id == "switch_to_file_commander") return &t.key_switch_to_file_commander;
     if (id == "switch_editor_prev") return &t.key_switch_editor_prev;
@@ -1271,6 +1358,10 @@ class FileCommander : public DialogOverlay {
         return true;
       }
       return false;
+    }
+    if (event == theme().key_theme_colors && !dialog_active()) {
+      show_dialog("ThemeColors");
+      return true;
     }
     if (!dialog_active() && event == theme().key_open_in_editor) {
       std::string error;

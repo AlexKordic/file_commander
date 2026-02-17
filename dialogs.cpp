@@ -16,9 +16,12 @@
 #include <ftxui/component/component.hpp>
 #include <ftxui/component/screen_interactive.hpp>
 #include <ftxui/dom/elements.hpp>
+#include <ftxui/screen/color_info.hpp>
 
+#include <algorithm>
 #include <cmath>
 #include <cctype>
+#include <cstdlib>
 #include <deque>
 #include <format>
 #include <mutex>
@@ -2404,6 +2407,331 @@ bool CommandPaletteDialog::capture_rebind_key(const Event& e) {
 }
 
 //
+// ThemeColorsDialog
+//
+
+namespace {
+
+std::string normalize_color_name(std::string value) {
+  std::string out;
+  out.reserve(value.size());
+  for (char ch : value) {
+    if (std::isalnum(static_cast<unsigned char>(ch))) {
+      out.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(ch))));
+    }
+  }
+  return out;
+}
+
+bool parse_palette_token(std::string token, int& index) {
+  if (token.size() < 2) return false;
+  token = normalize_color_name(std::move(token));
+  if (token.empty() || token[0] != 'p') return false;
+  for (size_t i = 1; i < token.size(); ++i) {
+    if (!std::isdigit(static_cast<unsigned char>(token[i]))) return false;
+  }
+  index = std::atoi(token.c_str() + 1);
+  return index >= 0 && index <= 255;
+}
+
+bool token_to_palette_index(const std::string& token, int& out_index) {
+  if (parse_palette_token(token, out_index)) return true;
+  const std::string norm = normalize_color_name(token);
+  if (norm.empty()) return false;
+  for (int i = 0; i <= 255; ++i) {
+    const auto info = GetColorInfo(Color::Palette256(i));
+    if (normalize_color_name(info.name ? info.name : "") == norm) {
+      out_index = i;
+      return true;
+    }
+  }
+  return false;
+}
+
+std::string palette_token_for_index(int index) {
+  return "p" + std::to_string(std::clamp(index, 0, 255));
+}
+
+std::vector<std::vector<int>> palette_256_grid() {
+  std::vector<ColorInfo> info_gray;
+  std::vector<ColorInfo> info_color;
+  for (int i = 16; i < 256; ++i) {
+    ColorInfo info = GetColorInfo(Color::Palette256(i));
+    if (info.saturation == 0) {
+      info_gray.push_back(info);
+    } else {
+      info_color.push_back(info);
+    }
+  }
+
+  std::sort(info_color.begin(), info_color.end(), [](const ColorInfo& a, const ColorInfo& b) { return a.hue < b.hue; });
+
+  std::vector<std::vector<ColorInfo>> info_columns(8);
+  info_columns[0] = info_gray;
+  for (size_t i = 0; i < info_color.size(); ++i) {
+    info_columns[1 + 7 * i / info_color.size()].push_back(info_color[i]);
+  }
+
+  for (auto& column : info_columns) {
+    std::sort(column.begin(), column.end(), [](const ColorInfo& a, const ColorInfo& b) { return a.value < b.value; });
+    for (int i = 0; i < static_cast<int>(column.size()) - 1; ++i) {
+      int best_index    = i + 1;
+      int best_distance = 255 * 255 * 3;
+      for (int j = i + 1; j < static_cast<int>(column.size()); ++j) {
+        const int dx       = static_cast<int>(column[i].red) - static_cast<int>(column[j].red);
+        const int dy       = static_cast<int>(column[i].green) - static_cast<int>(column[j].green);
+        const int dz       = static_cast<int>(column[i].blue) - static_cast<int>(column[j].blue);
+        const int distance = dx * dx + dy * dy + dz * dz;
+        if (distance < best_distance) {
+          best_distance = distance;
+          best_index    = j;
+        }
+      }
+      std::swap(column[i + 1], column[best_index]);
+    }
+  }
+
+  std::vector<std::vector<int>> grid;
+  grid.reserve(info_columns.size());
+  for (const auto& column : info_columns) {
+    std::vector<int> row;
+    row.reserve(column.size());
+    for (const auto& item : column) row.push_back(item.index_256);
+    grid.push_back(std::move(row));
+  }
+  return grid;
+}
+
+}  // namespace
+
+ThemeColorsDialog::ThemeColorsDialog(
+  std::function<void()> close_dialog,
+  std::function<std::vector<ThemeColorEntry>()> list_entries,
+  std::function<std::vector<std::string>()> list_tokens,
+  std::function<bool(const std::string&, const std::string&, std::string&)> set_color_token,
+  std::function<void()> reset_defaults,
+  std::function<void()> persist_colors
+) : Dialog(nullptr),
+    close_dialog(std::move(close_dialog)),
+    list_entries(std::move(list_entries)),
+    list_tokens(std::move(list_tokens)),
+    set_color_token(std::move(set_color_token)),
+    reset_defaults(std::move(reset_defaults)),
+    persist_colors(std::move(persist_colors)) {
+  ButtonOption ascii_button;
+  ascii_button.transform = ascii_button_transform();
+  button_save            = Button(" Save ", [this] {
+    if (this->persist_colors) this->persist_colors();
+    status_message = "Theme colors saved";
+  }, ascii_button);
+  button_reset           = Button(" Reset Defaults ", [this] {
+    if (this->reset_defaults) this->reset_defaults();
+    entries = this->list_entries ? this->list_entries() : std::vector<ThemeColorEntry>();
+    status_message = "Reset to default colors";
+  }, ascii_button);
+  button_close           = Button(" Close ", [this] { cancel(); }, ascii_button);
+
+  _data_source.dataset_size = [this]() -> DataSize {
+    auto sz = static_cast<int64_t>(entries.size());
+    return {sz, 0, std::max(0LL, sz - 1)};
+  };
+  _data_source.move_id_by = [this](int64_t& id, int64_t delta) -> bool {
+    int64_t old = id;
+    int64_t max = std::max(0LL, static_cast<int64_t>(entries.size()) - 1);
+    id = std::clamp(id + delta, 0LL, max);
+    return id != old;
+  };
+  _data_source.count_items_before = [](int64_t id) -> int64_t { return id; };
+  _data_source.on_event = [this](DSEventContext c) -> bool {
+    if (c.event == Event::Return) {
+      open_picker_for_focused();
+      return true;
+    }
+    return c.handled;
+  };
+  _data_source.transform = [this](DSRenderContext& c) -> Element {
+    if (c.id < 0 || c.id >= static_cast<int64_t>(entries.size())) return text("<invalid>");
+    const auto& entry = entries.at(c.id);
+    auto row = hbox({
+      text(" " + entry.label) | xflex_grow,
+      text(" " + entry.token + " ") | dim,
+    });
+    if (c.focused) {
+      row |= c.component_focused ? bgcolor(Color::DarkBlue) : bgcolor(Color::GrayDark);
+      row |= ftxui::focus;
+    }
+    return row;
+  };
+  _data_source.min_y = 14;
+  list_menu          = DBMenu(&_data_source);
+
+  navigation = CatchEvent(Container::Vertical({
+                            Container::Horizontal({button_save, button_reset, button_close}),
+                            list_menu,
+                          }),
+                          [this](Event e) -> bool {
+                            if (picker_open) {
+                              if (e == Event::ArrowUp) {
+                                move_picker(-1, 0);
+                                return true;
+                              }
+                              if (e == Event::ArrowDown) {
+                                move_picker(+1, 0);
+                                return true;
+                              }
+                              if (e == Event::ArrowLeft) {
+                                move_picker(0, -1);
+                                return true;
+                              }
+                              if (e == Event::ArrowRight) {
+                                move_picker(0, +1);
+                                return true;
+                              }
+                              if (e == Event::Return) {
+                                accept_picker();
+                                return true;
+                              }
+                              if (e == Event::Escape) {
+                                cancel_picker();
+                                return true;
+                              }
+                              return true;
+                            }
+                            if (e == Event::Return && list_menu->Focused()) {
+                              open_picker_for_focused();
+                              return true;
+                            }
+                            return close_on_esc(this)(e);
+                          });
+  renderer   = Renderer(navigation, [this]() -> Element {
+    auto title = text(" Theme Colors [" + std::to_string(entries.size()) + "] ") | bold | hcenter;
+    auto content = vbox({
+      hbox({
+        button_save->Render() | hcenter | xflex_grow,
+        separator(),
+        button_reset->Render() | hcenter | xflex_grow,
+        separator(),
+        button_close->Render() | hcenter | xflex_grow,
+      }),
+      separator(),
+      text(" Use Up/Down to select a color, Enter to open picker. ") | dim,
+      !status_message.empty() ? (text(" " + status_message + " ") | dim) : text(""),
+      separator(),
+      entries.empty() ? (text("  No editable colors.") | dim) : (list_menu->Render() | yflex),
+    });
+    Element base = window(title, content, BorderStyle::DOUBLE);
+    if (!picker_open) return base;
+    return dbox({base, render_picker() | clear_under_colors | center});
+  });
+}
+
+void ThemeColorsDialog::OnShow() {
+  entries = list_entries ? list_entries() : std::vector<ThemeColorEntry>();
+  tokens  = list_tokens ? list_tokens() : std::vector<std::string>();
+  picker_grid = palette_256_grid();
+  picker_row  = 0;
+  picker_col  = 0;
+  picker_open = false;
+  status_message.clear();
+  _data_source.focused_id = 0;
+  auto screen = ScreenInteractive::Active();
+  if (screen) _data_source.min_y = std::max(12, static_cast<int>(0.8 * screen->dimy()));
+  list_menu->TakeFocus();
+}
+
+void ThemeColorsDialog::cancel() { close_dialog(); }
+
+void ThemeColorsDialog::open_picker_for_focused() {
+  if (entries.empty() || picker_grid.empty()) return;
+  const int64_t focused = std::clamp(_data_source.focused_id, 0LL, static_cast<int64_t>(entries.size()) - 1);
+  const auto&   entry   = entries.at(focused);
+  int           wanted  = 16;
+  token_to_palette_index(entry.token, wanted);
+  picker_row  = 0;
+  picker_col  = 0;
+  picker_open = true;
+
+  for (int r = 0; r < static_cast<int>(picker_grid.size()); ++r) {
+    for (int c = 0; c < static_cast<int>(picker_grid[r].size()); ++c) {
+      if (picker_grid[r][c] == wanted) {
+        picker_row = r;
+        picker_col = c;
+        return;
+      }
+    }
+  }
+}
+
+void ThemeColorsDialog::move_picker(int drow, int dcol) {
+  if (!picker_open || picker_grid.empty()) return;
+  picker_row = std::clamp(picker_row + drow, 0, static_cast<int>(picker_grid.size()) - 1);
+  if (picker_grid[picker_row].empty()) {
+    picker_col = 0;
+    return;
+  }
+  picker_col = std::clamp(picker_col + dcol, 0, static_cast<int>(picker_grid[picker_row].size()) - 1);
+}
+
+void ThemeColorsDialog::accept_picker() {
+  if (!picker_open || entries.empty()) return;
+  const int64_t focused = std::clamp(_data_source.focused_id, 0LL, static_cast<int64_t>(entries.size()) - 1);
+  auto&         entry   = entries.at(focused);
+  const std::string next_token = palette_token_for_index(selected_picker_index());
+  std::string error;
+  if (!set_color_token || !set_color_token(entry.id, next_token, error)) {
+    status_message = error.empty() ? "Failed to update theme color" : error;
+    return;
+  }
+  entry.token    = next_token;
+  status_message = "Updated " + entry.label + " -> " + next_token;
+  picker_open    = false;
+}
+
+void ThemeColorsDialog::cancel_picker() {
+  if (!picker_open) return;
+  picker_open = false;
+}
+
+int ThemeColorsDialog::selected_picker_index() const {
+  if (picker_grid.empty()) return 16;
+  const int row = std::clamp(picker_row, 0, static_cast<int>(picker_grid.size()) - 1);
+  if (picker_grid[row].empty()) return 16;
+  const int col = std::clamp(picker_col, 0, static_cast<int>(picker_grid[row].size()) - 1);
+  return picker_grid[row][col];
+}
+
+Element ThemeColorsDialog::render_picker() const {
+  const int         idx         = selected_picker_index();
+  const std::string chosen_name = palette_token_for_index(idx);
+
+  auto chosen_text = text(" Chosen: " + chosen_name + "                                ") | bgcolor(Color(Color::Palette256(idx)));
+
+  Elements rows;
+  for (int r = 0; r < static_cast<int>(picker_grid.size()); ++r) {
+    Elements row;
+    for (int c = 0; c < static_cast<int>(picker_grid[r].size()); ++c) {
+      const bool selected = (r == picker_row) && (c == picker_col);
+      auto       cell     = text(selected ? "[]" : "  ") | bgcolor(Color(Color::Palette256(picker_grid[r][c])));
+      if (selected) {
+        cell |= inverted;
+        cell |= bold;
+      }
+      row.push_back(std::move(cell));
+    }
+    rows.push_back(hbox(std::move(row)));
+  }
+
+  auto content = vbox({
+    chosen_text,
+    separator(),
+    vbox(std::move(rows)),
+    separator(),
+    text(" Arrows: move  Enter: apply  Esc: cancel ") | dim,
+  });
+  return window(text(" Color Picker (256) ") | bold | hcenter, content, BorderStyle::DOUBLE);
+}
+
+//
 // Commands
 //
 
@@ -2440,6 +2768,7 @@ Commands::Commands() {
   available.push_back({"toggle_errors", theme().key_toggle_error_details, "ErrorList", "Toggle Error List", CommandScope::GLOBAL, CommandKind::SHOW_DIALOG});
   available.push_back({"toggle_job_list", theme().key_toggle_job_list, "JobList", "Toggle Job List", CommandScope::GLOBAL, CommandKind::SHOW_DIALOG});
   available.push_back({"open_bookmarks", theme().key_bookmarks_dialog, "Bookmarks", "Open Bookmarks", CommandScope::GLOBAL, CommandKind::SHOW_DIALOG});
+  available.push_back({"edit_theme_colors", theme().key_theme_colors, "ThemeColors", "Edit Theme Colors", CommandScope::GLOBAL, CommandKind::SHOW_DIALOG});
   available.push_back({"open_in_editor", theme().key_open_in_editor, "", "Open in Fresh Editor", CommandScope::GLOBAL, CommandKind::EXECUTE_CALLBACK});
   available.push_back({"switch_to_file_commander", theme().key_switch_to_file_commander, "", "Switch to File Commander", CommandScope::GLOBAL, CommandKind::EXECUTE_CALLBACK});
   available.push_back({"switch_editor_prev", theme().key_switch_editor_prev, "", "Switch to Previous Editor Session", CommandScope::GLOBAL, CommandKind::EXECUTE_CALLBACK});

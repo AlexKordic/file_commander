@@ -42,6 +42,12 @@ struct Command {
   int          use_count = 0;
 };
 
+struct ThemeColorEntry {
+  std::string id;
+  std::string label;
+  std::string token;
+};
+
 struct Commands {
   std::vector<Command> available;
   Commands();
@@ -428,6 +434,46 @@ struct CommandPaletteDialog : Dialog {
   void run_selected();
   void start_rebind();
   bool capture_rebind_key(const Event& e);
+};
+
+struct ThemeColorsDialog : Dialog {
+  ThemeColorsDialog(
+    std::function<void()> close_dialog,
+    std::function<std::vector<ThemeColorEntry>()> list_entries,
+    std::function<std::vector<std::string>()> list_tokens,
+    std::function<bool(const std::string&, const std::string&, std::string&)> set_color_token,
+    std::function<void()> reset_defaults,
+    std::function<void()> persist_colors
+  );
+  void OnShow() override;
+  void cancel();
+
+  std::function<void()> close_dialog;
+  std::function<std::vector<ThemeColorEntry>()> list_entries;
+  std::function<std::vector<std::string>()> list_tokens;
+  std::function<bool(const std::string&, const std::string&, std::string&)> set_color_token;
+  std::function<void()> reset_defaults;
+  std::function<void()> persist_colors;
+
+  std::vector<ThemeColorEntry> entries;
+  std::vector<std::string>     tokens;
+  DataSource                   _data_source;
+  Component                    list_menu;
+  Component                    button_save;
+  Component                    button_reset;
+  Component                    button_close;
+  std::string                  status_message;
+  bool                         picker_open = false;
+  std::vector<std::vector<int>> picker_grid;
+  int                          picker_row = 0;
+  int                          picker_col = 0;
+
+  void open_picker_for_focused();
+  void move_picker(int drow, int dcol);
+  void accept_picker();
+  void cancel_picker();
+  int  selected_picker_index() const;
+  Element render_picker() const;
 };
 
 }  // namespace ftxui
