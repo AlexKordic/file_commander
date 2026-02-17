@@ -455,7 +455,9 @@ void LuaScripting::check_waits() {
         if (_event_log[i].name == name) {
           // Match! Resume coroutine with true
           _pending_wait.reset();
-          _event_cursor = _event_log.size();
+          // Advance only past the matched event. This preserves trailing events
+          // that may have been produced in the same poll cycle for subsequent waits.
+          _event_cursor = i + 1;
           lua_pushboolean(_lua_co, 1);
           int status = lua_resume(_lua_co, 1);
           handle_resume_status(status);
@@ -798,7 +800,8 @@ int LuaScripting::l_wait_event(lua_State* L) {
   for (size_t i = self->_event_cursor; i < self->_event_log.size(); i++) {
     for (auto& name : names) {
       if (self->_event_log[i].name == name) {
-        self->_event_cursor = self->_event_log.size();
+        // Preserve trailing already-logged events for the caller's next wait.
+        self->_event_cursor = i + 1;
         lua_pushboolean(L, 1);
         return 1;  // already happened, no yield
       }
