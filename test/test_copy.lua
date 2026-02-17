@@ -899,7 +899,7 @@ local function test_cancel_copy()
   check(cancelled, "29: cancel_job returned true")
 
   -- Wait for the job to finish (cancel triggers job_completed event)
-  fc.wait_for_jobs()
+  check(fc.wait_for_jobs(15000), "29: expected job completion after cancel")
 
   -- Reset transfer rate for subsequent tests
   fc.set_transfer_rate(0)
@@ -1033,7 +1033,12 @@ local function test_job_history()
 
   -- Run a normal copy
   h.do_copy()
-  fc.wait_for_jobs()
+  local s = fc.state()
+  check(
+    s.jobs.state == "completed" or s.jobs.state == "completed_with_errors",
+    "31: expected completed state after copy, got %s",
+    tostring(s.jobs.state)
+  )
 
   -- Check job history has at least one new entry
   local hist_after = fc.job_history()
