@@ -45,7 +45,11 @@ struct Theme {
     key_toggle_error_details,
     key_toggle_job_list,
     key_bookmarks_dialog,
-    key_command_palette;
+    key_command_palette,
+    key_open_in_editor,
+    key_switch_to_file_commander,
+    key_switch_editor_prev,
+    key_switch_editor_next;
 
   ftxui::Event key_mkdir, key_copy, key_move, key_delete, key_rename, key_names_to_clipboard, key_paths_to_clipboard, key_find;
 

@@ -56,6 +56,14 @@ Expected success signal includes:
 [PASS] ALL COPY TESTS PASSED
 ```
 
+Run editor integration test with a fake Fresh binary:
+
+```bash
+FC_FRESH_BIN=./test/fakes/fresh_fake.sh \
+FC_FRESH_FAKE_LOG=/tmp/fc_fresh_fake.log \
+./build/fc run test/test_editor_integration.lua
+```
+
 ## Troubleshooting
 
 If CMake reports a generator mismatch in `build/_deps/boost-subbuild`, clear only the Boost subbuild folders and re-run configure:

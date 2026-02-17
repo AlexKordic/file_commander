@@ -2440,6 +2440,10 @@ Commands::Commands() {
   available.push_back({"toggle_errors", theme().key_toggle_error_details, "ErrorList", "Toggle Error List", CommandScope::GLOBAL, CommandKind::SHOW_DIALOG});
   available.push_back({"toggle_job_list", theme().key_toggle_job_list, "JobList", "Toggle Job List", CommandScope::GLOBAL, CommandKind::SHOW_DIALOG});
   available.push_back({"open_bookmarks", theme().key_bookmarks_dialog, "Bookmarks", "Open Bookmarks", CommandScope::GLOBAL, CommandKind::SHOW_DIALOG});
+  available.push_back({"open_in_editor", theme().key_open_in_editor, "", "Open in Fresh Editor", CommandScope::GLOBAL, CommandKind::EXECUTE_CALLBACK});
+  available.push_back({"switch_to_file_commander", theme().key_switch_to_file_commander, "", "Switch to File Commander", CommandScope::GLOBAL, CommandKind::EXECUTE_CALLBACK});
+  available.push_back({"switch_editor_prev", theme().key_switch_editor_prev, "", "Switch to Previous Editor Session", CommandScope::GLOBAL, CommandKind::EXECUTE_CALLBACK});
+  available.push_back({"switch_editor_next", theme().key_switch_editor_next, "", "Switch to Next Editor Session", CommandScope::GLOBAL, CommandKind::EXECUTE_CALLBACK});
 }
 
 const Command* Commands::find_by_id(const std::string& id) const {

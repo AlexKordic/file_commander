@@ -14,6 +14,9 @@ project(fc LANGUAGES CXX VERSION 1.0.0)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
+option(FC_BUILD_FRESH "Build local Fresh editor alongside file_commander" ON)
+set(FC_FRESH_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../editor-fresh" CACHE PATH "Path to local Fresh source checkout")
+
 include(FetchContent)
 
 FetchContent_Declare(ftxui
@@ -80,8 +83,36 @@ set_target_properties(luajit PROPERTIES
   INTERFACE_INCLUDE_DIRECTORIES ${LUAJIT_DIR}/src
 )
 
-add_executable(fc main.cpp scripting.cpp log.cpp err.cpp commander.cpp theme.cpp custom_controls.cpp dialogs.cpp shared_state.cpp file_change_funnel.cpp file_io_jobs.cpp)
+add_executable(fc main.cpp scripting.cpp log.cpp err.cpp commander.cpp theme.cpp custom_controls.cpp dialogs.cpp shared_state.cpp file_change_funnel.cpp file_io_jobs.cpp editor_manager.cpp)
 target_link_libraries(fc PRIVATE ftxui::component Boost::filesystem luajit "-framework CoreServices")
+
+set(_fc_fresh_default_bin "fresh")
+if(FC_BUILD_FRESH)
+  set(_fresh_manifest "${FC_FRESH_SOURCE_DIR}/Cargo.toml")
+  set(_fresh_built_bin "${FC_FRESH_SOURCE_DIR}/target/release/fresh")
+  set(_fresh_stage_dir "${CMAKE_BINARY_DIR}/third_party/fresh/bin")
+  set(_fresh_stage_bin "${_fresh_stage_dir}/fresh")
+
+  if(EXISTS "${_fresh_manifest}")
+    add_custom_command(
+      OUTPUT "${_fresh_stage_bin}"
+      COMMAND ${CMAKE_COMMAND} -E make_directory "${_fresh_stage_dir}"
+      COMMAND cargo build --release --manifest-path "${_fresh_manifest}"
+      COMMAND ${CMAKE_COMMAND} -E copy_if_different "${_fresh_built_bin}" "${_fresh_stage_bin}"
+      DEPENDS "${_fresh_manifest}"
+      WORKING_DIRECTORY "${FC_FRESH_SOURCE_DIR}"
+      COMMENT "Building Fresh editor from local source"
+      VERBATIM
+    )
+    add_custom_target(fresh_bin ALL DEPENDS "${_fresh_stage_bin}")
+    add_dependencies(fc fresh_bin)
+    set(_fc_fresh_default_bin "${_fresh_stage_bin}")
+  else()
+    message(WARNING "FC_BUILD_FRESH=ON but Fresh source is missing Cargo.toml at: ${_fresh_manifest}. Falling back to PATH lookup for fresh.")
+  endif()
+endif()
+
+target_compile_definitions(fc PRIVATE FC_FRESH_DEFAULT_BIN="${_fc_fresh_default_bin}")
 
 # add_executable(playground playground.cpp log.cpp err.cpp commander.cpp theme.cpp custom_controls.cpp dialogs.cpp shared_state.cpp file_change_funnel.cpp file_io_jobs.cpp)
 # target_link_libraries(playground PRIVATE ftxui::component ftxui::dom ftxui::screen Boost::filesystem "-framework CoreServices")

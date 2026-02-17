@@ -60,7 +60,13 @@ int main(int argc, char** argv) {
   };
   // auto          redraw = [&screen]() -> void { screen.Post(Event::Custom); };
   auto          dimx = [&screen]() -> int { return screen.dimx(); };
-  FileCommander app(left_path, right_path, exec, dimx);
+  auto run_with_restored_io = [&screen](std::function<int()> fn) -> int {
+    int rc = -1;
+    auto wrapped = screen.WithRestoredIO([&]() { rc = fn(); });
+    wrapped();
+    return rc;
+  };
+  FileCommander app(left_path, right_path, exec, dimx, run_with_restored_io);
   if (!lua_mode) {
     const bool explicit_panel_paths = argc > 1;
     app.load_settings(!explicit_panel_paths);

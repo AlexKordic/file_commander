@@ -28,9 +28,13 @@ Theme::Theme() {
   key_select_all           = Event::CtrlA;
   key_clear_errors         = Event::Escape;
   key_toggle_error_details = Event::CtrlE;
-  key_toggle_job_list      = Event::F4;
+  key_toggle_job_list      = Event::F9;
   key_bookmarks_dialog     = Event::CtrlB;
   key_command_palette      = Event::F1;
+  key_open_in_editor       = Event::F4;
+  key_switch_to_file_commander = Event::F10;
+  key_switch_editor_prev   = Event::CtrlY;
+  key_switch_editor_next   = Event::CtrlU;
 
   filesize_colors  = {Color::White, Color::White, Color::Yellow, Color::IndianRed1, Color::Plum3};
   debuginfo_colors = {Color::Black, Color::Yellow, Color::IndianRed1, Color::Plum3};

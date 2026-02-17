@@ -7,6 +7,7 @@
 #include "bfs.hpp"
 #include "commander.hpp"
 #include "dialogs.hpp"
+#include "editor_manager.hpp"
 #include "file_io_jobs.hpp"
 #include "custom_controls.hpp"
 #include "log.hpp"
@@ -207,6 +208,7 @@ class Panel;
 using TargetFunc = std::function<Filepath(Panel*)>;
 
 using ExecuteOnUiThread = std::function<void(std::function<void()>)>;
+using RunWithRestoredIO = std::function<int(std::function<int()>)>;
 
 class DialogOverlay {
  public:
@@ -641,6 +643,8 @@ class FileCommander : public DialogOverlay {
   bool _last_main_focus_left = true;
   bool _single_panel_mode = false;
   int  _main_panels_mode  = 0;  // 0=split, 1=single
+  EditorManager _editor_manager;
+  RunWithRestoredIO _run_with_restored_io;
 
   std::function<void()> _close_dialog;
   std::function<int()>  _get_dimx;
@@ -666,6 +670,47 @@ class FileCommander : public DialogOverlay {
       return right;
     }
     return _last_main_focus_left ? left : right;
+  }
+
+  std::vector<Filepath> focused_selection_for_editor() {
+    Panel& panel = focused_panel();
+    auto   args  = panel.dir.take_selected();
+    std::vector<Filepath> selected = args ? args->selected : std::vector<Filepath>();
+    if (selected.empty()) {
+      Filepath focused;
+      auto*    focused_ptr = panel.get_shared_state()->get_focused_item();
+      if (focused_ptr) focused = *focused_ptr;
+      if (!focused.empty()) selected.push_back(focused);
+    }
+    return selected;
+  }
+
+  bool open_in_editor(std::string& error) {
+    Panel& panel = focused_panel();
+    auto   selected = focused_selection_for_editor();
+    if (selected.empty()) {
+      error = "No focused item to open in editor";
+      return false;
+    }
+
+    auto is_directory = [](const Filepath& p) -> bool {
+      boost::system::error_code ec;
+      const bool isdir = boost::filesystem::is_directory(p, ec);
+      return !ec.failed() && isdir;
+    };
+
+    if (selected.size() == 1 && is_directory(selected.front())) {
+      return _editor_manager.open_directory_new_session(selected.front(), error);
+    }
+
+    std::vector<Filepath> files;
+    files.reserve(selected.size());
+    for (const auto& p : selected) {
+      if (!is_directory(p)) files.push_back(p);
+    }
+    if (!files.empty()) return _editor_manager.open_files_in_last_session(files, error);
+
+    return _editor_manager.open_directory_new_session(panel.focused_dir(), error);
   }
 
   std::vector<Command> list_palette_commands() { return commands().list_all(); }
@@ -797,6 +842,15 @@ class FileCommander : public DialogOverlay {
         rebind_palette_command(id, e, err);
       }
     }
+
+    std::string fresh_binary_path;
+    if (fc_settings_detail::extract_json_string_field(json, "fresh_binary_path", fresh_binary_path)) {
+      _editor_manager.set_binary_override(fresh_binary_path);
+    }
+    std::string last_editor_session_id;
+    if (fc_settings_detail::extract_json_string_field(json, "last_editor_session_id", last_editor_session_id)) {
+      _editor_manager.set_last_session_id(last_editor_session_id);
+    }
   }
 
   void save_settings() const {
@@ -863,7 +917,14 @@ class FileCommander : public DialogOverlay {
       write_quoted(event_to_token(all_commands[i].key));
       out << (i + 1 < all_commands.size() ? ",\n" : "\n");
     }
-    out << "  }\n";
+    out << "  },\n";
+
+    out << "  \"fresh_binary_path\": ";
+    write_quoted(_editor_manager.binary_override());
+    out << ",\n";
+    out << "  \"last_editor_session_id\": ";
+    write_quoted(_editor_manager.last_session_id());
+    out << "\n";
     out << "}\n";
   }
 
@@ -977,10 +1038,43 @@ class FileCommander : public DialogOverlay {
       left.move_to(where);
       return;
     }
+    if (id == "open_in_editor") {
+      std::string error;
+      if (!open_in_editor(error) && !error.empty()) {
+        file_operations().report_error(error);
+      }
+      return;
+    }
+    if (id == "switch_to_file_commander") {
+      // File Commander is already active when this handler runs.
+      return;
+    }
+    if (id == "switch_editor_prev") {
+      std::string error;
+      if (!_editor_manager.switch_prev(error) && !error.empty()) {
+        file_operations().report_error(error);
+      }
+      return;
+    }
+    if (id == "switch_editor_next") {
+      std::string error;
+      if (!_editor_manager.switch_next(error) && !error.empty()) {
+        file_operations().report_error(error);
+      }
+      return;
+    }
   }
 
-  FileCommander(Filepath l, Filepath r, ExecuteOnUiThread exec, std::function<int()> dimx) : left(l, get_target(), exec), right(r, get_target(), exec), _get_dimx(dimx) {
+  FileCommander(Filepath l, Filepath r, ExecuteOnUiThread exec, std::function<int()> dimx, RunWithRestoredIO run_with_restored_io = {})
+      : left(l, get_target(), exec), right(r, get_target(), exec), _get_dimx(dimx), _run_with_restored_io(std::move(run_with_restored_io)) {
     _close_dialog         = [this]() { close_dialog(); };
+    _editor_manager.set_run_foreground([this](const std::function<int()>& run) -> int {
+      if (_run_with_restored_io) return _run_with_restored_io(run);
+      return run();
+    });
+    _editor_manager.set_status_sink([this](const std::string& text) {
+      if (!text.empty()) file_operations().report_error(text);
+    });
     auto global_shortcuts = [this](Event event) -> bool { return this->handle_global_shortcuts(event); };
     // Overlay dialogs on top of main document:
     // + errors - fullscreen
@@ -1153,6 +1247,10 @@ class FileCommander : public DialogOverlay {
     if (id == "toggle_errors") return &t.key_toggle_error_details;
     if (id == "toggle_job_list") return &t.key_toggle_job_list;
     if (id == "open_bookmarks") return &t.key_bookmarks_dialog;
+    if (id == "open_in_editor") return &t.key_open_in_editor;
+    if (id == "switch_to_file_commander") return &t.key_switch_to_file_commander;
+    if (id == "switch_editor_prev") return &t.key_switch_editor_prev;
+    if (id == "switch_editor_next") return &t.key_switch_editor_next;
     return nullptr;
   }
 
@@ -1173,6 +1271,31 @@ class FileCommander : public DialogOverlay {
         return true;
       }
       return false;
+    }
+    if (!dialog_active() && event == theme().key_open_in_editor) {
+      std::string error;
+      if (!open_in_editor(error) && !error.empty()) {
+        file_operations().report_error(error);
+      }
+      return true;
+    }
+    if (!dialog_active() && event == theme().key_switch_editor_prev) {
+      std::string error;
+      if (!_editor_manager.switch_prev(error) && !error.empty()) {
+        file_operations().report_error(error);
+      }
+      return true;
+    }
+    if (!dialog_active() && event == theme().key_switch_editor_next) {
+      std::string error;
+      if (!_editor_manager.switch_next(error) && !error.empty()) {
+        file_operations().report_error(error);
+      }
+      return true;
+    }
+    if (!dialog_active() && event == theme().key_switch_to_file_commander) {
+      // File Commander is already active.
+      return true;
     }
     if (event == theme().key_toggle_single_panel_mode && !dialog_active()) {
       set_single_panel_mode(!_single_panel_mode);
