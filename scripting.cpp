@@ -595,14 +595,18 @@ void LuaScripting::push_panel_state(lua_State* L, Panel& panel) {
     lua_pushstring(L, panel._active_dialog_name.c_str());
   }
   lua_setfield(L, -2, "active_dialog");
-  // tabs (NOT YET IMPLEMENTED — always 1 tab)
+  // tabs
   lua_newtable(L);  // tabs array
-  lua_newtable(L);  // tabs[1]
-  lua_pushstring(L, panel.dir.path.native().c_str());
-  lua_setfield(L, -2, "path");
-  lua_pushboolean(L, 1);
-  lua_setfield(L, -2, "active");
-  lua_rawseti(L, -2, 1);  // tabs[1] = {...}
+  const auto tabs = panel.tab_paths();
+  const int  active_tab = panel.active_tab_index();
+  for (int i = 0; i < (int)tabs.size(); ++i) {
+    lua_newtable(L);  // tabs[i + 1]
+    lua_pushstring(L, tabs[i].native().c_str());
+    lua_setfield(L, -2, "path");
+    lua_pushboolean(L, i == active_tab);
+    lua_setfield(L, -2, "active");
+    lua_rawseti(L, -2, i + 1);
+  }
   lua_setfield(L, -2, "tabs");
 }
 
@@ -760,7 +764,7 @@ int LuaScripting::l_cancel_job(lua_State* L) {
   return 1;
 }
 
-// fc.pause_job() — pause the currently running job (takes effect between items)
+// fc.pause_job() — toggle pause/resume for the currently running job
 int LuaScripting::l_pause_job(lua_State* L) {
   auto jobinfo = file_operations().get_running_job();
   if (jobinfo.job && !jobinfo.job->is_stopped()) {

@@ -38,6 +38,8 @@ struct PanelSharedState {
   } action;
   // bool    commands_enabled = true;
   int64_t render_count     = 0;
+  bool    show_permissions_column = false;
+  bool    show_owner_group_column = false;
 
   // std::function<ftxui::Element(RowInfo&)> transform;
   std::function<void(Filepath)>           move_to;

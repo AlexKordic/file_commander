@@ -13,6 +13,12 @@
 #include <optional>
 #include <sstream>
 #include <vector>
+#if defined(__unix__) || defined(__APPLE__)
+#include <grp.h>
+#include <pwd.h>
+#include <sys/stat.h>
+#include <sys/types.h>
+#endif
 
 using namespace boost::filesystem;
 using namespace boost::system;
@@ -61,6 +67,21 @@ std::string time_to_string(double _w_time) {
 
 std::string DirItem::get_time() const { return time_to_string(_w_time); }
 
+std::string DirItem::perms_string() const {
+  auto has = [this](DirItem::Perms p) -> bool { return (_perms & p) != DirItem::Perms::no_perms; };
+  std::string out = "---------";
+  out[0] = has(DirItem::Perms::owner_read) ? 'r' : '-';
+  out[1] = has(DirItem::Perms::owner_write) ? 'w' : '-';
+  out[2] = has(DirItem::Perms::owner_exe) ? 'x' : '-';
+  out[3] = has(DirItem::Perms::group_read) ? 'r' : '-';
+  out[4] = has(DirItem::Perms::group_write) ? 'w' : '-';
+  out[5] = has(DirItem::Perms::group_exe) ? 'x' : '-';
+  out[6] = has(DirItem::Perms::others_read) ? 'r' : '-';
+  out[7] = has(DirItem::Perms::others_write) ? 'w' : '-';
+  out[8] = has(DirItem::Perms::others_exe) ? 'x' : '-';
+  return out;
+}
+
 std::string DirItem::to_string() const {
   if (_type == Type::directory_file) return _filename;
   std::ostringstream ss;
@@ -80,6 +101,21 @@ void DirItem::update(Type type, Perms perms) {
     _symlink = boost::filesystem::read_symlink(_path, ec);
     if (ec.failed()) _symlink = std::nullopt;
   }
+
+#if defined(__unix__) || defined(__APPLE__)
+  struct stat st;
+  if (lstat(_path.native().c_str(), &st) == 0) {
+    if (auto* pw = getpwuid(st.st_uid)) _owner = pw->pw_name;
+    else _owner = std::to_string(static_cast<unsigned long>(st.st_uid));
+
+    if (auto* gr = getgrgid(st.st_gid)) _group = gr->gr_name;
+    else _group = std::to_string(static_cast<unsigned long>(st.st_gid));
+  } else {
+    _owner.clear();
+    _group.clear();
+  }
+#endif
+
   _w_time = last_write_time(_path, ec);
   if (ec.failed()) _w_time = 0;
   if (type == boost::filesystem::directory_file) return;

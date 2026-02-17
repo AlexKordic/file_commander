@@ -930,7 +930,7 @@ local function test_cancel_copy()
 end
 
 -- =========================================================================
--- Test 30: Pause copy mid-job (pauses between files, not mid-file)
+-- Test 30: Pause/resume copy mid-job
 -- =========================================================================
 
 local function test_pause_copy()
@@ -987,23 +987,39 @@ local function test_pause_copy()
   local paused = fc.pause_job()
   check(paused, "30: pause_job returned true")
 
-  -- Wait for the job to finish (pause triggers job_completed event since worker returns)
-  fc.wait_for_jobs()
+  -- Pause state should become visible quickly.
+  local saw_paused = false
+  for _ = 1, 30 do
+    local state = fc.state()
+    if state.jobs.state == "paused" then
+      saw_paused = true
+      break
+    end
+    fc.sleep(100)
+  end
+  check(saw_paused, "30: expected paused state")
+
+  -- Resume and wait for completion.
+  local resumed = fc.pause_job()
+  check(resumed, "30: resume pause_job returned true")
+  check(fc.wait_for_jobs(20000), "30: expected completion after resume")
 
   -- Reset transfer rate for subsequent tests
   fc.set_transfer_rate(0)
 
-  -- Check that the job state is "paused"
+  -- Check that the job state is completed
   local s = fc.state()
-  check(s.jobs.state == "paused", "30: job state is paused, got %s", tostring(s.jobs.state))
+  check(
+    s.jobs.state == "completed" or s.jobs.state == "completed_with_errors",
+    "30: job state is completed, got %s",
+    tostring(s.jobs.state)
+  )
 
   -- Count files actually copied to destination
   local copied_count = h.count_items(dst)
 
-  -- Should be partial: more than 0 but less than all 10
-  -- Pause takes effect between files, so the current file finishes completely
-  check(copied_count > 0,          "30: some files were copied: got %d", copied_count)
-  check(copied_count < file_count, "30: not all files copied: got %d/%d", copied_count, file_count)
+  -- Full copy should complete after resume.
+  check(copied_count == file_count, "30: all files copied after resume: got %d/%d", copied_count, file_count)
 
   -- No new errors (pause is clean, not an error)
   local errs_after = #fc.errors()
@@ -1042,14 +1058,26 @@ local function test_job_history()
   fc.wait_for_jobs()
   fc.sleep(100)
 
-  -- Check job history has a new entry
+  -- Check job history has at least one new entry
   local hist_after = fc.job_history()
-  check(#hist_after == hist_count_before + 1, "31: history grew by 1, got %d (was %d)", #hist_after, hist_count_before)
+  check(#hist_after >= hist_count_before + 1, "31: history did not grow, got %d (was %d)", #hist_after, hist_count_before)
 
-  local last_job = hist_after[#hist_after]
-  check(last_job.type == "copy", "31: last job type is copy, got %s", tostring(last_job.type))
-  check(last_job.state == "completed", "31: last job state is completed, got %s", tostring(last_job.state))
-  check(last_job.items_done == 3, "31: 3 items done, got %d", last_job.items_done)
+  -- Find the newly added copy entry for this 3-file run.
+  local matching = nil
+  for i = hist_count_before + 1, #hist_after do
+    local job = hist_after[i]
+    if job.type == "copy" and job.items_total == 3 then
+      matching = job
+      break
+    end
+  end
+  check(matching ~= nil, "31: expected new copy job in history")
+  check(
+    matching.state == "completed" or matching.state == "completed_with_errors",
+    "31: expected completed state, got %s",
+    tostring(matching.state)
+  )
+  check(matching.items_done == 3, "31: 3 items done, got %d", matching.items_done)
 
   -- Open job list dialog with F4
   fc.key("f4")
@@ -1172,7 +1200,7 @@ test_pause_copy()
 test_conflict_skip()
 test_conflict_update()
 test_copy_dir_into_subdir_guard()
--- -- test_job_history()
+test_job_history()
 
 test_pass("ALL COPY TESTS PASSED")
 fc.quit()

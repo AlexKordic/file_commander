@@ -23,6 +23,10 @@ struct Theme {
 
   ftxui::Event 
     key_switch_focused_panel,
+    key_new_tab,
+    key_close_tab,
+    key_next_tab,
+    key_prev_tab,
     key_files_select,
     key_glob_select,
     key_glob_deselect,
@@ -32,6 +36,8 @@ struct Theme {
     key_enter_dir,
     key_leave_dir,
     key_toggle_single_panel_mode,
+    key_toggle_permissions_column,
+    key_toggle_owner_group_column,
     key_refresh_dir,
     key_target_dir_to_focused_item_right,
     key_target_dir_to_focused_item_left,

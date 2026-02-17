@@ -131,10 +131,26 @@ std::function<Element(DSRenderContext&)> filelist_transform(PanelSharedState::P 
     if (selected) n |= theme().files_selected;
     if (!ctx.focused && !selected) n |= filetype_color(data);
 
+    Element perms = text(data.perms_string()) | dim;
+    Element owner_group = text(data.owner_string() + ":" + data.group_string()) | dim;
     Element t = text(data.get_time());
     if (selected) t |= theme().files_selected;
 
-    Element row = hbox({std::move(n), std::move(size), separatorLight(), std::move(t)});
+    Elements cols;
+    cols.push_back(std::move(n));
+    if (state->show_permissions_column) {
+      cols.push_back(separatorLight());
+      cols.push_back(std::move(perms));
+    }
+    if (state->show_owner_group_column) {
+      cols.push_back(separatorLight());
+      cols.push_back(std::move(owner_group));
+    }
+    cols.push_back(std::move(size));
+    cols.push_back(separatorLight());
+    cols.push_back(std::move(t));
+
+    Element row = hbox(std::move(cols));
     if (ctx.focused) {
       if (ctx.focused) row |= ftxui::focus;
       else row |= ftxui::select;  // TODO: ftxui::select does nothing in our case, decorate background somehow
@@ -158,51 +174,65 @@ void setup_filelist_datasource(PanelSharedState::P app, DataSource& data_source)
 }
 
 bool filelist_handle_commands(PanelSharedState* app, DataSource* data_source, DSEventContext& ctx) {
-  if (ctx.event == theme().key_files_select) {
-    app->dir->item_toggle_select(data_source->focused_id);
-    data_source->focused_id = app->dir->next_visible(data_source->focused_id);
-    return true;
-  }
-  if (ctx.event == theme().key_clear_selection) {
-    app->dir->clear_selection();
-    return true;
-  }
-  if (ctx.event == theme().key_select_all) {
-    app->dir->select_all();
-    return true;
-  }
-  if (ctx.event == theme().key_leave_dir) {
-    const Filepath old_path   = app->dir->path;
-    const Filepath parent_dir = app->dir->path.parent_path();
-    app->move_to(parent_dir);
-    data_source->focused_id = app->dir->offset_vissible(0, 0);
-    app->filter_txt.clear();
-    // find our old_path and set it as focused
-    for (int i = 0; i < app->dir->items.size(); i++) {
-      const DirItem& item = app->dir->items.at(i);
-      if (item.path_ref() == old_path) {
-        data_source->focused_id = i;
-        break;
-      }
+  auto execute_panel_callback = [&]() -> bool {
+    const Command* action = commands().find_panel_by_key(ctx.event);
+    if (!action || action->kind != CommandKind::EXECUTE_CALLBACK) return false;
+
+    data_source->focused_id = app->dir->offset_vissible(data_source->focused_id, 0);
+    if (action->id == "select_toggle") {
+      if (app->dir->items.empty()) return false;
+      app->dir->item_toggle_select(data_source->focused_id);
+      data_source->focused_id = app->dir->next_visible(data_source->focused_id);
+      return true;
     }
-    return true;
-  }
-  if (ctx.event == theme().key_enter_dir) {
-    if (app->dir->items.empty()) return false;
-    DirItem& where = app->dir->items.at(data_source->focused_id);
-    if (where.is_dir()) {
-      Filepath p = where.path_ref();
-      app->move_to(p);
+    if (action->id == "clear_selection") {
+      app->dir->clear_selection();
+      return true;
+    }
+    if (action->id == "select_all") {
+      app->dir->select_all();
+      return true;
+    }
+    if (action->id == "toggle_permissions_column") {
+      app->show_permissions_column = !app->show_permissions_column;
+      return true;
+    }
+    if (action->id == "toggle_owner_group_column") {
+      app->show_owner_group_column = !app->show_owner_group_column;
+      return true;
+    }
+    if (action->id == "leave_dir") {
+      const Filepath old_path   = app->dir->path;
+      const Filepath parent_dir = app->dir->path.parent_path();
+      app->move_to(parent_dir);
+      data_source->focused_id = app->dir->offset_vissible(0, 0);
+      app->filter_txt.clear();
+      for (int i = 0; i < app->dir->items.size(); i++) {
+        const DirItem& item = app->dir->items.at(i);
+        if (item.path_ref() == old_path) {
+          data_source->focused_id = i;
+          break;
+        }
+      }
+      return true;
+    }
+    if (action->id == "enter_dir") {
+      if (app->dir->items.empty()) return false;
+      DirItem& where = app->dir->items.at(data_source->focused_id);
+      if (!where.is_dir()) return false;
+      app->move_to(where.path_ref());
       data_source->focused_id = app->dir->offset_vissible(0, 0);
       app->filter_txt.clear();
       return true;
     }
     return false;
-  }
+  };
 
-  // check for registered panel dialog actions
-  const Command* action = commands().find_panel_dialog_by_key(ctx.event);
+  if (execute_panel_callback()) return true;
+
+  const Command* action = commands().find_panel_by_key(ctx.event);
   if (action) {
+    if (action->kind != CommandKind::SHOW_DIALOG) return false;
     app->action.dialog            = action->dialog;
     app->action.arguments         = app->dir->take_selected();
     app->action.arguments->origin = app->dir->path;
@@ -313,6 +343,9 @@ Files::Files(PanelSharedState::P s) : Dialog(std::move(s)) {
     case Orderby::TIME_DESC: prefixes[2] = "↓↓"; break;
     }
     auto     s        = state->dir->stats();
+    std::string columns = " cols:name,size,date";
+    if (state->show_permissions_column) columns += ",perm";
+    if (state->show_owner_group_column) columns += ",owner:group";
     Elements children = Elements({
       text(" Sel " + std::to_string(s.items_selected) + "/" + std::to_string(s.items_total)),
       text(" bytes "),
@@ -326,6 +359,7 @@ Files::Files(PanelSharedState::P s) : Dialog(std::move(s)) {
       sort_size->Render(),
       text(prefixes[2]),
       sort_time->Render(),
+      text(columns) | dim,
     });
     return hbox(std::move(children));
   };
@@ -2375,6 +2409,14 @@ bool CommandPaletteDialog::capture_rebind_key(const Event& e) {
 
 Commands::Commands() {
   available.reserve(64);
+  available.push_back({"select_toggle", theme().key_files_select, "", "Select / Deselect Focused Item", CommandScope::PANEL, CommandKind::EXECUTE_CALLBACK});
+  available.push_back({"clear_selection", theme().key_clear_selection, "", "Clear Selection", CommandScope::PANEL, CommandKind::EXECUTE_CALLBACK});
+  available.push_back({"select_all", theme().key_select_all, "", "Select All", CommandScope::PANEL, CommandKind::EXECUTE_CALLBACK});
+  available.push_back({"enter_dir", theme().key_enter_dir, "", "Enter Directory", CommandScope::PANEL, CommandKind::EXECUTE_CALLBACK});
+  available.push_back({"leave_dir", theme().key_leave_dir, "", "Leave Directory", CommandScope::PANEL, CommandKind::EXECUTE_CALLBACK});
+  available.push_back({"toggle_permissions_column", theme().key_toggle_permissions_column, "", "Toggle Permissions Column", CommandScope::PANEL, CommandKind::EXECUTE_CALLBACK});
+  available.push_back({"toggle_owner_group_column", theme().key_toggle_owner_group_column, "", "Toggle Owner/Group Column", CommandScope::PANEL, CommandKind::EXECUTE_CALLBACK});
+
   available.push_back({"copy", theme().key_copy, "Copy", "Copy", CommandScope::PANEL, CommandKind::SHOW_DIALOG});
   available.push_back({"move", theme().key_move, "Move", "Move", CommandScope::PANEL, CommandKind::SHOW_DIALOG});
   available.push_back({"delete", theme().key_delete, "Delete", "Delete", CommandScope::PANEL, CommandKind::SHOW_DIALOG});
@@ -2387,6 +2429,10 @@ Commands::Commands() {
   available.push_back({"paths_to_clipboard", theme().key_paths_to_clipboard, "PathToClipboard", "Paths to Clipboard", CommandScope::PANEL, CommandKind::SHOW_DIALOG});
 
   available.push_back({"switch_panel", theme().key_switch_focused_panel, "", "Switch Focused Panel", CommandScope::GLOBAL, CommandKind::EXECUTE_CALLBACK});
+  available.push_back({"tab_new", theme().key_new_tab, "", "New Tab in Focused Panel", CommandScope::GLOBAL, CommandKind::EXECUTE_CALLBACK});
+  available.push_back({"tab_close", theme().key_close_tab, "", "Close Active Tab in Focused Panel", CommandScope::GLOBAL, CommandKind::EXECUTE_CALLBACK});
+  available.push_back({"tab_next", theme().key_next_tab, "", "Next Tab in Focused Panel", CommandScope::GLOBAL, CommandKind::EXECUTE_CALLBACK});
+  available.push_back({"tab_prev", theme().key_prev_tab, "", "Previous Tab in Focused Panel", CommandScope::GLOBAL, CommandKind::EXECUTE_CALLBACK});
   available.push_back({"toggle_single_panel_mode", theme().key_toggle_single_panel_mode, "", "Toggle Single Panel Full Width", CommandScope::GLOBAL, CommandKind::EXECUTE_CALLBACK});
   available.push_back({"refresh_dir", theme().key_refresh_dir, "", "Refresh Directory", CommandScope::GLOBAL, CommandKind::EXECUTE_CALLBACK});
   available.push_back({"target_right", theme().key_target_dir_to_focused_item_right, "", "Target Right Panel to Focused Item", CommandScope::GLOBAL, CommandKind::EXECUTE_CALLBACK});
@@ -2427,9 +2473,9 @@ bool Commands::set_key(const std::string& id, const Event& key) {
   return true;
 }
 
-const Command* Commands::find_panel_dialog_by_key(const Event& key) const {
+const Command* Commands::find_panel_by_key(const Event& key) const {
   auto it = std::find_if(available.begin(), available.end(), [&key](const Command& c) {
-    return c.key == key && c.scope == CommandScope::PANEL && c.kind == CommandKind::SHOW_DIALOG;
+    return c.key == key && c.scope == CommandScope::PANEL;
   });
   return it == available.end() ? nullptr : &(*it);
 }

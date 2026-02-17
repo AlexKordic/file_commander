@@ -1,20 +1,20 @@
-
 #include "commander.hpp"
 #include "file_io_jobs.hpp"
 
-#include <sys/stat.h>
 #include <functional>
 #include <memory>
-#include <mutex>
 #include <stdexcept>
 #include <string>
 #include <thread>
-#include <utility>  // For std::declval
+#include <utility>
 #include <vector>
 
-#include <CoreServices/CoreServices.h>
-
 #include <boost/filesystem.hpp>
+
+#ifdef __APPLE__
+
+#include <CoreServices/CoreServices.h>
+#include <sys/stat.h>
 
 static CFArrayRef getArrayRef(const std::vector<std::string>& strings) {
   std::vector<CFStringRef> string_refs;
@@ -23,9 +23,7 @@ static CFArrayRef getArrayRef(const std::vector<std::string>& strings) {
     CFStringRef cfStr = CFStringCreateWithCString(kCFAllocatorDefault, string.c_str(), kCFStringEncodingUTF8);
     string_refs.push_back(cfStr);
   }
-  // Use kCFTypeArrayCallBacks to ensure the array retains/releases its elements
   CFArrayRef array = CFArrayCreate(kCFAllocatorDefault, reinterpret_cast<const void**>(string_refs.data()), string_refs.size(), &kCFTypeArrayCallBacks);
-  // Release our ownership of the CFStringRefs
   for (CFStringRef cfStr : string_refs) {
     CFRelease(cfStr);
   }
@@ -37,13 +35,10 @@ DirItemUpdated::Event What(FSEventStreamEventFlags f) {
   if (!removed && (f & kFSEventStreamEventFlagItemCreated) != 0) return DirItemUpdated::Event::Created;
   if (removed) return DirItemUpdated::Event::Removed;
   if ((f & kFSEventStreamEventFlagItemRenamed) != 0) return DirItemUpdated::Event::Renamed;
-  // if((f & kFSEventStreamEventFlagItemModified) != 0) return DirItemUpdated::Event::Modified;
   return DirItemUpdated::Event::Modified;
 }
 
 struct FileId {
-  // decltype(std::declval<struct stat>().st_dev) device_id;
-  // decltype(std::declval<struct stat>().st_ino) inode_number;
   struct stat _stat;
 
   bool same_dir(const FileId& other) const { return _stat.st_dev == other._stat.st_dev && _stat.st_ino == other._stat.st_ino; }
@@ -59,10 +54,10 @@ void DirEvents_callback(ConstFSEventStreamRef sr, void* callback_info, size_t nu
 
 class DirEvents : public FileChangeFunnel {
  public:
-  DirEvents(Filepath where, FileChangeFunnel::Callback cb) : _callback(cb) {
+  DirEvents(Filepath where, FileChangeFunnel::Callback cb) : _callback(std::move(cb)) {
     _root = boost::filesystem::canonical(where);
 
-    FSEventStreamCreateFlags flags = kFSEventStreamCreateFlagFileEvents;  // | kFSEventStreamCreateFlagNoDefer;
+    FSEventStreamCreateFlags flags = kFSEventStreamCreateFlagFileEvents;
     if (!FileId::from_filename(_root_id, _root.native().c_str())) {
       auto msg = "our dir lstat failed " + std::to_string(errno) + " " + _root.native();
       Perun::file_operations().report_error(msg);
@@ -75,14 +70,14 @@ class DirEvents : public FileChangeFunnel {
     CFRelease(pathsArray);
     if (!_stream) throw std::runtime_error("FSEventStreamCreate failed");
     _runloop_thread = std::thread([this]() {
-      // TODO: https://lore.kernel.org/git/de558eb7-8931-a5b5-d711-459ae3f52216@jeffhostetler.com/T/
       _runloop_ref = CFRunLoopGetCurrent();
       FSEventStreamScheduleWithRunLoop(this->_stream, _runloop_ref, kCFRunLoopDefaultMode);
       FSEventStreamStart(this->_stream);
       CFRunLoopRun();
     });
   }
-  virtual ~DirEvents() {
+
+  ~DirEvents() override {
     stop();
     if (_runloop_thread.joinable()) _runloop_thread.join();
   }
@@ -90,8 +85,7 @@ class DirEvents : public FileChangeFunnel {
   void events_received(ConstFSEventStreamRef sr, size_t num_events, const char** event_paths, const FSEventStreamEventFlags* event_flags, const FSEventStreamEventId* event_ids) {
     UpdatedFiles filtered_events = std::make_unique<std::vector<DirItemUpdated>>();
     filtered_events->reserve(num_events);
-    for (int event_index = 0; event_index < num_events; event_index++) {
-      // Using parent dir to identify items in our watched dir
+    for (int event_index = 0; event_index < static_cast<int>(num_events); event_index++) {
       Filepath    signaled_path(event_paths[event_index]);
       std::string parent_dir = signaled_path.parent_path().native();
       FileId      parent_dir_id;
@@ -115,26 +109,144 @@ class DirEvents : public FileChangeFunnel {
     }
   }
 
-  bool valid() { return !!_stream; }
-
  private:
   FileId                                _root_id;
   Filepath                              _root;
   FileChangeFunnel::Callback            _callback;
   std::vector<std::string>              _paths_to_watch;
   std::unique_ptr<FSEventStreamContext> _context;
-  FSEventStreamRef                      _stream;
+  FSEventStreamRef                      _stream = nullptr;
 
   std::thread  _runloop_thread;
-  CFRunLoopRef _runloop_ref;
+  CFRunLoopRef _runloop_ref = nullptr;
   std::mutex   _m;
 };
 
-// route events to DirEvents method:
 void DirEvents_callback(ConstFSEventStreamRef sr, void* callback_info, size_t num_events, void* event_paths_, const FSEventStreamEventFlags event_flags[], const FSEventStreamEventId event_ids[]) {
   const char** event_paths = reinterpret_cast<const char**>(event_paths_);
   DirEvents*   self        = reinterpret_cast<DirEvents*>(callback_info);
   self->events_received(sr, num_events, event_paths, event_flags, event_ids);
 }
 
-std::unique_ptr<FileChangeFunnel> FileChangeFunnel::create(Filepath root, Callback cb) { return std::make_unique<DirEvents>(root, cb); }
+std::unique_ptr<FileChangeFunnel> FileChangeFunnel::create(Filepath root, Callback cb) {
+  return std::make_unique<DirEvents>(root, std::move(cb));
+}
+
+#elif defined(__linux__)
+
+#include <errno.h>
+#include <sys/inotify.h>
+#include <unistd.h>
+
+#include <array>
+#include <chrono>
+
+namespace {
+
+DirItemUpdated::Event from_inotify_mask(uint32_t mask) {
+  if (mask & (IN_CREATE | IN_MOVED_TO)) return DirItemUpdated::Event::Created;
+  if (mask & (IN_DELETE | IN_MOVED_FROM | IN_DELETE_SELF | IN_MOVE_SELF)) return DirItemUpdated::Event::Removed;
+  if (mask & (IN_ATTRIB | IN_MODIFY)) return DirItemUpdated::Event::Modified;
+  return DirItemUpdated::Event::Modified;
+}
+
+}  // namespace
+
+class LinuxDirEvents : public FileChangeFunnel {
+ public:
+  LinuxDirEvents(Filepath where, FileChangeFunnel::Callback cb) : _callback(std::move(cb)) {
+    _root = boost::filesystem::canonical(where);
+
+    _inotify_fd = inotify_init1(IN_CLOEXEC | IN_NONBLOCK);
+    if (_inotify_fd < 0) {
+      throw std::runtime_error("inotify_init1 failed");
+    }
+
+    constexpr uint32_t mask = IN_CREATE | IN_DELETE | IN_MOVED_FROM | IN_MOVED_TO | IN_MODIFY | IN_ATTRIB | IN_DELETE_SELF | IN_MOVE_SELF;
+    _watch_fd = inotify_add_watch(_inotify_fd, _root.native().c_str(), mask);
+    if (_watch_fd < 0) {
+      ::close(_inotify_fd);
+      _inotify_fd = -1;
+      throw std::runtime_error("inotify_add_watch failed");
+    }
+
+    _running.store(true, std::memory_order_relaxed);
+    _thread = std::thread([this]() { run(); });
+  }
+
+  ~LinuxDirEvents() override {
+    stop();
+    if (_thread.joinable()) _thread.join();
+  }
+
+  void stop() {
+    bool expected = true;
+    if (!_running.compare_exchange_strong(expected, false)) return;
+    if (_watch_fd >= 0 && _inotify_fd >= 0) {
+      inotify_rm_watch(_inotify_fd, _watch_fd);
+      _watch_fd = -1;
+    }
+    if (_inotify_fd >= 0) {
+      ::close(_inotify_fd);
+      _inotify_fd = -1;
+    }
+  }
+
+ private:
+  void run() {
+    std::array<char, 16384> buffer{};
+    while (_running.load(std::memory_order_relaxed)) {
+      const ssize_t length = ::read(_inotify_fd, buffer.data(), buffer.size());
+      if (length < 0) {
+        if (errno == EINTR) continue;
+        if (errno == EAGAIN || errno == EWOULDBLOCK) {
+          std::this_thread::sleep_for(std::chrono::milliseconds(30));
+          continue;
+        }
+        return;
+      }
+      if (length == 0) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(30));
+        continue;
+      }
+
+      UpdatedFiles updates = std::make_unique<std::vector<DirItemUpdated>>();
+      for (ssize_t i = 0; i < length;) {
+        auto* event = reinterpret_cast<const struct inotify_event*>(buffer.data() + i);
+        i += sizeof(struct inotify_event) + event->len;
+
+        if (event->len == 0) continue;
+        std::string name(event->name);
+        if (name.empty() || name == "." || name == "..") continue;
+        Filepath changed = _root / name;
+        updates->emplace_back(changed.native().c_str(), from_inotify_mask(event->mask));
+      }
+      if (!updates->empty()) _callback(std::move(updates));
+    }
+  }
+
+  Filepath                   _root;
+  FileChangeFunnel::Callback _callback;
+  int                        _inotify_fd = -1;
+  int                        _watch_fd   = -1;
+  std::atomic<bool>          _running{false};
+  std::thread                _thread;
+};
+
+std::unique_ptr<FileChangeFunnel> FileChangeFunnel::create(Filepath root, Callback cb) {
+  return std::make_unique<LinuxDirEvents>(root, std::move(cb));
+}
+
+#else
+
+class NoopDirEvents : public FileChangeFunnel {
+ public:
+  NoopDirEvents(Filepath where, FileChangeFunnel::Callback cb) {}
+  ~NoopDirEvents() override = default;
+};
+
+std::unique_ptr<FileChangeFunnel> FileChangeFunnel::create(Filepath root, Callback cb) {
+  return std::make_unique<NoopDirEvents>(root, std::move(cb));
+}
+
+#endif

@@ -263,6 +263,12 @@ class DialogOverlay {
 // DialogOverlay supports drawing overlay dialogs on top of this Panel.
 class Panel : public DialogOverlay {
  public:
+  struct TabState {
+    Dir         dir;
+    int         focused_index = 0;
+    std::string filter_txt;
+  };
+
   Dir        dir;
   TargetFunc get_target;
 
@@ -294,7 +300,61 @@ class Panel : public DialogOverlay {
     _overlay_dialogs["GlobDeselect"]    = std::make_shared<GlobSelectDialog>(_state, false);
     _overlay_dialogs["NameToClipboard"] = std::make_shared<ToClipboardDialog>(_state);
     _overlay_dialogs["PathToClipboard"] = std::make_shared<ToClipboardDialog>(_state);
+
+    _tabs.push_back(TabState{});
+    _tabs[0].dir = dir;
+    sync_active_tab_state();
   }
+
+  int tab_count() const { return static_cast<int>(_tabs.size()); }
+  int active_tab_index() const { return _active_tab; }
+
+  std::vector<Filepath> tab_paths() const {
+    std::vector<Filepath> out;
+    out.reserve(_tabs.size());
+    for (int i = 0; i < static_cast<int>(_tabs.size()); ++i) {
+      if (i == _active_tab) out.push_back(dir.path);
+      else out.push_back(_tabs[i].dir.path);
+    }
+    return out;
+  }
+
+  void new_tab() {
+    sync_active_tab_state();
+    TabState clone = _tabs.at(_active_tab);
+    _tabs.insert(_tabs.begin() + _active_tab + 1, std::move(clone));
+    switch_to_tab(_active_tab + 1);
+    if (on_event) on_event("tab_created", std::to_string(_active_tab));
+  }
+
+  void close_tab() {
+    if (_tabs.size() <= 1) return;
+    sync_active_tab_state();
+    _tabs.erase(_tabs.begin() + _active_tab);
+    if (_active_tab >= static_cast<int>(_tabs.size())) {
+      _active_tab = static_cast<int>(_tabs.size()) - 1;
+    }
+    load_active_tab();
+    if (on_event) on_event("tab_closed", std::to_string(_active_tab));
+  }
+
+  void cycle_tab(int delta) {
+    if (_tabs.size() <= 1 || delta == 0) return;
+    const int n = static_cast<int>(_tabs.size());
+    int       next = (_active_tab + delta) % n;
+    if (next < 0) next += n;
+    switch_to_tab(next);
+  }
+
+  void switch_to_tab(int index) {
+    if (index < 0 || index >= static_cast<int>(_tabs.size())) return;
+    if (index == _active_tab) return;
+    sync_active_tab_state();
+    _active_tab = index;
+    load_active_tab();
+    if (on_event) on_event("tab_switched", std::to_string(_active_tab));
+  }
+
   void move_to(Filepath& where) {
     int      focused_index_before = 0;
     Filepath focused_path_before;
@@ -306,9 +366,6 @@ class Panel : public DialogOverlay {
         if (focused) focused_path_before = *focused;
       }
     }
-    // clear old updates that don't matter any more
-    pending_changes.erase_if([this](const UpdatedFiles& x) -> bool { return true; });
-
     Err err = dir.move_to(where);
     if (!err.ok()) {
       file_operations().report_error("[Panel move_to] " + err.steps.front());
@@ -317,34 +374,16 @@ class Panel : public DialogOverlay {
     if (same_directory_refresh) {
       _restore_focus_after_update(focused_path_before, focused_index_before);
     }
-    update_funnel = FileChangeFunnel::create(where, [this](UpdatedFiles changes) {
-      // record changes
-      pending_changes.push(std::move(changes));
-      // schedule apply changes on UI thread
-      this->run_on_ui([this]() {
-        while (true) {
-          UpdatedFiles batch;
-          FifoError    err = this->pending_changes.try_pop(batch);
-          if (FifoError::OK != err) return;
-          int      focused_index_before = 0;
-          Filepath focused_path_before;
-          if (_state) {
-            if (_state->get_focused_index) { focused_index_before = _state->get_focused_index(); }
-            if (_state->get_focused_item) {
-              const Filepath* focused = _state->get_focused_item();
-              if (focused) focused_path_before = *focused;
-            }
-          }
-          this->dir.partial_refresh(std::move(batch));
-          _restore_focus_after_update(focused_path_before, focused_index_before);
-        }
-      });
-    });
+    start_watcher(where);
+    sync_active_tab_state();
     if (on_event) on_event("dir_changed", where.native());
   }
   Element render() {
     // Panel is always shown
-    Element document = _main_document->renderer->Render();
+    Element document = vbox({
+      render_tabs(),
+      _main_document->renderer->Render() | yflex,
+    });
     // Overwrite with active dialog
     if (!_overlay_renderer) return document;
     return dbox({
@@ -383,6 +422,83 @@ class Panel : public DialogOverlay {
   PanelSharedState::P get_shared_state() const { return _state; }
 
  private:
+  Element render_tabs() const {
+    Elements tabs;
+    tabs.reserve(_tabs.size() * 2 + 1);
+    tabs.push_back(text(" Tabs "));
+    for (int i = 0; i < static_cast<int>(_tabs.size()); ++i) {
+      if (i > 0) tabs.push_back(separatorLight());
+      Filepath path = (i == _active_tab) ? dir.path : _tabs[i].dir.path;
+      std::string label = path.filename().native();
+      if (label.empty()) label = path.native();
+      if (label.empty()) label = "/";
+      Element cell = text(" " + std::to_string(i + 1) + ":" + label + " ");
+      if (i == _active_tab) {
+        cell |= bold;
+        cell |= inverted;
+      } else {
+        cell |= dim;
+      }
+      tabs.push_back(std::move(cell));
+    }
+    tabs.push_back(filler());
+    tabs.push_back(text(" cT:new cW:close f11/f12:switch ") | dim);
+    return hbox(std::move(tabs));
+  }
+
+  void sync_active_tab_state() {
+    if (_tabs.empty() || _active_tab < 0 || _active_tab >= static_cast<int>(_tabs.size())) return;
+    TabState& tab = _tabs[_active_tab];
+    tab.dir = dir;
+    if (_state) {
+      tab.filter_txt = _state->filter_txt;
+      if (_state->get_focused_index) tab.focused_index = _state->get_focused_index();
+    }
+  }
+
+  void start_watcher(const Filepath& where) {
+    pending_changes.erase_if([this](const UpdatedFiles&) -> bool { return true; });
+    update_funnel = FileChangeFunnel::create(where, [this](UpdatedFiles changes) {
+      pending_changes.push(std::move(changes));
+      this->run_on_ui([this]() {
+        while (true) {
+          UpdatedFiles batch;
+          FifoError    err = this->pending_changes.try_pop(batch);
+          if (FifoError::OK != err) return;
+          int      focused_index_before = 0;
+          Filepath focused_path_before;
+          if (_state) {
+            if (_state->get_focused_index) { focused_index_before = _state->get_focused_index(); }
+            if (_state->get_focused_item) {
+              const Filepath* focused = _state->get_focused_item();
+              if (focused) focused_path_before = *focused;
+            }
+          }
+          this->dir.partial_refresh(std::move(batch));
+          _restore_focus_after_update(focused_path_before, focused_index_before);
+          sync_active_tab_state();
+        }
+      });
+    });
+  }
+
+  void load_active_tab() {
+    if (_tabs.empty() || _active_tab < 0 || _active_tab >= static_cast<int>(_tabs.size())) return;
+    const TabState& tab = _tabs[_active_tab];
+    dir = tab.dir;
+    if (_state) {
+      _state->filter_txt = tab.filter_txt.empty() ? dir.filter.phrase : tab.filter_txt;
+      dir.apply_filter(_state->filter_txt);
+      if (_state->set_focused_index) _state->set_focused_index(tab.focused_index);
+    }
+    if (!dir.path.empty()) {
+      start_watcher(dir.path);
+    } else {
+      update_funnel.reset();
+    }
+    if (on_event) on_event("dir_changed", dir.path.native());
+  }
+
   void _restore_focus_after_update(const Filepath& focused_path_before, int focused_index_before) {
     if (!_state || this->dir.items.empty() || !_state->set_focused_index) return;
     int restore_index = -1;
@@ -413,6 +529,8 @@ class Panel : public DialogOverlay {
 
   PanelSharedState::P    _state;
   std::shared_ptr<Files> _files;
+  std::vector<TabState>  _tabs;
+  int                    _active_tab = 0;
 };
 
 inline std::string job_type_to_string(JobInstructions::Type type) {
@@ -436,7 +554,7 @@ struct JobProgressBar {
         file_operations().cancel_job(jobinfo.job.get());
       }
     });
-    pause_button = Button(" Pause ", [] {
+    pause_button = Button(" Pause/Resume ", [] {
       auto jobinfo = file_operations().get_running_job();
       if (jobinfo.job && !jobinfo.job->is_stopped()) {
         file_operations().pause_job(jobinfo.job.get());
@@ -612,6 +730,23 @@ class FileCommander : public DialogOverlay {
       }
     }
 
+    bool left_show_perm = false;
+    if (fc_settings_detail::extract_json_bool_field(json, "left_show_permissions", left_show_perm)) {
+      left.get_shared_state()->show_permissions_column = left_show_perm;
+    }
+    bool right_show_perm = false;
+    if (fc_settings_detail::extract_json_bool_field(json, "right_show_permissions", right_show_perm)) {
+      right.get_shared_state()->show_permissions_column = right_show_perm;
+    }
+    bool left_show_owner_group = false;
+    if (fc_settings_detail::extract_json_bool_field(json, "left_show_owner_group", left_show_owner_group)) {
+      left.get_shared_state()->show_owner_group_column = left_show_owner_group;
+    }
+    bool right_show_owner_group = false;
+    if (fc_settings_detail::extract_json_bool_field(json, "right_show_owner_group", right_show_owner_group)) {
+      right.get_shared_state()->show_owner_group_column = right_show_owner_group;
+    }
+
     bool single_mode = false;
     if (fc_settings_detail::extract_json_bool_field(json, "single_panel_mode", single_mode)) {
       set_single_panel_mode(single_mode);
@@ -688,6 +823,10 @@ class FileCommander : public DialogOverlay {
     out << "  \"right_sort\": ";
     write_quoted(sort_order_to_string(right.dir.order_by));
     out << ",\n";
+    out << "  \"left_show_permissions\": " << (left.get_shared_state()->show_permissions_column ? "true" : "false") << ",\n";
+    out << "  \"right_show_permissions\": " << (right.get_shared_state()->show_permissions_column ? "true" : "false") << ",\n";
+    out << "  \"left_show_owner_group\": " << (left.get_shared_state()->show_owner_group_column ? "true" : "false") << ",\n";
+    out << "  \"right_show_owner_group\": " << (right.get_shared_state()->show_owner_group_column ? "true" : "false") << ",\n";
     out << "  \"single_panel_mode\": " << (_single_panel_mode ? "true" : "false") << ",\n";
     out << "  \"focused_panel\": ";
     write_quoted(_last_main_focus_left ? "left" : "right");
@@ -774,6 +913,8 @@ class FileCommander : public DialogOverlay {
     if (command->scope == CommandScope::PANEL) {
       if (command->kind == CommandKind::SHOW_DIALOG) {
         focused_panel().execute_dialog_command(command->dialog);
+      } else if (command->kind == CommandKind::EXECUTE_CALLBACK) {
+        focused_panel().navigation->OnEvent(command->key);
       }
       return;
     }
@@ -792,6 +933,22 @@ class FileCommander : public DialogOverlay {
         left.navigation->TakeFocus();
         _last_main_focus_left = true;
       }
+      return;
+    }
+    if (id == "tab_new") {
+      focused_panel().new_tab();
+      return;
+    }
+    if (id == "tab_close") {
+      focused_panel().close_tab();
+      return;
+    }
+    if (id == "tab_next") {
+      focused_panel().cycle_tab(+1);
+      return;
+    }
+    if (id == "tab_prev") {
+      focused_panel().cycle_tab(-1);
       return;
     }
     if (id == "refresh_dir") {
@@ -961,6 +1118,13 @@ class FileCommander : public DialogOverlay {
 
   static Event* theme_key_for_command(const std::string& id) {
     Theme& t = theme();
+    if (id == "select_toggle") return &t.key_files_select;
+    if (id == "clear_selection") return &t.key_clear_selection;
+    if (id == "select_all") return &t.key_select_all;
+    if (id == "enter_dir") return &t.key_enter_dir;
+    if (id == "leave_dir") return &t.key_leave_dir;
+    if (id == "toggle_permissions_column") return &t.key_toggle_permissions_column;
+    if (id == "toggle_owner_group_column") return &t.key_toggle_owner_group_column;
     if (id == "copy") return &t.key_copy;
     if (id == "move") return &t.key_move;
     if (id == "delete") return &t.key_delete;
@@ -972,6 +1136,10 @@ class FileCommander : public DialogOverlay {
     if (id == "names_to_clipboard") return &t.key_names_to_clipboard;
     if (id == "paths_to_clipboard") return &t.key_paths_to_clipboard;
     if (id == "switch_panel") return &t.key_switch_focused_panel;
+    if (id == "tab_new") return &t.key_new_tab;
+    if (id == "tab_close") return &t.key_close_tab;
+    if (id == "tab_next") return &t.key_next_tab;
+    if (id == "tab_prev") return &t.key_prev_tab;
     if (id == "toggle_single_panel_mode") return &t.key_toggle_single_panel_mode;
     if (id == "refresh_dir") return &t.key_refresh_dir;
     if (id == "target_right") return &t.key_target_dir_to_focused_item_right;
@@ -1045,6 +1213,22 @@ class FileCommander : public DialogOverlay {
         left.navigation->TakeFocus();
         _last_main_focus_left = true;
       }
+      return true;
+    }
+    if (!dialog_active() && event == theme().key_new_tab) {
+      focused_panel().new_tab();
+      return true;
+    }
+    if (!dialog_active() && event == theme().key_close_tab) {
+      focused_panel().close_tab();
+      return true;
+    }
+    if (!dialog_active() && event == theme().key_next_tab) {
+      focused_panel().cycle_tab(+1);
+      return true;
+    }
+    if (!dialog_active() && event == theme().key_prev_tab) {
+      focused_panel().cycle_tab(-1);
       return true;
     }
     if (event == theme().key_refresh_dir) {

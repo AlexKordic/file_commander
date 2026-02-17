@@ -51,7 +51,7 @@ struct Commands {
   bool           increment_use_count(const std::string& id);
   bool           set_use_count(const std::string& id, int use_count);
   bool           set_key(const std::string& id, const Event& key);
-  const Command* find_panel_dialog_by_key(const Event& key) const;
+  const Command* find_panel_by_key(const Event& key) const;
   std::vector<Command> list_all() const;
 };
 

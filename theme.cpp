@@ -7,6 +7,10 @@ using namespace ftxui;
 
 Theme::Theme() {
   key_switch_focused_panel             = Event::Tab;
+  key_new_tab                          = Event::CtrlT;
+  key_close_tab                        = Event::CtrlW;
+  key_next_tab                         = Event::F11;
+  key_prev_tab                         = Event::F12;
   key_target_dir_to_focused_item_right = Event::ArrowRightCtrl;
   key_target_dir_to_focused_item_left  = Event::ArrowLeftCtrl;
 
@@ -19,6 +23,8 @@ Theme::Theme() {
   key_leave_dir            = Event::Character("?");
   key_refresh_dir          = Event::CtrlR;
   key_toggle_single_panel_mode = Event::CtrlO;
+  key_toggle_permissions_column = Event::CtrlL;
+  key_toggle_owner_group_column = Event::CtrlG;
   key_select_all           = Event::CtrlA;
   key_clear_errors         = Event::Escape;
   key_toggle_error_details = Event::CtrlE;

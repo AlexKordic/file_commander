@@ -127,6 +127,10 @@ class ProgressMonitor {
           it = _jobs.erase(it);
           continue;
         }
+        if (job->_state.load() == JobState::PAUSED) {
+          ++it;
+          continue;
+        }
         // Check timing to proceed. This is to reduce number of updates and improve performance
         if (now() >= job->_last_progress_update_time + job->_progress_update_interval) {
           job->_last_progress_update_time = now();
@@ -240,11 +244,32 @@ class ThreadedFileJobs : public FileJobs {
   JobError cancel_job(JobSpec* job) override {
     if (!job) return JobError::NOT_FOUND;
     job->_cancel_requested = true;
+    job->_pause_cv.notify_all();
     return JobError::OK;
   }
   JobError pause_job(JobSpec* job) override {
     if (!job) return JobError::NOT_FOUND;
-    job->_pause_requested = true;
+    const bool was_paused = job->_pause_requested.load(std::memory_order_relaxed);
+    const bool pause_now  = !was_paused;
+    bool       notify_ui  = false;
+    job->_pause_requested.store(pause_now, std::memory_order_relaxed);
+
+    if (pause_now) {
+      // Make pause observable immediately in UI/state APIs.
+      if (job->_state.load(std::memory_order_relaxed) == JobState::RUNNING) {
+        job->_state = JobState::PAUSED;
+        notify_ui   = true;
+      }
+    } else {
+      // Resume and wake workers that are waiting at a pause checkpoint.
+      if (job->_state.load(std::memory_order_relaxed) == JobState::PAUSED) {
+        job->_state = JobState::RUNNING;
+        notify_ui   = true;
+      }
+      job->_pause_cv.notify_all();
+    }
+
+    if (notify_ui) { job->updated(); }
     return JobError::OK;
   }
   RunningJobsInfo get_running_job() override {
@@ -392,9 +417,8 @@ class ThreadedFileJobs : public FileJobs {
         files.close();  // signal discovery thread to stop
         break;
       }
-      if (job->_pause_requested.load(std::memory_order_relaxed)) {
-        job->_state = JobState::PAUSED;
-        files.close();  // signal discovery thread to stop
+      if (!wait_for_resume(job)) {
+        files.close();
         break;
       }
       DirItem   item("", boost::filesystem::file_type::status_error, boost::filesystem::perms::no_perms);
@@ -419,8 +443,7 @@ class ThreadedFileJobs : public FileJobs {
         job->_state = JobState::CANCELLED;
         return;
       }
-      if (job->_pause_requested.load(std::memory_order_relaxed)) {
-        job->_state = JobState::PAUSED;
+      if (!wait_for_resume(job)) {
         return;
       }
       auto&      item = job->_items.at(i);
@@ -475,8 +498,7 @@ class ThreadedFileJobs : public FileJobs {
         job->_state = JobState::CANCELLED;
         return;
       }
-      if (job->_pause_requested.load(std::memory_order_relaxed)) {
-        job->_state = JobState::PAUSED;
+      if (!wait_for_resume_locked(job, lock)) {
         return;
       }
       Defer update_progress([&]() { job->_current_item_index++; });
@@ -613,6 +635,49 @@ class ThreadedFileJobs : public FileJobs {
   std::mutex  _m;
 
   std::atomic<uint64_t> _transfer_rate{0};
+
+  static bool wait_for_resume(JobSpec* job) {
+    if (!job->_pause_requested.load(std::memory_order_relaxed)) return true;
+
+    std::unique_lock lock(job->_m);
+    job->_state = JobState::PAUSED;
+    lock.unlock();
+    job->updated();
+    lock.lock();
+    job->_pause_cv.wait(lock, [job] {
+      return !job->_pause_requested.load(std::memory_order_relaxed)
+        || job->_cancel_requested.load(std::memory_order_relaxed);
+    });
+    if (job->_cancel_requested.load(std::memory_order_relaxed)) {
+      job->_state = JobState::CANCELLED;
+      return false;
+    }
+    job->_state = JobState::RUNNING;
+    lock.unlock();
+    job->updated();
+    return true;
+  }
+
+  static bool wait_for_resume_locked(JobSpec* job, std::unique_lock<std::mutex>& lock) {
+    if (!job->_pause_requested.load(std::memory_order_relaxed)) return true;
+    job->_state = JobState::PAUSED;
+    lock.unlock();
+    job->updated();
+    lock.lock();
+    job->_pause_cv.wait(lock, [job] {
+      return !job->_pause_requested.load(std::memory_order_relaxed)
+        || job->_cancel_requested.load(std::memory_order_relaxed);
+    });
+    if (job->_cancel_requested.load(std::memory_order_relaxed)) {
+      job->_state = JobState::CANCELLED;
+      return false;
+    }
+    job->_state = JobState::RUNNING;
+    lock.unlock();
+    job->updated();
+    lock.lock();
+    return true;
+  }
 };
 
 FileJobs& file_operations() {

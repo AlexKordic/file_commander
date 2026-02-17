@@ -7,6 +7,7 @@
 #include <ftxui/component/component_options.hpp>
 
 #include <atomic>
+#include <condition_variable>
 #include <cstdint>
 #include <deque>
 #include <memory>
@@ -86,6 +87,7 @@ struct JobSpec : JobInstructions, JobStats, JobInterface {
   uint64_t           _job_id = 0;
   std::atomic<bool>  _cancel_requested{false};
   std::atomic<bool>  _pause_requested{false};
+  std::condition_variable _pause_cv;
 
   JobSpec(Type t, std::vector<DirItem> items, CopyConflictMode copy_conflict = CopyConflictMode::Replace);
 

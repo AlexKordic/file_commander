@@ -37,6 +37,9 @@ class DirItem {
   void        update(Type type, Perms perms);
   std::string to_string() const;
   std::string get_time() const;
+  std::string perms_string() const;
+  const std::string& owner_string() const { return _owner; }
+  const std::string& group_string() const { return _group; }
 
   const std::string& filename_ref() const { return _filename; }
   const Filepath&    path_ref() const { return _path; }
@@ -68,6 +71,8 @@ class DirItem {
   std::string                _filename;
   std::optional<Filepath>    _symlink;
   std::optional<std::string> _warning;
+  std::string                _owner;
+  std::string                _group;
 
   friend class Dir;
 };
