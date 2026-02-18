@@ -1,0 +1,32 @@
+if(NOT DEFINED FC_BIN)
+  message(FATAL_ERROR "FC_BIN is required")
+endif()
+if(NOT DEFINED FC_DIST_ROOT OR NOT DEFINED FC_DIST_NAME)
+  message(FATAL_ERROR "FC_DIST_ROOT and FC_DIST_NAME are required")
+endif()
+
+set(_stage "${FC_DIST_ROOT}/${FC_DIST_NAME}")
+set(_tar "${FC_DIST_ROOT}/${FC_DIST_NAME}.tar.gz")
+
+file(REMOVE_RECURSE "${_stage}")
+file(MAKE_DIRECTORY "${_stage}/bin")
+file(COPY "${FC_BIN}" DESTINATION "${_stage}/bin")
+
+if(DEFINED FC_DIST_FRESH AND EXISTS "${FC_DIST_FRESH}")
+  file(COPY "${FC_DIST_FRESH}" DESTINATION "${_stage}/bin")
+endif()
+
+if(DEFINED FC_DIST_ARCHIVE AND EXISTS "${FC_DIST_ARCHIVE}")
+  file(COPY "${FC_DIST_ARCHIVE}" DESTINATION "${_stage}/bin")
+endif()
+
+execute_process(
+  COMMAND "${CMAKE_COMMAND}" -E tar "cfvz" "${_tar}" --format=gnutar "${FC_DIST_NAME}"
+  WORKING_DIRECTORY "${FC_DIST_ROOT}"
+  RESULT_VARIABLE _tar_rc
+)
+if(NOT _tar_rc EQUAL 0)
+  message(FATAL_ERROR "Failed to create tarball: ${_tar}")
+endif()
+
+message(STATUS "Packaged distribution: ${_tar}")

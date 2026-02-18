@@ -1,4 +1,5 @@
 #include "editor_manager.hpp"
+#include "runtime_paths.hpp"
 
 #include <boost/filesystem.hpp>
 
@@ -47,19 +48,6 @@ int decode_exit_code(int system_result) {
   return system_result;
 }
 
-std::string normalize_binary_reference(std::string value) {
-  if (value.empty()) return value;
-  if (value.find('/') == std::string::npos) return value;
-
-  Filepath p(value);
-  if (p.is_relative()) {
-    boost::system::error_code ec;
-    const Filepath cwd = boost::filesystem::current_path(ec);
-    if (!ec.failed()) p = cwd / p;
-  }
-  return p.lexically_normal().native();
-}
-
 }  // namespace
 
 EditorManager::EditorManager(RunForeground run_foreground, StatusSink status_sink)
@@ -82,13 +70,13 @@ const std::string& EditorManager::binary_override() const {
 }
 
 std::string EditorManager::resolved_binary() const {
-  if (!_binary_override.empty()) return normalize_binary_reference(_binary_override);
+  if (!_binary_override.empty()) return normalize_tool_reference(_binary_override);
 
   if (const char* env_bin = std::getenv("FC_FRESH_BIN")) {
-    if (*env_bin) return normalize_binary_reference(env_bin);
+    if (*env_bin) return normalize_tool_reference(env_bin);
   }
 
-  return normalize_binary_reference(FC_FRESH_DEFAULT_BIN);
+  return normalize_tool_reference(FC_FRESH_DEFAULT_BIN);
 }
 
 void EditorManager::set_last_session_id(std::string id) {

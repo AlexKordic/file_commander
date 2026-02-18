@@ -206,7 +206,7 @@ struct DelayedUpdateDelete {
 
   void file_deleted(DirItem file, JobSpec* job) {
     double ts = now();
-    // bytes_queued += std::max(0ll, file.size());
+    // bytes_queued += std::max(int64_t{0}, file.size());
     items_deleted.push_back(std::move(file));
     if (ts < last_ts + interval) return;
     last_ts = ts;
@@ -216,7 +216,7 @@ struct DelayedUpdateDelete {
     {
       std::lock_guard lock(job->_m);
       for (auto& item : items_deleted) {
-        job->_bytes_processed += std::max(0ll, item.size());
+        job->_bytes_processed += std::max(int64_t{0}, item.size());
         job->_items.emplace_back(std::move(item));
       }
       job->_current_item_index = job->_items.size() - 1;
@@ -322,7 +322,7 @@ class ThreadedFileJobs : public FileJobs {
     const int64_t   initial = i;
     const int64_t   size    = static_cast<int64_t>(_errors.size());
     if (size == 0) return false;
-    i = std::max(0LL, std::min(i + offset, size - 1));
+    i = std::max(int64_t{0}, std::min(i + offset, size - 1));
     // return false when offset would go out of bounds.
     return i != initial;
   }
@@ -389,7 +389,7 @@ class ThreadedFileJobs : public FileJobs {
         _discover_files(job, subdir_items, files, update);
         // push parent dir item last
       }
-      update.file_found(std::max(0ll, item.size()), job);
+      update.file_found(std::max(int64_t{0}, item.size()), job);
       files.push(item);
     }
   }
@@ -591,7 +591,7 @@ class ThreadedFileJobs : public FileJobs {
         continue;
       }
       auto skip_current_file = [&]() {
-        job->_bytes_total = std::max(0.0, job->_bytes_total - double(std::max(0LL, item.size())));
+        job->_bytes_total = std::max(0.0, job->_bytes_total - double(std::max(int64_t{0}, item.size())));
         job->_total.update(job->_bytes_processed, job->_bytes_total);
       };
       const Filepath destination_path = *item.symlink_ref();

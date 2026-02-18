@@ -6,6 +6,7 @@
 #include <ftxui/dom/direction.hpp>
 #include <ftxui/dom/elements.hpp>
 #include <ftxui/dom/table.hpp>
+#include <ftxui/util/smart_ptr.hpp>
 
 #include <algorithm>
 #include <cmath>

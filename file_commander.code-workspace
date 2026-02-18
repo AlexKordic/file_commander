@@ -9,5 +9,8 @@
     {
       "path": "../luajit"
     }
-  ]
+  ],
+  "settings": {
+    "git.ignoreLimitWarning": true
+  }
 }

@@ -64,6 +64,43 @@ FC_FRESH_FAKE_LOG=/tmp/fc_fresh_fake.log \
 ./build/fc run test/test_editor_integration.lua
 ```
 
+Run static-plan smoke tests:
+
+```bash
+cmake --build /Users/alexkordic/code/file_commander/build -j10 --target smoke_lua_suite
+```
+
+## Packaging
+
+Create a self-contained distribution tarball:
+
+```bash
+cmake --build /Users/alexkordic/code/file_commander/build -j10 --target package_static_dist
+```
+
+Expected output:
+- `/Users/alexkordic/code/file_commander/build/dist/fc-Darwin-arm64.tar.gz`
+- Tarball contains `bin/fc`, `bin/fresh` (if built), and `bin/7zr` (if built).
+
+## Linux static (Zig)
+
+Requires `zig` available on `PATH`.
+
+Configure:
+
+```bash
+cmake -S /Users/alexkordic/code/file_commander \
+  -B /Users/alexkordic/code/file_commander/build-static-linux-x86_64 \
+  -G Ninja \
+  -DCMAKE_BUILD_TYPE=Release \
+  -DCMAKE_TOOLCHAIN_FILE=/Users/alexkordic/code/file_commander/cmake/toolchains/zig-musl-x86_64.cmake \
+  -DFC_STATIC_MODE=ON \
+  -DFC_BUILD_FRESH=OFF \
+  -DFC_BUILD_LZMA_TOOL=OFF
+```
+
+For ARM64 Linux, use `cmake/toolchains/zig-musl-aarch64.cmake`.
+
 ## Troubleshooting
 
 If CMake reports a generator mismatch in `build/_deps/boost-subbuild`, clear only the Boost subbuild folders and re-run configure:

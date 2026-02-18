@@ -949,7 +949,7 @@ CopyDiscoveryProcess::CopyDiscoveryProcess(CopyDialog* parent, Filepath target) 
   // Dir::_calculate(), so stats() would always return 0. Read items.size() directly.
   _data_source.dataset_size = [dir = _dir.get()]() -> DataSize {
     auto sz = (int64_t)dir->items.size();
-    return {sz, 0, std::max(0LL, sz - 1)};
+    return {sz, 0, std::max(int64_t{0}, sz - 1)};
   };
   _data_source.on_event = [app = _state, data_source = &_data_source](DSEventContext ctx) -> bool {
     // handle filter only
@@ -1412,13 +1412,13 @@ FindDialog::FindDialog(PanelSharedState::P s) : Dialog(std::move(s)) {
   _data_source.dataset_size = [this]() -> DataSize {
     std::lock_guard lock(_results_mutex);
     int64_t         total = static_cast<int64_t>(_results.size());
-    return {total, 0, std::max(0LL, total - 1)};
+    return {total, 0, std::max(int64_t{0}, total - 1)};
   };
   _data_source.move_id_by = [this](int64_t& id, int64_t delta) -> bool {
     std::lock_guard lock(_results_mutex);
     const int64_t   old = id;
-    const int64_t   max = std::max(0LL, static_cast<int64_t>(_results.size()) - 1);
-    id = std::clamp(id + delta, 0LL, max);
+    const int64_t   max = std::max(int64_t{0}, static_cast<int64_t>(_results.size()) - 1);
+    id = std::clamp(id + delta, int64_t{0}, max);
     return id != old;
   };
   _data_source.count_items_before = [](int64_t id) -> int64_t { return id; };
@@ -1592,7 +1592,7 @@ void FindDialog::open_selected() {
   {
     std::lock_guard lock(_results_mutex);
     if (_results.empty()) return;
-    const int64_t focused = std::clamp(_data_source.focused_id, 0LL, static_cast<int64_t>(_results.size()) - 1);
+    const int64_t focused = std::clamp(_data_source.focused_id, int64_t{0}, static_cast<int64_t>(_results.size()) - 1);
     selected = _results.at(focused);
   }
 
@@ -1755,7 +1755,7 @@ void JobListDialog::rebuild_list() {
 
   // Clamp focused_id to valid range
   if (!jobs.empty()) {
-    _job_data_source.focused_id = std::clamp(_job_data_source.focused_id, 0LL, (int64_t)jobs.size() - 1);
+    _job_data_source.focused_id = std::clamp(_job_data_source.focused_id, int64_t{0}, (int64_t)jobs.size() - 1);
   } else {
     _job_data_source.focused_id = 0;
   }
@@ -1816,12 +1816,12 @@ JobListDialog::JobListDialog(std::function<void()> close_dialog) : Dialog(nullpt
 
   _job_data_source.dataset_size = [this]() -> DataSize {
     auto sz = (int64_t)jobs.size();
-    return {sz, 0, std::max(0LL, sz - 1)};
+    return {sz, 0, std::max(int64_t{0}, sz - 1)};
   };
   _job_data_source.move_id_by = [this](int64_t& id, int64_t delta) -> bool {
     int64_t old_id = id;
-    int64_t max_id = std::max(0LL, (int64_t)jobs.size() - 1);
-    id = std::clamp(id + delta, 0LL, max_id);
+    int64_t max_id = std::max(int64_t{0}, (int64_t)jobs.size() - 1);
+    id = std::clamp(id + delta, int64_t{0}, max_id);
     return id != old_id;
   };
   _job_data_source.count_items_before = [](int64_t id) -> int64_t { return id; };
@@ -1893,13 +1893,13 @@ JobListDialog::JobListDialog(std::function<void()> close_dialog) : Dialog(nullpt
   _detail_items_data_source.dataset_size = [this]() -> DataSize {
     if (!detail_job) return {0, 0, 0};
     auto sz = (int64_t)detail_job->_items.size();
-    return {sz, 0, std::max(0LL, sz - 1)};
+    return {sz, 0, std::max(int64_t{0}, sz - 1)};
   };
   _detail_items_data_source.move_id_by = [this](int64_t& id, int64_t delta) -> bool {
     if (!detail_job) return false;
     int64_t old_id = id;
-    int64_t max_id = std::max(0LL, (int64_t)detail_job->_items.size() - 1);
-    id = std::clamp(id + delta, 0LL, max_id);
+    int64_t max_id = std::max(int64_t{0}, (int64_t)detail_job->_items.size() - 1);
+    id = std::clamp(id + delta, int64_t{0}, max_id);
     return id != old_id;
   };
   _detail_items_data_source.count_items_before = [](int64_t id) -> int64_t { return id; };
@@ -1912,7 +1912,7 @@ JobListDialog::JobListDialog(std::function<void()> close_dialog) : Dialog(nullpt
     if (item.type() == boost::filesystem::directory_file) {
       name = text("  / " + item.path_ref().native());
     } else {
-      std::string line = "  . " + item.path_ref().native() + "  " + format_bytes(std::max(0LL, item.size()));
+      std::string line = "  . " + item.path_ref().native() + "  " + format_bytes(std::max(int64_t{0}, item.size()));
       if (item.symlink_ref()) line += "  -> " + item.symlink_ref()->native();
       name = text(line);
     }
@@ -1931,13 +1931,13 @@ JobListDialog::JobListDialog(std::function<void()> close_dialog) : Dialog(nullpt
   _detail_errors_data_source.dataset_size = [this]() -> DataSize {
     if (!detail_job) return {0, 0, 0};
     auto sz = (int64_t)detail_job->_errors.size();
-    return {sz, 0, std::max(0LL, sz - 1)};
+    return {sz, 0, std::max(int64_t{0}, sz - 1)};
   };
   _detail_errors_data_source.move_id_by = [this](int64_t& id, int64_t delta) -> bool {
     if (!detail_job) return false;
     int64_t old_id = id;
-    int64_t max_id = std::max(0LL, (int64_t)detail_job->_errors.size() - 1);
-    id = std::clamp(id + delta, 0LL, max_id);
+    int64_t max_id = std::max(int64_t{0}, (int64_t)detail_job->_errors.size() - 1);
+    id = std::clamp(id + delta, int64_t{0}, max_id);
     return id != old_id;
   };
   _detail_errors_data_source.count_items_before = [](int64_t id) -> int64_t { return id; };
@@ -2105,12 +2105,12 @@ BookmarksDialog::BookmarksDialog(
 
   _data_source.dataset_size = [this]() -> DataSize {
     int64_t size = static_cast<int64_t>(bookmarks.size());
-    return {size, 0, std::max(0LL, size - 1)};
+    return {size, 0, std::max(int64_t{0}, size - 1)};
   };
   _data_source.move_id_by = [this](int64_t& id, int64_t delta) -> bool {
     int64_t old = id;
-    int64_t max = std::max(0LL, static_cast<int64_t>(bookmarks.size()) - 1);
-    id = std::clamp(id + delta, 0LL, max);
+    int64_t max = std::max(int64_t{0}, static_cast<int64_t>(bookmarks.size()) - 1);
+    id = std::clamp(id + delta, int64_t{0}, max);
     return id != old;
   };
   _data_source.count_items_before = [](int64_t id) -> int64_t { return id; };
@@ -2183,7 +2183,7 @@ void BookmarksDialog::refresh() {
   if (bookmarks.empty()) {
     _data_source.focused_id = 0;
   } else {
-    _data_source.focused_id = std::clamp(_data_source.focused_id, 0LL, static_cast<int64_t>(bookmarks.size()) - 1);
+    _data_source.focused_id = std::clamp(_data_source.focused_id, int64_t{0}, static_cast<int64_t>(bookmarks.size()) - 1);
   }
 }
 
@@ -2281,12 +2281,12 @@ CommandPaletteDialog::CommandPaletteDialog(
 
   _data_source.dataset_size = [this]() -> DataSize {
     auto sz = static_cast<int64_t>(visible_ids.size());
-    return {sz, 0, std::max(0LL, sz - 1)};
+    return {sz, 0, std::max(int64_t{0}, sz - 1)};
   };
   _data_source.move_id_by = [this](int64_t& id, int64_t delta) -> bool {
     int64_t old = id;
-    int64_t max = std::max(0LL, static_cast<int64_t>(visible_ids.size()) - 1);
-    id = std::clamp(id + delta, 0LL, max);
+    int64_t max = std::max(int64_t{0}, static_cast<int64_t>(visible_ids.size()) - 1);
+    id = std::clamp(id + delta, int64_t{0}, max);
     return id != old;
   };
   _data_source.count_items_before = [](int64_t id) -> int64_t { return id; };
@@ -2395,13 +2395,13 @@ void CommandPaletteDialog::apply_filter() {
   if (visible_ids.empty()) {
     _data_source.focused_id = 0;
   } else {
-    _data_source.focused_id = std::clamp(_data_source.focused_id, 0LL, static_cast<int64_t>(visible_ids.size()) - 1);
+    _data_source.focused_id = std::clamp(_data_source.focused_id, int64_t{0}, static_cast<int64_t>(visible_ids.size()) - 1);
   }
 }
 
 void CommandPaletteDialog::run_selected() {
   if (visible_ids.empty()) return;
-  const int64_t focused = std::clamp(_data_source.focused_id, 0LL, static_cast<int64_t>(visible_ids.size()) - 1);
+  const int64_t focused = std::clamp(_data_source.focused_id, int64_t{0}, static_cast<int64_t>(visible_ids.size()) - 1);
   const Command& cmd = commands_all.at(visible_ids.at(focused));
   if (execute_command) execute_command(cmd.id);
 }
@@ -2424,7 +2424,7 @@ bool CommandPaletteDialog::capture_rebind_key(const Event& e) {
     return true;
   }
 
-  const int64_t focused = std::clamp(_data_source.focused_id, 0LL, static_cast<int64_t>(visible_ids.size()) - 1);
+  const int64_t focused = std::clamp(_data_source.focused_id, int64_t{0}, static_cast<int64_t>(visible_ids.size()) - 1);
   const Command cmd = commands_all.at(visible_ids.at(focused));
   capture_key_mode = false;
   if (!rebind_command) {
@@ -2571,12 +2571,12 @@ ThemeColorsDialog::ThemeColorsDialog(
 
   _data_source.dataset_size = [this]() -> DataSize {
     auto sz = static_cast<int64_t>(entries.size());
-    return {sz, 0, std::max(0LL, sz - 1)};
+    return {sz, 0, std::max(int64_t{0}, sz - 1)};
   };
   _data_source.move_id_by = [this](int64_t& id, int64_t delta) -> bool {
     int64_t old = id;
-    int64_t max = std::max(0LL, static_cast<int64_t>(entries.size()) - 1);
-    id = std::clamp(id + delta, 0LL, max);
+    int64_t max = std::max(int64_t{0}, static_cast<int64_t>(entries.size()) - 1);
+    id = std::clamp(id + delta, int64_t{0}, max);
     return id != old;
   };
   _data_source.count_items_before = [](int64_t id) -> int64_t { return id; };
@@ -2681,7 +2681,7 @@ void ThemeColorsDialog::cancel() { close_dialog(); }
 
 void ThemeColorsDialog::open_picker_for_focused() {
   if (entries.empty() || picker_grid.empty()) return;
-  const int64_t focused = std::clamp(_data_source.focused_id, 0LL, static_cast<int64_t>(entries.size()) - 1);
+  const int64_t focused = std::clamp(_data_source.focused_id, int64_t{0}, static_cast<int64_t>(entries.size()) - 1);
   const auto&   entry   = entries.at(focused);
   int           wanted  = 16;
   token_to_palette_index(entry.token, wanted);
@@ -2712,7 +2712,7 @@ void ThemeColorsDialog::move_picker(int drow, int dcol) {
 
 void ThemeColorsDialog::accept_picker() {
   if (!picker_open || entries.empty()) return;
-  const int64_t focused = std::clamp(_data_source.focused_id, 0LL, static_cast<int64_t>(entries.size()) - 1);
+  const int64_t focused = std::clamp(_data_source.focused_id, int64_t{0}, static_cast<int64_t>(entries.size()) - 1);
   auto&         entry   = entries.at(focused);
   const std::string next_token = palette_token_for_index(selected_picker_index());
   std::string error;

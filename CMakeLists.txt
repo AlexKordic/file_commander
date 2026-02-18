@@ -14,17 +14,25 @@ project(fc LANGUAGES CXX VERSION 1.0.0)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
+option(FC_STATIC_MODE "Prefer static linking for non-system libraries" OFF)
 option(FC_BUILD_FRESH "Build local Fresh editor alongside file_commander" ON)
 set(FC_FRESH_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../editor-fresh" CACHE PATH "Path to local Fresh source checkout")
 option(FC_BUILD_LZMA_TOOL "Build local 7zr from LZMA SDK" ON)
 set(FC_LZMA_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../lzma2600" CACHE PATH "Path to local LZMA SDK checkout")
+set(FC_FTXUI_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../alex_ftxui" CACHE PATH "Path to local FTXUI source checkout")
+set(FC_LUAJIT_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../luajit" CACHE PATH "Path to local LuaJIT source checkout")
+
+if(FC_STATIC_MODE)
+  set(BUILD_SHARED_LIBS OFF CACHE BOOL "Build shared libraries" FORCE)
+  set(CMAKE_FIND_LIBRARY_SUFFIXES ".a")
+  set(CMAKE_POSITION_INDEPENDENT_CODE OFF)
+  if(NOT APPLE)
+    string(APPEND CMAKE_EXE_LINKER_FLAGS " -static")
+  endif()
+endif()
 
 include(FetchContent)
-
-FetchContent_Declare(ftxui
-  GIT_REPOSITORY https://github.com/AlexKordic/ftxui
-  GIT_TAG 34f7464263d71ef7b2b1c92d39ccb80debc608f8
-)
+include(ExternalProject)
 
 # FetchContent_Declare(ftxui-grid-container
 #   GIT_REPOSITORY https://github.com/mingsheng13/grid-container-ftxui
@@ -74,19 +82,89 @@ add_subdirectory(boost/filesystem)
 
 set(FTXUI_USE_LOCAL_SHARED_PTR ON CACHE BOOL "" FORCE)
 set(FTXUI_ENABLE_INSTALL OFF CACHE BOOL "" FORCE)
-# FetchContent_MakeAvailable(ftxui)
-add_subdirectory(/Users/alexkordic/code/alex_ftxui ftxui)
+if(EXISTS "${FC_FTXUI_SOURCE_DIR}/CMakeLists.txt")
+  add_subdirectory("${FC_FTXUI_SOURCE_DIR}" ftxui)
+else()
+  message(FATAL_ERROR "Local FTXUI source not found at ${FC_FTXUI_SOURCE_DIR}. Set FC_FTXUI_SOURCE_DIR to your local alex_ftxui checkout.")
+endif()
 
-# LuaJIT (local build from ../luajit, run: MACOSX_DEPLOYMENT_TARGET=$(sw_vers -productVersion) make -C ../luajit)
-set(LUAJIT_DIR /Users/alexkordic/code/luajit)
-add_library(luajit STATIC IMPORTED)
-set_target_properties(luajit PROPERTIES
-  IMPORTED_LOCATION ${LUAJIT_DIR}/src/libluajit.a
-  INTERFACE_INCLUDE_DIRECTORIES ${LUAJIT_DIR}/src
+set(_luajit_src_lib "${FC_LUAJIT_SOURCE_DIR}/src/libluajit.a")
+set(_luajit_stage_dir "${CMAKE_BINARY_DIR}/third_party/luajit/lib")
+set(_luajit_stage_lib "${_luajit_stage_dir}/libluajit.a")
+if(EXISTS "${FC_LUAJIT_SOURCE_DIR}/src/luajit.h")
+  set(_luajit_cc "${CMAKE_C_COMPILER}")
+  if(CMAKE_C_COMPILER_ARG1)
+    string(APPEND _luajit_cc " ${CMAKE_C_COMPILER_ARG1}")
+  endif()
+  if(CMAKE_C_COMPILER_TARGET)
+    string(APPEND _luajit_cc " -target ${CMAKE_C_COMPILER_TARGET}")
+  endif()
+
+  set(_luajit_host_cc "${CMAKE_C_COMPILER}")
+  if(CMAKE_CROSSCOMPILING)
+    find_program(FC_HOST_CC NAMES cc clang gcc REQUIRED)
+    set(_luajit_host_cc "${FC_HOST_CC}")
+  endif()
+
+  set(_luajit_make_args BUILDMODE=static)
+  if(CMAKE_CROSSCOMPILING AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    list(APPEND _luajit_make_args TARGET_SYS=Linux)
+  endif()
+
+  add_custom_command(
+    OUTPUT "${_luajit_stage_lib}"
+    COMMAND ${CMAKE_COMMAND} -E make_directory "${_luajit_stage_dir}"
+    COMMAND ${CMAKE_COMMAND} -E env
+      "MACOSX_DEPLOYMENT_TARGET=${CMAKE_OSX_DEPLOYMENT_TARGET}"
+      make -C "${FC_LUAJIT_SOURCE_DIR}/src"
+      "CC=${_luajit_cc}"
+      "HOST_CC=${_luajit_host_cc}"
+      clean
+    COMMAND ${CMAKE_COMMAND} -E env
+      "MACOSX_DEPLOYMENT_TARGET=${CMAKE_OSX_DEPLOYMENT_TARGET}"
+      make -C "${FC_LUAJIT_SOURCE_DIR}/src"
+      "CC=${_luajit_cc}"
+      "HOST_CC=${_luajit_host_cc}"
+      ${_luajit_make_args}
+      libluajit.a
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different "${_luajit_src_lib}" "${_luajit_stage_lib}"
+    DEPENDS "${FC_LUAJIT_SOURCE_DIR}/src/luajit.h"
+    WORKING_DIRECTORY "${FC_LUAJIT_SOURCE_DIR}"
+    COMMENT "Building LuaJIT static library from local source"
+    VERBATIM
+  )
+  add_custom_target(luajit_lib ALL DEPENDS "${_luajit_stage_lib}")
+  add_library(luajit STATIC IMPORTED GLOBAL)
+  set_target_properties(luajit PROPERTIES
+    IMPORTED_LOCATION "${_luajit_stage_lib}"
+    INTERFACE_INCLUDE_DIRECTORIES "${FC_LUAJIT_SOURCE_DIR}/src"
+  )
+  add_dependencies(luajit luajit_lib)
+else()
+  message(FATAL_ERROR "LuaJIT source not found at ${FC_LUAJIT_SOURCE_DIR}. Set FC_LUAJIT_SOURCE_DIR.")
+endif()
+
+add_executable(fc
+  main.cpp
+  scripting.cpp
+  log.cpp
+  err.cpp
+  commander.cpp
+  theme.cpp
+  custom_controls.cpp
+  dialogs.cpp
+  shared_state.cpp
+  file_change_funnel.cpp
+  file_io_jobs.cpp
+  editor_manager.cpp
+  archive.cpp
+  runtime_paths.cpp
 )
-
-add_executable(fc main.cpp scripting.cpp log.cpp err.cpp commander.cpp theme.cpp custom_controls.cpp dialogs.cpp shared_state.cpp file_change_funnel.cpp file_io_jobs.cpp editor_manager.cpp archive.cpp)
-target_link_libraries(fc PRIVATE ftxui::component Boost::filesystem luajit "-framework CoreServices")
+if(APPLE)
+  target_link_libraries(fc PRIVATE ftxui::component Boost::filesystem luajit "-framework CoreServices")
+else()
+  target_link_libraries(fc PRIVATE ftxui::component Boost::filesystem luajit)
+endif()
 
 set(_fc_fresh_default_bin "fresh")
 if(FC_BUILD_FRESH)
@@ -141,6 +219,33 @@ if(FC_BUILD_LZMA_TOOL)
 endif()
 
 target_compile_definitions(fc PRIVATE FC_ARCHIVE_TOOL_DEFAULT="${_fc_archive_default_bin}")
+
+set(_fc_dist_root "${CMAKE_BINARY_DIR}/dist")
+set(_fc_dist_name "fc-${CMAKE_SYSTEM_NAME}-${CMAKE_SYSTEM_PROCESSOR}")
+set(_fc_pack_script "${CMAKE_BINARY_DIR}/cmake/package_dist.cmake")
+configure_file("${CMAKE_CURRENT_SOURCE_DIR}/cmake/package_dist.cmake.in" "${_fc_pack_script}" @ONLY)
+
+add_custom_target(package_static_dist
+  DEPENDS fc
+  COMMAND ${CMAKE_COMMAND}
+    -DFC_BIN=$<TARGET_FILE:fc>
+    -DFC_DIST_ROOT=${_fc_dist_root}
+    -DFC_DIST_NAME=${_fc_dist_name}
+    -DFC_DIST_FRESH=${_fc_fresh_default_bin}
+    -DFC_DIST_ARCHIVE=${_fc_archive_default_bin}
+    -P "${_fc_pack_script}"
+  COMMENT "Creating self-contained distribution tarball"
+  VERBATIM
+)
+
+add_custom_target(smoke_lua_suite
+  DEPENDS fc
+  COMMAND ${CMAKE_COMMAND} -E chdir "${CMAKE_CURRENT_SOURCE_DIR}" "$<TARGET_FILE:fc>" run "test/test_events.lua"
+  COMMAND ${CMAKE_COMMAND} -E chdir "${CMAKE_CURRENT_SOURCE_DIR}" "$<TARGET_FILE:fc>" run "test/test_palette.lua"
+  COMMAND ${CMAKE_COMMAND} -E chdir "${CMAKE_CURRENT_SOURCE_DIR}" "$<TARGET_FILE:fc>" run "test/test_archive.lua"
+  COMMENT "Running smoke Lua suite"
+  VERBATIM
+)
 
 # add_executable(playground playground.cpp log.cpp err.cpp commander.cpp theme.cpp custom_controls.cpp dialogs.cpp shared_state.cpp file_change_funnel.cpp file_io_jobs.cpp)
 # target_link_libraries(playground PRIVATE ftxui::component ftxui::dom ftxui::screen Boost::filesystem "-framework CoreServices")
