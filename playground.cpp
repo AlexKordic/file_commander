@@ -1,5 +1,5 @@
 
-#include "file_panel.hpp"
+#include "custom_controls.hpp"
 
 #include <boost/filesystem.hpp>
 #include <boost/filesystem/operations.hpp>
@@ -250,7 +250,7 @@ int main_yflex() {
 }
 
 #include "commander.hpp"
-#include "file_panel.hpp"
+#include "custom_controls.hpp"
 #include "theme.hpp"
 
 int main_file_list() {

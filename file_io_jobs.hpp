@@ -6,6 +6,8 @@
 
 #include <ftxui/component/component_options.hpp>
 
+#include <atomic>
+#include <condition_variable>
 #include <cstdint>
 #include <deque>
 #include <memory>
@@ -13,6 +15,21 @@
 #include <vector>
 
 namespace Perun {
+
+enum class CopyConflictMode {
+  Replace,
+  Update,
+  Skip,
+};
+
+enum class JobState {
+  QUEUED,
+  RUNNING,
+  PAUSED,
+  CANCELLED,
+  COMPLETED,
+  COMPLETED_WITH_ERRORS,
+};
 
 struct ProgressInfo {
   int64_t current_size = 0;
@@ -28,15 +45,18 @@ struct ProgressInfo {
 };
 
 struct JobInstructions {
-  enum class Type { COPY, MOVE, DELETE };
+  enum class Type { COPY, MOVE, DELETE, ARCHIVE_CREATE };
 
   Type                 _type;
   std::vector<DirItem> _items;
   std::vector<DirItem> _errors;
+  CopyConflictMode     _copy_conflict = CopyConflictMode::Replace;
 
   void report_error(DirItem item, std::string message);
 };
 struct JobStats {
+  std::atomic<JobState> _state{JobState::QUEUED};
+
   // use this index to find current item in _items vector and display file name and path
   int          _current_item_index = 0;
   ProgressInfo _current_item;
@@ -64,7 +84,12 @@ struct JobInterface {
 // Specifies single operation to be performed on a set of files.
 // Operation steps are defined in advance and FileJobs will execute them in order
 struct JobSpec : JobInstructions, JobStats, JobInterface {
-  JobSpec(Type t, std::vector<DirItem> items);
+  uint64_t           _job_id = 0;
+  std::atomic<bool>  _cancel_requested{false};
+  std::atomic<bool>  _pause_requested{false};
+  std::condition_variable _pause_cv;
+
+  JobSpec(Type t, std::vector<DirItem> items, CopyConflictMode copy_conflict = CopyConflictMode::Replace);
 
   int64_t item_count() const { return _items_pending > 0 ? _items_pending : _items.size(); }
   // Not in FileJobs books
@@ -104,11 +129,20 @@ class FileJobs {
  public:
   virtual ~FileJobs() = default;
 
-  // Add a new job to the queue
-  virtual FifoError add_job(std::shared_ptr<JobSpec> job) = 0;
-  virtual JobError  cancel_job(JobSpec* job)              = 0;
+  // Add a new job to the queue. Returns assigned job ID.
+  virtual uint64_t add_job(std::shared_ptr<JobSpec> job) = 0;
+  virtual JobError cancel_job(JobSpec* job)              = 0;
+  virtual JobError pause_job(JobSpec* job)               = 0;
 
   virtual RunningJobsInfo get_running_job() = 0;
+
+  /// Get all jobs in history (completed, paused, cancelled, errored).
+  virtual std::vector<std::shared_ptr<JobSpec>> get_job_history() = 0;
+
+  /// Dismiss (remove) a job from history by ID.
+  virtual void dismiss_job(uint64_t job_id) = 0;
+  // TODO: review later
+  virtual void set_transfer_rate(uint64_t bytes_per_second) = 0;
 
   virtual std::deque<JobErrorInfo> get_errors(int count) = 0;
 

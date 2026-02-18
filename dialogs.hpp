@@ -2,15 +2,19 @@
 #define _PERUN_FC_DIALOGS_
 
 #include "commander.hpp"
+#include "file_io_jobs.hpp"
 #include "shared_state.hpp"
 
 #include <cstdint>
 #include <ftxui/component/component.hpp>
 #include <ftxui/component/event.hpp>
 
+#include <atomic>
 #include <memory>
+#include <mutex>
 #include <string>
 #include <thread>
+#include <vector>
 
 namespace ftxui {
 
@@ -18,14 +22,43 @@ Element screen_render_time();
 
 Decorator filetype_color(const DirItem& item);
 
+enum class CommandScope {
+  PANEL,
+  GLOBAL,
+};
+
+enum class CommandKind {
+  SHOW_DIALOG,
+  EXECUTE_CALLBACK,
+};
+
 struct Command {
+  std::string id;
   Event       key;
   std::string dialog;
+  std::string description;
+  CommandScope scope = CommandScope::PANEL;
+  CommandKind  kind  = CommandKind::SHOW_DIALOG;
+  int          use_count = 0;
+};
+
+struct ThemeColorEntry {
+  std::string id;
+  std::string label;
+  std::string token;
 };
 
 struct Commands {
   std::vector<Command> available;
   Commands();
+
+  const Command* find_by_id(const std::string& id) const;
+  Command*       find_by_id(const std::string& id);
+  bool           increment_use_count(const std::string& id);
+  bool           set_use_count(const std::string& id, int use_count);
+  bool           set_key(const std::string& id, const Event& key);
+  const Command* find_panel_by_key(const Event& key) const;
+  std::vector<Command> list_all() const;
 };
 
 Commands& commands();
@@ -67,6 +100,24 @@ struct MkdirDialog : Dialog {
 
   MkdirDialog(PanelSharedState::P s);
   void OnShow() override;
+
+  void    ok();
+  void    cancel();
+  Element render();
+};
+
+struct GlobSelectDialog : Dialog {
+  GlobSelectDialog(PanelSharedState::P s, bool select_mode);
+  void OnShow() override;
+
+  std::string pattern;
+  std::string error;
+  bool        select_mode = true;
+  int         cursor_pos  = 0;
+
+  Component input_pattern;
+  Component button_ok;
+  Component button_close;
 
   void    ok();
   void    cancel();
@@ -128,6 +179,7 @@ struct CopyDiscoveryProcess {
   bool         _follow_links            = false;
   bool         _preserve_relative_links = true;
   CopyConflict _conflict                = CopyConflict::Replace;
+  uint64_t     _sequence_id             = 0;
   DataSource   _data_source;
   int64_t      _bytes_total = 0;
   bool         _completed   = false;
@@ -167,9 +219,13 @@ struct CopyDialog : Dialog {
   Component button_cancel, button_ok;
   Component op_follow_links;
   Component op_preserve_relative_links;
+  Component op_conflict_mode;
   Component input_destination_path;
   int       filter_cursor_pos      = 0;
   int       destination_cursor_pos = 0;
+  int       conflict_mode_selected = 0;
+
+  std::vector<std::string> conflict_mode_labels;
 
   Component _filelist_wrapper;
 
@@ -217,6 +273,41 @@ struct DeleteDialog : Dialog {
   PanelSharedState::P _operation_state;
 };
 
+struct FindDialog : Dialog {
+  FindDialog(PanelSharedState::P s);
+  ~FindDialog();
+  void OnShow() override;
+
+  std::string root_path;
+  std::string pattern;
+  std::string status;
+  int         root_cursor_pos    = 0;
+  int         pattern_cursor_pos = 0;
+
+  Component input_root;
+  Component input_pattern;
+  Component button_find;
+  Component button_open;
+  Component button_close;
+  Component results_menu;
+
+  DataSource _data_source;
+
+  std::vector<Filepath> _results;
+  std::mutex            _results_mutex;
+  std::thread           _worker;
+  std::atomic<bool>     _running{false};
+  std::atomic<bool>     _completed{false};
+  std::atomic<int64_t>  _dirs_scanned{0};
+  std::atomic<int64_t>  _files_scanned{0};
+  std::atomic<int64_t>  _errors{0};
+
+  void start_search();
+  void stop_search();
+  void open_selected();
+  void cancel();
+};
+
 struct Nyi : Dialog {
   Nyi(PanelSharedState::P s);
   void OnShow() override {}
@@ -236,6 +327,154 @@ struct ErrorListDialog : Dialog {
   DataSource _data_source;
 
   std::function<void()> close_dialog;
+};
+
+struct JobListDialog : Dialog {
+  JobListDialog(std::function<void()> close_dialog);
+  void OnShow() override;
+  void cancel();
+
+  // Job list view (DataSource-backed)
+  std::vector<std::shared_ptr<Perun::JobSpec>> jobs;
+  DataSource _job_data_source;
+  Component  _job_list;
+  Component  button_close;
+  Component  button_dismiss_all;
+
+  // Detail view (DataSource-backed)
+  bool                            in_detail = false;
+  int                             view_mode = 0;  // 0=list, 1=detail
+  std::shared_ptr<Perun::JobSpec> detail_job;
+  DataSource                      _detail_items_data_source;
+  Component                       _detail_items;
+  DataSource                      _detail_errors_data_source;
+  Component                       _detail_errors;
+  Component                       detail_back_button;
+  Component                       detail_close_button;
+
+  Component tab;
+
+  std::function<void()> close_dialog;
+
+  void    open_detail();
+  void    close_detail();
+  void    dismiss_selected();
+  void    dismiss_all_clean();
+  void    rebuild_list();
+  Element render_list();
+  Element render_detail();
+
+  static std::string state_icon(Perun::JobState state);
+  static std::string format_duration(double seconds);
+  static std::string format_bytes(double bytes);
+};
+
+struct BookmarksDialog : Dialog {
+  BookmarksDialog(
+    std::function<void()> close_dialog,
+    std::function<std::vector<Filepath>()> list_bookmarks,
+    std::function<void()> add_current_dir,
+    std::function<void(const Filepath&)> remove_bookmark,
+    std::function<void(const Filepath&)> open_bookmark
+  );
+  void OnShow() override;
+  void cancel();
+
+  std::function<void()> close_dialog;
+  std::function<std::vector<Filepath>()> list_bookmarks;
+  std::function<void()> add_current_dir;
+  std::function<void(const Filepath&)> remove_bookmark;
+  std::function<void(const Filepath&)> open_bookmark;
+
+  std::vector<Filepath> bookmarks;
+  DataSource            _data_source;
+  Component             list_menu;
+  Component             button_add;
+  Component             button_remove;
+  Component             button_open;
+  Component             button_close;
+
+  void refresh();
+  bool has_selected() const;
+  int64_t selected_index() const;
+  void run_open();
+  void run_add();
+  void run_remove();
+};
+
+struct CommandPaletteDialog : Dialog {
+  CommandPaletteDialog(
+    std::function<void()> close_dialog,
+    std::function<std::vector<Command>()> list_commands,
+    std::function<void(const std::string&)> execute_command,
+    std::function<bool(const std::string&, const Event&, std::string&)> rebind_command
+  );
+  void OnShow() override;
+  void cancel();
+
+  std::function<void()> close_dialog;
+  std::function<std::vector<Command>()> list_commands;
+  std::function<void(const std::string&)> execute_command;
+  std::function<bool(const std::string&, const Event&, std::string&)> rebind_command;
+
+  std::string filter_txt;
+  int         filter_cursor_pos = 0;
+  DataSource  _data_source;
+  Component   input_filter;
+  Component   list_menu;
+  Component   button_close;
+  Component   button_run;
+  Component   button_rebind;
+
+  std::vector<Command> commands_all;
+  std::vector<int64_t> visible_ids;
+  std::string          status_message;
+  bool                 capture_key_mode = false;
+
+  void apply_filter();
+  void run_selected();
+  void start_rebind();
+  bool capture_rebind_key(const Event& e);
+};
+
+struct ThemeColorsDialog : Dialog {
+  ThemeColorsDialog(
+    std::function<void()> close_dialog,
+    std::function<std::vector<ThemeColorEntry>()> list_entries,
+    std::function<std::vector<std::string>()> list_tokens,
+    std::function<bool(const std::string&, const std::string&, std::string&)> set_color_token,
+    std::function<void()> reset_defaults,
+    std::function<void()> persist_colors
+  );
+  void OnShow() override;
+  void cancel();
+
+  std::function<void()> close_dialog;
+  std::function<std::vector<ThemeColorEntry>()> list_entries;
+  std::function<std::vector<std::string>()> list_tokens;
+  std::function<bool(const std::string&, const std::string&, std::string&)> set_color_token;
+  std::function<void()> reset_defaults;
+  std::function<void()> persist_colors;
+
+  std::vector<ThemeColorEntry> entries;
+  std::vector<std::string>     tokens;
+  DataSource                   _data_source;
+  Component                    list_menu;
+  Component                    button_save;
+  Component                    button_reset;
+  Component                    button_close;
+  std::string                  status_message;
+  bool                         picker_open = false;
+  std::vector<std::vector<int>> picker_grid;
+  int                          picker_row = 0;
+  int                          picker_col = 0;
+
+  void open_picker_for_focused();
+  void move_picker(int drow, int dcol);
+  void accept_picker();
+  void cancel_picker();
+  int  selected_picker_index() const;
+  Element render_picker() const;
 };
 
 }  // namespace ftxui

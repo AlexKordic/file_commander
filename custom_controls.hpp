@@ -10,6 +10,8 @@
 namespace ftxui {
 
 Event event_from_string(std::string s);
+std::string event_to_string(const Event& e);
+std::string event_to_token(const Event& e);
 
 Element coloredInt(int64_t n);
 
