@@ -208,6 +208,7 @@ struct CopyDiscoveryProcess {
   void _queue_link(Filepath const& location, Filepath const& destination, boost::filesystem::perms p);
   void _queue_error(const DirItem& item, Filepath const& new_record_path, std::string error_message);
   bool _queue_dir(const DirItem& item, Filepath const& new_record_path);
+  std::vector<DirItem> read_children(const DirItem& parent, const Filepath& destination);
   void _stat_file(Filepath const& item_path);
   void _queue_file(const DirItem& item, Filepath const& new_record_path);
   void _run();

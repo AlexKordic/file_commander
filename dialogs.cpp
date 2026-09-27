@@ -1059,6 +1059,19 @@ bool CopyDiscoveryProcess::_queue_dir(const DirItem& item, Filepath const& new_r
   return true;
 }
 
+std::vector<DirItem> CopyDiscoveryProcess::read_children(const DirItem& parent, const Filepath& destination) {
+  std::vector<DirItem> children;
+  error_code ec;
+  directory_iterator it(parent.path_ref(), ec), end;
+  while (!ec.failed() && it != end && _running.load()) {
+    _stat_file(it->path());
+    children.emplace_back(it->path());
+    it.increment(ec);
+  }
+  if (ec.failed()) _queue_error(parent, destination, "Cannot enumerate directory: " + ec.message());
+  return children;
+}
+
 void CopyDiscoveryProcess::_stat_file(Filepath const& item_path) {
   std::lock_guard<std::mutex> lock(_m);
   _progress.current_file = item_path.native();
@@ -1112,15 +1125,7 @@ void CopyDiscoveryProcess::_discover(const std::vector<DirItem>& files, Filepath
         if (target_item.type() == boost::filesystem::directory_file) {
           const bool valid = _queue_dir(target_item, new_record_path);
           if (!valid) return;
-          std::vector<DirItem> subdir_items;
-          for (directory_entry& subdir_item : directory_iterator(target_item.path_ref(), target_ec)) {
-            if (!_running) return;
-            _stat_file(subdir_item.path());
-            error_code  subdir_ec;
-            file_status fs = subdir_item.status(subdir_ec);
-            subdir_items.emplace_back(subdir_item.path(), fs.type(), fs.permissions());
-          }
-          _discover(subdir_items, new_record_path);
+          _discover(read_children(target_item, new_record_path), new_record_path);
           return;
         }
         _queue_file(target_item, new_record_path);
@@ -1154,16 +1159,7 @@ void CopyDiscoveryProcess::_discover(const std::vector<DirItem>& files, Filepath
       const bool valid = _queue_dir(item, new_record_path);
       if (!valid) return;
       // Recurse into subdir
-      std::vector<DirItem> subdir_items;
-      error_code           ec;
-      for (directory_entry& subdir_item : directory_iterator(item.path_ref(), ec)) {
-        if (!_running) return;
-        _stat_file(subdir_item.path());
-        error_code  ec;
-        file_status fs = subdir_item.status(ec);
-        subdir_items.emplace_back(subdir_item.path(), fs.type(), fs.permissions());
-      }
-      _discover(subdir_items, new_record_path);
+      _discover(read_children(item, new_record_path), new_record_path);
       return;
     }
     // Act on file

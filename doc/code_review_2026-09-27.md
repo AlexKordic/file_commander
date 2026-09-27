@@ -228,15 +228,15 @@ A mode-000 directory containing a file produced `file_count=0, error_count=0`. A
 
 **Fix direction:** preserve discovery failures as first-class job errors and handle iterator construction and increment failures. **Regression:** unreadable subdirectories, disappearing entries, cyclic links and copy-to-self must yield explicit incomplete/error results, never clean success.
 
-**Implementation status:** Planned.
+**Implementation status:** Applied.
 
 **Planned solution:** preserve discovery failures as first-class job errors and handle iterator construction and increment failures.
 
-**Applied solution:** Pending.
+**Applied solution:** Copy discovery now checks iterator construction and increment errors through one read_children helper and stores enumeration failures in the plan. The copy worker promotes every discovery-error item into job/global errors, so final state becomes completed_with_errors.
 
-**Plan deviations:** Pending.
+**Plan deviations:** Used explicit error-code iteration rather than relying on throwing range iteration. Both ordinary and followed-directory traversal share the same error path.
 
-**Validation:** Pending.
+**Validation:** Native build and R11 passed: a mode-000 directory produces a discovery error, and both its submitted plan and an explicit missing-source error finish completed_with_errors.
 
 ## P2 findings
 

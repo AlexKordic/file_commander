@@ -591,7 +591,14 @@ class ThreadedFileJobs : public FileJobs {
       // if type is dir path is to be mkdired
       // if type is link path is where to place link and symlink_ref is link target
       // else path is source file and symlink_ref is destination file for copy operation
-      if (item.type() == boost::filesystem::file_type::status_error) { continue; }
+      if (item.type() == boost::filesystem::file_type::status_error) {
+        const auto message = item.warning_ref().value_or("Discovery failed");
+        job->report_error(item, message);
+        lock.unlock();
+        file_operations().report_error("[Discovery] " + item.path_ref().native() + ": " + message);
+        lock.lock();
+        continue;
+      }
       if (item.type() == boost::filesystem::file_type::directory_file) {
         ec.clear();
         lock.unlock();

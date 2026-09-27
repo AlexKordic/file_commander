@@ -247,8 +247,29 @@ static void R10() {
   }
 }
 
+static void R11() {
+  Fixture f;
+  auto source = f.dir("unreadable"); f.file("unreadable/hidden");
+  auto destination = f.dir("destination");
+  Dir dir; dir.move_to(f.root);
+  auto state = copy_state(dir, source, destination);
+  fs::permissions(source, fs::no_perms);
+  CopyDialog dialog(state); dialog.OnShow(); dialog._discovery_process->_thread.join();
+  fs::permissions(source, fs::owner_all);
+  auto plan = dialog._discovery_process->take_items();
+  require(dialog._discovery_process->get_progress().error_count > 0, "unreadable directory silently omitted");
+  dialog.cancel();
+  auto job = std::make_shared<JobSpec>(JobSpec::Type::COPY, std::move(plan));
+  wait_job(file_operations().add_job(job));
+  require(job->_state == JobState::COMPLETED_WITH_ERRORS && !job->_errors.empty(), "discovery failure became clean success");
+  DirItem missing(f.root / "missing", fs::status_error, fs::no_perms); missing._set_warning("missing source");
+  auto second = std::make_shared<JobSpec>(JobSpec::Type::COPY, std::vector<DirItem>{missing});
+  wait_job(file_operations().add_job(second));
+  require(second->_state == JobState::COMPLETED_WITH_ERRORS, "explicit discovery error was dropped");
+}
+
 int main(int argc, char** argv) {
-  const std::vector<std::pair<std::string, void (*)()>> tests = {{"R01", R01}, {"R02", R02}, {"R03", R03}, {"R04", R04}, {"R05", R05}, {"R06", R06}, {"R07", R07}, {"R08", R08}, {"R09", R09}, {"R10", R10}};
+  const std::vector<std::pair<std::string, void (*)()>> tests = {{"R01", R01}, {"R02", R02}, {"R03", R03}, {"R04", R04}, {"R05", R05}, {"R06", R06}, {"R07", R07}, {"R08", R08}, {"R09", R09}, {"R10", R10}, {"R11", R11}};
   try {
     bool matched = false;
     for (const auto& [id, run] : tests) {
