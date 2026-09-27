@@ -872,6 +872,20 @@ static void AR01() {
   require(delivered == 1, "closed dispatcher delivered callbacks");
 }
 
+static void TS07_render_sizes() {
+  Fixture f;f.file("Ω界 combining-é");f.file("control\nname");UiQueue ui;
+  int width=100;FileCommander app(f.root,f.root,[&](auto fn){ui.post(std::move(fn));},[&]{return width;});ui.wait(app.get_left());ui.wait(app.get_right());
+  auto interactive=ScreenInteractive::FixedSize(100,30);Loop loop(&interactive,app.renderer);app.get_left().navigation->TakeFocus();
+  for(auto command:{"", "copy", "find", "toggle_job_list", "open_bookmarks", "edit_theme_colors"}) {
+    if(*command)require(app.execute_command(command),"render dialog setup failed");
+    for(auto [w,h]:std::vector<std::pair<int,int>>{{100,30},{35,8},{12,3},{1,1},{100,30}}) {
+      width=w;for(int frame=0;frame<3;++frame){auto screen=Screen::Create(Dimension::Fixed(w),Dimension::Fixed(h));Render(screen,app.renderer->Render());require(!screen.ToString().empty(),"render produced empty screen");}
+    }
+    app.navigation->OnEvent(Event::Escape);
+  }
+  require(app.get_left().navigation->Focused(),"resize/dialog teardown lost focus");
+}
+
 static void TS06_archive_contracts() {
   Fixture f;ArchiveService service;auto input=f.file("input","lease content");
   for(size_t bytes:{size_t{12},size_t{13},size_t{14}}){

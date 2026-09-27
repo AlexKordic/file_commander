@@ -79,7 +79,7 @@ ErrorListDialog::ErrorListDialog(std::function<void()> close_dialog) : Dialog(nu
     }
     return std::move(row);
   };
-  _errors    = DBMenu(&_data_source);
+  _errors    = clipped_menu(&_data_source);
   navigation = CatchEvent(Container::Vertical({
                             Container::Horizontal({button_hide, button_clear}),
                             // Following are path items to delete
@@ -307,7 +307,7 @@ JobListDialog::JobListDialog(std::function<void()> close_dialog) : Dialog(nullpt
     return row;
   };
   _job_data_source.min_y = 5;
-  _job_list = DBMenu(&_job_data_source);
+  _job_list = clipped_menu(&_job_data_source);
 
   auto list_view = Container::Vertical({
     Container::Horizontal({button_dismiss_all, button_close}),
@@ -354,7 +354,7 @@ JobListDialog::JobListDialog(std::function<void()> close_dialog) : Dialog(nullpt
     return name;
   };
   _detail_items_data_source.min_y = 5;
-  _detail_items = DBMenu(&_detail_items_data_source);
+  _detail_items = clipped_menu(&_detail_items_data_source);
 
   // Detail errors DataSource
   _detail_errors_data_source.dataset_size = [this]() -> DataSize {
@@ -385,7 +385,7 @@ JobListDialog::JobListDialog(std::function<void()> close_dialog) : Dialog(nullpt
     return row;
   };
   _detail_errors_data_source.min_y = 3;
-  _detail_errors = DBMenu(&_detail_errors_data_source);
+  _detail_errors = clipped_menu(&_detail_errors_data_source);
 
   auto detail_view = Container::Vertical({
     Container::Horizontal({detail_back_button, detail_close_button}),

@@ -102,7 +102,7 @@ BookmarksDialog::BookmarksDialog(
     return c.handled;
   };
   _data_source.min_y = 10;
-  list_menu          = DBMenu(&_data_source);
+  list_menu          = clipped_menu(&_data_source);
 
   navigation = CatchEvent(Container::Vertical({
                             Container::Horizontal({button_add, button_remove, button_open, button_close}),
@@ -278,7 +278,7 @@ CommandPaletteDialog::CommandPaletteDialog(
     return row;
   };
   _data_source.min_y = 12;
-  list_menu          = DBMenu(&_data_source);
+  list_menu          = clipped_menu(&_data_source);
 
   navigation = CatchEvent(Container::Vertical({
                             Container::Horizontal({button_run, button_rebind, button_close}),
@@ -568,7 +568,7 @@ ThemeColorsDialog::ThemeColorsDialog(
     return row;
   };
   _data_source.min_y = 14;
-  list_menu          = DBMenu(&_data_source);
+  list_menu          = clipped_menu(&_data_source);
 
   navigation = CatchEvent(Container::Vertical({
                             Container::Horizontal({button_save, button_reset, button_close}),

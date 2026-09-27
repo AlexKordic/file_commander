@@ -4,10 +4,14 @@
 
 #include <boost/filesystem.hpp>
 #include <ftxui/component/component.hpp>
+#include <ftxui/component/component_options.hpp>
 
 #include <cstdint>
 
 namespace ftxui {
+
+// A clipped box may have a negative height; never feed it to DBMenu allocation.
+Component clipped_menu(DataSource* data);
 
 Event event_from_string(std::string s);
 std::string event_to_string(const Event& e);

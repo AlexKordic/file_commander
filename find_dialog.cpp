@@ -138,7 +138,7 @@ FindDialog::FindDialog(PanelSharedState::P s) : Dialog(std::move(s)) {
     return row;
   };
   _data_source.min_y = 12;
-  results_menu       = DBMenu(&_data_source);
+  results_menu       = clipped_menu(&_data_source);
 
   navigation = CatchEvent(Container::Vertical({
                             Container::Horizontal({button_find, button_open, button_close}),

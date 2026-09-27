@@ -329,7 +329,7 @@ Files::Files(PanelSharedState::P s) : Dialog(std::move(s)) {
   };
   app->set_min_y = [this](int y) { _data_source.min_y = y; };
 
-  files     = DBMenu(&_data_source);
+  files     = clipped_menu(&_data_source);
   sort_name = Button("Name", [dir = app->dir] { dir->sort_toggle_name_direction(); }, ascii_button);
   sort_size = Button("Size", [dir = app->dir] { dir->sort_toggle_size_direction(); }, ascii_button);
   sort_time = Button("Date", [dir = app->dir] { dir->sort_toggle_time_direction(); }, ascii_button);
@@ -761,7 +761,7 @@ CopyDialog::CopyDialog(PanelSharedState::P d) : Dialog(std::move(d)) {
   // _virtual_dir             = std::make_unique<Dir>();
   // _operation_state         = std::make_shared<PanelSharedState>(_virtual_dir.get());
   // _operation_state->filter = Input(&_operation_state->filter_txt, &(_virtual_dir->path_txt), filelist_filter_opt(filter_cursor_pos));
-  // _files = DBMenu(&_data_source);
+  // _files = clipped_menu(&_data_source);
   // setup_filelist_datasource(_operation_state, _data_source);
   // _data_source.on_event = [app = _operation_state, data_source = &_data_source](DSEventContext ctx) -> bool {
   //   // handle filter only
@@ -920,7 +920,7 @@ CopyDiscoveryProcess::CopyDiscoveryProcess(CopyDialog* parent, Filepath target)
   _state         = std::make_shared<PanelSharedState>(_dir.get());
   // TODO: filter must be part of parent
   _state->filter = Input(&_state->filter_txt, &(_dir->path_txt), filelist_filter_opt(parent->filter_cursor_pos));
-  _files         = DBMenu(&_data_source);
+  _files         = clipped_menu(&_data_source);
   setup_filelist_datasource(_state, _data_source);
   _data_source.on_event = [app = _state, data_source = &_data_source](DSEventContext ctx) -> bool {
     // handle filter only

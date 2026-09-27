@@ -20,6 +20,14 @@
 using namespace ftxui;
 
 namespace ftxui {
+Component clipped_menu(DataSource* data) {
+  auto menu = DBMenu(data);
+  return Renderer(menu, [menu, data] {
+    data->v.component_height = std::max(0, data->v.component_height);
+    return menu->Render();
+  });
+}
+
 
 Event event_from_string(std::string s) {
   if(s == "<-") return Event::ArrowLeft;

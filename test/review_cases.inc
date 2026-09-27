@@ -1,3 +1,4 @@
+FC_REVIEW_CASE(TS07_render_sizes, "tiny_unicode_rendering")
 FC_REVIEW_CASE(TS06_archive_contracts, "archive_byte_limits")
 FC_REVIEW_CASE(TS06_lua_expiry, "lua_event_expiry")
 FC_REVIEW_CASE(TS05_archive_suspend, "suspended_archive_delivery")

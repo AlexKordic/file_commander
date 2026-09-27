@@ -26,6 +26,8 @@ endforeach()
 
 if(UNIX AND NOT CMAKE_CROSSCOMPILING)
   find_package(Python3 3.12 COMPONENTS Interpreter REQUIRED)
+  add_test(NAME fc.terminal.input_resize COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/test/test_terminal.py" $<TARGET_FILE:fc>)
+  set_tests_properties(fc.terminal.input_resize PROPERTIES LABELS "integration;pty;terminal;posix" TIMEOUT 25)
   foreach(_check result_checks protocol manifests supervisor)
     add_test(NAME "fc.harness.${_check}" COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/test/test_${_check}.py" $<TARGET_FILE:fc>)
     set_tests_properties("fc.harness.${_check}" PROPERTIES LABELS "unit;harness" TIMEOUT 40)
