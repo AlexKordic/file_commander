@@ -132,7 +132,7 @@ struct RenameDialog : Dialog {
     std::string content;
     int         cursor_position = 0;
   };
-  std::vector<Item> rows;
+  std::vector<std::unique_ptr<Item>> rows;
 
   int       selected = 0;
   Component menu;

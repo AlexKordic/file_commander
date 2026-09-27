@@ -651,15 +651,16 @@ void RenameDialog::OnShow() {
   const bool same_dir = app->action.arguments->selected_share_same_dir();
   rows.resize(selected_count);
   for (int i = 0; i < selected_count; i++) {
+    rows[i] = std::make_unique<Item>();
     auto& data              = app->action.arguments->selected.at(i);
-    rows[i].content         = data.filename().native();
-    rows[i].cursor_position = 0;
+    rows[i]->content         = data.filename().native();
+    rows[i]->cursor_position = 0;
     InputOption style;
     style.multiline           = false;
-    style.content             = &(rows.at(i).content);
+    style.content             = &(rows.at(i)->content);
     style.placeholder         = "";
-    style.cursor_position     = &(rows[i].cursor_position);
-    Component input_field     = Input(style) | showInputCursor(&(rows.at(i).cursor_position));
+    style.cursor_position     = &(rows[i]->cursor_position);
+    Component input_field     = Input(style) | showInputCursor(&(rows.at(i)->cursor_position));
     Component old_to_new_item = Renderer(input_field, [input_field, same_dir = same_dir, data = data]() -> Element {
       return vbox({
         text(same_dir ? data.filename().native() : data.native()) | dim,
@@ -676,7 +677,7 @@ void RenameDialog::ok() {
   for (int i = selected_count - 1; i >= 0; --i) {
     error_code ec;
     auto       original = app->action.arguments->selected.at(i);
-    auto       new_path = original.parent_path() / rows.at(i).content;
+    auto       new_path = original.parent_path() / rows.at(i)->content;
     boost::filesystem::rename(original, new_path, ec);
     if (ec.failed()) {
       Perun::l.e("Rename failed", ec.to_string(), {{"original", original.native()}, {"new", new_path.native()}});

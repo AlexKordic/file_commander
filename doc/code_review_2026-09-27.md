@@ -136,15 +136,15 @@ Each Input stores pointers into a `std::vector<Row>`. If a higher-index rename f
 
 **Fix direction:** give rows stable storage or rebuild/rebind all surviving controls after erasure. **Regression:** mixed successes/failures followed by typing, cursor movement, and retry, with AddressSanitizer enabled.
 
-**Implementation status:** Planned.
+**Implementation status:** Applied.
 
 **Planned solution:** give rows stable storage or rebuild/rebind all surviving controls after erasure.
 
-**Applied solution:** Pending.
+**Applied solution:** Rename rows now have stable individually owned storage. Erasing successful entries only moves owning pointers, so failed rows retain their string and cursor addresses for rendering, editing and retry.
 
-**Plan deviations:** Pending.
+**Plan deviations:** Chose stable row ownership rather than rebuilding every surviving input.
 
-**Validation:** Pending.
+**Validation:** Native build and R06 passed: one rename failed, a lower row succeeded, the surviving Input accepted text into its live row, and retry renamed the remaining file. Sanitizer validation is still pending.
 
 ### R07 — Immediate macOS watcher destruction races startup and crashes
 

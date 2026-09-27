@@ -158,8 +158,27 @@ static void R05() {
           "early confirmation lost undiscovered files");
 }
 
+static void R06() {
+  Fixture f;
+  auto first = f.file("a"); auto second = f.file("b");
+  Dir dir; dir.move_to(f.root);
+  auto state = copy_state(dir, first, f.root);
+  state->action.arguments->selected.push_back(second);
+  RenameDialog dialog(state); dialog.OnShow();
+  dialog.rows[0]->content = "renamed_a";
+  dialog.rows[1]->content = "missing/b";
+  auto* stable = dialog.rows[1].get();
+  dialog.ok();
+  require(dialog.rows.size() == 1 && dialog.rows[0].get() == stable, "failed rename row lost stable address");
+  dialog.menu->ChildAt(0)->OnEvent(Event::Character('X'));
+  require(dialog.rows[0]->content == "Xmissing/b", "surviving input no longer edits its row");
+  dialog.rows[0]->content = "renamed_b";
+  dialog.ok();
+  require(fs::exists(f.root / "renamed_a") && fs::exists(f.root / "renamed_b"), "rename retry failed");
+}
+
 int main(int argc, char** argv) {
-  const std::vector<std::pair<std::string, void (*)()>> tests = {{"R01", R01}, {"R02", R02}, {"R03", R03}, {"R04", R04}, {"R05", R05}};
+  const std::vector<std::pair<std::string, void (*)()>> tests = {{"R01", R01}, {"R02", R02}, {"R03", R03}, {"R04", R04}, {"R05", R05}, {"R06", R06}};
   try {
     bool matched = false;
     for (const auto& [id, run] : tests) {
