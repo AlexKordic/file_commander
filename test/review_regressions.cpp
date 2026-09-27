@@ -512,8 +512,30 @@ static void R23() {
   require(rendered().find("Hidden ") == std::string::npos, "split layout was not restored");
 }
 
+static void R24() {
+  Fixture f; auto origin = f.dir("origin");
+  Dir dir; dir.move_to(origin);
+  auto state = copy_state(dir, origin / "unused", f.root);
+  state->action.arguments->origin = origin;
+  int closed = 0; state->action.close_dialog = [&] { ++closed; };
+  MkdirDialog dialog(state);
+  for (const auto& name : {"", "missing/child"}) {
+    dialog.new_dir_name = name; dialog.ok();
+    require(!dialog.error.empty() && closed == 0, "invalid mkdir closed without an error");
+  }
+  f.file("origin/existing"); dialog.new_dir_name = "existing"; dialog.ok();
+  require(!dialog.error.empty() && closed == 0, "existing file was not reported");
+  fs::permissions(origin, fs::owner_read | fs::owner_exe); dialog.new_dir_name = "denied"; dialog.ok();
+  fs::permissions(origin, fs::owner_all);
+  require(!dialog.error.empty() && closed == 0, "permission failure was not reported");
+  dialog.new_dir_name = "created"; dialog.ok();
+  require(dialog.error.empty() && closed == 1 && fs::is_directory(origin / "created"), "valid mkdir failed");
+  fs::remove_all(origin); dialog.new_dir_name = "vanished"; dialog.ok();
+  require(!dialog.error.empty() && closed == 1, "vanished origin was not reported");
+}
+
 int main(int argc, char** argv) {
-  const std::vector<std::pair<std::string, void (*)()>> tests = {{"R01", R01}, {"R02", R02}, {"R03", R03}, {"R04", R04}, {"R05", R05}, {"R06", R06}, {"R07", R07}, {"R08", R08}, {"R09", R09}, {"R10", R10}, {"R11", R11}, {"R12", R12}, {"R13", R13}, {"R14", R14}, {"R15", R15}, {"R16", R16}, {"R17", R17}, {"R18", R18}, {"R19", R19}, {"R20", R20}, {"R21", R21}, {"R22", R22}, {"R23", R23}};
+  const std::vector<std::pair<std::string, void (*)()>> tests = {{"R01", R01}, {"R02", R02}, {"R03", R03}, {"R04", R04}, {"R05", R05}, {"R06", R06}, {"R07", R07}, {"R08", R08}, {"R09", R09}, {"R10", R10}, {"R11", R11}, {"R12", R12}, {"R13", R13}, {"R14", R14}, {"R15", R15}, {"R16", R16}, {"R17", R17}, {"R18", R18}, {"R19", R19}, {"R20", R20}, {"R21", R21}, {"R22", R22}, {"R23", R23}, {"R24", R24}};
   try {
     bool matched = false;
     for (const auto& [id, run] : tests) {

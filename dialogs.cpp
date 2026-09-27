@@ -443,18 +443,16 @@ Element MkdirDialog::render() {
 }
 
 void MkdirDialog::ok() {
-  // Create dir
-  auto dir_path = app->action.arguments->origin;
-  dir_path /= new_dir_name;
-  // Perun::l.d("mkdir::ok", dir_path.native(), {{"base", app->action.arguments->origin.native()}, {"new_dir_name", new_dir_name}});
-  if (boost::filesystem::exists(dir_path)) {
-    // Display error
-    error = "Name conflict";
+  error.clear();
+  if (new_dir_name.empty()) { error = "Enter a directory name"; return; }
+  const auto dir_path = app->action.arguments->origin / new_dir_name;
+  boost::system::error_code ec;
+  // Create one directory only; missing parent paths are reported to the user.
+  const bool created = boost::filesystem::create_directory(dir_path, ec);
+  if (ec || !created) {
+    error = "Cannot create " + dir_path.native() + ": " + (ec ? ec.message() : "already exists");
     return;
   }
-  boost::filesystem::create_directory(dir_path);
-  // Close dialog
-  // app->dir->refresh();
   app->action.close_dialog();
 }
 

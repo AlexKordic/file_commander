@@ -464,15 +464,15 @@ Single-panel rendering delegates to a panel whose component remains parented und
 
 **Fix direction:** use error-code overloads and retain the dialog with a useful error message; explicitly choose whether nested paths are supported. **Regression:** missing parent, read-only directory, existing file, and vanished source directory.
 
-**Implementation status:** Planned.
+**Implementation status:** Applied.
 
 **Planned solution:** use error-code overloads and retain the dialog with a useful error message; explicitly choose whether nested paths are supported.
 
-**Applied solution:** Pending.
+**Applied solution:** Mkdir uses the error-code create_directory overload, rejects an empty name, reports the path and filesystem error, and closes only after successful creation.
 
-**Plan deviations:** Pending.
+**Plan deviations:** Nested paths require their parent directories to exist; the dialog deliberately creates a single directory rather than silently creating a hierarchy.
 
-**Validation:** Pending.
+**Validation:** Native build and R24 passed for empty name, missing parent, existing file, permission denial, successful creation and a vanished origin. Failures retained the dialog without throwing.
 
 ### R25 — Directory navigation and archive browsing perform blocking work on the UI thread
 
