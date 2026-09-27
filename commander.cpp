@@ -202,7 +202,8 @@ void Dir::partial_refresh(UpdatedFiles changes) {
     return items.end();
   };
   for (DirItemUpdated& updated : *changes) {
-    error_code  ec;
+    error_code ec;
+    if (!boost::filesystem::equivalent(updated.path.parent_path(), path, ec) || ec) continue;
     file_status fs     = symlink_status(updated.path, ec);
     auto        listed = find(updated.path);
     const bool  found  = listed != items.end();
@@ -215,11 +216,6 @@ void Dir::partial_refresh(UpdatedFiles changes) {
       DirItem refreshed(updated.path);
       listed->update(refreshed.type(), refreshed.perms());
     } else {
-      const bool sanity_check = boost::filesystem::equivalent(updated.path.parent_path(), this->path);
-      if (!sanity_check) {
-        Perun::l.e("FS change event sanity check failed", updated.path.native(), {{"root", this->path.native()}});
-        continue;
-      }
       DirItem& inserted = items.emplace_back(updated.path);
       if (filter_match(inserted._filename, filter.phrase)) {
         inserted._visible = true;

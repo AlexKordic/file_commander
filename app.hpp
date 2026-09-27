@@ -287,6 +287,7 @@ class Panel : public DialogOverlay {
   ExecuteOnUiThread                 run_on_ui;
   std::unique_ptr<FileChangeFunnel> update_funnel;
   Perun::FifoQueue<UpdatedFiles>    pending_changes;
+  uint64_t _watch_generation = 0;
 
   ~Panel() {
     _callback_alive->store(false);
@@ -551,17 +552,15 @@ class Panel : public DialogOverlay {
   }
 
   void start_watcher(const Filepath& where) {
-    if (in_archive_view(where)) {
-      pending_changes.erase_if([this](const UpdatedFiles&) -> bool { return true; });
-      update_funnel.reset();
-      return;
-    }
-    pending_changes.erase_if([this](const UpdatedFiles&) -> bool { return true; });
-    update_funnel = FileChangeFunnel::create(where, [this, alive = _callback_alive](UpdatedFiles changes) {
+    const auto generation = ++_watch_generation;
+    update_funnel.reset(); // Stop the previous producer before draining its queue.
+    pending_changes.erase_if([](const UpdatedFiles&) { return true; });
+    if (in_archive_view(where)) return;
+    update_funnel = FileChangeFunnel::create(where, [this, alive = _callback_alive, generation](UpdatedFiles changes) {
       if (!alive->load()) return;
       pending_changes.push(std::move(changes));
-      this->run_on_ui([this, alive]() {
-        if (!alive->load()) return;
+      this->run_on_ui([this, alive, generation]() {
+        if (!alive->load() || generation != _watch_generation) return;
         while (true) {
           UpdatedFiles batch;
           FifoError    err = this->pending_changes.try_pop(batch);

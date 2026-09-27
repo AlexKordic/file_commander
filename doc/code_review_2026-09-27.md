@@ -410,15 +410,15 @@ Watcher replacement clears pending events before the old watcher has been stoppe
 
 **Fix direction:** stop the producer before draining it, tag updates with the watched directory/generation, and reject every mismatched update before basename lookup. **Regression:** rapidly navigate between directories sharing filenames while deleting/renaming entries in the old directory.
 
-**Implementation status:** Planned.
+**Implementation status:** Applied.
 
 **Planned solution:** stop the producer before draining it, tag updates with the watched directory/generation, and reject every mismatched update before basename lookup.
 
-**Applied solution:** Pending.
+**Applied solution:** Watcher replacement now advances a generation, stops the old producer, then drains its queue. Posted callbacks reject obsolete generations before reading panel state. Dir::partial_refresh validates every event parent before basename lookup, using nonthrowing comparison.
 
-**Plan deviations:** Pending.
+**Plan deviations:** Generation is attached to the callback owning each drained batch rather than adding metadata to every individual filesystem event.
 
-**Validation:** Pending.
+**Validation:** Native build and R21 passed: delayed removal and metadata events from another directory with the same filename left the current model and size unchanged.
 
 ### R22 — Watchers discard events that require a full rescan or watch recovery
 
