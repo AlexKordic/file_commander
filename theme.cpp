@@ -198,7 +198,8 @@ bool set_color_field(Theme& t, const std::string& id, const Color& color) {
 
 }  // namespace
 
-Theme::Theme() {
+KeyBindings& keys() { static KeyBindings bindings;return bindings; }
+KeyBindings::KeyBindings() {
   key_switch_focused_panel             = Event::Tab;
   key_new_tab                          = Event::CtrlT;
   key_close_tab                        = Event::CtrlW;
@@ -206,7 +207,6 @@ Theme::Theme() {
   key_prev_tab                         = Event::F11;
   key_target_dir_to_focused_item_right = Event::ArrowRightCtrl;
   key_target_dir_to_focused_item_left  = Event::ArrowLeftCtrl;
-
   key_files_select         = Event::Character(' ');
   key_glob_select          = Event::Character('+');
   key_glob_deselect        = Event::Character('-');
@@ -229,6 +229,18 @@ Theme::Theme() {
   key_switch_to_file_commander = Event::F10;
   key_switch_editor_prev   = Event::CtrlY;
   key_switch_editor_next   = Event::CtrlU;
+  key_copy               = Event::F5;
+  key_move               = Event::F6;
+  key_mkdir              = Event::F7;
+  key_delete             = Event::F8;
+  key_rename             = Event::F2;
+  key_names_to_clipboard = Event::CtrlN;
+  key_paths_to_clipboard = Event::CtrlP;
+  key_find               = Event::F3;
+}
+
+Theme::Theme() {
+
 
   filesize_colors  = {Color::White, Color::White, Color::Yellow, Color::IndianRed1, Color::Plum3};
   debuginfo_colors = {Color::Black, Color::Yellow, Color::IndianRed1, Color::Plum3};
@@ -246,14 +258,6 @@ Theme::Theme() {
   reset_color_defaults();
   refresh_decorators();
 
-  key_copy               = Event::F5;
-  key_move               = Event::F6;
-  key_mkdir              = Event::F7;
-  key_delete             = Event::F8;
-  key_rename             = Event::F2;
-  key_names_to_clipboard = Event::CtrlN;
-  key_paths_to_clipboard = Event::CtrlP;
-  key_find               = Event::F3;
 }
 
 void Theme::reset_color_defaults() {

@@ -161,7 +161,7 @@ static void R04() {
     CopyDialog dialog(state);
     dialog.OnShow(); dialog._discovery_process->_thread.join();
     dialog.destination_path = target.string();
-    if (method == 0) dialog.navigation->OnEvent(theme().key_copy);
+    if (method == 0) dialog.navigation->OnEvent(keys().key_copy);
     else { dialog.button_ok->TakeFocus(); dialog.button_ok->OnEvent(Event::Return); }
     require(dialog._confirm_when_ready, "edited target was not rediscovered");
     dialog._discovery_process->_thread.join();
@@ -544,7 +544,7 @@ static void R23() {
     return screen.ToString();
   };
   require(rendered().find("Hidden Right:") != std::string::npos, "single view did not render");
-  app.navigation->OnEvent(theme().key_switch_focused_panel);
+  app.navigation->OnEvent(keys().key_switch_focused_panel);
   require(app.single_panel_mode() && &app.focused_panel() == &app.get_right(), "Tab did not switch single panel");
   require(app.get_right().navigation->Focused(), "shown panel lost focus ancestry");
   require(rendered().find("Hidden Left:") != std::string::npos, "Tab restored split presentation");
@@ -1032,8 +1032,41 @@ static void AR06() {
   require(queued->_state==JobState::CANCELLED,"queued cancellation ignored");
 }
 
+static void AR08() {
+  Fixture f;UiQueue ui;FileCommander app(f.root,f.root,[&](auto fn){ui.post(std::move(fn));},[]{return 100;});
+  ui.wait(app.get_left());ui.wait(app.get_right());app.get_left().navigation->TakeFocus();
+  std::map<std::string,int> hits,previous;
+  std::string script;
+  for(const auto& command:commands().list_all()) {
+    require(app.handlers.contains(command.id),"command has no handler: "+command.id);
+    previous[command.id]=command.use_count;commands().set_use_count(command.id,0);
+    app.handlers[command.id]={[&,id=command.id]{++hits[id];return true;},[]{return true;}};
+    app.execute_palette_command(command.id);
+    require(app.handle_global_shortcuts(command.key),"shortcut bypassed command registry: "+command.id);
+    script+="assert(fc.command('"+command.id+"'))\n";
+  }
+  auto path=f.file("commands.lua",script);
+  auto screen=ScreenInteractive::FixedSize(100,30);Loop loop(&screen,app.renderer);
+  LuaScripting lua(app,app.renderer);require(lua.setup(path.native()),"semantic command script setup failed");
+  auto deadline=std::chrono::steady_clock::now()+std::chrono::seconds(5);
+  while(!lua.finished() && std::chrono::steady_clock::now()<deadline){ui.drain();loop.RunOnce();lua.tick();}
+  require(lua.finished() && lua.exit_code()==0,"semantic command execution failed");lua.cleanup();
+  for(const auto& command:commands().list_all()) {
+    require(hits[command.id]==3 && command.use_count==3,"routes have inconsistent accounting: "+command.id);
+    app.handlers[command.id].available=[]{return false;};
+    app.execute_palette_command(command.id);require(!app.execute_command(command.id),"disabled semantic command ran");
+    require(!app.handle_global_shortcuts(command.key),"disabled shortcut ran");
+    require(hits[command.id]==3 && commands().find_by_id(command.id)->use_count==3,"disabled command changed usage");
+    commands().set_use_count(command.id,previous[command.id]);
+  }
+  auto bus=std::make_shared<ApplicationEvents>();uint64_t cursor=0;
+  CopyPlanner planner({{f.root/"commands.lua"},f.root/"destination"},[]{},[bus](auto name,auto detail,auto id){bus->publish(name,detail,id);});
+  planner._thread.join();auto events=bus->since(cursor);
+  require(events.size()==1 && events[0].name=="discovery_completed" && events[0].request_id==planner._sequence_id,"headless planner did not publish request event");
+}
+
 int main(int argc, char** argv) {
-  const std::vector<std::pair<std::string, void (*)()>> tests = {{"AR06", AR06}, {"AR05", AR05}, {"AR04", AR04}, {"AR07", AR07}, {"AR03", AR03}, {"AR02", AR02}, {"AR01", AR01}, {"R01", R01}, {"R02", R02}, {"R03", R03}, {"R04", R04}, {"R05", R05}, {"R06", R06}, {"R07", R07}, {"R08", R08}, {"R09", R09}, {"R10", R10}, {"R11", R11}, {"R12", R12}, {"R13", R13}, {"R14", R14}, {"R15", R15}, {"R16", R16}, {"R17", R17}, {"R18", R18}, {"R19", R19}, {"R20", R20}, {"R21", R21}, {"R22", R22}, {"R23", R23}, {"R24", R24}, {"R25", R25}, {"R26", R26}, {"R27", R27}, {"R28", R28}, {"R29", R29}, {"R31", R31}, {"R35", R35}, {"R37", R37}};
+  const std::vector<std::pair<std::string, void (*)()>> tests = {{"AR08", AR08}, {"AR06", AR06}, {"AR05", AR05}, {"AR04", AR04}, {"AR07", AR07}, {"AR03", AR03}, {"AR02", AR02}, {"AR01", AR01}, {"R01", R01}, {"R02", R02}, {"R03", R03}, {"R04", R04}, {"R05", R05}, {"R06", R06}, {"R07", R07}, {"R08", R08}, {"R09", R09}, {"R10", R10}, {"R11", R11}, {"R12", R12}, {"R13", R13}, {"R14", R14}, {"R15", R15}, {"R16", R16}, {"R17", R17}, {"R18", R18}, {"R19", R19}, {"R20", R20}, {"R21", R21}, {"R22", R22}, {"R23", R23}, {"R24", R24}, {"R25", R25}, {"R26", R26}, {"R27", R27}, {"R28", R28}, {"R29", R29}, {"R31", R31}, {"R35", R35}, {"R37", R37}};
   try {
     bool matched = false;
     for (const auto& [id, run] : tests) {

@@ -140,6 +140,7 @@ bool LuaScripting::setup(const std::string& script_path) {
   };
 
   // clang-format off
+  reg("command", l_command);
   reg("key",               l_key);
   reg("quit",              l_quit);
   reg("left_cd",           l_left_cd);
@@ -266,9 +267,6 @@ bool LuaScripting::finished() const { return _finished; }
 
 void LuaScripting::cleanup() {
   _scheduler.stop();
-  _app.on_event = {};
-  _app.get_left().on_event = {};
-  _app.get_right().on_event = {};
   if (_lua) { lua_close(_lua); _lua = nullptr; _lua_co = nullptr; }
   if (_log_file) { fclose(_log_file); _log_file = nullptr; }
 }
@@ -276,138 +274,8 @@ void LuaScripting::cleanup() {
 // --- poll_async_events ---
 
 void LuaScripting::poll_async_events() {
-  _poll_count++;
-  auto focused_side = [&]() -> std::string {
-    if (_app.get_left().navigation->Focused()) return "left";
-    if (_app.get_right().navigation->Focused()) return "right";
-    Panel& focused = _app.focused_panel();
-    return (&focused == &_app.get_left()) ? "left" : "right";
-  };
-  auto job_state_name = [](const std::shared_ptr<JobSpec>& job) -> std::string {
-    if (!job) return "none";
-    switch (job->_state.load()) {
-    case Perun::JobState::QUEUED: return "queued";
-    case Perun::JobState::RUNNING: return "running";
-    case Perun::JobState::PAUSED: return "paused";
-    case Perun::JobState::CANCELLED: return "cancelled";
-    case Perun::JobState::COMPLETED: return "completed";
-    case Perun::JobState::COMPLETED_WITH_ERRORS: return "completed_with_errors";
-    }
-    return "unknown";
-  };
-
-  const std::string current_focus_side = focused_side();
-  const bool        current_single_panel_mode = _app.single_panel_mode();
-
-  // Transitions are retained by the job manager even between UI frames.
-  for (const auto& event : file_operations().events_since(_last_job_sequence)) {
-    if(event.history_expired) { fire_event("job_history_expired",std::to_string(event.sequence)); continue; }
-    fire_event(event.completed ? "job_completed" : "job_started", std::to_string(event.job_id));
-  }
-  auto jobinfo = file_operations().get_running_job();
-  int current_job_items_done = -1;
-  std::string current_job_state = job_state_name(jobinfo.job);
-  if (jobinfo.job) {
-    {
-      std::lock_guard lock(jobinfo.job->_m);
-      current_job_items_done = static_cast<int>(jobinfo.job->_items_done);
-    }
-    _had_running_job = !jobinfo.job->is_stopped();
-  } else {
-    _had_running_job = false;
-  }
-
-  // Completion identity is per request, including repeated searches in one dialog.
-  for (auto* panel : {&_app.get_left(), &_app.get_right()}) {
-    auto copy = std::dynamic_pointer_cast<CopyDialog>(panel->get_overlay_dialog("Copy"));
-    if (copy && copy->_discovery_process) {
-      auto* discovery = copy->_discovery_process.get();
-      if (!discovery->_running.load() && _completed_discoveries.insert(discovery->_sequence_id).second)
-        fire_event("discovery_completed", std::to_string(discovery->_sequence_id));
-    }
-    auto find = std::dynamic_pointer_cast<FindDialog>(panel->get_overlay_dialog("Find"));
-    if (find && find->_completed.load() && !find->_running.load() && _completed_searches.insert(find->_sequence_id).second)
-      fire_event("find_completed", std::to_string(find->_sequence_id));
-  }
-
-  auto count_selected = [](Panel& panel) -> int {
-    int selected = 0;
-    for (const auto& item : panel.dir.items) {
-      if (item.selected()) selected++;
-    }
-    return selected;
-  };
-  const int left_item_count      = static_cast<int>(_app.get_left().dir._calculated.items_visible);
-  const int right_item_count     = static_cast<int>(_app.get_right().dir._calculated.items_visible);
-  const int left_selected_count  = count_selected(_app.get_left());
-  const int right_selected_count = count_selected(_app.get_right());
-  const int error_count          = static_cast<int>(file_operations().error_count());
-
-  if (!_event_baseline_initialized) {
-    _event_baseline_initialized = true;
-    _last_left_item_count       = left_item_count;
-    _last_right_item_count      = right_item_count;
-    _last_left_revision = _app.get_left().items_revision;
-    _last_right_revision = _app.get_right().items_revision;
-    _last_left_selected_count   = left_selected_count;
-    _last_right_selected_count  = right_selected_count;
-    _last_error_count           = error_count;
-    _last_focus_side            = current_focus_side;
-    _last_single_panel_mode     = current_single_panel_mode;
-    _last_job_state_name        = current_job_state;
-    _last_job_items_done        = current_job_items_done;
-    return;
-  }
-
-  if (current_focus_side != _last_focus_side) {
-    fire_event("focus_changed", current_focus_side);
-  }
-  if (current_single_panel_mode != _last_single_panel_mode) {
-    fire_event("single_panel_mode_changed", current_single_panel_mode ? "on" : "off");
-  }
-  if (current_job_state != _last_job_state_name) {
-    fire_event("job_state_changed", current_job_state);
-  }
-  if (current_job_items_done >= 0 && current_job_items_done != _last_job_items_done) {
-    fire_event("job_progress", std::to_string(current_job_items_done));
-  }
-
-  const bool left_items_changed  = left_item_count != _last_left_item_count || _app.get_left().items_revision != _last_left_revision;
-  const bool right_items_changed = right_item_count != _last_right_item_count || _app.get_right().items_revision != _last_right_revision;
-  if (left_items_changed || right_items_changed) {
-    std::string detail = "both";
-    if (left_items_changed && !right_items_changed) detail = "left";
-    if (!left_items_changed && right_items_changed) detail = "right";
-    fire_event("items_updated", detail);
-  }
-
-  if (left_selected_count != _last_left_selected_count) {
-    fire_event("selection_changed", "left:" + std::to_string(left_selected_count));
-  }
-  if (right_selected_count != _last_right_selected_count) {
-    fire_event("selection_changed", "right:" + std::to_string(right_selected_count));
-  }
-
-  if (error_count > _last_error_count) {
-    for (int i = _last_error_count; i < error_count; ++i) {
-      JobErrorInfo e = file_operations().get_error(i);
-      fire_event("error_reported", e.valid() ? e.message : "");
-    }
-  } else if (error_count < _last_error_count) {
-    fire_event("errors_cleared", std::to_string(error_count));
-  }
-
-  _last_left_revision = _app.get_left().items_revision;
-  _last_right_revision = _app.get_right().items_revision;
-  _last_left_item_count      = left_item_count;
-  _last_right_item_count     = right_item_count;
-  _last_left_selected_count  = left_selected_count;
-  _last_right_selected_count = right_selected_count;
-  _last_error_count          = error_count;
-  _last_focus_side           = current_focus_side;
-  _last_single_panel_mode    = current_single_panel_mode;
-  _last_job_state_name       = current_job_state;
-  _last_job_items_done       = current_job_items_done;
+  _app.observe_state();
+  for(const auto& event:_app.events->since(_application_cursor)) fire_event(event.name,event.detail);
 }
 
 // --- handle_resume_status ---
@@ -542,6 +410,11 @@ int LuaScripting::l_key(lua_State* L) {
   const char* name = luaL_checkstring(L, 1);
   dispatch_name(name);
   return 0;
+}
+
+int LuaScripting::l_command(lua_State* L) {
+  auto* self=from_lua(L);self->begin_action();
+  lua_pushboolean(L,self->_app.execute_command(luaL_checkstring(L,1)));return 1;
 }
 
 // fc.quit()

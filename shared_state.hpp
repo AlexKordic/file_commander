@@ -33,6 +33,8 @@ struct PanelSharedState {
   std::function<void()> notify = [] {};
   std::function<void(std::function<void()>)> post = [](auto fn) { fn(); };
   Perun::FileJobs* jobs = nullptr;
+  std::function<bool(const std::string&)> dispatch_command;
+  std::function<void(std::string,std::string,uint64_t)> emit = [](auto,auto,auto) {};
   ftxui::Component filter;
   std::string      filter_txt;
   struct Action {

@@ -309,12 +309,15 @@ class ThreadedFileJobs : public FileJobs {
   struct UpdateSink {
     std::mutex mutex;
     std::function<void()> callback = [] {};
+    EventSink event=[](auto,auto,auto) {};
+    void emit(std::string name,std::string detail,uint64_t id=0) {EventSink sink;{std::lock_guard lock(mutex);sink=event;}sink(std::move(name),std::move(detail),id);}
     void notify() { std::function<void()> fn; { std::lock_guard lock(mutex); fn = callback; } fn(); }
   };
   std::shared_ptr<UpdateSink> _updates = std::make_shared<UpdateSink>();
   void set_update_sink(std::function<void()> sink) override {
     std::lock_guard lock(_updates->mutex); _updates->callback = sink ? std::move(sink) : [] {};
   }
+  void set_event_sink(EventSink sink) override {std::lock_guard lock(_updates->mutex);_updates->event=std::move(sink);}
   JobRetention _limits;
   FileJobServices _services;
   ArchiveService& _archives;
@@ -336,7 +339,16 @@ class ThreadedFileJobs : public FileJobs {
   }
   uint64_t add_job(std::shared_ptr<JobSpec> job) override {
     for(const auto& op:job->_plan->steps) if(auto lease=_archives.lease_for_path(op.source)) job->_archive_leases.push_back(std::move(lease));
-    job->updated = [updates = _updates] { updates->notify(); };
+    job->updated = [updates = _updates, weak=std::weak_ptr<JobSpec>(job)] {
+      updates->notify();if(auto job=weak.lock()) {
+        auto snapshot=job->snapshot(false);auto state=snapshot->_state.load();
+        if(job->_last_notified_state.exchange(state)!=state) {
+          const char* names[]={"queued","running","paused","cancelled","completed","completed_with_errors"};
+          updates->emit("job_state_changed",names[static_cast<int>(state)],job->_job_id);
+        }
+        updates->emit("job_progress",std::to_string(snapshot->_items_done),job->_job_id);
+      }
+    };
     uint64_t id    = _next_job_id.fetch_add(1);
     job->_job_id   = id;
     job->_queued_time = now();
@@ -429,22 +441,14 @@ class ThreadedFileJobs : public FileJobs {
   }
 
   void report_error(std::string message) override {
-    constexpr double epsilon = 0.00001;
-    std::lock_guard  lock(_m);
-    double           time = now();
-    if (!_errors.empty() && time <= _errors.back().time) {
-      // Creating always increasing time order, giving each error unique time
-      time = _errors.back().time + epsilon;
-    }
-    if(message.size()>65536) message.resize(65536);
-    _errors.emplace_back(std::move(message), time);
-    while(_errors.size()>_limits.error_count) _errors.pop_front();
+    if(message.size()>65536)message.resize(65536);
+    { std::lock_guard lock(_m);double time=now();if(!_errors.empty() && time<=_errors.back().time)time=_errors.back().time+0.00001;
+      _errors.emplace_back(message,time);while(_errors.size()>_limits.error_count)_errors.pop_front(); }
+    _updates->emit("error_reported",std::move(message));
   }
-
   void clear_errors() override {
-    std::lock_guard lock(_m);
-    _errors.clear();
-    _err_last_access_index = 0;
+    {std::lock_guard lock(_m);_errors.clear();_err_last_access_index=0;}
+    _updates->emit("errors_cleared","0");
   }
 
  private:
@@ -500,6 +504,8 @@ class ThreadedFileJobs : public FileJobs {
         record_event(_active_job->_job_id,false);
         if (_shutdown.load()) _active_job->_cancel_requested = true;
       }
+      _updates->emit("job_started",std::to_string(_active_job->_job_id),_active_job->_job_id);
+      _active_job->updated();
       _progress_monitor.add_job(_active_job);
       if (_active_job->_cancel_requested.load()) {
         _active_job->_state = JobState::CANCELLED;
@@ -533,6 +539,7 @@ class ThreadedFileJobs : public FileJobs {
         retain_history();
         --_outstanding;
       }
+      _updates->emit("job_completed",std::to_string(_active_job->_job_id),_active_job->_job_id);
       _active_job->updated();
     }
   }

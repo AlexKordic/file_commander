@@ -9,6 +9,7 @@
 #include "latest_work.hpp"
 #include "commander.hpp"
 #include "settings.hpp"
+#include "application_events.hpp"
 #include "dialogs.hpp"
 #include "editor_manager.hpp"
 #include "file_io_jobs.hpp"
@@ -377,6 +378,8 @@ class Panel : public DialogOverlay {
     move_to(top.archive_file.parent_path(), top.archive_file);
     return true;
   }
+
+  bool execute_file_command(const std::string& id) {return _files->execute_command(id);}
 
   void execute_dialog_command(const std::string& dialog_name) {
     _state->action.dialog            = dialog_name;
@@ -797,10 +800,10 @@ class FileCommander : public DialogOverlay {
     auto proposed = commands().list_all();
     for (const auto& [id, token] : bindings) {
       auto item = std::find_if(proposed.begin(), proposed.end(), [&](const Command& command) { return command.id == id; });
-      if (item == proposed.end() || !theme_key_for_command(id)) { error = "Unknown command id: " + id; return false; }
+      if (item == proposed.end() || !item->binding) { error = "Unknown command id: " + id; return false; }
       auto key = event_from_string(token);
       if (key == Event::Custom || event_to_token(key).empty()) { error = "Unsupported key for " + id + ": " + token; return false; }
-      if (key == theme().key_command_palette) { error = "Key is reserved for the command palette"; return false; }
+      if (key == keys().key_command_palette) { error = "Key is reserved for the command palette"; return false; }
       item->key = key;
     }
     for (size_t i = 0; i < proposed.size(); ++i) {
@@ -813,7 +816,6 @@ class FileCommander : public DialogOverlay {
     }
     // Validation is complete before either the catalog or Theme is changed.
     for (const auto& command : proposed) {
-      *theme_key_for_command(command.id) = command.key;
       commands().set_key(command.id, command.key);
     }
     return true;
@@ -916,105 +918,71 @@ class FileCommander : public DialogOverlay {
     else right.navigation->TakeFocus();
   }
 
-  void execute_palette_command(const std::string& id) {
-    Command* command = commands().find_by_id(id);
-    if (!command) return;
-    command->use_count++;
-
-    // If palette triggered this action, close it first.
-    if (_active_dialog_name == "CommandPalette") { close_dialog(); }
-
-    if (command->scope == CommandScope::PANEL) {
-      if (command->kind == CommandKind::SHOW_DIALOG) {
-        focused_panel().execute_dialog_command(command->dialog);
-      } else if (command->kind == CommandKind::EXECUTE_CALLBACK) {
-        focused_panel().navigation->OnEvent(command->key);
+  struct CommandHandler {std::function<bool()> run,available;};
+  std::map<std::string,CommandHandler> handlers;
+  std::shared_ptr<ApplicationEvents> events=std::make_shared<ApplicationEvents>();
+  uint64_t command_sequence=0;
+  void register_commands() {
+    auto ready=[this] { return !dialog_active() || _active_dialog_name=="CommandPalette"; };
+    auto panel_ready=[this,ready] {return ready() && focused_panel()._active_dialog==0;};
+    auto add=[&](std::string id,std::function<void()> run,std::function<bool()> available) {
+      handlers[std::move(id)]={[run=std::move(run)] {run();return true;},std::move(available)};
+    };
+    for(const auto& command:commands().list_all()) {
+      if(command.kind==CommandKind::SHOW_DIALOG) {
+        add(command.id,[this,command] {if(command.scope==CommandScope::PANEL) focused_panel().execute_dialog_command(command.dialog);else show_dialog(command.dialog);},command.scope==CommandScope::PANEL?std::function<bool()>(panel_ready):std::function<bool()>(ready));
+      } else if(command.scope==CommandScope::PANEL) {
+        handlers[command.id]={[this,id=command.id] {return focused_panel().execute_file_command(id);},panel_ready};
       }
-      return;
     }
-
-    if (command->scope == CommandScope::GLOBAL && command->kind == CommandKind::SHOW_DIALOG) {
-      show_dialog(command->dialog);
-      return;
+    add("switch_panel",[this] {auto& current=focused_panel();_last_main_focus_left=&current!=&left;(_last_main_focus_left?left:right).navigation->TakeFocus();},ready);
+    add("tab_new",[this] {focused_panel().new_tab();},panel_ready);
+    add("tab_close",[this] {focused_panel().close_tab();},panel_ready);
+    add("tab_next",[this] {focused_panel().cycle_tab(1);},panel_ready);
+    add("tab_prev",[this] {focused_panel().cycle_tab(-1);},panel_ready);
+    add("refresh_dir",[this] {auto& panel=focused_panel();panel.move_to(panel.dir.path);},panel_ready);
+    add("toggle_single_panel_mode",[this] {set_single_panel_mode(!_single_panel_mode);},ready);
+    add("target_right",[this] {right.move_to(focused_panel().focused_dir());},panel_ready);
+    add("target_left",[this] {left.move_to(focused_panel().focused_dir());},panel_ready);
+    add("open_in_editor",[this] {std::string error;if(!open_in_editor(error)&&!error.empty())file_operations().report_error(error);},panel_ready);
+    add("switch_to_file_commander",[] {},ready);
+    add("switch_editor_prev",[this] {std::string error;if(!_editor_manager.switch_prev(error)&&!error.empty())file_operations().report_error(error);},ready);
+    add("switch_editor_next",[this] {std::string error;if(!_editor_manager.switch_next(error)&&!error.empty())file_operations().report_error(error);},ready);
+  }
+  bool command_available(const std::string& id) {auto at=handlers.find(id);return at!=handlers.end() && at->second.available();}
+  bool execute_command(const std::string& id) {
+    auto at=handlers.find(id);if(at==handlers.end() || !at->second.available())return false;
+    if(_active_dialog_name=="CommandPalette")close_dialog();
+    if(!at->second.run())return false;
+    commands().increment_use_count(id);events->publish("command_executed",id,++command_sequence);observe_state();return true;
+  }
+  void execute_palette_command(const std::string& id) {execute_command(id);}
+  struct ViewObservation {
+    uint64_t left_revision=0,right_revision=0;int64_t left_selected=0,right_selected=0;
+    bool focus_left=true,single=false;
+  };
+  std::optional<ViewObservation> last_view;
+  void observe_state() {
+    ViewObservation current{left.items_revision,right.items_revision,left.dir.stats().items_selected,right.dir.stats().items_selected,&focused_panel()==&left,_single_panel_mode};
+    if(last_view) {
+      if(current.left_revision!=last_view->left_revision || current.right_revision!=last_view->right_revision)
+        events->publish("items_updated",current.left_revision!=last_view->left_revision?(current.right_revision!=last_view->right_revision?"both":"left"):"right");
+      if(current.left_selected!=last_view->left_selected)events->publish("selection_changed","left:"+std::to_string(current.left_selected));
+      if(current.right_selected!=last_view->right_selected)events->publish("selection_changed","right:"+std::to_string(current.right_selected));
+      if(current.focus_left!=last_view->focus_left)events->publish("focus_changed",current.focus_left?"left":"right");
+      if(current.single!=last_view->single)events->publish("single_panel_mode_changed",current.single?"on":"off");
     }
-
-    if (id == "switch_panel") {
-      Panel& current = focused_panel();
-      if (&current == &left) {
-        right.navigation->TakeFocus();
-        _last_main_focus_left = false;
-      } else {
-        left.navigation->TakeFocus();
-        _last_main_focus_left = true;
-      }
-      return;
-    }
-    if (id == "tab_new") {
-      focused_panel().new_tab();
-      return;
-    }
-    if (id == "tab_close") {
-      focused_panel().close_tab();
-      return;
-    }
-    if (id == "tab_next") {
-      focused_panel().cycle_tab(+1);
-      return;
-    }
-    if (id == "tab_prev") {
-      focused_panel().cycle_tab(-1);
-      return;
-    }
-    if (id == "refresh_dir") {
-      Panel& panel = focused_panel();
-      auto   where = panel.dir.path;
-      panel.move_to(where);
-      return;
-    }
-    if (id == "toggle_single_panel_mode") {
-      set_single_panel_mode(!_single_panel_mode);
-      return;
-    }
-    if (id == "target_right") {
-      Filepath where = focused_panel().focused_dir();
-      right.move_to(where);
-      return;
-    }
-    if (id == "target_left") {
-      Filepath where = focused_panel().focused_dir();
-      left.move_to(where);
-      return;
-    }
-    if (id == "open_in_editor") {
-      std::string error;
-      if (!open_in_editor(error) && !error.empty()) {
-        file_operations().report_error(error);
-      }
-      return;
-    }
-    if (id == "switch_to_file_commander") {
-      // File Commander is already active when this handler runs.
-      return;
-    }
-    if (id == "switch_editor_prev") {
-      std::string error;
-      if (!_editor_manager.switch_prev(error) && !error.empty()) {
-        file_operations().report_error(error);
-      }
-      return;
-    }
-    if (id == "switch_editor_next") {
-      std::string error;
-      if (!_editor_manager.switch_next(error) && !error.empty()) {
-        file_operations().report_error(error);
-      }
-      return;
-    }
+    last_view=current;
   }
 
   FileCommander(Filepath l, Filepath r, ExecuteOnUiThread exec, std::function<int()> dimx, RunWithRestoredIO run_with_restored_io = {}, bool defer_load = false)
       : left(l, get_target(), exec, {}, defer_load), right(r, get_target(), exec, {}, defer_load), _get_dimx(dimx), _run_with_restored_io(std::move(run_with_restored_io)) {
     _close_dialog         = [this]() { close_dialog(); };
+    auto emit=[weak=std::weak_ptr<ApplicationEvents>(events)](std::string name,std::string detail,uint64_t request=0) {if(auto bus=weak.lock())bus->publish(std::move(name),std::move(detail),request);};
+    on_event=[emit](const auto& name,const auto& detail){emit(name,detail,0);};left.on_event=on_event;right.on_event=on_event;
+    for(auto* panel:{&left,&right}) {panel->get_shared_state()->emit=emit;panel->get_shared_state()->dispatch_command=[this](const auto& id){return execute_command(id);};}
+    file_operations().set_event_sink(emit);
+    register_commands();
     _editor_manager.set_run_foreground([this](const std::function<int()>& run) -> int {
       if (_run_with_restored_io) return _run_with_restored_io(run);
       return run();
@@ -1129,44 +1097,6 @@ class FileCommander : public DialogOverlay {
     catch (const std::exception& e) { file_operations().report_error("[Theme settings] " + std::string(e.what())); }
   }
 
-  static Event* theme_key_for_command(const std::string& id) {
-    Theme& t = theme();
-    if (id == "select_toggle") return &t.key_files_select;
-    if (id == "clear_selection") return &t.key_clear_selection;
-    if (id == "select_all") return &t.key_select_all;
-    if (id == "enter_dir") return &t.key_enter_dir;
-    if (id == "leave_dir") return &t.key_leave_dir;
-    if (id == "toggle_permissions_column") return &t.key_toggle_permissions_column;
-    if (id == "toggle_owner_group_column") return &t.key_toggle_owner_group_column;
-    if (id == "copy") return &t.key_copy;
-    if (id == "move") return &t.key_move;
-    if (id == "delete") return &t.key_delete;
-    if (id == "rename") return &t.key_rename;
-    if (id == "mkdir") return &t.key_mkdir;
-    if (id == "find") return &t.key_find;
-    if (id == "glob_select") return &t.key_glob_select;
-    if (id == "glob_deselect") return &t.key_glob_deselect;
-    if (id == "names_to_clipboard") return &t.key_names_to_clipboard;
-    if (id == "paths_to_clipboard") return &t.key_paths_to_clipboard;
-    if (id == "switch_panel") return &t.key_switch_focused_panel;
-    if (id == "tab_new") return &t.key_new_tab;
-    if (id == "tab_close") return &t.key_close_tab;
-    if (id == "tab_next") return &t.key_next_tab;
-    if (id == "tab_prev") return &t.key_prev_tab;
-    if (id == "toggle_single_panel_mode") return &t.key_toggle_single_panel_mode;
-    if (id == "refresh_dir") return &t.key_refresh_dir;
-    if (id == "target_right") return &t.key_target_dir_to_focused_item_right;
-    if (id == "target_left") return &t.key_target_dir_to_focused_item_left;
-    if (id == "toggle_errors") return &t.key_toggle_error_details;
-    if (id == "toggle_job_list") return &t.key_toggle_job_list;
-    if (id == "open_bookmarks") return &t.key_bookmarks_dialog;
-    if (id == "edit_theme_colors") return &t.key_theme_colors;
-    if (id == "open_in_editor") return &t.key_open_in_editor;
-    if (id == "switch_to_file_commander") return &t.key_switch_to_file_commander;
-    if (id == "switch_editor_prev") return &t.key_switch_editor_prev;
-    if (id == "switch_editor_next") return &t.key_switch_editor_next;
-    return nullptr;
-  }
 
  public:
 
@@ -1198,61 +1128,14 @@ class FileCommander : public DialogOverlay {
       }
     }
 
-    if (event == theme().key_command_palette) {
+    if (event == keys().key_command_palette) {
       if (!dialog_active() || _active_dialog_name == "CommandPalette") {
         show_dialog("CommandPalette");
         return true;
       }
       return false;
     }
-    if (event == theme().key_theme_colors && !dialog_active()) {
-      show_dialog("ThemeColors");
-      return true;
-    }
-    if (!dialog_active() && event == theme().key_open_in_editor) {
-      std::string error;
-      if (!open_in_editor(error) && !error.empty()) {
-        file_operations().report_error(error);
-      }
-      return true;
-    }
-    if (!dialog_active() && event == theme().key_switch_editor_prev) {
-      std::string error;
-      if (!_editor_manager.switch_prev(error) && !error.empty()) {
-        file_operations().report_error(error);
-      }
-      return true;
-    }
-    if (!dialog_active() && event == theme().key_switch_editor_next) {
-      std::string error;
-      if (!_editor_manager.switch_next(error) && !error.empty()) {
-        file_operations().report_error(error);
-      }
-      return true;
-    }
-    if (!dialog_active() && event == theme().key_switch_to_file_commander) {
-      // File Commander is already active.
-      return true;
-    }
-    if (event == theme().key_toggle_single_panel_mode && !dialog_active()) {
-      set_single_panel_mode(!_single_panel_mode);
-      return true;
-    }
-
-    if (event == theme().key_toggle_error_details && !dialog_active()) {
-      show_dialog("ErrorList");
-      return true;
-    }
-    if (event == theme().key_toggle_job_list && !dialog_active()) {
-      show_dialog("JobList");
-      return true;
-    }
-    if (event == theme().key_bookmarks_dialog && !dialog_active()) {
-      show_dialog("Bookmarks");
-      return true;
-    }
-
-    if (event == theme().key_clear_errors) {
+    if (event == keys().key_clear_errors) {
       clear_errors_sequence.emplace_front(now());
       while (clear_errors_sequence.size() > theme().clear_errors_command_repeat_count) { clear_errors_sequence.pop_back(); }
       const double sequence_interval = clear_errors_sequence.front() - clear_errors_sequence.back();
@@ -1269,58 +1152,8 @@ class FileCommander : public DialogOverlay {
       clear_errors_sequence.clear();
     }
 
-    // Tab between panels
-    if (event == theme().key_switch_focused_panel) {
-      Panel& current = focused_panel();
-      if (&current == &left) {
-        right.navigation->TakeFocus();
-        _last_main_focus_left = false;
-      } else {
-        left.navigation->TakeFocus();
-        _last_main_focus_left = true;
-      }
-      return true;
-    }
-    if (!dialog_active() && event == theme().key_new_tab) {
-      focused_panel().new_tab();
-      return true;
-    }
-    if (!dialog_active() && event == theme().key_close_tab) {
-      focused_panel().close_tab();
-      return true;
-    }
-    if (!dialog_active() && event == theme().key_next_tab) {
-      focused_panel().cycle_tab(+1);
-      return true;
-    }
-    if (!dialog_active() && event == theme().key_prev_tab) {
-      focused_panel().cycle_tab(-1);
-      return true;
-    }
-    if (event == theme().key_refresh_dir) {
-      Panel& panel = focused_panel();
-      auto where = panel.dir.path;
-      panel.move_to(where);
-      return true;
-    }
-    // Move target to selected dir.
-    // Do not apply if dialog is active on the source panel. When rename is open we want ctrl+right/left to move cursor by entire word.
-    Panel& source = focused_panel();
-    const bool change_right = event == theme().key_target_dir_to_focused_item_right && (&source == &left);
-    const bool change_left  = event == theme().key_target_dir_to_focused_item_left && (&source == &right);
-    if (change_right) {
-      const bool dialog_active = source._active_dialog > 0;
-      if (dialog_active) return false;
-      Filepath where = source.focused_dir();
-      right.move_to(where);
-      return true;
-    } else if (change_left) {
-      const bool dialog_active = source._active_dialog > 0;
-      if (dialog_active) return false;
-      Filepath where = source.focused_dir();
-      left.move_to(where);
-      return true;
-    }
+    for(const auto& command:commands().list_all()) if(command.key==event) return execute_command(command.id);
+
     return false;
   }
 };

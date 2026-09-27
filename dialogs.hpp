@@ -42,6 +42,9 @@ struct Command {
   CommandScope scope = CommandScope::PANEL;
   CommandKind  kind  = CommandKind::SHOW_DIALOG;
   int          use_count = 0;
+  Event* binding = nullptr;
+  Command(std::string id,Event& key,std::string dialog,std::string description,CommandScope scope,CommandKind kind)
+    : id(std::move(id)),key(key),dialog(std::move(dialog)),description(std::move(description)),scope(scope),kind(kind),binding(&key) {}
 };
 
 struct ThemeColorEntry {
@@ -92,6 +95,7 @@ struct Files : Dialog {
 
   explicit Files(PanelSharedState::P s);
   void OnShow() override {}
+  bool execute_command(const std::string& id);
 
   DataSource _data_source;
 
@@ -283,6 +287,7 @@ struct FindDialog : Dialog {
 struct Nyi : Dialog {
   Nyi(PanelSharedState::P s);
   void OnShow() override {}
+  bool execute_command(const std::string& id);
 };
 
 struct ErrorListDialog : Dialog {

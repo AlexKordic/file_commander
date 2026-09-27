@@ -16,15 +16,8 @@
 //  > Structure key shortcuts to contain description 
 //
 
-struct Theme {
-  Theme();
-
-  float  copyfiles_height_screen_portion = 0.9;
-  float  errorlist_height_screen_portion = 0.9;
-  double clear_errors_command_sequence = 1.0;
-  int    clear_errors_command_repeat_count = 3;
-  int    max_errors_to_show = 3; // in FileCommander error quick view
-
+struct KeyBindings {
+  KeyBindings();
   ftxui::Event 
     key_switch_focused_panel,
     key_new_tab,
@@ -57,6 +50,18 @@ struct Theme {
     key_switch_editor_next;
 
   ftxui::Event key_mkdir, key_copy, key_move, key_delete, key_rename, key_names_to_clipboard, key_paths_to_clipboard, key_find;
+
+};
+KeyBindings& keys();
+
+struct Theme {
+  Theme();
+
+  float  copyfiles_height_screen_portion = 0.9;
+  float  errorlist_height_screen_portion = 0.9;
+  double clear_errors_command_sequence = 1.0;
+  int    clear_errors_command_repeat_count = 3;
+  int    max_errors_to_show = 3; // in FileCommander error quick view
 
   std::vector<ftxui::Color> filesize_colors;
   std::vector<ftxui::Color> debuginfo_colors;

@@ -121,28 +121,7 @@ private:
   };
   std::optional<PendingWait> _pending_wait;
 
-  // --- Async poll state (replaces g_had_running_job, etc.) ---
-  bool   _had_running_job = false;
-  bool   _had_discovery   = false;
-  uint64_t _last_discovery_id = 0;  // track process identity for fast-completion detection
-  int    _poll_count = 0;
-  uint64_t _last_job_sequence = 0;
-  uint64_t _last_left_revision = 0;
-  uint64_t _last_right_revision = 0;
-  std::set<uint64_t> _completed_discoveries;
-  std::set<uint64_t> _completed_searches;
-  bool   _event_baseline_initialized = false;
-  int    _last_left_item_count = -1;
-  int    _last_right_item_count = -1;
-  int    _last_left_selected_count = -1;
-  int    _last_right_selected_count = -1;
-  int    _last_error_count = -1;
-  int    _last_job_items_done = -1;
-  std::string _last_job_state_name;
-  std::string _last_focus_side;
-  bool   _last_single_panel_mode = false;
-  bool   _had_find = false;
-  void*  _last_find_ptr = nullptr;
+  uint64_t _application_cursor=0;
 
   // --- Per-test watchdog (hard timeout window between heartbeats) ---
   double _test_timeout_window_sec = 6.0;
@@ -169,6 +148,7 @@ private:
   // --- Lua C callbacks: access 'this' via registry, not globals ---
   static LuaScripting* from_lua(lua_State* L);  // extract 'this' from registry
 
+  static int l_command(lua_State* L);
   static int l_key(lua_State* L);
   static int l_quit(lua_State* L);
   static int l_left_cd(lua_State* L);

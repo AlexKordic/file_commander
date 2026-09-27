@@ -16,7 +16,7 @@ struct CopyDiscoveryProgress {
 };
 class CopyPlanner {
  public:
-  explicit CopyPlanner(CopyRequest, std::function<void()> notify = [] {});
+  explicit CopyPlanner(CopyRequest, std::function<void()> notify = [] {}, std::function<void(std::string, std::string, uint64_t)> emit = [](auto, auto, auto) {});
   ~CopyPlanner();
   CopyDiscoveryProgress                       get_progress();
   const CopyRequest&                          request() const { return _request; }
@@ -32,8 +32,9 @@ class CopyPlanner {
   CopyDiscoveryProgress _progress;
 
  private:
-  CopyRequest               _request;
-  std::vector<ArchiveLease> _leases;
-  std::function<void()>     _notify;
-  void                      run();
+  CopyRequest                                             _request;
+  std::vector<ArchiveLease>                               _leases;
+  std::function<void()>                                   _notify;
+  std::function<void(std::string, std::string, uint64_t)> _emit;
+  void                                                    run();
 };

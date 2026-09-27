@@ -17,7 +17,7 @@ Filepath              resolve_link(Filepath current) {
   }
 }
 }  // namespace
-CopyPlanner::CopyPlanner(CopyRequest request, std::function<void()> notify) : _request(std::move(request)), _notify(std::move(notify)) {
+CopyPlanner::CopyPlanner(CopyRequest request, std::function<void()> notify, std::function<void(std::string, std::string, uint64_t)> emit) : _request(std::move(request)), _notify(std::move(notify)), _emit(std::move(emit)) {
   _sequence_id   = sequence.fetch_add(1);
   _plan.conflict = _request.conflict;
   for (const auto& p : _request.sources)
@@ -111,6 +111,7 @@ void CopyPlanner::run() {
   try {
     traverse(_request.sources, TraversalPolicy{_request.follow_links}, cb);
   } catch (const std::exception& e) { error({}, _request.destination, e.what()); }
-  _running = false;
+  bool completed = _running.exchange(false);
+  _emit(completed ? "discovery_completed" : "discovery_cancelled", std::to_string(_sequence_id), _sequence_id);
   _notify();
 }

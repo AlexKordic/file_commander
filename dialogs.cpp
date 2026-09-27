@@ -187,9 +187,9 @@ void setup_filelist_datasource(PanelSharedState::P app, DataSource& data_source)
   data_source.transform          = filelist_transform(app);
 }
 
-bool filelist_handle_commands(PanelSharedState* app, DataSource* data_source, DSEventContext& ctx) {
+bool execute_file_command(PanelSharedState* app,DataSource* data_source,const std::string& id) {
   auto execute_panel_callback = [&]() -> bool {
-    const Command* action = commands().find_panel_by_key(ctx.event);
+    const Command* action = commands().find_by_id(id);
     if (!action || action->kind != CommandKind::EXECUTE_CALLBACK) return false;
 
     data_source->focused_id = app->dir->offset_vissible(data_source->focused_id, 0);
@@ -247,7 +247,7 @@ bool filelist_handle_commands(PanelSharedState* app, DataSource* data_source, DS
 
   if (execute_panel_callback()) return true;
 
-  const Command* action = commands().find_panel_by_key(ctx.event);
+  const Command* action = commands().find_by_id(id);
   if (action) {
     if (action->kind != CommandKind::SHOW_DIALOG) return false;
     app->action.dialog            = action->dialog;
@@ -264,6 +264,12 @@ bool filelist_handle_commands(PanelSharedState* app, DataSource* data_source, DS
     return true;
   }
   return false;
+}
+
+bool Files::execute_command(const std::string& id) {return execute_file_command(app.get(),&_data_source,id);}
+bool filelist_handle_commands(PanelSharedState* app,DataSource* data_source,DSEventContext& ctx) {
+  const auto* command=commands().find_panel_by_key(ctx.event);if(!command)return false;
+  return app->dispatch_command?app->dispatch_command(command->id):execute_file_command(app,data_source,command->id);
 }
 
 bool filelist_handle_filter(PanelSharedState* app, DataSource* data_source, DSEventContext& ctx) {
@@ -299,7 +305,7 @@ InputOption filelist_filter_opt(int& filter_cursor_pos) {
 
 template <typename THIS> std::function<bool(Event e)> close_on_esc(THIS* self) {
   return [self](Event e) -> bool {
-    if (e == theme().key_cancel_dialog) {
+    if (e == keys().key_cancel_dialog) {
       self->cancel();
       return true;
     }
@@ -796,7 +802,7 @@ CopyDialog::CopyDialog(PanelSharedState::P d) : Dialog(std::move(d)) {
                               run_copy();
                               return true;
                             }
-                            if (e == theme().key_cancel_dialog) {
+                            if (e == keys().key_cancel_dialog) {
                               this->cancel();
                               return true;
                             }
@@ -815,7 +821,7 @@ CopyDialog::CopyDialog(PanelSharedState::P d) : Dialog(std::move(d)) {
                               _conflict              = CopyConflict::Skip;
                               return true;
                             }
-                            if (e == theme().key_copy) {
+                            if (e == keys().key_copy) {
                               this->run_copy();
                               return true;
                             }
@@ -919,7 +925,7 @@ void CopyDialog::_clear_operation_state() {
 }
 
 CopyDiscoveryProcess::CopyDiscoveryProcess(CopyDialog* parent, Filepath target)
-  : CopyPlanner(CopyRequest{parent->app->action.arguments->selected,target,parent->b_follow_links,parent->b_preserve_relative_links,to_job_copy_conflict(parent->_conflict)},parent->app->notify) {
+  : CopyPlanner(CopyRequest{parent->app->action.arguments->selected,target,parent->b_follow_links,parent->b_preserve_relative_links,to_job_copy_conflict(parent->_conflict)},parent->app->notify, parent->app->emit) {
   _dir           = std::make_unique<Dir>();
   _dir->path     = target;
   _dir->path_txt = target.native();
@@ -1352,6 +1358,7 @@ void FindDialog::start_search() {
 
     _running.store(false, std::memory_order_relaxed);
     _completed.store(true, std::memory_order_relaxed);
+    app->emit(result.cancelled?"find_cancelled":"find_completed",std::to_string(_sequence_id),_sequence_id);
     app->notify();
   });
 }
@@ -1746,7 +1753,7 @@ JobListDialog::JobListDialog(std::function<void()> close_dialog) : Dialog(nullpt
   tab = Container::Tab({list_view, detail_view}, &view_mode);
 
   navigation = CatchEvent(tab, [this](Event e) -> bool {
-    if (e == theme().key_cancel_dialog) {
+    if (e == keys().key_cancel_dialog) {
       if (in_detail) {
         close_detail();
       } else {
@@ -1925,7 +1932,7 @@ BookmarksDialog::BookmarksDialog(
                             list_menu,
                           }),
                           [this](Event e) -> bool {
-                            if (e == theme().key_cancel_dialog) {
+                            if (e == keys().key_cancel_dialog) {
                               cancel();
                               return true;
                             }
@@ -2558,42 +2565,42 @@ Element ThemeColorsDialog::render_picker() const {
 
 Commands::Commands() {
   available.reserve(64);
-  available.push_back({"select_toggle", theme().key_files_select, "", "Select / Deselect Focused Item", CommandScope::PANEL, CommandKind::EXECUTE_CALLBACK});
-  available.push_back({"clear_selection", theme().key_clear_selection, "", "Clear Selection", CommandScope::PANEL, CommandKind::EXECUTE_CALLBACK});
-  available.push_back({"select_all", theme().key_select_all, "", "Select All", CommandScope::PANEL, CommandKind::EXECUTE_CALLBACK});
-  available.push_back({"enter_dir", theme().key_enter_dir, "", "Enter Directory", CommandScope::PANEL, CommandKind::EXECUTE_CALLBACK});
-  available.push_back({"leave_dir", theme().key_leave_dir, "", "Leave Directory", CommandScope::PANEL, CommandKind::EXECUTE_CALLBACK});
-  available.push_back({"toggle_permissions_column", theme().key_toggle_permissions_column, "", "Toggle Permissions Column", CommandScope::PANEL, CommandKind::EXECUTE_CALLBACK});
-  available.push_back({"toggle_owner_group_column", theme().key_toggle_owner_group_column, "", "Toggle Owner/Group Column", CommandScope::PANEL, CommandKind::EXECUTE_CALLBACK});
+  available.push_back({"select_toggle", keys().key_files_select, "", "Select / Deselect Focused Item", CommandScope::PANEL, CommandKind::EXECUTE_CALLBACK});
+  available.push_back({"clear_selection", keys().key_clear_selection, "", "Clear Selection", CommandScope::PANEL, CommandKind::EXECUTE_CALLBACK});
+  available.push_back({"select_all", keys().key_select_all, "", "Select All", CommandScope::PANEL, CommandKind::EXECUTE_CALLBACK});
+  available.push_back({"enter_dir", keys().key_enter_dir, "", "Enter Directory", CommandScope::PANEL, CommandKind::EXECUTE_CALLBACK});
+  available.push_back({"leave_dir", keys().key_leave_dir, "", "Leave Directory", CommandScope::PANEL, CommandKind::EXECUTE_CALLBACK});
+  available.push_back({"toggle_permissions_column", keys().key_toggle_permissions_column, "", "Toggle Permissions Column", CommandScope::PANEL, CommandKind::EXECUTE_CALLBACK});
+  available.push_back({"toggle_owner_group_column", keys().key_toggle_owner_group_column, "", "Toggle Owner/Group Column", CommandScope::PANEL, CommandKind::EXECUTE_CALLBACK});
 
-  available.push_back({"copy", theme().key_copy, "Copy", "Copy", CommandScope::PANEL, CommandKind::SHOW_DIALOG});
-  available.push_back({"move", theme().key_move, "Move", "Move", CommandScope::PANEL, CommandKind::SHOW_DIALOG});
-  available.push_back({"delete", theme().key_delete, "Delete", "Delete", CommandScope::PANEL, CommandKind::SHOW_DIALOG});
-  available.push_back({"rename", theme().key_rename, "Rename", "Rename", CommandScope::PANEL, CommandKind::SHOW_DIALOG});
-  available.push_back({"mkdir", theme().key_mkdir, "Mkdir", "Make Directory", CommandScope::PANEL, CommandKind::SHOW_DIALOG});
-  available.push_back({"find", theme().key_find, "Find", "Find", CommandScope::PANEL, CommandKind::SHOW_DIALOG});
-  available.push_back({"glob_select", theme().key_glob_select, "GlobSelect", "Select by Glob", CommandScope::PANEL, CommandKind::SHOW_DIALOG});
-  available.push_back({"glob_deselect", theme().key_glob_deselect, "GlobDeselect", "Deselect by Glob", CommandScope::PANEL, CommandKind::SHOW_DIALOG});
-  available.push_back({"names_to_clipboard", theme().key_names_to_clipboard, "NameToClipboard", "Names to Clipboard", CommandScope::PANEL, CommandKind::SHOW_DIALOG});
-  available.push_back({"paths_to_clipboard", theme().key_paths_to_clipboard, "PathToClipboard", "Paths to Clipboard", CommandScope::PANEL, CommandKind::SHOW_DIALOG});
+  available.push_back({"copy", keys().key_copy, "Copy", "Copy", CommandScope::PANEL, CommandKind::SHOW_DIALOG});
+  available.push_back({"move", keys().key_move, "Move", "Move", CommandScope::PANEL, CommandKind::SHOW_DIALOG});
+  available.push_back({"delete", keys().key_delete, "Delete", "Delete", CommandScope::PANEL, CommandKind::SHOW_DIALOG});
+  available.push_back({"rename", keys().key_rename, "Rename", "Rename", CommandScope::PANEL, CommandKind::SHOW_DIALOG});
+  available.push_back({"mkdir", keys().key_mkdir, "Mkdir", "Make Directory", CommandScope::PANEL, CommandKind::SHOW_DIALOG});
+  available.push_back({"find", keys().key_find, "Find", "Find", CommandScope::PANEL, CommandKind::SHOW_DIALOG});
+  available.push_back({"glob_select", keys().key_glob_select, "GlobSelect", "Select by Glob", CommandScope::PANEL, CommandKind::SHOW_DIALOG});
+  available.push_back({"glob_deselect", keys().key_glob_deselect, "GlobDeselect", "Deselect by Glob", CommandScope::PANEL, CommandKind::SHOW_DIALOG});
+  available.push_back({"names_to_clipboard", keys().key_names_to_clipboard, "NameToClipboard", "Names to Clipboard", CommandScope::PANEL, CommandKind::SHOW_DIALOG});
+  available.push_back({"paths_to_clipboard", keys().key_paths_to_clipboard, "PathToClipboard", "Paths to Clipboard", CommandScope::PANEL, CommandKind::SHOW_DIALOG});
 
-  available.push_back({"switch_panel", theme().key_switch_focused_panel, "", "Switch Focused Panel", CommandScope::GLOBAL, CommandKind::EXECUTE_CALLBACK});
-  available.push_back({"tab_new", theme().key_new_tab, "", "New Tab in Focused Panel", CommandScope::GLOBAL, CommandKind::EXECUTE_CALLBACK});
-  available.push_back({"tab_close", theme().key_close_tab, "", "Close Active Tab in Focused Panel", CommandScope::GLOBAL, CommandKind::EXECUTE_CALLBACK});
-  available.push_back({"tab_next", theme().key_next_tab, "", "Next Tab in Focused Panel", CommandScope::GLOBAL, CommandKind::EXECUTE_CALLBACK});
-  available.push_back({"tab_prev", theme().key_prev_tab, "", "Previous Tab in Focused Panel", CommandScope::GLOBAL, CommandKind::EXECUTE_CALLBACK});
-  available.push_back({"toggle_single_panel_mode", theme().key_toggle_single_panel_mode, "", "Toggle Single Panel Full Width", CommandScope::GLOBAL, CommandKind::EXECUTE_CALLBACK});
-  available.push_back({"refresh_dir", theme().key_refresh_dir, "", "Refresh Directory", CommandScope::GLOBAL, CommandKind::EXECUTE_CALLBACK});
-  available.push_back({"target_right", theme().key_target_dir_to_focused_item_right, "", "Target Right Panel to Focused Item", CommandScope::GLOBAL, CommandKind::EXECUTE_CALLBACK});
-  available.push_back({"target_left", theme().key_target_dir_to_focused_item_left, "", "Target Left Panel to Focused Item", CommandScope::GLOBAL, CommandKind::EXECUTE_CALLBACK});
-  available.push_back({"toggle_errors", theme().key_toggle_error_details, "ErrorList", "Toggle Error List", CommandScope::GLOBAL, CommandKind::SHOW_DIALOG});
-  available.push_back({"toggle_job_list", theme().key_toggle_job_list, "JobList", "Toggle Job List", CommandScope::GLOBAL, CommandKind::SHOW_DIALOG});
-  available.push_back({"open_bookmarks", theme().key_bookmarks_dialog, "Bookmarks", "Open Bookmarks", CommandScope::GLOBAL, CommandKind::SHOW_DIALOG});
-  available.push_back({"edit_theme_colors", theme().key_theme_colors, "ThemeColors", "Edit Theme Colors", CommandScope::GLOBAL, CommandKind::SHOW_DIALOG});
-  available.push_back({"open_in_editor", theme().key_open_in_editor, "", "Open in Fresh Editor", CommandScope::GLOBAL, CommandKind::EXECUTE_CALLBACK});
-  available.push_back({"switch_to_file_commander", theme().key_switch_to_file_commander, "", "Switch to File Commander", CommandScope::GLOBAL, CommandKind::EXECUTE_CALLBACK});
-  available.push_back({"switch_editor_prev", theme().key_switch_editor_prev, "", "Switch to Previous Editor Session", CommandScope::GLOBAL, CommandKind::EXECUTE_CALLBACK});
-  available.push_back({"switch_editor_next", theme().key_switch_editor_next, "", "Switch to Next Editor Session", CommandScope::GLOBAL, CommandKind::EXECUTE_CALLBACK});
+  available.push_back({"switch_panel", keys().key_switch_focused_panel, "", "Switch Focused Panel", CommandScope::GLOBAL, CommandKind::EXECUTE_CALLBACK});
+  available.push_back({"tab_new", keys().key_new_tab, "", "New Tab in Focused Panel", CommandScope::GLOBAL, CommandKind::EXECUTE_CALLBACK});
+  available.push_back({"tab_close", keys().key_close_tab, "", "Close Active Tab in Focused Panel", CommandScope::GLOBAL, CommandKind::EXECUTE_CALLBACK});
+  available.push_back({"tab_next", keys().key_next_tab, "", "Next Tab in Focused Panel", CommandScope::GLOBAL, CommandKind::EXECUTE_CALLBACK});
+  available.push_back({"tab_prev", keys().key_prev_tab, "", "Previous Tab in Focused Panel", CommandScope::GLOBAL, CommandKind::EXECUTE_CALLBACK});
+  available.push_back({"toggle_single_panel_mode", keys().key_toggle_single_panel_mode, "", "Toggle Single Panel Full Width", CommandScope::GLOBAL, CommandKind::EXECUTE_CALLBACK});
+  available.push_back({"refresh_dir", keys().key_refresh_dir, "", "Refresh Directory", CommandScope::GLOBAL, CommandKind::EXECUTE_CALLBACK});
+  available.push_back({"target_right", keys().key_target_dir_to_focused_item_right, "", "Target Right Panel to Focused Item", CommandScope::GLOBAL, CommandKind::EXECUTE_CALLBACK});
+  available.push_back({"target_left", keys().key_target_dir_to_focused_item_left, "", "Target Left Panel to Focused Item", CommandScope::GLOBAL, CommandKind::EXECUTE_CALLBACK});
+  available.push_back({"toggle_errors", keys().key_toggle_error_details, "ErrorList", "Toggle Error List", CommandScope::GLOBAL, CommandKind::SHOW_DIALOG});
+  available.push_back({"toggle_job_list", keys().key_toggle_job_list, "JobList", "Toggle Job List", CommandScope::GLOBAL, CommandKind::SHOW_DIALOG});
+  available.push_back({"open_bookmarks", keys().key_bookmarks_dialog, "Bookmarks", "Open Bookmarks", CommandScope::GLOBAL, CommandKind::SHOW_DIALOG});
+  available.push_back({"edit_theme_colors", keys().key_theme_colors, "ThemeColors", "Edit Theme Colors", CommandScope::GLOBAL, CommandKind::SHOW_DIALOG});
+  available.push_back({"open_in_editor", keys().key_open_in_editor, "", "Open in Fresh Editor", CommandScope::GLOBAL, CommandKind::EXECUTE_CALLBACK});
+  available.push_back({"switch_to_file_commander", keys().key_switch_to_file_commander, "", "Switch to File Commander", CommandScope::GLOBAL, CommandKind::EXECUTE_CALLBACK});
+  available.push_back({"switch_editor_prev", keys().key_switch_editor_prev, "", "Switch to Previous Editor Session", CommandScope::GLOBAL, CommandKind::EXECUTE_CALLBACK});
+  available.push_back({"switch_editor_next", keys().key_switch_editor_next, "", "Switch to Next Editor Session", CommandScope::GLOBAL, CommandKind::EXECUTE_CALLBACK});
 }
 
 const Command* Commands::find_by_id(const std::string& id) const {
@@ -2624,6 +2631,7 @@ bool Commands::set_key(const std::string& id, const Event& key) {
   auto* c = find_by_id(id);
   if (!c) return false;
   c->key = key;
+  if(c->binding)*c->binding=key;
   return true;
 }
 

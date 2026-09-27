@@ -100,20 +100,13 @@ int main(int argc, char** argv) {
   if (lua_mode) {
     LuaScripting scripting(app, app.renderer);
 
-    auto fire = [&scripting](const std::string& n, const std::string& d) {
-      scripting.fire_event(n, d);
-    };
-    // Wire all three DialogOverlay instances
-    app.on_event             = fire;
-    app.get_left().on_event  = fire;
-    app.get_right().on_event = fire;
-
     if (!scripting.setup(lua_script_path)) return 1;
 
     // Explicit Loop — Lua tick() runs after every render pass
     while (!loop.HasQuitted()) {
       if (dispatcher.drain()) screen.Post(Event::Custom);
       loop.RunOnce();
+      app.observe_state();
       scripting.tick();   // first call starts coroutine; thereafter checks waits
       dispatcher.wait();
     }
@@ -124,6 +117,7 @@ int main(int argc, char** argv) {
     while (!loop.HasQuitted()) {
       if (dispatcher.drain()) screen.Post(Event::Custom);
       loop.RunOnce();
+      app.observe_state();
       dispatcher.wait();
     }
     app.save_settings();

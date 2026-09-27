@@ -25,7 +25,7 @@ end
 
 -- Explicit command dispatch by stable command id (bypasses key binding dependence).
 fc.cmd = function(command_id)
-  _raw_key(command_id)
+  return fc.command(command_id)
 end
 
 -- fc.wait_for_jobs is registered by C++ and checks the queue-drained predicate.
