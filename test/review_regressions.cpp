@@ -346,8 +346,30 @@ static void R14() {
   require(arch->_items_done == 1 && arch->_items_skipped == 1, "archive skip count wrong");
 }
 
+static void R15() {
+  Fixture f;
+  auto source = f.dir("src"); auto dest = f.dir("dest");
+  fs::create_symlink("missing", source / "dangling");
+  fs::create_symlink("cycle_b", source / "cycle_a");
+  fs::create_symlink("cycle_a", source / "cycle_b");
+  auto target = f.dir("target");
+  fs::create_directory_symlink(target, source / "directory_link");
+  Dir dir; dir.move_to(source);
+  require(dir.items.size() == 4, "dangling/cyclic links disappeared from listing");
+  require(DirItem(source / "directory_link").is_dir(), "valid directory link lost navigation");
+  auto changes = std::make_unique<std::vector<DirItemUpdated>>();
+  changes->emplace_back((source / "dangling").c_str(), DirItemUpdated::Event::Modified);
+  dir.partial_refresh(std::move(changes));
+  require(dir.items.size() == 4, "partial refresh removed dangling link");
+  auto state = copy_state(dir, source / "dangling", dest);
+  CopyDialog dialog(state); dialog.OnShow(); dialog._discovery_process->_thread.join();
+  auto job = std::make_shared<JobSpec>(JobSpec::Type::COPY, dialog._discovery_process->take_items());
+  dialog.cancel(); wait_job(file_operations().add_job(job));
+  require(fs::is_symlink(dest / "dangling") && fs::read_symlink(dest / "dangling") == "missing", "preserve copy lost dangling link text");
+}
+
 int main(int argc, char** argv) {
-  const std::vector<std::pair<std::string, void (*)()>> tests = {{"R01", R01}, {"R02", R02}, {"R03", R03}, {"R04", R04}, {"R05", R05}, {"R06", R06}, {"R07", R07}, {"R08", R08}, {"R09", R09}, {"R10", R10}, {"R11", R11}, {"R12", R12}, {"R13", R13}, {"R14", R14}};
+  const std::vector<std::pair<std::string, void (*)()>> tests = {{"R01", R01}, {"R02", R02}, {"R03", R03}, {"R04", R04}, {"R05", R05}, {"R06", R06}, {"R07", R07}, {"R08", R08}, {"R09", R09}, {"R10", R10}, {"R11", R11}, {"R12", R12}, {"R13", R13}, {"R14", R14}, {"R15", R15}};
   try {
     bool matched = false;
     for (const auto& [id, run] : tests) {

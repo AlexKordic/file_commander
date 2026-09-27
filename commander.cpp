@@ -96,6 +96,7 @@ void DirItem::update(Type type, Perms perms) {
   if (_type == boost::filesystem::status_error) return;
 
   error_code ec;
+  _symlink.reset();
   const bool is_link = boost::filesystem::is_symlink(_path, ec);
   if (!ec.failed() && is_link) {
     _symlink = boost::filesystem::read_symlink(_path, ec);
@@ -118,7 +119,7 @@ void DirItem::update(Type type, Perms perms) {
 
   _w_time = last_write_time(_path, ec);
   if (ec.failed()) _w_time = 0;
-  if (type == boost::filesystem::directory_file) return;
+  if (_type == boost::filesystem::directory_file) return;
   _size = file_size(_path, ec);
   if (ec.failed()) _size = -1;
 }
@@ -126,10 +127,15 @@ void DirItem::update(Type type, Perms perms) {
 DirItem::DirItem(Filepath p) : _path(std::move(p)) {
   _filename = _path.filename().native();
   error_code  ec;
-  file_status fs = status(_path, ec);
+  file_status fs = symlink_status(_path, ec);
   if (ec.failed()) {
     update(boost::filesystem::status_error, boost::filesystem::no_perms);
     return;
+  }
+  // Follow metadata only for real entries, not synthetic operation records.
+  if (is_symlink(fs)) {
+    const auto target = status(_path, ec);
+    if (!ec.failed()) fs = file_status(target.type(), fs.permissions());
   }
   update(fs.type(), fs.permissions());
 }
@@ -157,12 +163,12 @@ Err Dir::move_to(const Filepath p) {
   for (directory_entry& item : directory_iterator(p, dir_ec)) {
     error_code  ec;
     // file_status fs = status(item.path(), ec);
-    file_status fs = item.status(ec);
+    file_status fs = boost::filesystem::symlink_status(item.path(), ec);
     if (ec) {
       Perun::file_operations().report_error(ec.message() + " : stat() error on " + item.path().native());
       continue;
     }
-    items.emplace_back(item.path(), fs.type(), fs.permissions());
+    items.emplace_back(item.path());
   }
   if (dir_ec) return Err("dir iterate: " + p.native() + "; " + dir_ec.message());
   this->path     = p;
@@ -193,23 +199,24 @@ void Dir::partial_refresh(UpdatedFiles changes) {
   };
   for (DirItemUpdated& updated : *changes) {
     error_code  ec;
-    file_status fs     = status(updated.path, ec);
+    file_status fs     = symlink_status(updated.path, ec);
     auto        listed = find(updated.path);
     const bool  found  = listed != items.end();
-    if (ec) {
+    if (ec || !exists(fs)) {
       // find it and remove from the list
       if (found) items.erase(listed);
       continue;
     }
     if (found) {
-      listed->update(fs.type(), fs.permissions());
+      DirItem refreshed(updated.path);
+      listed->update(refreshed.type(), refreshed.perms());
     } else {
       const bool sanity_check = boost::filesystem::equivalent(updated.path.parent_path(), this->path);
       if (!sanity_check) {
         Perun::l.e("FS change event sanity check failed", updated.path.native(), {{"root", this->path.native()}});
         continue;
       }
-      DirItem& inserted = items.emplace_back(updated.path, fs.type(), fs.permissions());
+      DirItem& inserted = items.emplace_back(updated.path);
       if (filter_match(inserted._filename, filter.phrase)) {
         inserted._visible = true;
       } else {

@@ -302,15 +302,15 @@ Listing follows each link using `directory_entry::status()`, then skips the entr
 
 **Fix direction:** obtain link identity with `symlink_status()` and treat target status as separate optional metadata. **Regression:** visible, selectable dangling absolute/relative links and link cycles; preserve-mode copy must retain the link text.
 
-**Implementation status:** Planned.
+**Implementation status:** Applied.
 
 **Planned solution:** obtain link identity with `symlink_status()` and treat target status as separate optional metadata.
 
-**Applied solution:** Pending.
+**Applied solution:** Directory listing, direct DirItem construction and partial refresh classify entries with symlink_status. Link text is retained when target stat fails, while valid directory links still expose directory navigation. Refresh clears obsolete link metadata when an entry becomes a regular file.
 
-**Plan deviations:** Pending.
+**Plan deviations:** Preserved the existing followed-target display type for valid links; link identity remains in symlink_ref and deletion independently uses lstat classification from R01. The initial regression exposed that directory_entry::symlink_status refreshes followed metadata too, so listing uses the standalone path-based symlink_status call.
 
-**Validation:** Pending.
+**Validation:** Native build and R15 passed: dangling and cyclic links remain listed after partial refresh, valid directory links remain navigable, and preserve-mode copy retains a dangling relative target verbatim.
 
 ### R16 — Valid symlink chains are falsely detected as cycles
 
