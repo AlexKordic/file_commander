@@ -215,6 +215,7 @@ struct CopyDialog : Dialog {
   void OnShow() override;
 
   std::string destination_path;
+  bool _confirm_when_ready = false;
 
   Component button_cancel, button_ok;
   Component op_follow_links;

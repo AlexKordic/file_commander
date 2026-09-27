@@ -101,8 +101,42 @@ static void R03() {
   require(std::distance(fs::directory_iterator(f.root), fs::directory_iterator()) == 2, "archive staging leaked");
 }
 
+static PanelSharedState::P copy_state(Dir& dir, Filepath source, Filepath target) {
+  auto state = std::make_shared<PanelSharedState>(&dir);
+  state->action.arguments = std::make_shared<CommandArgs>();
+  state->action.arguments->origin = source.parent_path();
+  state->action.arguments->selected = {source};
+  state->action.arguments->target = target;
+  return state;
+}
+
+static void R04() {
+  Fixture f;
+  auto source = f.file("src/a", "NEW");
+  auto old = f.dir("old");
+  f.file("old/a", "KEEP");
+  Dir dir; dir.move_to(source.parent_path());
+  for (int method = 0; method < 2; ++method) {
+    auto target = f.dir("new" + std::to_string(method));
+    auto state = copy_state(dir, source, old);
+    CopyDialog dialog(state);
+    dialog.OnShow(); dialog._discovery_process->_thread.join();
+    dialog.destination_path = target.string();
+    if (method == 0) dialog.navigation->OnEvent(theme().key_copy);
+    else { dialog.button_ok->TakeFocus(); dialog.button_ok->OnEvent(Event::Return); }
+    require(dialog._confirm_when_ready, "edited target was not rediscovered");
+    dialog._discovery_process->_thread.join();
+    auto before = file_operations().get_job_history().size();
+    dialog.navigation->OnEvent(Event::Custom);
+    for (int i = 0; file_operations().get_job_history().size() == before && i < 2000; ++i)
+      std::this_thread::sleep_for(std::chrono::milliseconds(2));
+    require(read_file(old / "a") == "KEEP", "copy modified obsolete target");
+    require(read_file(target / "a") == "NEW", "copy did not use edited target");
+  }
+}
+
 int main(int argc, char** argv) {
-  const std::vector<std::pair<std::string, void (*)()>> tests = {{"R01", R01}, {"R02", R02}, {"R03", R03}};
+  const std::vector<std::pair<std::string, void (*)()>> tests = {{"R01", R01}, {"R02", R02}, {"R03", R03}, {"R04", R04}};
   try {
     bool matched = false;
     for (const auto& [id, run] : tests) {

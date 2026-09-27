@@ -815,6 +815,11 @@ CopyDialog::CopyDialog(PanelSharedState::P d) : Dialog(std::move(d)) {
                             _filelist_wrapper,
                           }),
                           [this](Event e) {
+                            if (e == Event::Custom && _confirm_when_ready && _discovery_process && !_discovery_process->_running) {
+                              _confirm_when_ready = false;
+                              run_copy();
+                              return true;
+                            }
                             if (e == theme().key_cancel_dialog) {
                               this->cancel();
                               return true;
@@ -854,6 +859,13 @@ void CopyDialog::run_copy() {
 
   Filepath target(destination_path);
   if (target.empty()) target = app->action.arguments->target;
+  if (_discovery_process->_target != target ||
+      _discovery_process->_follow_links != b_follow_links ||
+      _discovery_process->_preserve_relative_links != b_preserve_relative_links) {
+    _start_new_discovery();
+    _confirm_when_ready = true;
+    return;
+  }
   if (is_archive_file_path(target)) {
     std::vector<DirItem> items;
     items.reserve(app->action.arguments->selected.size());
@@ -904,6 +916,7 @@ Element CopyDialog::render() {
             hbox({text(" TO: "), input_destination_path->Render() | xflex_grow, text(" ")}),
             separator(),
             hbox({button_ok->Render() | hcenter, button_cancel->Render() | hcenter}) | hcenter,
+            _confirm_when_ready ? text("Preparing copy…") | hcenter : text(""),
             separatorHeavy(),
             op_follow_links->Render() | hcenter,
             op_preserve_relative_links->Render() | hcenter,
@@ -918,6 +931,7 @@ Element CopyDialog::render() {
 }
 
 void CopyDialog::_clear_operation_state() {
+  _confirm_when_ready = false;
   // _virtual_dir->items.clear();
   // _visited_dirs.clear();
   _discovery_process.reset();

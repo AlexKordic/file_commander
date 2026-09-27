@@ -100,15 +100,15 @@ Destination edits trigger discovery only on the input's Enter callback. Pressing
 
 **Fix direction:** bind each discovery result to its exact source/options/destination revision and validate that revision on confirmation; rebuild when it differs. **Regression:** edit the target and confirm via both mouse/button and F5 without pressing Enter in the input.
 
-**Implementation status:** Planned.
+**Implementation status:** Applied.
 
 **Planned solution:** bind each discovery result to its exact source/options/destination revision and validate that revision on confirmation; rebuild when it differs.
 
-**Applied solution:** Pending.
+**Applied solution:** Confirmation compares the destination and link options with the discovery snapshot. A changed target restarts discovery and defers the pending confirmation until its completion event, then queues the updated plan. Cancel clears the deferred confirmation.
 
-**Plan deviations:** Pending.
+**Plan deviations:** The updated discovery is automatically confirmed after completion, avoiding an extra confirmation click; the dialog shows Preparing copy while it waits.
 
-**Validation:** Pending.
+**Validation:** Native build and fc_review_tests R04 passed for both F5 and the COPY button: the old target retained KEEP and each edited destination received NEW.
 
 ### R05 — Copy discovery exposes a mutating vector and moves it before stopping its writer
 
