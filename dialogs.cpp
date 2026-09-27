@@ -851,14 +851,14 @@ void CopyDialog::run_copy() {
     plan.conflict=to_job_copy_conflict(_conflict);
     auto job=std::make_shared<JobSpec>(std::make_shared<const OperationPlan>(std::move(plan)));
     _clear_operation_state();
-    file_operations().add_job(job);
+    (app->jobs?*app->jobs:file_operations()).add_job(job);
     app->dir->clear_selection();
     app->action.close_dialog();
     return;
   }
 
   auto job = std::make_shared<JobSpec>(_discovery_process->take_plan());
-  file_operations().add_job(job); // Acquire execution leases before releasing discovery.
+  (app->jobs?*app->jobs:file_operations()).add_job(job); // Acquire execution leases before releasing discovery.
   _clear_operation_state();
   app->dir->clear_selection();
   app->action.close_dialog();
@@ -1019,7 +1019,7 @@ void DeleteDialog::OnShow() {
 
 void DeleteDialog::ok() {
   auto job=std::make_shared<JobSpec>(std::make_shared<const OperationPlan>(selection_plan(OperationType::DELETE,app->action.arguments->selected)));
-  file_operations().add_job(job);
+  (app->jobs?*app->jobs:file_operations()).add_job(job);
   app->dir->clear_selection();
   app->action.close_dialog();
 }
@@ -1081,7 +1081,7 @@ void MoveDialog::OnShow() {
 
 void MoveDialog::ok() {
   auto job=std::make_shared<JobSpec>(std::make_shared<const OperationPlan>(selection_plan(OperationType::MOVE,app->action.arguments->selected,app->action.arguments->target)));
-  file_operations().add_job(job);
+  (app->jobs?*app->jobs:file_operations()).add_job(job);
   app->dir->clear_selection();
   app->action.close_dialog();
 }

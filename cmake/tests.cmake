@@ -1,3 +1,15 @@
+add_executable(fc_command_tests test/command_contracts.cpp)
+target_link_libraries(fc_command_tests PRIVATE fc_lua)
+target_compile_definitions(fc_command_tests PRIVATE FC_TEST_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
+file(STRINGS "${CMAKE_CURRENT_SOURCE_DIR}/test/command_cases.inc" _commands REGEX "^FC_COMMAND_CASE")
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/test/command_cases.inc")
+foreach(_command IN LISTS _commands)
+  string(REGEX MATCH "FC_COMMAND_CASE\\(([a-z_]+)\\)" _match "${_command}")
+  set(_id "${CMAKE_MATCH_1}")
+  add_test(NAME fc.command.${_id} COMMAND fc_command_tests ${_id})
+  set_tests_properties(fc.command.${_id} PROPERTIES LABELS "command;integration;native" TIMEOUT 30)
+endforeach()
+
 # Registry-driven discovery: each case owns a process, config and deadline.
 file(STRINGS "${CMAKE_CURRENT_SOURCE_DIR}/test/review_cases.inc" _review_cases REGEX "^FC_REVIEW_CASE")
 set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS

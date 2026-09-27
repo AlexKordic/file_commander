@@ -21,6 +21,12 @@ Each improvement records its plan before editing, its applied solution and valid
 | TS07 | Real command behavior/availability and view/input contracts | In progress: catalog-complete actual-handler route matrix, disabled contexts, destructive fixture workflows, render sizes and real PTY input/resize | Pending |
 | TS09 | Platform/package/tool qualification, presets/CI and bounded stress lanes | Planned | Pending |
 
+### Additional implementation observations
+
+- TS07-A, applied (matches plan): the real command tests show copy/move/delete submit directly to the global manager even when the panel owns an injected job service. Submissions now use `PanelSharedState::jobs`, matching mkdir/rename/clipboard. All 34 real-command cases pass through shortcut, palette and semantic Lua adapters, including actual copy/move/delete/rename/mkdir file effects, clipboard text, editor invocation, event identity and single usage increments.
+
+- TS07-B, planned: real PTY resize to 12×3 reproduces `std::length_error` from the pinned FTXUI DBMenu using a negative visible height. Add a repository-owned menu adapter that clamps stale clipped height before rendering, migrate all owned DBMenu construction, and test repeated tiny rendering plus actual resize/input. The pinned dependency remains unchanged.
+
 ## Evidence and current baseline
 
 Read the registered CMake test entry points, every active first-party C++/Lua/Python test and its helpers, the fake editor, and the corresponding core/UI/scripting/platform mechanisms. Compared these against the specification, testing/build documents and architecture implementation records. Dependency projects' own suites were not audited. No line or branch coverage percentage was measured.
