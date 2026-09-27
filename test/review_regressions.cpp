@@ -368,8 +368,30 @@ static void R15() {
   require(fs::is_symlink(dest / "dangling") && fs::read_symlink(dest / "dangling") == "missing", "preserve copy lost dangling link text");
 }
 
+static void R16() {
+  Fixture f;
+  auto source = f.dir("src"); auto dest = f.dir("dst");
+  f.file("src/real", "CHAIN");
+  fs::create_symlink("real", source / "c");
+  fs::create_symlink("c", source / "b");
+  fs::create_symlink("b", source / "a");
+  Dir dir; dir.move_to(source);
+  auto state = copy_state(dir, source / "a", dest);
+  CopyDialog dialog(state); dialog.b_follow_links = true;
+  dialog.OnShow(); dialog._discovery_process->_thread.join();
+  require(dialog._discovery_process->get_progress().error_count == 0, "valid chain classified as cycle");
+  auto job = std::make_shared<JobSpec>(JobSpec::Type::COPY, dialog._discovery_process->take_items());
+  dialog.cancel(); wait_job(file_operations().add_job(job));
+  require(read_file(dest / "a") == "CHAIN" && !fs::is_symlink(dest / "a"), "follow chain did not materialize data");
+  fs::create_symlink("loop", source / "loop");
+  state->action.arguments->selected = {source / "loop"};
+  dialog.OnShow(); dialog._discovery_process->_thread.join();
+  require(dialog._discovery_process->get_progress().error_count == 1, "real cycle was not detected");
+  dialog.cancel();
+}
+
 int main(int argc, char** argv) {
-  const std::vector<std::pair<std::string, void (*)()>> tests = {{"R01", R01}, {"R02", R02}, {"R03", R03}, {"R04", R04}, {"R05", R05}, {"R06", R06}, {"R07", R07}, {"R08", R08}, {"R09", R09}, {"R10", R10}, {"R11", R11}, {"R12", R12}, {"R13", R13}, {"R14", R14}, {"R15", R15}};
+  const std::vector<std::pair<std::string, void (*)()>> tests = {{"R01", R01}, {"R02", R02}, {"R03", R03}, {"R04", R04}, {"R05", R05}, {"R06", R06}, {"R07", R07}, {"R08", R08}, {"R09", R09}, {"R10", R10}, {"R11", R11}, {"R12", R12}, {"R13", R13}, {"R14", R14}, {"R15", R15}, {"R16", R16}};
   try {
     bool matched = false;
     for (const auto& [id, run] : tests) {

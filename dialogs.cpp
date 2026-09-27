@@ -729,24 +729,19 @@ CopyConflictMode to_job_copy_conflict(CopyConflict conflict) {
 
 Filepath resolve_symlink(Filepath path) {
   std::vector<Filepath> chain;
-  Filepath              current = std::move(path);
+  Filepath current = std::move(path);
   for (;;) {
     error_code ec;
-    Filepath   symlink_target = boost::filesystem::read_symlink(current, ec);
-    if (ec.failed() || symlink_target.empty()) return current;
-    if (symlink_target.is_relative()) {
-      symlink_target = current.parent_path() / symlink_target;
-    }
-    symlink_target = symlink_target.lexically_normal();
-    for (const Filepath& visited : chain) {
-      error_code equivalent_ec;
-      const bool same = boost::filesystem::equivalent(visited, symlink_target, equivalent_ec);
-      if ((!equivalent_ec.failed() && same) || (equivalent_ec.failed() && visited == symlink_target)) {
-        return Filepath();
-      }
-    }
-    chain.push_back(current);
-    current = symlink_target;
+    auto parent = boost::filesystem::canonical(current.parent_path(), ec);
+    const auto identity = ec.failed() ? current.lexically_normal() : parent / current.filename();
+    // Compare the link paths, resolving only their parent directories. Using
+    // equivalent() here dereferences the link and confuses chains with cycles.
+    if (std::find(chain.begin(), chain.end(), identity) != chain.end()) return {};
+    chain.push_back(identity);
+    auto target = boost::filesystem::read_symlink(current, ec);
+    if (ec.failed() || target.empty()) return current;
+    if (target.is_relative()) target = current.parent_path() / target;
+    current = target.lexically_normal();
   }
 }
 

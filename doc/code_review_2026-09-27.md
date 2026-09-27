@@ -320,15 +320,15 @@ Listing follows each link using `directory_entry::status()`, then skips the entr
 
 **Fix direction:** detect repeated link objects/paths without dereferencing their final targets. **Regression:** follow chains of two and three links, alongside real self/cyclic links and links through directory aliases.
 
-**Implementation status:** Planned.
+**Implementation status:** Applied.
 
 **Planned solution:** detect repeated link objects/paths without dereferencing their final targets.
 
-**Applied solution:** Pending.
+**Applied solution:** Symlink traversal records normalized link paths with canonical parent directories, then reads each link target. Cycle checks never dereference the final link target for identity, so valid chains remain distinct while directory aliases normalize consistently.
 
-**Plan deviations:** Pending.
+**Plan deviations:** Used normalized link paths with canonical parents rather than platform-specific inode identities, retaining portability across supported filesystem APIs.
 
-**Validation:** Pending.
+**Validation:** Native build and R16 passed: a three-link chain materializes the final file and a self-cycle yields a discovery error. R15 passed again after the path-based metadata correction.
 
 ### R17 — Symlink copies bypass Replace/Update/Skip conflict handling
 
