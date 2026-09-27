@@ -5,7 +5,7 @@
 #include "bfs.hpp"
 
 PanelSharedState::PanelSharedState(Dir* d) : dir(d) {
-  move_to             = [](boost::filesystem::path p) {};
+  move_to             = [](Filepath, Filepath) {};
   enter_archive       = [](const Filepath&) -> bool { return false; };
   leave_virtual_dir   = [](int64_t&) -> bool { return false; };
   get_focused_item    = []() -> Filepath const* { return nullptr; };

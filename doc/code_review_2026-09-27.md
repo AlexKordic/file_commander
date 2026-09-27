@@ -482,15 +482,15 @@ Directory listing and per-entry metadata lookup execute synchronously during nav
 
 **Fix direction:** perform enumeration/extraction on workers, publish bounded updates, and provide loading/cancel states with generation checks. **Regression:** deliberately slow enumeration and extraction while asserting that input and redraw continue promptly.
 
-**Implementation status:** Planned.
+**Implementation status:** Applied.
 
 **Planned solution:** perform enumeration/extraction on workers, publish bounded updates, and provide loading/cancel states with generation checks.
 
-**Applied solution:** Pending.
+**Applied solution:** Panel enumeration, metadata refresh and archive extraction now run on a cancellable worker with one pending replacement request. Completed snapshots publish only on the UI thread after lifetime and generation checks. The FTXUI loop is installed before panel construction so fast initial scans cannot lose their publication callbacks. Loading remains visible and Escape cancels; navigating elsewhere cancels the old operation. Focus/selection restoration occurs at publication. Owner/group lookup uses reentrant libc APIs and watcher installation failures are reported.
 
-**Plan deviations:** Pending.
+**Plan deviations:** Publishes one completed snapshot rather than incremental entry batches, with bounded pending requests. Cancellation checks occur between filesystem calls; an individual blocked kernel call cannot be interrupted, and orderly panel destruction joins its worker. Pure Dir model methods remain synchronous for worker use. Existing Lua waits require the event-stream correction tracked in R31.
 
-**Validation:** Pending.
+**Validation:** Native build and accumulated R01–R25 C++ regressions passed. R25 additionally verified redraw and Escape during a deliberately stalled scan, superseding navigation, and prompt cancellation of a 20-second archive command. Repeated package checks exposed dropped startup publication before loop installation; the corrected startup order has a regression that finishes the scan before the first event pass and verifies publication. Lua integration exposed older dir_changed events satisfying later waits; follow-up validation is tracked under R31/R32.
 
 ### R26 — Mutations inside an archive operate only on its temporary extraction
 

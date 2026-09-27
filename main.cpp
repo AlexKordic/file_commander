@@ -66,7 +66,12 @@ int main(int argc, char** argv) {
     wrapped();
     return rc;
   };
+  // FTXUI drops posts until its loop is installed. Activate it before the
+  // panels can launch their initial directory workers.
+  auto root = Container::Vertical({});
+  ftxui::Loop loop(&screen, root);
   FileCommander app(left_path, right_path, exec, dimx, run_with_restored_io);
+  root->Add(app.renderer);
   if (!lua_mode) {
     const bool explicit_panel_paths = argc > 1;
     app.load_settings(!explicit_panel_paths);
@@ -90,7 +95,6 @@ int main(int argc, char** argv) {
     if (!scripting.setup(lua_script_path)) return 1;
 
     // Explicit Loop — Lua tick() runs after every render pass
-    ftxui::Loop loop(&screen, app.renderer);
     while (!loop.HasQuitted()) {
       loop.RunOnceBlocking();
       scripting.tick();   // first call starts coroutine; thereafter checks waits
@@ -106,7 +110,7 @@ int main(int argc, char** argv) {
     scripting.cleanup();
   } else {
     // Normal mode — no Lua
-    screen.Loop(app.renderer);
+    loop.Run();
     app.save_settings();
   }
 

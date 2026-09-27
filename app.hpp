@@ -6,6 +6,7 @@
 
 #include "bfs.hpp"
 #include "archive.hpp"
+#include "latest_work.hpp"
 #include "commander.hpp"
 #include "dialogs.hpp"
 #include "editor_manager.hpp"
@@ -288,18 +289,35 @@ class Panel : public DialogOverlay {
   std::unique_ptr<FileChangeFunnel> update_funnel;
   Perun::FifoQueue<UpdatedFiles>    pending_changes;
   uint64_t _watch_generation = 0;
+  using DirectoryReader = std::function<Err(Dir&, const Filepath&, const std::atomic<bool>*)>;
+  DirectoryReader _read_directory;
+  LatestWork _loader;
+  uint64_t _load_generation = 0;
+  bool _loading = false;
+  Filepath _loading_path;
+  bool loading() const { return _loading; }
+  void cancel_loading() {
+    ++_load_generation;
+    _loader.cancel();
+    _loading = false;
+    if (!dir.path.empty()) start_watcher(dir.path);
+  }
 
   ~Panel() {
     _callback_alive->store(false);
+    _loader.shutdown();
     update_funnel.reset(); // Join callbacks while their queue/state still exist.
     pending_changes.close();
   }
 
-  Panel(Filepath location, TargetFunc get_target, ExecuteOnUiThread e) : get_target(get_target), run_on_ui(e) {
-    this->move_to(location);
+  Panel(Filepath location, TargetFunc get_target, ExecuteOnUiThread e, DirectoryReader reader = {})
+      : get_target(get_target), run_on_ui(e), _read_directory(std::move(reader)) {
+    if (!_read_directory) _read_directory = [](Dir& result, const Filepath& path, const std::atomic<bool>* cancelled) { return result.move_to(path, cancelled); };
+    dir.path = location;
+    dir.path_txt = location.native();
     _state                      = std::make_shared<PanelSharedState>(&dir);
     navigation                  = Container::Tab({}, &_active_dialog);
-    _state->move_to             = [this](Filepath where) { this->move_to(where); };
+    _state->move_to             = [this](Filepath where, Filepath focus) { this->move_to(where, focus); };
     _state->enter_archive       = [this](const Filepath& where) { return this->enter_archive(where); };
     _state->leave_virtual_dir   = [this](int64_t& focused_id) { return this->leave_virtual_dir(focused_id); };
     _state->action.close_dialog = [this]() { close_dialog(); };
@@ -309,7 +327,10 @@ class Panel : public DialogOverlay {
     };
     _files         = std::make_shared<ftxui::Files>(_state);
     _main_document = std::dynamic_pointer_cast<ftxui::Dialog>(_files);
-    navigation->Add(_main_document->navigation);
+    navigation->Add(CatchEvent(_main_document->navigation, [this](Event event) {
+      if (event == Event::Escape && _loading) { cancel_loading(); return true; }
+      return false;
+    }));
     // register dialogs
     _overlay_dialogs["Mkdir"]           = std::make_shared<MkdirDialog>(_state);
     _overlay_dialogs["Rename"]          = std::make_shared<RenameDialog>(_state);
@@ -325,6 +346,7 @@ class Panel : public DialogOverlay {
     _tabs.push_back(TabState{});
     _tabs[0].dir = dir;
     sync_active_tab_state();
+    move_to(location);
   }
 
   int tab_count() const { return static_cast<int>(_tabs.size()); }
@@ -389,39 +411,83 @@ class Panel : public DialogOverlay {
     if (on_event) on_event("tab_switched", std::to_string(_active_tab));
   }
 
-  void move_to(Filepath& where) {
-    int      focused_index_before = 0;
-    Filepath focused_path_before;
-    std::vector<Filepath> selected_before;
-    const bool same_directory_refresh = _state && (where == dir.path);
-    if (same_directory_refresh) {
-      selected_before = dir.take_selected()->selected;
-      if (_state->get_focused_index) { focused_index_before = _state->get_focused_index(); }
-      if (_state->get_focused_item) {
-        const Filepath* focused = _state->get_focused_item();
-        if (focused) focused_path_before = *focused;
-      }
+  void move_to(const Filepath& where, Filepath focus = {}) {
+    load_directory(where, false, false, std::move(focus));
+  }
+
+  void load_directory(Filepath where, bool archive, bool recover, Filepath focus = {}, bool background_refresh = false) {
+    const auto generation = ++_load_generation;
+    if (archive || where != dir.path) {
+      ++_watch_generation;
+      update_funnel.reset();
+      pending_changes.erase_if([](const UpdatedFiles&) { return true; });
     }
-    Err err = dir.move_to(where);
-    if (!err.ok()) {
-      file_operations().report_error("[Panel move_to] " + err.steps.front());
-      return;
-    }
-    _prune_archive_stack(where);
-    if (same_directory_refresh) {
-      for (int i = 0; i < dir.items.size(); ++i) {
-        if (std::find(selected_before.begin(), selected_before.end(), dir.items[i].path_ref()) != selected_before.end()) dir.item_toggle_select(i);
-      }
-      _restore_focus_after_update(focused_path_before, focused_index_before);
-    }
-    start_watcher(where);
-    sync_active_tab_state();
-    if (on_event) on_event("dir_changed", where.native());
+    _loading = true;
+    _loading_path = where;
+    auto result = std::make_shared<Dir>();
+    result->order_by = dir.order_by;
+    auto stack = _archive_stack;
+    _loader.submit([this, alive = _callback_alive, post = run_on_ui, reader = _read_directory,
+                    generation, result, where, archive, recover, stack, focus, background_refresh](const LatestWork::Token& cancelled) mutable {
+      Err error;
+      try {
+        if (archive) {
+          Filepath extracted;
+          error = archive_service().extract_to_cache(where, extracted, cancelled.get());
+          if (error.ok()) {
+            stack.push_back(ArchiveView{where.lexically_normal(), extracted.lexically_normal()});
+            where = extracted;
+          }
+        }
+        if (recover) {
+          for (;;) {
+            boost::system::error_code ec;
+            if (boost::filesystem::is_directory(where, ec) && !ec) break;
+            auto parent = where.parent_path();
+            if (parent.empty() || parent == where || cancelled->load()) break;
+            where = parent;
+          }
+        }
+        if (error.ok() && !cancelled->load()) error = reader(*result, where, cancelled.get());
+      } catch (const std::exception& e) { error = Err(e.what()); }
+      if (cancelled->load() || !alive->load()) return;
+      post([this, alive, cancelled, generation, result, where, stack, focus, error, recover, background_refresh]() mutable {
+        if (!alive->load() || cancelled->load() || generation != _load_generation) return;
+        _loading = false;
+        if (!error.ok()) {
+          file_operations().report_error("[Panel load] " + error.steps.front());
+          return;
+        }
+        const bool same = dir.path == where;
+        if (recover && !same) file_operations().report_error("Watched directory is unavailable; moved to " + where.native());
+        int old_index = same && _state->get_focused_index ? _state->get_focused_index() : 0;
+        Filepath old_focus = focus;
+        std::vector<Filepath> selected;
+        if (same) {
+          selected = dir.take_selected()->selected;
+          if (old_focus.empty() && _state->get_focused_item) {
+            if (auto item = _state->get_focused_item()) old_focus = *item;
+          }
+        }
+        dir = std::move(*result);
+        dir.apply_filter(_state->filter_txt, true);
+        for (int i = 0; i < dir.items.size(); ++i) {
+          if (std::find(selected.begin(), selected.end(), dir.items[i].path_ref()) != selected.end()) dir.item_toggle_select(i);
+        }
+        _archive_stack = stack;
+        _prune_archive_stack(where);
+        _restore_focus_after_update(old_focus, old_index);
+        start_watcher(where);
+        sync_active_tab_state();
+        if (on_event) on_event(background_refresh && same ? "items_updated" : "dir_changed", where.native());
+      });
+    });
   }
   Element render() {
     // Panel is always shown
     Element document = vbox({
       render_tabs(),
+      _loading ? hbox({text(" Loading "), text(_loading_path.native()) | xflex, text(" Esc: cancel ")}) | dim : text(""),
       _main_document->renderer->Render() | yflex,
     });
     // Overwrite with active dialog
@@ -444,49 +510,15 @@ class Panel : public DialogOverlay {
 
   bool enter_archive(const Filepath& archive_candidate) {
     if (!is_archive_file_path(archive_candidate)) return false;
-
-    Filepath extracted_root;
-    Err      err = archive_service().extract_to_cache(archive_candidate, extracted_root);
-    if (!err.ok()) {
-      file_operations().report_error("[Archive extract] " + err.steps.front());
-      return false;
-    }
-
-    Filepath archive_file = archive_candidate.lexically_normal();
-    boost::system::error_code canonical_ec;
-    Filepath canonical_archive = boost::filesystem::canonical(archive_candidate, canonical_ec);
-    if (!canonical_ec.failed()) archive_file = canonical_archive;
-
-    _archive_stack.push_back(ArchiveView{
-      .archive_file = archive_file,
-      .extracted_root = extracted_root.lexically_normal(),
-    });
-
-    Filepath where = extracted_root;
-    move_to(where);
-    if (dir.path.lexically_normal() != extracted_root.lexically_normal()) {
-      _archive_stack.pop_back();
-      return false;
-    }
+    load_directory(archive_candidate, true, false);
     return true;
   }
 
   bool leave_virtual_dir(int64_t& focused_id) {
     if (_archive_stack.empty()) return false;
-    const ArchiveView top = _archive_stack.back();
+    const auto top = _archive_stack.back();
     if (dir.path.lexically_normal() != top.extracted_root.lexically_normal()) return false;
-
-    _archive_stack.pop_back();
-    Filepath parent = top.archive_file.parent_path();
-    move_to(parent);
-
-    focused_id = dir.offset_vissible(0, 0);
-    for (int i = 0; i < static_cast<int>(dir.items.size()); ++i) {
-      if (dir.items[i].path_ref() == top.archive_file) {
-        focused_id = i;
-        break;
-      }
-    }
+    move_to(top.archive_file.parent_path(), top.archive_file);
     return true;
   }
 
@@ -556,6 +588,7 @@ class Panel : public DialogOverlay {
     update_funnel.reset(); // Stop the previous producer before draining its queue.
     pending_changes.erase_if([](const UpdatedFiles&) { return true; });
     if (in_archive_view(where)) return;
+    try {
     update_funnel = FileChangeFunnel::create(where, [this, alive = _callback_alive, generation](UpdatedFiles changes) {
       if (!alive->load()) return;
       pending_changes.push(std::move(changes));
@@ -569,39 +602,25 @@ class Panel : public DialogOverlay {
         }
       });
     });
+    } catch (const std::exception& error) {
+      file_operations().report_error("[Panel watch] " + std::string(error.what()));
+    }
   }
 
  public:
   // Apply a watcher batch on the UI thread.
   void apply_changes(UpdatedFiles batch) {
-    const bool rescan = std::any_of(batch->begin(), batch->end(), [](const auto& change) {
-      return change.what == DirItemUpdated::Event::Rescan || change.what == DirItemUpdated::Event::WatchInvalidated;
-    });
-    if (rescan) {
-      auto where = dir.path;
-      for (;;) {
-        boost::system::error_code ec;
-        if (boost::filesystem::is_directory(where, ec) && !ec) break;
-        auto parent = where.parent_path();
-        if (parent == where || parent.empty()) return;
-        where = parent;
-      }
-      if (where != dir.path) file_operations().report_error("Watched directory is unavailable; moved to " + where.native());
-      move_to(where); // Reconcile and rearm the watcher, including overflow.
-      return;
+    if (!batch || batch->empty()) return;
+    // Ordinary metadata reads also belong on the worker. A rescan is naturally
+    // coalesced with other notifications by the single pending request slot.
+    bool relevant = false;
+    bool recover = false;
+    for (const auto& change : *batch) {
+      const bool special = change.what == DirItemUpdated::Event::Rescan || change.what == DirItemUpdated::Event::WatchInvalidated;
+      relevant |= special || change.path.parent_path().lexically_normal() == dir.path.lexically_normal();
+      recover |= special;
     }
-    int      focused_index_before = 0;
-    Filepath focused_path_before;
-    if (_state) {
-      if (_state->get_focused_index) { focused_index_before = _state->get_focused_index(); }
-      if (_state->get_focused_item) {
-        const Filepath* focused = _state->get_focused_item();
-        if (focused) focused_path_before = *focused;
-      }
-    }
-    this->dir.partial_refresh(std::move(batch));
-    _restore_focus_after_update(focused_path_before, focused_index_before);
-    sync_active_tab_state();
+    if (relevant) load_directory(dir.path, false, recover, {}, true);
   }
 
  private:
@@ -624,7 +643,6 @@ class Panel : public DialogOverlay {
     } else {
       update_funnel.reset();
     }
-    if (on_event) on_event("dir_changed", dir.path.native());
   }
 
   void _restore_focus_after_update(const Filepath& focused_path_before, int focused_index_before) {

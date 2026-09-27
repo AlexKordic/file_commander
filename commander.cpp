@@ -107,10 +107,13 @@ void DirItem::update(Type type, Perms perms) {
   struct stat st;
   if (lstat(_path.native().c_str(), &st) == 0) {
     if (is_link) _w_time = st.st_mtime;
-    if (auto* pw = getpwuid(st.st_uid)) _owner = pw->pw_name;
+    // Directory and discovery workers must not share libc's static buffers.
+    char user_buffer[16384], group_buffer[16384];
+    struct passwd user_record{}, *user = nullptr;
+    struct group group_record{}, *group = nullptr;
+    if (getpwuid_r(st.st_uid, &user_record, user_buffer, sizeof(user_buffer), &user) == 0 && user) _owner = user->pw_name;
     else _owner = std::to_string(static_cast<unsigned long>(st.st_uid));
-
-    if (auto* gr = getgrgid(st.st_gid)) _group = gr->gr_name;
+    if (getgrgid_r(st.st_gid, &group_record, group_buffer, sizeof(group_buffer), &group) == 0 && group) _group = group->gr_name;
     else _group = std::to_string(static_cast<unsigned long>(st.st_gid));
   } else {
     _owner.clear();
@@ -158,24 +161,25 @@ Err Dir::leave_dir() {
 
 Err Dir::refresh() { return move_to(path); }
 
-Err Dir::move_to(const Filepath p) {
-  if (false == exists(p)) return Err("don't exists path=" + p.native());
-  if (false == is_directory(p)) return Err("must be dir path=" + p.native());
-  items.clear();
-  error_code dir_ec;
-  for (directory_entry& item : directory_iterator(p, dir_ec)) {
-    error_code  ec;
-    // file_status fs = status(item.path(), ec);
-    file_status fs = boost::filesystem::symlink_status(item.path(), ec);
-    if (ec) {
-      Perun::file_operations().report_error(ec.message() + " : stat() error on " + item.path().native());
-      continue;
-    }
-    items.emplace_back(item.path());
+Err Dir::move_to(const Filepath p, const std::atomic<bool>* cancelled) {
+  error_code ec;
+  if (!is_directory(p, ec) || ec) return Err("cannot open directory " + p.native() + (ec ? ": " + ec.message() : ""));
+  std::vector<DirItem> loaded;
+  directory_iterator it(p, ec), end;
+  if (ec) return Err("dir iterate: " + p.native() + "; " + ec.message());
+  while (it != end) {
+    if (cancelled && cancelled->load()) return Err("directory loading cancelled");
+    const auto entry = it->path();
+    const auto status = boost::filesystem::symlink_status(entry, ec);
+    if (!ec) loaded.emplace_back(entry);
+    else Perun::file_operations().report_error(ec.message() + " : stat() error on " + entry.native());
+    it.increment(ec);
+    if (ec) return Err("dir iterate: " + p.native() + "; " + ec.message());
   }
-  if (dir_ec) return Err("dir iterate: " + p.native() + "; " + dir_ec.message());
-  this->path     = p;
-  this->path_txt = this->path.native();
+  if (cancelled && cancelled->load()) return Err("directory loading cancelled");
+  items = std::move(loaded);
+  path = p;
+  path_txt = path.native();
   _sort();
   apply_filter(filter.phrase, true);
   _calculate();

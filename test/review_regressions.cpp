@@ -27,6 +27,24 @@ struct Fixture {
   }
 };
 
+struct UiQueue {
+  std::mutex mutex;
+  std::vector<std::function<void()>> posted;
+  void post(std::function<void()> f) { std::lock_guard lock(mutex); posted.push_back(std::move(f)); }
+  void drain() {
+    std::vector<std::function<void()>> ready;
+    { std::lock_guard lock(mutex); ready.swap(posted); }
+    for (auto& f : ready) f();
+  }
+  void wait(Panel& panel) {
+    auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    while (panel.loading() && std::chrono::steady_clock::now() < deadline) {
+      drain(); std::this_thread::sleep_for(std::chrono::milliseconds(2));
+    }
+    require(!panel.loading(), "panel load did not finish");
+  }
+};
+
 static void wait_job(uint64_t id) {
   auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
   while (std::chrono::steady_clock::now() < deadline) {
@@ -189,21 +207,20 @@ static void R07() {
 
 static void R08() {
   Fixture f;
-  std::mutex mutex;
-  std::vector<std::function<void()>> posted;
-  auto post = [&](std::function<void()> work) { std::lock_guard lock(mutex); posted.push_back(std::move(work)); };
-  auto panel = std::make_unique<Panel>(f.root, [&](Panel*) { return f.root; }, post);
+  UiQueue ui;
+  auto panel = std::make_unique<Panel>(f.root, [&](Panel*) { return f.root; }, [&](auto work) { ui.post(std::move(work)); });
+  ui.wait(*panel);
   f.file("trigger");
   bool received = false;
   for (int i = 0; i < 1000; ++i) {
-    { std::lock_guard lock(mutex); received = !posted.empty(); }
+    { std::lock_guard lock(ui.mutex); received = !ui.posted.empty(); }
     if (received) break;
     std::this_thread::sleep_for(std::chrono::milliseconds(5));
   }
   require(received, "watcher did not post a test callback");
   panel.reset();
   // All queued work must become harmless after destruction.
-  for (auto& callback : posted) callback();
+  ui.drain();
 }
 
 static void R09() {
@@ -443,14 +460,16 @@ static void R19() {
 static void R20() {
   Fixture f; auto first = f.dir("first"); auto second = f.dir("second");
   f.file("first/keep"); f.file("first/remove");
-  Panel panel(first, [&](Panel*) { return second; }, [](std::function<void()>) {});
+  UiQueue ui;
+  Panel panel(first, [&](Panel*) { return second; }, [&](auto work) { ui.post(std::move(work)); });
+  ui.wait(panel);
   auto state = panel.get_shared_state(); state->filter_txt = "keep"; panel.dir.apply_filter("keep");
   for (int i = 0; i < panel.dir.items.size(); ++i) if (panel.dir.items[i].filename_ref() == "keep") {
     panel.dir.item_toggle_select(i); state->set_focused_index(i);
   }
-  panel.new_tab(); panel.move_to(second);
+  panel.new_tab(); panel.move_to(second); ui.wait(panel);
   f.file("first/keep-new"); fs::remove(first / "remove");
-  panel.switch_to_tab(0);
+  panel.switch_to_tab(0); ui.wait(panel);
   require(panel.dir.items.size() == 2 && panel.dir.stats().items_visible == 2, "inactive tab did not reconcile changes/filter");
   require(panel.dir.take_selected()->selected == std::vector<Filepath>{first / "keep"}, "surviving selection lost");
   require(*state->get_focused_item() == first / "keep", "surviving focus lost");
@@ -473,23 +492,27 @@ static void R21() {
 
 static void R22() {
   Fixture f; auto root = f.dir("watched");
-  Panel panel(root, [&](Panel*) { return f.root; }, [](std::function<void()>) {});
+  UiQueue ui;
+  Panel panel(root, [&](Panel*) { return f.root; }, [&](auto work) { ui.post(std::move(work)); });
+  ui.wait(panel);
   f.file("watched/new");
   auto changes = std::make_unique<std::vector<DirItemUpdated>>();
   changes->emplace_back(root.c_str(), DirItemUpdated::Event::Rescan);
-  panel.apply_changes(std::move(changes));
+  panel.apply_changes(std::move(changes)); ui.wait(panel);
   require(panel.dir.items.size() == 1, "rescan did not reconcile directory");
   fs::remove_all(root);
   changes = std::make_unique<std::vector<DirItemUpdated>>();
   changes->emplace_back(root.c_str(), DirItemUpdated::Event::WatchInvalidated);
-  panel.apply_changes(std::move(changes));
+  panel.apply_changes(std::move(changes)); ui.wait(panel);
   require(panel.dir.path == f.root && panel.update_funnel, "invalidated root did not recover/rearm");
 }
 
 static void R23() {
   Fixture f; auto left = f.dir("left"); auto right = f.dir("right");
   f.file("left/a"); f.file("right/b");
-  FileCommander app(left, right, [](std::function<void()>) {}, [] { return 100; });
+  UiQueue ui;
+  FileCommander app(left, right, [&](auto work) { ui.post(std::move(work)); }, [] { return 100; });
+  ui.wait(app.get_left()); ui.wait(app.get_right());
   auto interactive = ScreenInteractive::FixedSize(100, 30);
   Loop active_screen(&interactive, app.renderer);
   app.get_left().navigation->TakeFocus();
@@ -534,8 +557,66 @@ static void R24() {
   require(!dialog.error.empty() && closed == 1, "vanished origin was not reported");
 }
 
+static void R25() {
+  Fixture f; auto slow = f.dir("slow"); auto fast = f.dir("fast");
+  f.file("slow/stale"); f.file("fast/current");
+  {
+    auto screen = ScreenInteractive::FixedSize(100, 30);
+    auto root = Container::Vertical({});
+    Loop loop(&screen, root);
+    std::atomic<bool> posted{false};
+    Panel startup(fast, [&](Panel*) { return fast; }, [&](auto work) {
+      screen.Post(std::move(work));
+      screen.Post(Event::Custom);
+      posted = true;
+    });
+    root->Add(startup.navigation);
+    for (int i = 0; i < 500 && !posted; ++i) std::this_thread::sleep_for(std::chrono::milliseconds(2));
+    require(posted && startup.loading(), "startup worker did not finish before first event pass");
+    loop.RunOnce();
+    require(!startup.loading() && startup.dir.items.size() == 1, "initial directory publication was lost");
+  }
+  std::atomic<bool> entered{false};
+  UiQueue ui;
+  Panel panel(f.root, [&](Panel*) { return f.root; }, [&](auto work) { ui.post(std::move(work)); },
+    [&](Dir& result, const Filepath& path, const std::atomic<bool>* cancelled) {
+      if (path == slow) {
+        entered = true;
+        while (!cancelled->load()) std::this_thread::sleep_for(std::chrono::milliseconds(2));
+      }
+      return result.move_to(path, cancelled);
+    });
+  ui.wait(panel);
+  auto start = std::chrono::steady_clock::now(); panel.move_to(slow);
+  require(std::chrono::steady_clock::now() - start < std::chrono::milliseconds(100), "navigation blocked UI");
+  for (int i = 0; i < 500 && !entered; ++i) std::this_thread::sleep_for(std::chrono::milliseconds(2));
+  require(entered && panel.loading(), "slow scan did not start");
+  {
+    auto interactive = ScreenInteractive::FixedSize(100, 30);
+    Loop active_screen(&interactive, panel.navigation);
+    auto screen = Screen::Create(Dimension::Fixed(100), Dimension::Fixed(30));
+    Render(screen, panel.render());
+    require(screen.ToString().find("Esc: cancel") != std::string::npos, "loading view could not redraw");
+  }
+  panel.navigation->OnEvent(Event::Escape);
+  require(!panel.loading(), "Escape did not cancel loading");
+  panel.move_to(fast); ui.wait(panel);
+  require(panel.dir.path == fast && panel.dir.items.size() == 1, "superseded scan replaced current directory");
+  auto tool = f.file("slow-tool", "#!/bin/sh\nsleep 20\n");
+  fs::permissions(tool, fs::owner_all);
+  auto archive = f.file("slow.7z");
+  auto previous_tool = archive_service().tool_path(); archive_service().set_tool_path(tool.string());
+  start = std::chrono::steady_clock::now();
+  require(panel.enter_archive(archive), "archive load was not scheduled");
+  require(std::chrono::steady_clock::now() - start < std::chrono::milliseconds(100), "archive entry blocked UI");
+  std::this_thread::sleep_for(std::chrono::milliseconds(100));
+  panel.move_to(fast); ui.wait(panel);
+  archive_service().set_tool_path(previous_tool);
+  require(panel.dir.path == fast && !panel.loading(), "cancelled archive changed panel");
+}
+
 int main(int argc, char** argv) {
-  const std::vector<std::pair<std::string, void (*)()>> tests = {{"R01", R01}, {"R02", R02}, {"R03", R03}, {"R04", R04}, {"R05", R05}, {"R06", R06}, {"R07", R07}, {"R08", R08}, {"R09", R09}, {"R10", R10}, {"R11", R11}, {"R12", R12}, {"R13", R13}, {"R14", R14}, {"R15", R15}, {"R16", R16}, {"R17", R17}, {"R18", R18}, {"R19", R19}, {"R20", R20}, {"R21", R21}, {"R22", R22}, {"R23", R23}, {"R24", R24}};
+  const std::vector<std::pair<std::string, void (*)()>> tests = {{"R01", R01}, {"R02", R02}, {"R03", R03}, {"R04", R04}, {"R05", R05}, {"R06", R06}, {"R07", R07}, {"R08", R08}, {"R09", R09}, {"R10", R10}, {"R11", R11}, {"R12", R12}, {"R13", R13}, {"R14", R14}, {"R15", R15}, {"R16", R16}, {"R17", R17}, {"R18", R18}, {"R19", R19}, {"R20", R20}, {"R21", R21}, {"R22", R22}, {"R23", R23}, {"R24", R24}, {"R25", R25}};
   try {
     bool matched = false;
     for (const auto& [id, run] : tests) {

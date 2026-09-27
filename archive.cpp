@@ -192,7 +192,7 @@ std::string ArchiveService::tool_path() const {
   return normalize_tool_reference(_tool_path);
 }
 
-Err ArchiveService::extract_to_cache(const Filepath& archive_path, Filepath& extracted_root) {
+Err ArchiveService::extract_to_cache(const Filepath& archive_path, Filepath& extracted_root, std::atomic<bool>* cancelled) {
   if (!is_archive_file_path(archive_path)) return Err("unsupported archive type: " + archive_path.native());
 
   const Filepath archive_abs = absolute_path_safe(archive_path);
@@ -247,7 +247,7 @@ Err ArchiveService::extract_to_cache(const Filepath& archive_path, Filepath& ext
     "-o" + extract_root.native(),
     canonical_archive.native(),
   };
-  const int rc = run_command(canonical_archive.parent_path(), args);
+  const int rc = run_command(canonical_archive.parent_path(), args, cancelled);
   if (rc != 0) {
     boost::filesystem::remove_all(extract_root, ec);
     return Err("archive extract failed (exit " + std::to_string(rc) + "): " + canonical_archive.native());

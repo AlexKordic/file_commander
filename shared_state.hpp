@@ -43,7 +43,7 @@ struct PanelSharedState {
   bool    show_owner_group_column = false;
 
   // std::function<ftxui::Element(RowInfo&)> transform;
-  std::function<void(Filepath)>           move_to;
+  std::function<void(Filepath, Filepath)> move_to;
   std::function<bool(const Filepath&)>    enter_archive;
   std::function<bool(int64_t&)>           leave_virtual_dir;
   std::function<void(int)>                set_min_y;

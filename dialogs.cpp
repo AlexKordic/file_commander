@@ -216,16 +216,8 @@ bool filelist_handle_commands(PanelSharedState* app, DataSource* data_source, DS
       }
       const Filepath old_path   = app->dir->path;
       const Filepath parent_dir = app->dir->path.parent_path();
-      app->move_to(parent_dir);
-      data_source->focused_id = app->dir->offset_vissible(0, 0);
       app->filter_txt.clear();
-      for (int i = 0; i < app->dir->items.size(); i++) {
-        const DirItem& item = app->dir->items.at(i);
-        if (item.path_ref() == old_path) {
-          data_source->focused_id = i;
-          break;
-        }
-      }
+      app->move_to(parent_dir, old_path);
       return true;
     }
     if (action->id == "enter_dir") {
@@ -239,7 +231,7 @@ bool filelist_handle_commands(PanelSharedState* app, DataSource* data_source, DS
         app->filter_txt.clear();
         return true;
       }
-      app->move_to(where.path_ref());
+      app->move_to(where.path_ref(), {});
       data_source->focused_id = app->dir->offset_vissible(0, 0);
       app->filter_txt.clear();
       return true;
@@ -1619,18 +1611,8 @@ void FindDialog::open_selected() {
   }
 
   Filepath parent = selected.parent_path();
-  app->move_to(parent);
   app->filter_txt.clear();
-  app->dir->apply_filter(app->filter_txt);
-
-  if (app->set_focused_index) {
-    for (int i = 0; i < static_cast<int>(app->dir->items.size()); ++i) {
-      if (app->dir->items.at(i).path_ref() == selected) {
-        app->set_focused_index(i);
-        break;
-      }
-    }
-  }
+  app->move_to(parent, selected);
   app->action.close_dialog();
 }
 

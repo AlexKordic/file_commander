@@ -1,10 +1,10 @@
-
 #ifndef FC_COMMANDER_H_
 #define FC_COMMANDER_H_
 
 #include "bfs.hpp"
 #include "err.hpp"
 
+#include <atomic>
 #include <cstdint>
 #include <ctime>
 #include <memory>
@@ -132,7 +132,7 @@ class Dir {
     int64_t largest_item_bytes = 0;
   };
 
-  Err   move_to(const Filepath path);
+  Err   move_to(const Filepath path, const std::atomic<bool>* cancelled = nullptr);
   void  partial_refresh(UpdatedFiles changes);
   Err   refresh();  // TODO: add system notifications for current dir
   Err   leave_dir();
