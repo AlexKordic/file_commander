@@ -778,8 +778,31 @@ static void R31() {
   require(fs::exists(f.root / "queued0") && fs::exists(f.root / "queued1"), "Lua wait returned before both copies");
 }
 
+static void R35() {
+  Fixture f;
+  auto background_workers = make_file_jobs(); // SIGPIPE must also be safe with other live threads.
+#ifdef __APPLE__
+  const auto helper_name = "pbcopy";
+#else
+  const auto helper_name = "wl-copy";
+#endif
+  const auto capture = f.root / "captured";
+  auto helper = f.file(helper_name, "#!/bin/sh\n/bin/cat > '" + capture.string() + "'\n");
+  fs::permissions(helper, fs::owner_all);
+  EnvOverride path("PATH", f.root.string());
+  const std::string payload = "first line\nUnicode: café\n";
+  require(push_to_clipboard(payload).ok() && read_file(capture) == payload, "clipboard roundtrip failed");
+  require(push_to_clipboard("").ok() && read_file(capture).empty(), "empty clipboard write failed");
+  f.file(helper_name, "#!/bin/sh\n/bin/cat >/dev/null\nexit 23\n");
+  require(!push_to_clipboard(payload).ok(), "nonzero helper exit was ignored");
+  f.file(helper_name, "#!/bin/sh\nexit 7\n");
+  require(!push_to_clipboard(std::string(1024 * 1024, 'x')).ok(), "closed helper pipe was accepted");
+  fs::remove(helper);
+  require(!push_to_clipboard(payload).ok(), "missing helper was reported as success");
+}
+
 int main(int argc, char** argv) {
-  const std::vector<std::pair<std::string, void (*)()>> tests = {{"R01", R01}, {"R02", R02}, {"R03", R03}, {"R04", R04}, {"R05", R05}, {"R06", R06}, {"R07", R07}, {"R08", R08}, {"R09", R09}, {"R10", R10}, {"R11", R11}, {"R12", R12}, {"R13", R13}, {"R14", R14}, {"R15", R15}, {"R16", R16}, {"R17", R17}, {"R18", R18}, {"R19", R19}, {"R20", R20}, {"R21", R21}, {"R22", R22}, {"R23", R23}, {"R24", R24}, {"R25", R25}, {"R26", R26}, {"R27", R27}, {"R28", R28}, {"R29", R29}, {"R31", R31}};
+  const std::vector<std::pair<std::string, void (*)()>> tests = {{"R01", R01}, {"R02", R02}, {"R03", R03}, {"R04", R04}, {"R05", R05}, {"R06", R06}, {"R07", R07}, {"R08", R08}, {"R09", R09}, {"R10", R10}, {"R11", R11}, {"R12", R12}, {"R13", R13}, {"R14", R14}, {"R15", R15}, {"R16", R16}, {"R17", R17}, {"R18", R18}, {"R19", R19}, {"R20", R20}, {"R21", R21}, {"R22", R22}, {"R23", R23}, {"R24", R24}, {"R25", R25}, {"R26", R26}, {"R27", R27}, {"R28", R28}, {"R29", R29}, {"R31", R31}, {"R35", R35}};
   try {
     bool matched = false;
     for (const auto& [id, run] : tests) {

@@ -18,6 +18,12 @@
 #include <pwd.h>
 #include <sys/stat.h>
 #include <sys/types.h>
+#include <sys/wait.h>
+#include <pthread.h>
+#include <fcntl.h>
+#include <signal.h>
+#include <cerrno>
+#include <cstring>
 #endif
 
 using namespace boost::filesystem;
@@ -414,11 +420,65 @@ bool CommandArgs::selected_share_same_dir() {
 }
 
 Err push_to_clipboard(std::string const& txt) {
-  FILE* pipe = popen("pbcopy", "w");
-  if (pipe == nullptr) return Err("pbcopy not found");
-  int count = fwrite(txt.c_str(), txt.size(), 1, pipe);
-  fflush(pipe);
-  if (-1 == pclose(pipe)) return Err("pbcopy pclose() err");
-  if (count != 1) return Err("pbcopy write count mismatch");
+#if defined(__unix__) || defined(__APPLE__)
+#ifdef __APPLE__
+  const char* command = "pbcopy";
+  const char* missing = "Clipboard helper pbcopy is unavailable";
+#else
+  const char* command = "if command -v wl-copy >/dev/null 2>&1; then exec wl-copy; "
+                        "elif command -v xclip >/dev/null 2>&1; then exec xclip -selection clipboard; "
+                        "elif command -v xsel >/dev/null 2>&1; then exec xsel --clipboard --input; "
+                        "else exit 127; fi";
+  const char* missing = "Clipboard unavailable: install wl-copy, xclip or xsel";
+#endif
+  // Block SIGPIPE only on this calling thread. A helper closing stdin must
+  // produce an error, not terminate the application or alter other threads.
+  sigset_t pipe_signal, previous_mask, pending;
+  sigemptyset(&pipe_signal);
+  sigaddset(&pipe_signal, SIGPIPE);
+  const int mask_error = pthread_sigmask(SIG_BLOCK, &pipe_signal, &previous_mask);
+  if (mask_error) return Err("Cannot protect clipboard pipe: " + std::string(std::strerror(mask_error)));
+  sigpending(&pending);
+  const bool already_pending = sigismember(&pending, SIGPIPE) == 1;
+  bool generated_pipe_signal = false;
+  struct RestoreSignals {
+    sigset_t& previous;
+    sigset_t& blocked;
+    bool& generated;
+    bool already_pending;
+    ~RestoreSignals() {
+      if (generated && !already_pending) {
+        sigset_t current;
+        sigpending(&current);
+        if (sigismember(&current, SIGPIPE) == 1) { int signal; sigwait(&blocked, &signal); }
+      }
+      pthread_sigmask(SIG_SETMASK, &previous, nullptr);
+    }
+  } restore{previous_mask, pipe_signal, generated_pipe_signal, already_pending};
+  FILE* pipe = popen(command, "w");
+  if (!pipe) return Err("Cannot start clipboard helper: " + std::string(std::strerror(errno)));
+#ifdef __APPLE__
+  // Darwin may deliver pipe signals process-wide, including to another worker.
+  // Suppress generation on this descriptor instead of changing global handlers.
+  if (fcntl(fileno(pipe), F_SETNOSIGPIPE, 1) == -1) {
+    const auto message = std::string(std::strerror(errno));
+    pclose(pipe);
+    return Err("Cannot protect clipboard descriptor: " + message);
+  }
+#endif
+  const auto written = fwrite(txt.data(), 1, txt.size(), pipe);
+  const int write_error = written == txt.size() ? 0 : errno;
+  const bool flushed = fflush(pipe) == 0;
+  const int flush_error = flushed ? 0 : errno;
+  const int status = pclose(pipe);
+  generated_pipe_signal = write_error == EPIPE || flush_error == EPIPE;
+  if (status == -1) return Err("Cannot wait for clipboard helper: " + std::string(std::strerror(errno)));
+  if (WIFEXITED(status) && WEXITSTATUS(status) == 127) return Err(missing);
+  if (!WIFEXITED(status) || WEXITSTATUS(status) != 0)
+    return Err("Clipboard helper failed (status " + std::to_string(WIFEXITED(status) ? WEXITSTATUS(status) : 128 + WTERMSIG(status)) + ")");
+  if (written != txt.size() || !flushed) return Err("Clipboard helper did not accept all input");
   return Err();
+#else
+  return Err("Clipboard is unsupported on this platform");
+#endif
 }
