@@ -190,15 +190,15 @@ The job UI includes the active job and reads its counters, `_items`, and `_error
 
 **Fix direction:** expose a consistent job snapshot under the job mutex; keep references into mutable vectors out of render callbacks. Synchronize lifecycle publication as well. **Regression:** inspect and scroll active delete/error-heavy jobs while workers mutate them, under ThreadSanitizer.
 
-**Implementation status:** Planned.
+**Implementation status:** Applied.
 
 **Planned solution:** expose a consistent job snapshot under the job mutex; keep references into mutable vectors out of render callbacks. Synchronize lifecycle publication as well.
 
-**Applied solution:** Pending.
+**Applied solution:** JobSpec publishes immutable JobSnapshot objects under its mutex. Job history/detail rendering refreshes these snapshots per frame rather than reading live vectors. Start/final timestamp writes share the mutex, stopped state has acquire/release publication, Lua completion polling reads snapshots, and progress-monitor stop uses a synchronized predicate.
 
-**Plan deviations:** Pending.
+**Plan deviations:** Snapshots include complete item/error vectors for consistency; optimizing large-history snapshot cost is deferred. Progress rendering already held the job lock and retains that approach.
 
-**Validation:** Pending.
+**Validation:** Native build and R09 passed while deleting 1,000 files and repeatedly rendering job details; a retained snapshot remained unchanged. git diff --check passed. ThreadSanitizer remains to be run.
 
 ### R10 — Exiting with a paused job hangs forever
 

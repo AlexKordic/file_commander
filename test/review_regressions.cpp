@@ -136,6 +136,7 @@ static void R04() {
 }
 
 static void R05() {
+  const auto before = file_operations().get_job_history().size();
   Fixture f;
   auto source = f.dir("src");
   auto destination = f.dir("dst");
@@ -151,7 +152,7 @@ static void R05() {
     std::this_thread::yield();
   }
   if (dialog._discovery_process) dialog.navigation->OnEvent(Event::Custom);
-  for (int i = 0; file_operations().get_job_history().empty() && i < 2000; ++i)
+  for (int i = 0; file_operations().get_job_history().size() == before && i < 2000; ++i)
     std::this_thread::sleep_for(std::chrono::milliseconds(2));
   require(fs::is_directory(destination / "src"), "directory was not copied");
   require(std::distance(fs::directory_iterator(destination / "src"), fs::directory_iterator()) == 600,
@@ -204,8 +205,27 @@ static void R08() {
   for (auto& callback : posted) callback();
 }
 
+static void R09() {
+  Fixture f;
+  auto tree = f.dir("tree");
+  for (int i = 0; i < 1000; ++i) f.file("tree/entry" + std::to_string(i));
+  auto job = std::make_shared<JobSpec>(JobSpec::Type::DELETE, std::vector<DirItem>{DirItem(tree)});
+  auto id = file_operations().add_job(job);
+  auto frozen = job->snapshot();
+  const auto initial_size = frozen->_items.size();
+  JobListDialog dialog([] {}); dialog.OnShow();
+  for (int i = 0; !job->is_stopped() && i < 3000; ++i) {
+    dialog.rebuild_list();
+    if (!dialog.jobs.empty()) { dialog.open_detail(); dialog.renderer->Render(); }
+    require(frozen->_items.size() == initial_size, "published job snapshot mutated");
+    std::this_thread::yield();
+  }
+  wait_job(id);
+  require(job->snapshot()->is_stopped(), "completion not published in snapshot");
+}
+
 int main(int argc, char** argv) {
-  const std::vector<std::pair<std::string, void (*)()>> tests = {{"R01", R01}, {"R02", R02}, {"R03", R03}, {"R04", R04}, {"R05", R05}, {"R06", R06}, {"R07", R07}, {"R08", R08}};
+  const std::vector<std::pair<std::string, void (*)()>> tests = {{"R01", R01}, {"R02", R02}, {"R03", R03}, {"R04", R04}, {"R05", R05}, {"R06", R06}, {"R07", R07}, {"R08", R08}, {"R09", R09}};
   try {
     bool matched = false;
     for (const auto& [id, run] : tests) {

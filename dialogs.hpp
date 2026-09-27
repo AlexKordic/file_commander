@@ -339,7 +339,7 @@ struct JobListDialog : Dialog {
   void cancel();
 
   // Job list view (DataSource-backed)
-  std::vector<std::shared_ptr<Perun::JobSpec>> jobs;
+  std::vector<std::shared_ptr<const Perun::JobSnapshot>> jobs;
   DataSource _job_data_source;
   Component  _job_list;
   Component  button_close;
@@ -348,7 +348,7 @@ struct JobListDialog : Dialog {
   // Detail view (DataSource-backed)
   bool                            in_detail = false;
   int                             view_mode = 0;  // 0=list, 1=detail
-  std::shared_ptr<Perun::JobSpec> detail_job;
+  std::shared_ptr<const Perun::JobSnapshot> detail_job;
   DataSource                      _detail_items_data_source;
   Component                       _detail_items;
   DataSource                      _detail_errors_data_source;

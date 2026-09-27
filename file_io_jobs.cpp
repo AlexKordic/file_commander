@@ -46,6 +46,24 @@ bool ProgressInfo::update(int64_t new_size, int64_t source_size) {
   return true;
 }
 
+std::shared_ptr<const JobSnapshot> JobSpec::snapshot() {
+  std::lock_guard lock(_m);
+  auto view = std::make_shared<JobSnapshot>();
+  static_cast<JobInstructions&>(*view) = static_cast<const JobInstructions&>(*this);
+  view->_job_id = _job_id;
+  view->_state = _state.load();
+  view->_current_item_index = _current_item_index;
+  view->_current_item = _current_item;
+  view->_total = _total;
+  view->_items_pending = _items_pending;
+  view->_queued_time = _queued_time;
+  view->_started_time = _started_time;
+  view->_finished_time = _finished_time;
+  view->_bytes_processed = _bytes_processed;
+  view->_bytes_total = _bytes_total;
+  return view;
+}
+
 void JobSpec::_calculate_transfer_stats() {
   const bool current_index_valid = _current_item_index >= 0 && _current_item_index < _items.size();
   if (!current_index_valid) return;
@@ -80,7 +98,7 @@ class ProgressMonitor {
     if (_thread.joinable()) _thread.join();
   }
   void stop() {
-    _running = false;
+    { std::lock_guard lock(_m); _running = false; }
     _condition.notify_all();
   }
   void add_job(std::shared_ptr<JobSpec> job) {
@@ -92,7 +110,7 @@ class ProgressMonitor {
   }
 
  protected:
-  volatile bool _running = true;
+  std::atomic<bool> _running{true};
 
   std::thread                           _thread;
   std::condition_variable               _condition;
@@ -347,9 +365,12 @@ class ThreadedFileJobs : public FileJobs {
       std::shared_ptr<JobSpec> job;
       FifoError                err = _queue.pop(job);
       if (err == FifoError::Destroyed) { break; }
-      job->_started_time = now();
-      job->_state        = JobState::RUNNING;
-      job->_total        = ProgressInfo();
+      {
+        std::lock_guard lock(job->_m);
+        job->_started_time = now();
+        job->_state = JobState::RUNNING;
+        job->_total = ProgressInfo();
+      }
       {
         std::lock_guard lock(_m);
         _active_job = std::move(job);
@@ -361,12 +382,16 @@ class ThreadedFileJobs : public FileJobs {
       case JobSpec::Type::DELETE: run_delete(_active_job.get()); break;
       case JobSpec::Type::ARCHIVE_CREATE: run_archive_create(_active_job.get()); break;
       }
-      _active_job->_finished_time = now();
-      // Determine final state (if not already set by pause/cancel in future steps)
-      if (_active_job->_state == JobState::RUNNING) {
-        _active_job->_state = _active_job->_errors.empty()
-          ? JobState::COMPLETED
-          : JobState::COMPLETED_WITH_ERRORS;
+      {
+        std::lock_guard lock(_active_job->_m);
+        _active_job->_finished_time = now();
+        // Determine final state (if not already set by pause/cancel in future steps)
+        if (_active_job->_state == JobState::RUNNING) {
+          _active_job->_state = _active_job->_errors.empty()
+            ? JobState::COMPLETED
+            : JobState::COMPLETED_WITH_ERRORS;
+        }
+        _active_job->_stopped.store(true, std::memory_order_release);
       }
       // Store in job history directly (under _m, which we already use for _active_job)
       {
@@ -406,11 +431,11 @@ class ThreadedFileJobs : public FileJobs {
       std::lock_guard lock(job->_m);
       initial_items = std::move(job->_items);
       job->_items.clear();
+      job->_items_pending = 0;
     }
     // discovery thread.
     std::thread         discovery_thread([job, &initial_items, &files, this]() {
       DelayedUpdateDiscovery update;
-      job->_items_pending = 0;
       _discover_files(job, initial_items, files, update);
       update.flush(job);
       files.close();

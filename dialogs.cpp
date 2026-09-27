@@ -1778,15 +1778,20 @@ void JobListDialog::rebuild_list() {
 
   auto jobinfo = file_operations().get_running_job();
   if (jobinfo.job && !jobinfo.job->is_stopped()) {
-    jobs.push_back(jobinfo.job);
+    jobs.push_back(jobinfo.job->snapshot());
   }
 
   auto history = file_operations().get_job_history();
   // Show most recent first
   for (auto it = history.rbegin(); it != history.rend(); ++it) {
-    jobs.push_back(*it);
+    const auto id = (*it)->_job_id;
+    if (std::none_of(jobs.begin(), jobs.end(), [id](const auto& j) { return j->_job_id == id; }))
+      jobs.push_back((*it)->snapshot());
   }
 
+  if (detail_job) {
+    for (auto& view : jobs) if (view->_job_id == detail_job->_job_id) { detail_job = view; break; }
+  }
   // Clamp focused_id to valid range
   if (!jobs.empty()) {
     _job_data_source.focused_id = std::clamp(_job_data_source.focused_id, int64_t{0}, (int64_t)jobs.size() - 1);
@@ -2019,6 +2024,7 @@ JobListDialog::JobListDialog(std::function<void()> close_dialog) : Dialog(nullpt
   });
 
   renderer = Renderer(navigation, [this]() -> Element {
+    rebuild_list();
     if (in_detail && detail_job) {
       return render_detail();
     }

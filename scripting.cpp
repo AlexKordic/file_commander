@@ -291,15 +291,16 @@ void LuaScripting::poll_async_events() {
   int  current_job_items_done = -1;
   std::string current_job_state = job_state_name(jobinfo.job);
   if (jobinfo.job) {
+    auto view = jobinfo.job->snapshot();
     // Detect job start
-    if (jobinfo.job->_started_time > 0 && jobinfo.job->_started_time != _last_job_started_time) {
-      _last_job_started_time = jobinfo.job->_started_time;
+    if (view->_started_time > 0 && view->_started_time != _last_job_started_time) {
+      _last_job_started_time = view->_started_time;
       log("poll: job_started");
       fire_event("job_started", "");
     }
     // Detect job completion
-    if (jobinfo.job->_finished_time > 0 && jobinfo.job->_finished_time != _last_job_finished_time) {
-      _last_job_finished_time = jobinfo.job->_finished_time;
+    if (view->_finished_time > 0 && view->_finished_time != _last_job_finished_time) {
+      _last_job_finished_time = view->_finished_time;
       log("poll: job_completed");
       fire_event("job_completed", "");
     }
