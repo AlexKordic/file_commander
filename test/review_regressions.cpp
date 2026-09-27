@@ -415,8 +415,23 @@ static void R17() {
   require(fs::is_symlink(destination), "Update did not replace older regular destination with link");
 }
 
+static void R18() {
+  Fixture f; auto source = f.file("src/a"); auto dest = f.dir("dest");
+  Dir dir; dir.move_to(source.parent_path());
+  CopyDialog dialog(copy_state(dir, source, dest));
+  dialog.OnShow(); dialog._discovery_process->_thread.join();
+  dialog.destination_path.clear(); dialog.destination_cursor_pos = 0;
+  dialog.input_destination_path->TakeFocus();
+  for (char digit : std::string("123")) dialog.navigation->OnEvent(Event::Character(digit));
+  require(dialog.destination_path == "123", "destination digits were consumed");
+  require(dialog.conflict_mode_selected == 0, "typing changed conflict policy");
+  dialog.op_conflict_mode->TakeFocus(); dialog.navigation->OnEvent(Event::Character('3'));
+  require(dialog.conflict_mode_selected == 2, "focused option shortcut stopped working");
+  dialog.cancel();
+}
+
 int main(int argc, char** argv) {
-  const std::vector<std::pair<std::string, void (*)()>> tests = {{"R01", R01}, {"R02", R02}, {"R03", R03}, {"R04", R04}, {"R05", R05}, {"R06", R06}, {"R07", R07}, {"R08", R08}, {"R09", R09}, {"R10", R10}, {"R11", R11}, {"R12", R12}, {"R13", R13}, {"R14", R14}, {"R15", R15}, {"R16", R16}, {"R17", R17}};
+  const std::vector<std::pair<std::string, void (*)()>> tests = {{"R01", R01}, {"R02", R02}, {"R03", R03}, {"R04", R04}, {"R05", R05}, {"R06", R06}, {"R07", R07}, {"R08", R08}, {"R09", R09}, {"R10", R10}, {"R11", R11}, {"R12", R12}, {"R13", R13}, {"R14", R14}, {"R15", R15}, {"R16", R16}, {"R17", R17}, {"R18", R18}};
   try {
     bool matched = false;
     for (const auto& [id, run] : tests) {

@@ -356,15 +356,15 @@ The outer CatchEvent unconditionally consumes characters `1`, `2`, and `3` to se
 
 **Fix direction:** scope these shortcuts to the options/list context or require a modifier. **Regression:** type a destination and filter containing all three digits while checking that the conflict mode stays unchanged.
 
-**Implementation status:** Planned.
+**Implementation status:** Applied.
 
 **Planned solution:** scope these shortcuts to the options/list context or require a modifier.
 
-**Applied solution:** Pending.
+**Applied solution:** Conflict-mode digit shortcuts are handled only when the conflict control has focus, allowing destination and file-filter inputs to receive ordinary 1/2/3 characters.
 
-**Plan deviations:** Pending.
+**Plan deviations:** Used focus scoping rather than introducing new modifier bindings.
 
-**Validation:** Pending.
+**Validation:** Native build and R18 passed: typing 123 populated the destination without changing policy, and the focused conflict control still accepted its digit shortcut.
 
 ### R19 — Full directory refresh loses an active filter
 

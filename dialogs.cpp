@@ -820,17 +820,17 @@ CopyDialog::CopyDialog(PanelSharedState::P d) : Dialog(std::move(d)) {
                               this->cancel();
                               return true;
                             }
-                            if (e == Event::Character('1')) {
+                            if (op_conflict_mode->Focused() && e == Event::Character('1')) {
                               conflict_mode_selected = 0;
                               _conflict              = CopyConflict::Replace;
                               return true;
                             }
-                            if (e == Event::Character('2')) {
+                            if (op_conflict_mode->Focused() && e == Event::Character('2')) {
                               conflict_mode_selected = 1;
                               _conflict              = CopyConflict::Update;
                               return true;
                             }
-                            if (e == Event::Character('3')) {
+                            if (op_conflict_mode->Focused() && e == Event::Character('3')) {
                               conflict_mode_selected = 2;
                               _conflict              = CopyConflict::Skip;
                               return true;
