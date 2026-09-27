@@ -38,6 +38,8 @@ The core-only configuration was also verified with every UI/Lua/editor/LZMA sour
 
 ## Tests and logs
 
+The [test suite review and expansion proposal](test_suite_review_2026-09-27.md) records demonstrated harness/assertion gaps, a mechanism coverage matrix and prioritized implementation batches. It distinguishes current tests from proposed additions.
+
 CTest discovers `fc.core`, `fc.regressions`, `fc.lua`, `fc.lua_negative`, `fc.process_exit`, `fc.package` and (when 7zr is enabled) `fc.dependency_rebuild`. Labels distinguish core, unit, integration, PTY, POSIX, package and slow build checks. Cross builds register compiled tests but do not execute target binaries on the host.
 
 The dependency rebuild test is disabled by default because it temporarily changes dependency source timestamps and can rebuild Fresh. Enable it with `-DFC_TEST_DEPENDENCY_REBUILDS=ON`, or run `python3 test/test_dependency_rebuild.py build`. It restores timestamps in `finally` blocks and does not change source contents. Package and rebuild checks run serially under CTest.
