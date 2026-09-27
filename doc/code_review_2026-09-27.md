@@ -2,9 +2,46 @@
 
 Reviewed commit: `72034c9d095ec242f6adf647bd076874af015402`.
 
-The review found **37 actionable issues: 11 P1, 24 P2, and 2 P3**. The most urgent are three independently reproduced data-loss paths: deleting a directory symlink deletes its target's contents; cancellation cleanup can delete an untouched destination; and failed archive creation removes the previous archive. Copy confirmation can also use a destination different from the one displayed to the user.
+The original review found **37 actionable issues: 11 P1, 24 P2, and 2 P3**. The most urgent were three independently reproduced data-loss paths: deleting a directory symlink deleted its target's contents; cancellation cleanup could delete an untouched destination; and failed archive creation removed the previous archive. Copy confirmation could also use a destination different from the one displayed to the user.
 
 The review above describes the original revision. Implementation is now tracked under each finding: the planned solution is recorded before code changes, then the applied solution, validation, and any deviations are recorded in that finding’s fix commit. Historical source line references refer to the reviewed revision.
+
+## Implementation completion and final validation
+
+**All 37 findings are applied in 37 separate fix commits**, through code revision `7e89044`. The initial plans were committed in `065658f` before implementation. Each finding below retains its planned solution, applied solution, explicit plan deviations, and validation. No findings remain in Planned status.
+
+Final validation used the combined implementation, rather than relying only on each isolated fix's checks:
+
+| Check | Final result |
+| --- | --- |
+| macOS arm64 application and C++ regression build | Passed |
+| [C++ mechanism regressions](../test/review_regressions.cpp) | All 32 groups passed; these cover R01–R29, R31, R35 and R37 |
+| Same 32 C++ groups with UndefinedBehaviorSanitizer | Passed with `halt_on_error=1`; no runtime diagnostics |
+| [Lua integration suite](../test/run_lua_suite.py) | All 14 scripts passed, including 34 copy scenarios |
+| Five Lua negative controls | Each deliberately disabled behavior failed for its expected assertion |
+| [Script process-exit checks](../test/test_script_exit.py) | All 7 passed: syntax/runtime failures, normal return, yield/CPU watchdogs, and 7-second explicit sleep/event waits |
+| Native distribution and [unpacked script smoke test](../test/test_packaged_script.py) | Package built; 10 consecutive runs from an unrelated working directory passed without an external framework file |
+| [Dependency source rebuild checks](../test/test_dependency_rebuild.py) | LuaJIT, 7zr and Fresh implementation changes triggered rebuilds; source contents and timestamps were preserved, and LuaJIT did not build in the shared source checkout |
+| Linux x86-64 application cross-build | Zig build passed; `file` identifies a statically linked x86-64 ELF. Fresh and 7zr cross-builds were disabled; the ELF was not executed |
+| AddressSanitizer execution | Blocked before `main` in sanitizer/allocator initialization; no application test result available |
+
+The combined checks exposed two additional cases within the repaired mechanisms: macOS clipboard SIGPIPE delivery with background workers (R35), and initial directory publication before FTXUI loop installation (R25). Both were corrected in their respective fix commits and covered by strengthened regressions before the final runs above.
+
+Committed entry points for repeating the native checks, after configuring the local dependencies, are:
+
+```sh
+cmake --build build --target fc fc_review_tests -j8
+PATH="$PWD/build/third_party/lzma/_o:$PATH" ./build/fc_review_tests
+python3 test/run_lua_suite.py --negative-controls
+python3 test/test_script_exit.py
+cmake --build build --target package_static_dist -j8
+python3 test/test_packaged_script.py build/dist/fc-Darwin-arm64.tar.gz
+python3 test/test_dependency_rebuild.py
+```
+
+The UBSan build used `-fsanitize=undefined -fno-omit-frame-pointer` for C++ compilation, `-fsanitize=undefined` for linking, and `UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1` at execution. Local final logs and the ASan startup sample are retained under ignored `build/review-validation/`; the committed tests are the reproducible evidence.
+
+Remaining validation limits: no Linux runtime or ThreadSanitizer run, no actual EXDEV device boundary, and no real interactive Fresh terminal session. The staged move fallback and editor CLI/session behavior were exercised directly with fixtures and fakes. Watcher overflow/root recovery was injected rather than induced by a real kernel overflow. Individual blocked filesystem calls remain non-interruptible, as documented under R25. ASan's sampled stack stayed in runtime initialization through `AsanInitInternal`, `get_dyld_hdr`, allocator recursion and `StaticSpinMutex::LockSlow`; that run was terminated before application code executed.
 
 ## Scope and method
 
@@ -30,7 +67,7 @@ All 13 existing project Markdown files were read, including the ignored build-se
 
 The Markdown inventory excludes generated dependency/build trees and the pre-existing untracked `old_fc`. Code coverage includes the active application translation units and their headers, the local Boost copy extension and relevant copy internals, Lua framework/tests, CMake/toolchain/package files, and the inactive `playground.cpp` experiment. This is not a full audit of unmodified upstream Boost, LuaJIT, Fresh, 7zr, or FTXUI.
 
-Validation used the existing macOS arm64 Debug build and local sibling dependencies. `cmake --build build -j10` succeeded. Linux branches and cross compilation were reviewed statically; they were not executed. No sanitizer build, real cross-device move, or real interactive Fresh session was run.
+Original review validation used the existing macOS arm64 Debug build and local sibling dependencies. `cmake --build build -j10` succeeded. At that stage, Linux branches and cross compilation were reviewed statically; no sanitizer build, real cross-device move, or real interactive Fresh session was run. Final implementation validation is recorded separately above.
 
 **Evidence labels:** **Reproduced** means a disposable filesystem fixture, a component-level probe linked to the application's built objects, or a PTY test demonstrated the behavior. **Static** means the source establishes the faulty path but it was not reproduced under a sanitizer or end-to-end runtime. Severity reflects impact, not whether a test happened to trigger it: P1 is urgent data integrity, memory safety, or serious lifecycle failure; P2 is a functional/reliability defect; P3 is a limited-impact implementation defect.
 
@@ -710,9 +747,9 @@ The constructor clamps `progress_` before initializing it. The field is unrelate
 
 **Validation:** Native build and R37 passed with a capacity-one queue: a producer was confirmed blocked, each selective-removal API freed its slot, and the producer completed promptly with its value available to pop.
 
-## Mechanism coverage
+## Original review mechanism coverage
 
-“No additional finding” below means the reviewed code and stated tests did not establish another defect; it is not a guarantee of correctness.
+This table records the pre-fix review. “No additional finding” means the reviewed code and stated tests did not establish another defect; it is not a guarantee of correctness. The implementation and validation entries under each finding describe the repairs.
 
 | Mechanism | Reviewed implementation / evidence | Result |
 | --- | --- | --- |
@@ -739,7 +776,9 @@ The constructor clamps `progress_` before initializing it. The field is unrelate
 | Build, dependency staging, static/cross configuration and packaging | CMake, toolchain files, package script, local Boost build integration | Native build passed; R33, R34; full cross-target distribution unverified |
 | Logging, error transport, utility types and playground | `log.*`, `err.*`, shared state, FIFO, `playground.cpp` | Error visibility affected by R11/R30; R37; playground is not an active build target |
 
-## Validation results and limitations
+## Original review validation results and limitations
+
+The failures and limitations in this section describe the reviewed revision before the fixes. They are retained as evidence of the original defects, not as the current test results.
 
 ### Existing Lua suite
 
@@ -790,7 +829,7 @@ The C++ probe used the compile flags from `build/compile_commands.json`, linked 
 | Create three stub editor sessions, repeatedly choose Next | C → B → C → B | R28 |
 | Lua script containing an immediate `error(...)` | Error logged, process still alive at 8 seconds; externally killed | R30 |
 
-Temporary harnesses and captured PTY/debug logs were kept outside the repository in `/var/folders/nv/lp72srjd5kj7qxgxb9d8klp40000gn/T/fc-review-lmhimb8e` for local follow-up. That temporary path is evidence from this run, not a permanent test dependency. Future regression tests should be committed alongside fixes.
+Temporary harnesses and captured PTY/debug logs were kept outside the repository in `/var/folders/nv/lp72srjd5kj7qxgxb9d8klp40000gn/T/fc-review-lmhimb8e` for local follow-up. That temporary path is evidence from the original review, not a permanent test dependency. Regression tests have since been committed alongside the fixes.
 
 To reproduce the most destructive cases safely, create independent temporary source/destination/target directories and use only their paths: (1) a `DELETE` `JobSpec` containing `DirItem(link)`; (2) `copy_file(missing_source, existing_destination, copy_file_options{...cancel_requested=&true_flag}, ec)`; (3) `ArchiveService::set_tool_path("/usr/bin/false")` followed by `create_archive(existing_archive, {fixture_source}, source_parent)`. Check the pre-existing target contents after the call, not only its return value. Never use valuable files for these checks.
 
@@ -798,15 +837,17 @@ To reproduce the most destructive cases safely, create independent temporary sou
 
 These are separated from the defect count because an unimplemented proposal is not automatically a regression.
 
-- `spec.md` and parts of `file_operations.md` still describe conflict options, cancellation, pause/resume, destination editing, tabs, single-panel mode, glob selection, bookmarks, and some columns/platform work as missing. The current implementation contains these mechanisms, with the defects above. Their existence should be reflected in the status documents.
+- `spec.md` and parts of `file_operations.md` still describe conflict options, cancellation, pause/resume, destination editing, tabs, single-panel mode, glob selection, bookmarks, and some columns/platform work as missing. The implementation contains these mechanisms, and the 37 findings above have now been addressed. Older status documents still need reconciliation with the implemented feature set.
 - The known follow-links doubled-filename and directory-into-subtree problems described in older material have corresponding code changes and passing existing tests. They were not copied into this review as current bugs without contrary evidence.
 - `completed_jobs.md` proposes a richer ownership/completion design than the implementation. Current pause blocks the single worker on a condition variable, so queued work cannot proceed while it is paused. History retains full job vectors indefinitely until dismissal, rather than bounded summaries. Job-ID control APIs, richer retry/resume ownership, and parts of the proposed Lua contract are not present.
-- The editor is bound to **F4** and JobList to **F9** in `theme.cpp`; editor documentation/test comments and the integration test still use F9. Update them together with R32.
+- The editor is bound to **F4** and JobList to **F9** in `theme.cpp`. R32 corrected the integration test and its comments to use F4 and assert actual editor invocations; older editor planning material may still describe F9.
 - The documented `FC_FRESH_BIN=./test/fakes/fresh_fake.sh` example conflicts with `normalize_tool_reference()`, which resolves references containing a slash relative to the executable directory. The validation run used an absolute path. Clarify whether explicit relative overrides should be relative to the caller's working directory or the executable, then make examples and tests consistent.
 - Absolute build-time tool paths take precedence while they still exist; only missing absolute paths fall back to an executable-adjacent binary. Test distribution relocation both with and without the original build tree available to establish the intended runtime precedence.
-- Cross-target builds, actual cross-device moves, watcher overflow recovery, real editor terminal interaction, restart persistence beyond the source trace, and archive behavior with unusual option-like filenames remain important validation gaps. They were not claimed as tested.
+- A Linux x86-64 static application cross-build now passes. Injected watcher overflow/root invalidation and shortcut save/reload swaps/cycles are covered by regressions. Linux runtime behavior, actual cross-device moves, real editor terminal interaction, broader settings restart behavior, and unusual option-like archive filenames remain validation gaps.
 
-## Suggested repair order
+## Original suggested repair order (completed)
+
+All four groups below are complete; each R01–R37 finding has its own fix commit and implementation record.
 
 1. Address R01–R04 and R11 first: preserve data and make operation results truthful.
 2. Establish synchronized discovery/job snapshots and explicit shutdown/ownership rules for R05–R10, then fix the pause/cancel state machine in R12–R14.
