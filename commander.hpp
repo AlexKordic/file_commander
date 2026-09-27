@@ -137,7 +137,7 @@ class Dir {
   void  sort_toggle_name_direction();
   void  sort_toggle_size_direction();
   void  sort_toggle_time_direction();
-  void  apply_filter(std::string must_contain);
+  void  apply_filter(std::string must_contain, bool force = false);
   void  clear_selection();
   void  select_all();
   void  item_toggle_select(int index);

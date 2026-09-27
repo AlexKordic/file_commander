@@ -430,8 +430,17 @@ static void R18() {
   dialog.cancel();
 }
 
+static void R19() {
+  Fixture f; f.file("keep"); f.file("other");
+  Dir dir; dir.move_to(f.root); dir.apply_filter("keep");
+  require(dir.stats().items_visible == 1, "initial filter failed");
+  f.file("keep-new"); f.file("excluded"); dir.refresh(); dir.apply_filter("keep");
+  require(dir.stats().items_visible == 2 && dir.stats().items_total == 4, "refresh lost filter");
+  for (auto& item : dir.items) require(item.visible() == (item.filename_ref().find("keep") != std::string::npos), "visibility disagrees with phrase");
+}
+
 int main(int argc, char** argv) {
-  const std::vector<std::pair<std::string, void (*)()>> tests = {{"R01", R01}, {"R02", R02}, {"R03", R03}, {"R04", R04}, {"R05", R05}, {"R06", R06}, {"R07", R07}, {"R08", R08}, {"R09", R09}, {"R10", R10}, {"R11", R11}, {"R12", R12}, {"R13", R13}, {"R14", R14}, {"R15", R15}, {"R16", R16}, {"R17", R17}, {"R18", R18}};
+  const std::vector<std::pair<std::string, void (*)()>> tests = {{"R01", R01}, {"R02", R02}, {"R03", R03}, {"R04", R04}, {"R05", R05}, {"R06", R06}, {"R07", R07}, {"R08", R08}, {"R09", R09}, {"R10", R10}, {"R11", R11}, {"R12", R12}, {"R13", R13}, {"R14", R14}, {"R15", R15}, {"R16", R16}, {"R17", R17}, {"R18", R18}, {"R19", R19}};
   try {
     bool matched = false;
     for (const auto& [id, run] : tests) {

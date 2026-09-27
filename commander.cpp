@@ -177,6 +177,7 @@ Err Dir::move_to(const Filepath p) {
   this->path     = p;
   this->path_txt = this->path.native();
   _sort();
+  apply_filter(filter.phrase, true);
   _calculate();
   return Err();
 }
@@ -301,9 +302,9 @@ CommandArgs::P Dir::take_selected() {
   return s;
 }
 
-void Dir::apply_filter(std::string must_contain) {
+void Dir::apply_filter(std::string must_contain, bool force) {
   must_contain = to_lower(must_contain);
-  if (must_contain == filter.phrase) return;
+  if (!force && must_contain == filter.phrase) return;
   _calculated.items_visible = 0;
   filter.phrase             = must_contain;
   if (must_contain.empty()) {

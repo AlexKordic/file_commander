@@ -374,15 +374,15 @@ The outer CatchEvent unconditionally consumes characters `1`, `2`, and `3` to se
 
 **Fix direction:** recompute visibility whenever directory contents are replaced, independently of whether the phrase changed. **Regression:** refresh under an active filter after create/delete/rename, preserving the correct focused visible item.
 
-**Implementation status:** Planned.
+**Implementation status:** Applied.
 
 **Planned solution:** recompute visibility whenever directory contents are replaced, independently of whether the phrase changed.
 
-**Applied solution:** Pending.
+**Applied solution:** Dir::move_to forces filter recomputation after replacing and sorting entries. apply_filter has an explicit force option, also used when discovery publishes new preview entries.
 
-**Plan deviations:** Pending.
+**Plan deviations:** Kept the unchanged-phrase fast path for ordinary input events; content replacement explicitly invalidates that cached result.
 
-**Validation:** Pending.
+**Validation:** Native build and R19 passed: adding matching and excluded files then refreshing kept exactly the two matching entries visible with the unchanged phrase.
 
 ### R20 — Reactivating an inactive tab restores a stale snapshot
 

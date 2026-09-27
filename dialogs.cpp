@@ -1001,9 +1001,7 @@ void CopyDiscoveryProcess::publish_preview() {
     if (_dir->items.size() == _items.size()) return;
     _dir->items.insert(_dir->items.end(), _items.begin() + _dir->items.size(), _items.end());
   }
-  const auto phrase = _dir->filter.phrase;
-  _dir->filter.phrase.clear();
-  _dir->apply_filter(phrase);
+  _dir->apply_filter(_dir->filter.phrase, true);
   _dir->_calculate();
 }
 
