@@ -7,9 +7,10 @@ from pathlib import Path
 import os
 import subprocess
 import time
+import sys
 
 repo = Path(__file__).resolve().parent.parent
-build = repo / 'build'
+build = Path(sys.argv[1]).resolve() if len(sys.argv) > 1 else repo / 'build'
 cache = {}
 for line in (build / 'CMakeCache.txt').read_text().splitlines():
     if ':' in line and '=' in line and not line.startswith(('#', '//')):

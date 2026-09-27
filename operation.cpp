@@ -15,7 +15,7 @@ OperationPlan selection_plan(OperationType type, const std::vector<Filepath>& pa
     Operation op;
     op.source      = path;
     op.kind        = type == OperationType::DELETE ? Operation::Kind::DeleteEntry : type == OperationType::ARCHIVE_CREATE ? Operation::Kind::ArchiveInput : Operation::Kind::MoveEntry;
-    op.destination = type == OperationType::ARCHIVE_CREATE ? destination : destination / path.filename();
+    op.destination = type == OperationType::DELETE ? Filepath() : type == OperationType::ARCHIVE_CREATE ? destination : destination / path.filename();
     plan.steps.push_back(std::move(op));
   }
   return plan;
@@ -32,6 +32,7 @@ OperationPlan legacy_plan(OperationType type, const std::vector<DirItem>& items,
     op.modified    = item.write_time();
     op.permissions = item.perms();
     op.kind        = type == OperationType::DELETE ? Operation::Kind::DeleteEntry : type == OperationType::MOVE ? Operation::Kind::MoveEntry : type == OperationType::ARCHIVE_CREATE ? Operation::Kind::ArchiveInput : Operation::Kind::CopyFile;
+    if (type == OperationType::DELETE) op.destination.clear();
     if (type == OperationType::COPY) {
       if (item.type() == boost::filesystem::directory_file) {
         op.kind        = Operation::Kind::CreateDirectory;

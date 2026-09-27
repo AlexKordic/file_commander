@@ -317,7 +317,7 @@ class ThreadedFileJobs : public FileJobs {
   void set_update_sink(std::function<void()> sink) override {
     std::lock_guard lock(_updates->mutex); _updates->callback = sink ? std::move(sink) : [] {};
   }
-  void set_event_sink(EventSink sink) override {std::lock_guard lock(_updates->mutex);_updates->event=std::move(sink);}
+  void set_event_sink(EventSink sink) override {std::lock_guard lock(_updates->mutex);_updates->event=sink?std::move(sink):[](auto,auto,auto) {};}
   JobRetention _limits;
   FileJobServices _services;
   ArchiveService& _archives;

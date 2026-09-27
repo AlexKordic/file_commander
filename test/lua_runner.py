@@ -14,7 +14,8 @@ import time
 def run_script(binary, script, cwd, config, timeout=45, extra_env=None):
     master, slave = pty.openpty()
     fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", 40, 140, 0, 0))
-    env = dict(os.environ, TERM="xterm-256color", XDG_CONFIG_HOME=str(config))
+    Path(config).mkdir(parents=True, exist_ok=True)
+    env = dict(os.environ, TERM="xterm-256color", XDG_CONFIG_HOME=str(config), FC_LUA_DEBUG_LOG=str(Path(config) / "lua-debug.log"))
     env.update(extra_env or {})
     process = subprocess.Popen([str(Path(binary).resolve()), "run", str(script)],
                                stdin=slave, stdout=slave, stderr=slave, cwd=cwd,

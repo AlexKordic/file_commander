@@ -2,6 +2,7 @@
 #define _PERUN_FC_DIALOGS_
 
 #include "commander.hpp"
+#include "commands.hpp"
 #include "archive.hpp"
 #include "copy_planner.hpp"
 #include "file_io_jobs.hpp"
@@ -24,49 +25,11 @@ Element screen_render_time();
 
 Decorator filetype_color(const DirItem& item);
 
-enum class CommandScope {
-  PANEL,
-  GLOBAL,
-};
-
-enum class CommandKind {
-  SHOW_DIALOG,
-  EXECUTE_CALLBACK,
-};
-
-struct Command {
-  std::string id;
-  Event       key;
-  std::string dialog;
-  std::string description;
-  CommandScope scope = CommandScope::PANEL;
-  CommandKind  kind  = CommandKind::SHOW_DIALOG;
-  int          use_count = 0;
-  Event* binding = nullptr;
-  Command(std::string id,Event& key,std::string dialog,std::string description,CommandScope scope,CommandKind kind)
-    : id(std::move(id)),key(key),dialog(std::move(dialog)),description(std::move(description)),scope(scope),kind(kind),binding(&key) {}
-};
-
 struct ThemeColorEntry {
   std::string id;
   std::string label;
   std::string token;
 };
-
-struct Commands {
-  std::vector<Command> available;
-  Commands();
-
-  const Command* find_by_id(const std::string& id) const;
-  Command*       find_by_id(const std::string& id);
-  bool           increment_use_count(const std::string& id);
-  bool           set_use_count(const std::string& id, int use_count);
-  bool           set_key(const std::string& id, const Event& key);
-  const Command* find_panel_by_key(const Event& key) const;
-  std::vector<Command> list_all() const;
-};
-
-Commands& commands();
 
 struct Dialog {
   using P = std::shared_ptr<Dialog>;

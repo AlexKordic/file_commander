@@ -107,7 +107,7 @@ LuaScripting::~LuaScripting() { cleanup(); }
 // --- Debug logging ---
 
 void LuaScripting::log(const char* msg) {
-  if (!_log_file) _log_file = fopen("/tmp/fc_lua_debug.log", "w");
+  if (!_log_file) { const char* path=std::getenv("FC_LUA_DEBUG_LOG");if(!path || !*path)return;_log_file=fopen(path,"w"); }
   if (_log_file) { fprintf(_log_file, "%s\n", msg); fflush(_log_file); }
 }
 

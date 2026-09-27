@@ -1,37 +1,47 @@
 """Run integration scripts; success requires zero exit and a PASS marker.
 
 Usage: python3 test/run_lua_suite.py [--negative-controls] [script.lua ...]
-FC binary: build/fc. Logs: build/review-lua/. Each process has isolated settings.
+Use --binary or FC_TEST_BINARY to select fc, and --logs for output.
+Each invocation has separate logs; each process has isolated settings and fixtures.
 """
 from pathlib import Path
 import re
 import sys
+import argparse
+import os
+import uuid
 import tempfile
 from lua_runner import run_script
 
 repo = Path(__file__).resolve().parent.parent
-args = sys.argv[1:]
-negative_only = '--negative-only' in args
-negative = '--negative-controls' in args or negative_only
-args = [arg for arg in args if arg not in ('--negative-controls', '--negative-only')]
-scripts = [repo / arg for arg in args] if args else sorted((repo / 'test').glob('test_*.lua')) + [repo / 'test/review_events.lua']
-if negative_only:
+parser = argparse.ArgumentParser()
+parser.add_argument('--binary', type=Path, default=Path(os.environ.get('FC_TEST_BINARY', repo / 'build/fc')))
+parser.add_argument('--logs', type=Path, default=repo / 'build/review-lua')
+parser.add_argument('--negative-only', action='store_true')
+parser.add_argument('--negative-controls', action='store_true')
+parser.add_argument('scripts', nargs='*')
+args = parser.parse_args()
+negative = args.negative_controls or args.negative_only
+scripts = [repo / arg for arg in args.scripts] if args.scripts else sorted((repo / 'test').glob('test_*.lua')) + [repo / 'test/review_events.lua']
+if args.negative_only:
     scripts = []
-logs = repo / 'build/review-lua'
+logs = args.logs / ('run-' + uuid.uuid4().hex[:10])
 logs.mkdir(parents=True, exist_ok=True)
+print(f'Logs: {logs}', flush=True)
 
 
 def run(script, name, expect_success=True, expected_error=None):
     with tempfile.TemporaryDirectory(prefix='fc-lua-config-') as config:
         fixtures = Path(config) / 'fixtures'
         fixtures.mkdir()
-        rc, seconds, killed, output = run_script(repo / 'build/fc', script, repo, config, 120, {
+        rc, seconds, killed, output = run_script(args.binary, script, repo, config, 120, {
             'FC_FRESH_BIN': str(repo / 'test/fakes/fresh_fake.sh'),
             'FC_TEST_TMPDIR': str(fixtures),
             'FC_FRESH_FAKE_LOG': str(Path(config) / 'fresh.log'),
         })
+        debug_path = Path(config) / 'lua-debug.log'
+        debug = debug_path.read_text() if debug_path.exists() else ''
     (logs / (name + '.log')).write_bytes(output)
-    debug = Path('/tmp/fc_lua_debug.log').read_text()
     (logs / (name + '.debug.log')).write_text(debug)
     markers = re.findall(rb'\[PASS\] ([^\r\n\x1b]+)', output)
     if expect_success:

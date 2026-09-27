@@ -2,6 +2,8 @@
 
 Reviewed revision: `35f004e491907a69ea8c4aeb88e6b2e6e8282a47`, after the R01–R37 repair series. Local FTXUI revision: `ff94e7a1008d41e11ce040702654eed6aff1e52c`.
 
+Implementation update: AR01–AR09 are now implemented. This review preserves the original evidence and proposals; [implementation progress](architecture_progress_2026-09-27.md) records each planned solution, applied solution, differences and validation. See [build boundaries](build_boundaries.md) for the current structure and contracts.
+
 The project has useful mechanisms to build on: cancellable operation execution, owned staging outputs, asynchronous directory loading, watcher generations, virtualized lists, and Lua integration tests. The main architectural weakness is that ownership, operation semantics, and view state cross module boundaries without a common application contract. This produces observable failures when otherwise working mechanisms interact.
 
 This review records **nine findings**: five high-priority correctness/scaling problems and four medium-priority structural/resource problems. Four functional failures and a substantial UI latency problem were reproduced. These are additional findings against the current implementation; the previous review's test results remain historical evidence for its narrower cases. No production code was changed for this review.

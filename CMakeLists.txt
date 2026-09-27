@@ -1,7 +1,7 @@
-cmake_minimum_required (VERSION 3.14)
+cmake_minimum_required (VERSION 3.19)
 
 # Set deployment target before project() to avoid linker version mismatch warnings.
-if(NOT DEFINED CMAKE_OSX_DEPLOYMENT_TARGET)
+if(CMAKE_HOST_APPLE AND NOT DEFINED CMAKE_OSX_DEPLOYMENT_TARGET)
   execute_process(
     COMMAND sw_vers -productVersion
     OUTPUT_VARIABLE _macos_version
@@ -13,6 +13,9 @@ endif()
 project(fc LANGUAGES CXX VERSION 1.0.0)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+include(CTest)
+find_package(Threads REQUIRED)
+option(FC_CORE_ONLY "Build headless core and tests without UI/Lua/editor dependencies" OFF)
 
 option(FC_STATIC_MODE "Prefer static linking for non-system libraries" OFF)
 option(FC_BUILD_FRESH "Build local Fresh editor alongside file_commander" ON)
@@ -57,6 +60,7 @@ if(EXISTS "${_boost_local_tarball}")
   FetchContent_Declare(
       Boost
       URL "file://${_boost_local_tarball}"
+      URL_HASH SHA256=913ca43d49e93d1b158c9862009add1518a4c665e7853b349a6492d158b036d4
       DOWNLOAD_NO_EXTRACT FALSE
   )
 else()
@@ -66,6 +70,7 @@ else()
       Boost
       URL https://github.com/boostorg/boost/releases/download/boost-1.90.0/boost-1.90.0-cmake.tar.gz
       USES_TERMINAL_DOWNLOAD TRUE
+      URL_HASH SHA256=913ca43d49e93d1b158c9862009add1518a4c665e7853b349a6492d158b036d4
       DOWNLOAD_NO_EXTRACT FALSE
   )
 endif()
@@ -79,6 +84,43 @@ FetchContent_MakeAvailable(Boost)
 file(GLOB _boost_lib_include_dirs "${boost_SOURCE_DIR}/libs/*/include")
 set(BOOST_LIBRARY_INCLUDES ${_boost_lib_include_dirs} CACHE INTERNAL "Boost library include paths for config checks")
 add_subdirectory(boost/filesystem)
+
+add_library(fc_core STATIC
+  commander.cpp operation.cpp copy_planner.cpp file_io_jobs.cpp archive.cpp location.cpp
+  traversal.cpp settings.cpp runtime_paths.cpp log.cpp err.cpp)
+target_include_directories(fc_core PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
+target_link_libraries(fc_core PUBLIC Boost::filesystem Boost::json Threads::Threads)
+if(BUILD_TESTING)
+  add_executable(fc_core_tests test/core_operations.cpp)
+  target_link_libraries(fc_core_tests PRIVATE fc_core)
+  add_test(NAME fc.core COMMAND fc_core_tests)
+  set_tests_properties(fc.core PROPERTIES LABELS "unit;core")
+endif()
+if(FC_CORE_ONLY)
+  return()
+endif()
+
+option(FC_ALLOW_UNPINNED_DEPENDENCIES "Allow developer checkouts differing from dependencies.json" OFF)
+if(NOT FC_ALLOW_UNPINNED_DEPENDENCIES)
+  find_package(Python3 3.12 COMPONENTS Interpreter REQUIRED)
+  set(_fc_dependency_check "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tools/check_dependencies.py"
+    --ftxui "${FC_FTXUI_SOURCE_DIR}" --luajit "${FC_LUAJIT_SOURCE_DIR}" --fresh "${FC_FRESH_SOURCE_DIR}" --lzma "${FC_LZMA_SOURCE_DIR}")
+  if(NOT FC_BUILD_FRESH)
+    list(APPEND _fc_dependency_check --skip-fresh)
+  endif()
+  if(NOT FC_BUILD_LZMA_TOOL)
+    list(APPEND _fc_dependency_check --skip-lzma)
+  endif()
+  execute_process(COMMAND ${_fc_dependency_check} RESULT_VARIABLE _fc_dependency_result OUTPUT_VARIABLE _fc_dependency_output ERROR_VARIABLE _fc_dependency_error)
+  if(NOT _fc_dependency_result EQUAL 0)
+    message(FATAL_ERROR "Dependency validation failed: ${_fc_dependency_error}\nUse the pinned inputs or explicitly set FC_ALLOW_UNPINNED_DEPENDENCIES=ON for development.")
+  endif()
+  add_custom_target(fc_validate_dependencies COMMAND ${_fc_dependency_check} VERBATIM)
+  add_dependencies(fc_core fc_validate_dependencies)
+else()
+  message(WARNING "Dependency revision validation disabled for this development build")
+endif()
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/dependencies.json")
 
 set(FTXUI_USE_LOCAL_SHARED_PTR ON CACHE BOOL "" FORCE)
 set(FTXUI_ENABLE_INSTALL OFF CACHE BOOL "" FORCE)
@@ -120,7 +162,7 @@ if(EXISTS "${FC_LUAJIT_SOURCE_DIR}/src/luajit.h")
 
   set(_luajit_make_args BUILDMODE=static)
   if(CMAKE_CROSSCOMPILING AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
-    list(APPEND _luajit_make_args TARGET_SYS=Linux)
+    list(APPEND _luajit_make_args TARGET_SYS=Linux "TARGET_AR=\"${CMAKE_AR}\" rcus")
   endif()
 
   add_custom_command(
@@ -164,33 +206,17 @@ set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${CMAKE_CURRENT_
 file(READ "${CMAKE_CURRENT_SOURCE_DIR}/fc_framework.lua" FC_FRAMEWORK_SOURCE)
 configure_file(cmake/fc_framework.hpp.in "${CMAKE_CURRENT_BINARY_DIR}/generated/fc_framework.hpp" @ONLY)
 
-add_executable(fc
-  main.cpp
-  scripting.cpp
-  log.cpp
-  err.cpp
-  operation.cpp
-  copy_planner.cpp
-  location.cpp
-  traversal.cpp
-  settings.cpp
-  commander.cpp
-  theme.cpp
-  custom_controls.cpp
-  dialogs.cpp
-  shared_state.cpp
-  file_change_funnel.cpp
-  file_io_jobs.cpp
-  editor_manager.cpp
-  archive.cpp
-  runtime_paths.cpp
-)
-target_include_directories(fc PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/generated")
+add_library(fc_ui STATIC app.cpp theme.cpp custom_controls.cpp dialogs.cpp commands.cpp job_dialogs.cpp settings_dialogs.cpp find_dialog.cpp shared_state.cpp
+  file_change_funnel.cpp editor_manager.cpp)
+target_link_libraries(fc_ui PUBLIC fc_core ftxui::component)
 if(APPLE)
-  target_link_libraries(fc PRIVATE ftxui::component Boost::filesystem Boost::json luajit "-framework CoreServices")
-else()
-  target_link_libraries(fc PRIVATE ftxui::component Boost::filesystem Boost::json luajit)
+  target_link_libraries(fc_ui PRIVATE "-framework CoreServices")
 endif()
+add_library(fc_lua STATIC scripting.cpp)
+target_include_directories(fc_lua PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/generated")
+target_link_libraries(fc_lua PUBLIC fc_ui luajit)
+add_executable(fc main.cpp)
+target_link_libraries(fc PRIVATE fc_lua)
 
 set(_fc_fresh_default_bin "fresh")
 if(FC_BUILD_FRESH)
@@ -222,7 +248,7 @@ if(FC_BUILD_FRESH)
   endif()
 endif()
 
-target_compile_definitions(fc PRIVATE FC_FRESH_DEFAULT_BIN="${_fc_fresh_default_bin}")
+target_compile_definitions(fc_ui PRIVATE FC_FRESH_DEFAULT_BIN="${_fc_fresh_default_bin}")
 
 set(_fc_archive_default_bin "7zr")
 if(FC_BUILD_LZMA_TOOL)
@@ -260,24 +286,28 @@ if(FC_BUILD_LZMA_TOOL)
       VERBATIM
     )
     add_custom_target(lzma_7zr ALL DEPENDS "${_lzma_bin}")
-    add_dependencies(fc lzma_7zr)
+    add_dependencies(fc_core lzma_7zr)
     set(_fc_archive_default_bin "${_lzma_bin}")
   else()
     message(WARNING "FC_BUILD_LZMA_TOOL=ON but LZMA makefile is missing at: ${_lzma_makefile}. Falling back to PATH lookup for 7zr.")
   endif()
 endif()
 
-target_compile_definitions(fc PRIVATE FC_ARCHIVE_TOOL_DEFAULT="${_fc_archive_default_bin}")
+target_compile_definitions(fc_core PRIVATE FC_ARCHIVE_TOOL_DEFAULT="${_fc_archive_default_bin}")
 
-# Filesystem and component regressions run without a terminal or real user data.
-get_target_property(_fc_test_sources fc SOURCES)
-list(REMOVE_ITEM _fc_test_sources main.cpp)
-add_executable(fc_review_tests EXCLUDE_FROM_ALL test/review_regressions.cpp ${_fc_test_sources})
-target_include_directories(fc_review_tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}" "${CMAKE_CURRENT_BINARY_DIR}/generated")
-get_target_property(_fc_test_libraries fc LINK_LIBRARIES)
-target_link_libraries(fc_review_tests PRIVATE ${_fc_test_libraries})
-get_target_property(_fc_test_definitions fc COMPILE_DEFINITIONS)
-target_compile_definitions(fc_review_tests PRIVATE ${_fc_test_definitions})
+if(BUILD_TESTING)
+  add_executable(fc_review_tests test/review_regressions.cpp)
+  target_link_libraries(fc_review_tests PRIVATE fc_lua)
+  add_test(NAME fc.regressions COMMAND fc_review_tests)
+  set_tests_properties(fc.regressions PROPERTIES LABELS "unit;integration;native" TIMEOUT 120)
+  find_package(Python3 COMPONENTS Interpreter REQUIRED)
+  if(UNIX AND NOT CMAKE_CROSSCOMPILING)
+    add_test(NAME fc.lua COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/test/run_lua_suite.py" --binary $<TARGET_FILE:fc> --logs "${CMAKE_CURRENT_BINARY_DIR}/test-logs/lua")
+    add_test(NAME fc.lua_negative COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/test/run_lua_suite.py" --binary $<TARGET_FILE:fc> --logs "${CMAKE_CURRENT_BINARY_DIR}/test-logs/negative" --negative-only)
+    add_test(NAME fc.process_exit COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/test/test_script_exit.py" $<TARGET_FILE:fc>)
+    set_tests_properties(fc.lua fc.lua_negative fc.process_exit PROPERTIES LABELS "integration;pty;posix" TIMEOUT 240)
+  endif()
+endif()
 
 set(_fc_dist_root "${CMAKE_BINARY_DIR}/dist")
 set(_fc_dist_name "fc-${CMAKE_SYSTEM_NAME}-${CMAKE_SYSTEM_PROCESSOR}")
@@ -297,14 +327,24 @@ add_custom_target(package_static_dist
   VERBATIM
 )
 
-add_custom_target(smoke_lua_suite
-  DEPENDS fc
-  COMMAND ${CMAKE_COMMAND} -E chdir "${CMAKE_CURRENT_SOURCE_DIR}" "$<TARGET_FILE:fc>" run "test/test_events.lua"
-  COMMAND ${CMAKE_COMMAND} -E chdir "${CMAKE_CURRENT_SOURCE_DIR}" "$<TARGET_FILE:fc>" run "test/test_palette.lua"
-  COMMAND ${CMAKE_COMMAND} -E chdir "${CMAKE_CURRENT_SOURCE_DIR}" "$<TARGET_FILE:fc>" run "test/test_archive.lua"
-  COMMENT "Running smoke Lua suite"
-  VERBATIM
-)
+if(UNIX AND NOT CMAKE_CROSSCOMPILING)
+  find_package(Python3 COMPONENTS Interpreter REQUIRED)
+  add_custom_target(smoke_lua_suite DEPENDS fc
+    COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/test/run_lua_suite.py" --binary $<TARGET_FILE:fc> --logs "${CMAKE_CURRENT_BINARY_DIR}/test-logs/smoke"
+    COMMENT "Running the complete Lua integration suite in isolated PTYs" VERBATIM)
+  if(BUILD_TESTING)
+    add_test(NAME fc.package COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/test/test_package.py" "${CMAKE_BINARY_DIR}" "${_fc_dist_root}/${_fc_dist_name}.tar.gz")
+    set_tests_properties(fc.package PROPERTIES LABELS "integration;package;posix" TIMEOUT 180 RUN_SERIAL TRUE)
+    if(FC_BUILD_LZMA_TOOL)
+      option(FC_TEST_DEPENDENCY_REBUILDS "Run slow source-timestamp rebuild checks in CTest" OFF)
+      add_test(NAME fc.dependency_rebuild COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/test/test_dependency_rebuild.py" "${CMAKE_BINARY_DIR}")
+      set_tests_properties(fc.dependency_rebuild PROPERTIES LABELS "build;slow;posix" TIMEOUT 600 RUN_SERIAL TRUE)
+      if(NOT FC_TEST_DEPENDENCY_REBUILDS)
+        set_tests_properties(fc.dependency_rebuild PROPERTIES DISABLED TRUE)
+      endif()
+    endif()
+  endif()
+endif()
 
 # add_executable(playground playground.cpp log.cpp err.cpp commander.cpp theme.cpp custom_controls.cpp dialogs.cpp shared_state.cpp file_change_funnel.cpp file_io_jobs.cpp)
 # target_link_libraries(playground PRIVATE ftxui::component ftxui::dom ftxui::screen Boost::filesystem "-framework CoreServices")
@@ -312,12 +352,3 @@ add_custom_target(smoke_lua_suite
 # TODO: conditional parts for mac and linux
 # add_executable(dirnotify dir_notify/fsevents.cpp dir_notify/test.cpp)
 # target_link_libraries(dirnotify Boost::filesystem "-framework CoreServices")
-
-# A headless contract target: no terminal, scripting or editor linkage.
-add_library(fc_operation_core STATIC EXCLUDE_FROM_ALL
-  commander.cpp operation.cpp copy_planner.cpp file_io_jobs.cpp archive.cpp location.cpp
-  traversal.cpp runtime_paths.cpp log.cpp err.cpp)
-target_include_directories(fc_operation_core PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
-target_link_libraries(fc_operation_core PUBLIC Boost::filesystem)
-add_executable(fc_core_tests EXCLUDE_FROM_ALL test/core_operations.cpp)
-target_link_libraries(fc_core_tests PRIVATE fc_operation_core)

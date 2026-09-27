@@ -1,11 +1,12 @@
 """R30: errors, watchdogs and explicit waits have reliable process outcomes."""
 from pathlib import Path
 import sys
+import os
 import tempfile
 from lua_runner import run_script
 
 repo = Path(__file__).resolve().parent.parent
-binary = Path(sys.argv[1]).resolve() if len(sys.argv) > 1 else repo / "build/fc"
+binary = Path(sys.argv[1]).resolve() if len(sys.argv) > 1 else Path(os.environ.get("FC_TEST_BINARY", repo / "build/fc"))
 cases = [
     ("syntax", "this is not Lua", False, 0, 3),
     ("runtime", "error('deliberate regression failure')", False, 0, 3),

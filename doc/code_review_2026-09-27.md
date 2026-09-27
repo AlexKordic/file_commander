@@ -857,3 +857,5 @@ All four groups below are complete; each R01–R37 finding has its own fix commi
 ## Accepted architecture follow-up
 
 The subsequent high-level findings AR01–AR09, their planned solutions, applied solutions, validation and differences are tracked in [architecture implementation progress](architecture_progress_2026-09-27.md). Each linked finding document records the plan before implementation and is committed with its verified change.
+
+All nine architecture findings are implemented. Their service boundaries, typed settings, bounded history, archive leases and command/event contracts supersede the corresponding historical design gaps above. Current behavior is documented in [build boundaries](build_boundaries.md); the progress record includes final combined validation and remaining platform limits.

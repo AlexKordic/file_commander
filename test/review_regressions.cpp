@@ -1,4 +1,5 @@
 #include "app.hpp"
+#include "settings.hpp"
 #include "scripting.hpp"
 #include "ui_dispatcher.hpp"
 #include "traversal.hpp"

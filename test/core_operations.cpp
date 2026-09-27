@@ -38,6 +38,7 @@ int main() {
       return Err();
     };
     auto first = make_file_jobs({}, services), second = make_file_jobs();
+    first->set_event_sink({}); // Detaching observers must leave execution usable.
     auto job = std::make_shared<JobSpec>(plan);
     first->add_job(job);
     wait(*first);

@@ -1,0 +1,16 @@
+{
+  "schema": 1,
+  "boost": {
+    "version": "1.90.0",
+    "url": "https://github.com/boostorg/boost/releases/download/boost-1.90.0/boost-1.90.0-cmake.tar.gz",
+    "sha256": "913ca43d49e93d1b158c9862009add1518a4c665e7853b349a6492d158b036d4",
+    "filesystem": "Repository-owned modified subtree at boost/filesystem; use the same file_commander commit."
+  },
+  "git": {
+    "ftxui": {"revision": "ff94e7a1008d41e11ce040702654eed6aff1e52c", "source": "http://localhost:3000/PerunSoftware/ftxui.git", "default_path": "../alex_ftxui"},
+    "luajit": {"revision": "233ad24035944ece5367157e824e8357df3417d9", "source": "https://luajit.org/git/luajit.git", "default_path": "../luajit"},
+    "fresh": {"revision": "21610e4530a5dbd56027dcae81f3b05fccc2c465", "source": "https://github.com/sinelaw/fresh.git", "default_path": "../editor-fresh"}
+  },
+  "lzma": {"version": "26.00", "default_path": "../lzma2600", "source_files": 606, "source_sha256": "744ef6617d606d78676e06d3ab30784072c8a936a4c629c76d5877b93710e66c"},
+  "requirements": {"cmake": ">=3.19", "cxx": "C++20 with std::format", "python": ">=3.12", "fresh": "Cargo with --locked and the pinned checkout's toolchain", "cross": "Zig musl toolchain; Fresh must be independently built for the target"}
+}
