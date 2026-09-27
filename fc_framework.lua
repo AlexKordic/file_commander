@@ -38,8 +38,25 @@ function check(cond, fmt, ...)
 end
 
 -- Print pass marker (visible in fc error bar via report_error, or stdout)
+local function json_string(value)
+  return '"' .. value:gsub('[%c\\"]', function(c)
+    return string.format('\\u%04x', c:byte())
+  end) .. '"'
+end
+
 function test_pass(name)
   print("[PASS] " .. name)
+  -- Test-runner protocol is independent of terminal rendering. Ordinary user
+  -- scripts have no result-file environment and retain their existing behavior.
+  local path = os.getenv("FC_TEST_RESULT_FILE")
+  if path then
+    local kind = name == os.getenv("FC_TEST_COMPLETION") and "complete" or "case"
+    local file = assert(io.open(path, "a"))
+    assert(file:write('{"kind":' .. json_string(kind) .. ',"suite":' ..
+      json_string(os.getenv("FC_TEST_SUITE") or "") .. ',"id":' .. json_string(name) ..
+      ',"status":"passed"}\n'))
+    assert(file:close())
+  end
   if fc.test_heartbeat then
     fc.test_heartbeat()
   end

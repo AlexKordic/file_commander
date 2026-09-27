@@ -11,8 +11,8 @@ Each improvement records its plan before editing, its applied solution and valid
 | Improvement | Planned solution | Status / applied solution | Validation / differences |
 | --- | --- | --- | --- |
 | TS01 | Explicit Python runner failures and optimization-mode self-tests | Implemented: shared explicit validation; all Python runner assertions replaced; process failures check diagnostic category | Normal, `-O`, environment optimization and empty-binary CLI controls pass; 14 Lua, five negative and seven exit cases pass. No deviation. |
-| TS02 | Declared Lua case/completion protocol and incomplete-suite controls | Planned | Pending |
-| TS03 | Independent content/tree assertions and corruption/missing-link controls | Planned | Pending |
+| TS02 | Declared Lua case/completion protocol and incomplete-suite controls | Implemented: committed suite manifest, JSON-lines result file, exact case order and completion validation; explicit suite selection for replacement scripts | Malformed/missing/duplicate/unknown/wrong-suite results and real premature-return controls pass under normal/optimized Python; 14 Lua and five negative cases pass. Copy case isolation follows TS08. |
+| TS03 | Independent content/tree assertions and corruption/missing-link controls | In progress | Pending |
 | TS08 | Per-case discovery, deadlines and isolated process results | Planned | Pending |
 | TS10 | Bounded PTY supervision, fixture helpers and failure artifacts | Planned | Pending |
 | TS04 | Typed operation/fault-boundary matrices and cross-device test | Planned | Pending |

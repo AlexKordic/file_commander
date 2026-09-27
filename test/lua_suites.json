@@ -1,0 +1,107 @@
+{
+  "test_archive": {
+    "script": "test/test_archive.lua",
+    "cases": [],
+    "completion": "archive_create_enter_extract"
+  },
+  "test_bookmarks": {
+    "script": "test/test_bookmarks.lua",
+    "cases": [],
+    "completion": "bookmarks_basic"
+  },
+  "test_copy": {
+    "script": "test/test_copy.lua",
+    "cases": [
+      "1_basic_single_file",
+      "2_basic_multiple_files",
+      "3_nested_directories",
+      "4_empty_directory",
+      "5_deep_nesting",
+      "6_hidden_files",
+      "7_special_characters",
+      "8_absolute_symlink",
+      "9_relative_symlink",
+      "10_symlink_chain",
+      "11_circular_symlinks",
+      "12_self_referencing_symlink",
+      "13_dangling_symlink",
+      "14_symlink_to_directory",
+      "15_follow_links_file",
+      "16_follow_links_directory",
+      "17_overwrite_smaller",
+      "18_overwrite_larger",
+      "19_overwrite_extras_remain",
+      "20_mixed_content",
+      "21_symlink_chain_through_dirs",
+      "22_many_files",
+      "23_nested_symlink_to_dir",
+      "24_unicode_filenames",
+      "25_dir_of_symlinks",
+      "26_dangling_relative_symlink",
+      "27_three_way_circular",
+      "28_symlink_outside_tree",
+      "29_cancel_copy",
+      "30_pause_copy",
+      "32_conflict_skip",
+      "33_conflict_update",
+      "34_copy_dir_into_subdir_guard",
+      "31_job_history"
+    ],
+    "completion": "ALL COPY TESTS PASSED"
+  },
+  "test_editor_integration": {
+    "script": "test/test_editor_integration.lua",
+    "cases": [],
+    "completion": "editor_integration_fake_fresh"
+  },
+  "test_events": {
+    "script": "test/test_events.lua",
+    "cases": [],
+    "completion": "events_basic"
+  },
+  "test_find": {
+    "script": "test/test_find.lua",
+    "cases": [],
+    "completion": "find_dialog_basic"
+  },
+  "test_focus_refresh": {
+    "script": "test/test_focus_refresh.lua",
+    "cases": [],
+    "completion": "focus_refresh_stable"
+  },
+  "test_glob": {
+    "script": "test/test_glob.lua",
+    "cases": [],
+    "completion": "glob_select_deselect"
+  },
+  "test_palette": {
+    "script": "test/test_palette.lua",
+    "cases": [],
+    "completion": "command_palette_basic"
+  },
+  "test_pause_resume": {
+    "script": "test/test_pause_resume.lua",
+    "cases": [],
+    "completion": "pause_resume_copy_basic"
+  },
+  "test_rebind": {
+    "script": "test/test_rebind.lua",
+    "cases": [],
+    "completion": "rebind_copy_key_basic"
+  },
+  "test_single_panel": {
+    "script": "test/test_single_panel.lua",
+    "cases": [],
+    "completion": "single_panel_toggle"
+  },
+  "test_tabs": {
+    "script": "test/test_tabs.lua",
+    "cases": [],
+    "completion": "tabs_basic"
+  },
+  "review_events": {
+    "script": "test/review_events.lua",
+    "cases": [],
+    "completion": "review_events"
+  }
+}
