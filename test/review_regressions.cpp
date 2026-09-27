@@ -177,8 +177,16 @@ static void R06() {
   require(fs::exists(f.root / "renamed_a") && fs::exists(f.root / "renamed_b"), "rename retry failed");
 }
 
+static void R07() {
+  Fixture f;
+  for (int i = 0; i < 100; ++i) {
+    auto watcher = FileChangeFunnel::create(f.root, [](UpdatedFiles) {});
+    watcher.reset();
+  }
+}
+
 int main(int argc, char** argv) {
-  const std::vector<std::pair<std::string, void (*)()>> tests = {{"R01", R01}, {"R02", R02}, {"R03", R03}, {"R04", R04}, {"R05", R05}, {"R06", R06}};
+  const std::vector<std::pair<std::string, void (*)()>> tests = {{"R01", R01}, {"R02", R02}, {"R03", R03}, {"R04", R04}, {"R05", R05}, {"R06", R06}, {"R07", R07}};
   try {
     bool matched = false;
     for (const auto& [id, run] : tests) {

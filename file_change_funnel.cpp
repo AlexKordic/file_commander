@@ -14,6 +14,7 @@
 #ifdef __APPLE__
 
 #include <CoreServices/CoreServices.h>
+#include <dispatch/dispatch.h>
 #include <sys/stat.h>
 
 static CFArrayRef getArrayRef(const std::vector<std::string>& strings) {
@@ -69,18 +70,15 @@ class DirEvents : public FileChangeFunnel {
     _stream = FSEventStreamCreate(kCFAllocatorDefault, DirEvents_callback, _context.get(), pathsArray, kFSEventStreamEventIdSinceNow, 0.2, flags);
     CFRelease(pathsArray);
     if (!_stream) throw std::runtime_error("FSEventStreamCreate failed");
-    _runloop_thread = std::thread([this]() {
-      _runloop_ref = CFRunLoopGetCurrent();
-      FSEventStreamScheduleWithRunLoop(this->_stream, _runloop_ref, kCFRunLoopDefaultMode);
-      FSEventStreamStart(this->_stream);
-      CFRunLoopRun();
-    });
+    _dispatch_queue = dispatch_queue_create("file_commander.fsevents", DISPATCH_QUEUE_SERIAL);
+    FSEventStreamSetDispatchQueue(_stream, _dispatch_queue);
+    if (!FSEventStreamStart(_stream)) {
+      stop();
+      throw std::runtime_error("FSEventStreamStart failed");
+    }
   }
 
-  ~DirEvents() override {
-    stop();
-    if (_runloop_thread.joinable()) _runloop_thread.join();
-  }
+  ~DirEvents() override { stop(); }
 
   void events_received(ConstFSEventStreamRef sr, size_t num_events, const char** event_paths, const FSEventStreamEventFlags* event_flags, const FSEventStreamEventId* event_ids) {
     UpdatedFiles filtered_events = std::make_unique<std::vector<DirItemUpdated>>();
@@ -99,14 +97,16 @@ class DirEvents : public FileChangeFunnel {
 
   void stop() {
     std::lock_guard g(_m);
-    if (_stream) {
-      FSEventStreamUnscheduleFromRunLoop(_stream, _runloop_ref, kCFRunLoopDefaultMode);
-      FSEventStreamStop(_stream);
-      FSEventStreamInvalidate(_stream);
-      FSEventStreamRelease(_stream);
-      CFRunLoopStop(_runloop_ref);
-      _stream = nullptr;
-    }
+    if (!_stream) return;
+    FSEventStreamStop(_stream);
+    FSEventStreamInvalidate(_stream);
+    // Invalidation stops new delivery; drain callbacks before releasing their
+    // context or any state owned by this watcher.
+    dispatch_sync_f(_dispatch_queue, nullptr, [](void*) {});
+    FSEventStreamRelease(_stream);
+    _stream = nullptr;
+    dispatch_release(_dispatch_queue);
+    _dispatch_queue = nullptr;
   }
 
  private:
@@ -117,8 +117,7 @@ class DirEvents : public FileChangeFunnel {
   std::unique_ptr<FSEventStreamContext> _context;
   FSEventStreamRef                      _stream = nullptr;
 
-  std::thread  _runloop_thread;
-  CFRunLoopRef _runloop_ref = nullptr;
+  dispatch_queue_t _dispatch_queue = nullptr;
   std::mutex   _m;
 };
 

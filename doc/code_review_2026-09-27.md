@@ -154,15 +154,15 @@ The constructor launches a thread that initializes `_runloop_ref`, schedules `_s
 
 **Fix direction:** establish startup readiness and perform stream start/stop/release on a coordinated owner thread. **Regression:** repeated immediate create/destroy, rapid tab navigation, and exit during watcher startup.
 
-**Implementation status:** Planned.
+**Implementation status:** Applied.
 
 **Planned solution:** establish startup readiness and perform stream start/stop/release on a coordinated owner thread.
 
-**Applied solution:** Pending.
+**Applied solution:** macOS watchers synchronously create/start the FSEvent stream on a dedicated serial dispatch queue. Destruction stops and invalidates delivery, drains queued callbacks, then releases the stream and queue.
 
-**Plan deviations:** Pending.
+**Plan deviations:** Replaced the deprecated run-loop worker entirely with the supported dispatch-queue API instead of adding a startup handshake to it. This removes the null-run-loop and released-stream startup races.
 
-**Validation:** Pending.
+**Validation:** Native build and R07 passed 100 immediate watcher create/destroy cycles. The previous teardown crash did not recur; deprecated run-loop warnings are gone.
 
 ### R08 — Panel teardown destroys callback state before stopping its watcher
 
