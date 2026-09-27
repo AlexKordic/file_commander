@@ -13,6 +13,10 @@
 
 #if defined(__unix__) || defined(__APPLE__)
 #include <sys/wait.h>
+#include <unistd.h>
+#include <signal.h>
+#include <thread>
+#include <cerrno>
 #endif
 
 #ifndef FC_ARCHIVE_TOOL_DEFAULT
@@ -50,17 +54,46 @@ int decode_exit_code(int system_result) {
   return system_result;
 }
 
-int run_command(const Filepath& cwd, const std::vector<std::string>& args) {
+int run_command(const Filepath& cwd, const std::vector<std::string>& args, std::atomic<bool>* cancelled = nullptr) {
   if (args.empty()) return -1;
+#if defined(__unix__) || defined(__APPLE__)
+  if (cancelled && cancelled->load()) return 130;
+  std::vector<char*> argv;
+  for (const auto& arg : args) argv.push_back(const_cast<char*>(arg.c_str()));
+  argv.push_back(nullptr);
+  const pid_t pid = fork();
+  if (pid < 0) return -1;
+  if (pid == 0) {
+    setpgid(0, 0);
+    if (!cwd.empty() && chdir(cwd.c_str()) != 0) _exit(126);
+    execvp(argv[0], argv.data());
+    _exit(127);
+  }
+  setpgid(pid, pid);
+  bool terminating = false;
+  auto deadline = std::chrono::steady_clock::now();
+  int status = 0;
+  for (;;) {
+    const auto result = waitpid(pid, &status, WNOHANG);
+    if (result == pid) {
+      if (terminating) kill(-pid, SIGKILL); // Reap the leader and stop any surviving helpers.
+      return terminating ? 130 : decode_exit_code(status);
+    }
+    if (result < 0 && errno != EINTR) return -1;
+    if (cancelled && cancelled->load() && !terminating) {
+      kill(-pid, SIGTERM);
+      terminating = true;
+      deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(500);
+    }
+    if (terminating && std::chrono::steady_clock::now() >= deadline) kill(-pid, SIGKILL);
+    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+  }
+#else
   std::ostringstream cmd;
-  if (!cwd.empty()) {
-    cmd << "cd " << shell_escape(cwd.native()) << " && ";
-  }
-  for (size_t i = 0; i < args.size(); ++i) {
-    if (i > 0) cmd << " ";
-    cmd << shell_escape(args[i]);
-  }
+  if (!cwd.empty()) cmd << "cd " << shell_escape(cwd.native()) << " && ";
+  for (const auto& arg : args) cmd << shell_escape(arg) << " ";
   return decode_exit_code(std::system(cmd.str().c_str()));
+#endif
 }
 
 std::string sanitize_token(const std::string& input) {
@@ -233,7 +266,7 @@ Err ArchiveService::extract_to_cache(const Filepath& archive_path, Filepath& ext
   return Err();
 }
 
-Err ArchiveService::create_archive(const Filepath& archive_path, const std::vector<Filepath>& sources, const Filepath& preferred_cwd, ArchiveConflict conflict) {
+Err ArchiveService::create_archive(const Filepath& archive_path, const std::vector<Filepath>& sources, const Filepath& preferred_cwd, ArchiveConflict conflict, std::atomic<bool>* cancelled) {
   if (!is_archive_file_path(archive_path)) return Err("unsupported archive destination: " + archive_path.native());
   if (sources.empty()) return Err("no input files selected for archive creation");
 
@@ -319,11 +352,12 @@ Err ArchiveService::create_archive(const Filepath& archive_path, const std::vect
     args.push_back(rel.native());
   }
 
-  const int rc = run_command(working_dir, args);
+  const int rc = run_command(working_dir, args, cancelled);
   if (rc != 0) return Err("archive create failed (exit " + std::to_string(rc) + "): " + archive_abs.native());
 
   if (!boost::filesystem::is_regular_file(staged_archive, ec) || ec.failed())
     return Err("archive create reported success but output file is missing: " + archive_abs.native());
+  if (cancelled && cancelled->load()) return Err("archive creation cancelled");
   if (conflict == ArchiveConflict::Replace) {
     boost::filesystem::rename(staged_archive, archive_abs, ec);
   } else {

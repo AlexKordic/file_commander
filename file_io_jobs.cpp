@@ -241,6 +241,62 @@ struct DelayedUpdateDelete {
   }
 };
 
+namespace {
+bool transfer_checkpoint(const boost::filesystem::copy_file_options& options, error_code& ec) {
+  if ((options.cancel_requested && options.cancel_requested->load()) ||
+      (options.checkpoint && !options.checkpoint(options.checkpoint_context))) {
+    ec.assign(ECANCELED, boost::system::system_category());
+    return false;
+  }
+  return true;
+}
+
+bool copy_move_tree(const Filepath& source, const Filepath& destination,
+                    const boost::filesystem::copy_file_options& options, error_code& ec) {
+  if (!transfer_checkpoint(options, ec)) return false;
+  const auto status = boost::filesystem::symlink_status(source, ec);
+  if (ec) return false;
+  if (boost::filesystem::is_symlink(status)) {
+    auto target = boost::filesystem::read_symlink(source, ec);
+    if (!ec) boost::filesystem::create_symlink(target, destination, ec);
+  } else if (boost::filesystem::is_directory(status)) {
+    boost::filesystem::create_directory(destination, ec);
+    if (ec) return false;
+    boost::filesystem::directory_iterator it(source, ec), end;
+    while (!ec && it != end) {
+      if (!copy_move_tree(it->path(), destination / it->path().filename(), options, ec)) return false;
+      it.increment(ec);
+    }
+    if (!ec) boost::filesystem::permissions(destination, status.permissions(), ec);
+  } else {
+    boost::filesystem::copy_file(source, destination, options, ec);
+  }
+  return !ec;
+}
+}
+
+bool move_by_copy(const Filepath& source, const Filepath& destination,
+                  const boost::filesystem::copy_file_options& options, error_code& ec) {
+  ec.clear();
+  if (!transfer_checkpoint(options, ec)) return false;
+  auto parent = destination.parent_path();
+  if (parent.empty()) parent = ".";
+  const auto staging = parent / boost::filesystem::unique_path(".fc-move-%%%%-%%%%-%%%%");
+  if (!boost::filesystem::create_directory(staging, ec) || ec) return false;
+  struct Cleanup {
+    Filepath root;
+    ~Cleanup() { error_code ignored; boost::filesystem::remove_all(root, ignored); }
+  } cleanup{staging};
+  const auto output = staging / "entry";
+  if (!copy_move_tree(source, output, options, ec) || !transfer_checkpoint(options, ec)) return false;
+  boost::filesystem::rename(output, destination, ec);
+  if (ec) return false;
+  // Commit boundary: the complete destination now exists. Finish source cleanup
+  // even if cancellation arrives here, rather than leaving a half-deleted source.
+  boost::filesystem::remove_all(source, ec);
+  return !ec;
+}
+
 class ThreadedFileJobs : public FileJobs {
  public:
   ThreadedFileJobs() {
@@ -405,6 +461,7 @@ class ThreadedFileJobs : public FileJobs {
   void _discover_files(JobSpec* job, std::vector<DirItem>& items, FifoQueue<DirItem>& files, DelayedUpdateDiscovery& update) {
     error_code ec;
     for (DirItem const& item : items) {
+      if (job->_cancel_requested.load() || !files.running()) return;
       // Inspect the entry itself: a directory symlink must be unlinked, never
       // traversed. Recheck here instead of trusting an earlier followed stat.
       const auto entry_status = boost::filesystem::symlink_status(item.path_ref(), ec);
@@ -415,12 +472,17 @@ class ThreadedFileJobs : public FileJobs {
       }
       if (boost::filesystem::is_directory(entry_status)) {
         std::vector<DirItem> subdir_items;
-        for (boost::filesystem::directory_entry& subdir_item : boost::filesystem::directory_iterator(item.path_ref(), ec)) { subdir_items.emplace_back(DirItem(subdir_item.path())); }
+        boost::filesystem::directory_iterator it(item.path_ref(), ec), end;
+        while (!ec && it != end && !job->_cancel_requested.load() && files.running()) {
+          subdir_items.emplace_back(it->path());
+          it.increment(ec);
+        }
+        if (ec) { std::lock_guard lock(job->_m); job->report_error(item, "Delete discovery failed: " + ec.message()); }
         _discover_files(job, subdir_items, files, update);
         // push parent dir item last
       }
       update.file_found(std::max(int64_t{0}, item.size()), job);
-      files.push(item);
+      if (files.push(item) != FifoError::OK) return;
     }
   }
 
@@ -482,24 +544,19 @@ class ThreadedFileJobs : public FileJobs {
       error_code ec;
       boost::filesystem::rename(item.path_ref(), *item.symlink_ref(), ec);
       if (ec.value() == boost::system::errc::cross_device_link) {
-        // We need to copy instead of move.
-        copy_options op = copy_options::overwrite_existing | copy_options::recursive | copy_options::copy_symlinks;
-        boost::filesystem::copy(item.path_ref(), *item.symlink_ref(), op, ec);
-        if (ec.failed()) {
-          file_operations().report_error("[Move copy cross_device_link] " + item.path_ref().native());
-          std::lock_guard lock(job->_m);
-          job->report_error(item, "Failed to copy file: " + ec.message());
-          continue;
-        }
-        // now delete original
-        boost::filesystem::remove_all(item.path_ref(), ec);
-        if (ec.failed()) {
-          file_operations().report_error("[Move remove source cross_device_link] " + item.path_ref().native());
-          std::lock_guard lock(job->_m);
-          job->report_error(item, "Failed to remove source file: " + ec.message());
-          continue;
+        boost::filesystem::copy_file_options options;
+        options.cancel_requested = &job->_cancel_requested;
+        options.bytes_per_second = _transfer_rate.load();
+        options.bytes_copied = &job->_copy_bytes;
+        options.checkpoint = [](void* context) { return wait_for_resume(static_cast<JobSpec*>(context)); };
+        options.checkpoint_context = job;
+        move_by_copy(item.path_ref(), *item.symlink_ref(), options, ec);
+        if (job->_cancel_requested.load() && ec) {
+          job->_state = JobState::CANCELLED;
+          return;
         }
       }
+
       if (ec.failed()) {
         // "Failed to move file: Cross-device link"
         file_operations().report_error("[Move] " + item.path_ref().native());
@@ -555,7 +612,8 @@ class ThreadedFileJobs : public FileJobs {
     Filepath preferred_cwd = sources.front().parent_path();
     const auto conflict = job->_copy_conflict == CopyConflictMode::Skip ? ArchiveConflict::Skip
       : job->_copy_conflict == CopyConflictMode::Update ? ArchiveConflict::Update : ArchiveConflict::Replace;
-    Err err = archive_service().create_archive(archive_path, sources, preferred_cwd, conflict);
+    Err err = archive_service().create_archive(archive_path, sources, preferred_cwd, conflict, &job->_cancel_requested);
+    if (job->_cancel_requested.load()) { job->_state = JobState::CANCELLED; return; }
     if (!err.ok()) {
       file_operations().report_error("[Archive create] " + err.steps.front());
       std::lock_guard lock(job->_m);

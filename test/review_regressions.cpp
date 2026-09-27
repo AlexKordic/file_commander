@@ -291,8 +291,37 @@ static void R12() {
   require(file_operations().pause_job(job.get()) == JobError::NOT_FOUND, "terminal job accepted pause");
 }
 
+static void R13() {
+  Fixture f;
+  auto source = f.file("source", std::string(2 * 1024 * 1024, 'x'));
+  auto destination = f.file("destination", "KEEP");
+  std::atomic<bool> cancelled{false};
+  fs::copy_file_options options;
+  options.cancel_requested = &cancelled; options.bytes_per_second = 1024 * 1024;
+  boost::system::error_code ec;
+  std::thread cancel([&] { std::this_thread::sleep_for(std::chrono::milliseconds(30)); cancelled = true; });
+  bool moved = move_by_copy(source, destination, options, ec);
+  cancel.join();
+  require(!moved && ec && fs::exists(source) && read_file(destination) == "KEEP", "cancelled move damaged source/destination");
+  cancelled = false; options.bytes_per_second = 0;
+  auto tree = f.dir("tree"); f.file("tree/child");
+  fs::create_symlink(source, tree / "link");
+  require(move_by_copy(tree, f.root / "moved", options, ec), "staged recursive move failed");
+  require(!fs::exists(tree) && fs::is_symlink(f.root / "moved/link") && fs::exists(source), "move link semantics changed");
+  auto archive = f.file("old.7z", "OLD");
+  auto fake = f.file("slow-7zr", "#!/bin/sh\nsleep 20\n");
+  fs::permissions(fake, fs::owner_all);
+  ArchiveService service; service.set_tool_path(fake.string());
+  auto start = std::chrono::steady_clock::now();
+  std::thread cancel_archive([&] { std::this_thread::sleep_for(std::chrono::milliseconds(40)); cancelled = true; });
+  auto result = service.create_archive(archive, {source}, f.root, ArchiveConflict::Replace, &cancelled);
+  cancel_archive.join();
+  require(!result.ok() && read_file(archive) == "OLD", "cancelled archive replaced old output");
+  require(std::chrono::steady_clock::now() - start < std::chrono::seconds(2), "archive subprocess ignored cancellation");
+}
+
 int main(int argc, char** argv) {
-  const std::vector<std::pair<std::string, void (*)()>> tests = {{"R01", R01}, {"R02", R02}, {"R03", R03}, {"R04", R04}, {"R05", R05}, {"R06", R06}, {"R07", R07}, {"R08", R08}, {"R09", R09}, {"R10", R10}, {"R11", R11}, {"R12", R12}};
+  const std::vector<std::pair<std::string, void (*)()>> tests = {{"R01", R01}, {"R02", R02}, {"R03", R03}, {"R04", R04}, {"R05", R05}, {"R06", R06}, {"R07", R07}, {"R08", R08}, {"R09", R09}, {"R10", R10}, {"R11", R11}, {"R12", R12}, {"R13", R13}};
   try {
     bool matched = false;
     for (const auto& [id, run] : tests) {

@@ -266,15 +266,15 @@ Delete cancellation closes the traversal queue, but discovery never checks cance
 
 **Fix direction:** propagate cancellation through traversal and transfer stages, define safe commit boundaries for moves, and manage archive subprocesses explicitly. **Regression:** cancel each operation while it is inside its long-running phase, not only between items.
 
-**Implementation status:** Planned.
+**Implementation status:** Applied.
 
 **Planned solution:** propagate cancellation through traversal and transfer stages, define safe commit boundaries for moves, and manage archive subprocesses explicitly.
 
-**Applied solution:** Pending.
+**Applied solution:** Delete discovery now checks cancellation/queue closure during enumeration and stops when publication fails. Cross-device moves use a cancellable recursive copy into private staging, commit the complete entry, then clean the source. Archive commands run as owned process groups with cancellation, bounded TERM-to-KILL escalation, helper cleanup and leader reaping; cancelled archives never commit.
 
-**Plan deviations:** Pending.
+**Plan deviations:** Moves now use an entry-level atomic commit instead of merging into an existing nonempty destination directory. Source cleanup is intentionally non-cancellable after commit to avoid a partially removed source. The cross-device transfer helper is exposed for direct regression testing without requiring another mounted device.
 
-**Validation:** Pending.
+**Validation:** Native build and R13 passed for cancelled file-move staging, successful recursive move with a preserved symlink, and a cancelled 20-second fake archive tool returning within two seconds while preserving OLD. Delete pause/cancel lifecycle is covered by R10; actual EXDEV routing was not executed on this single-volume host.
 
 ### R14 — Completed-item accounting is inconsistent across operations
 

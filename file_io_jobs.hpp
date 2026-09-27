@@ -166,6 +166,10 @@ class FileJobs {
   virtual void clear_errors()                    = 0;
 };
 
+// Copy into an owned sibling staging tree, commit, then remove the source.
+// Cancellation before commit preserves both source and previous destination.
+bool move_by_copy(const Filepath& source, const Filepath& destination,
+                  const boost::filesystem::copy_file_options& options, boost::system::error_code& ec);
 std::unique_ptr<FileJobs> make_file_jobs();
 FileJobs& file_operations();
 
