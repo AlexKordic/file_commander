@@ -106,6 +106,7 @@ void DirItem::update(Type type, Perms perms) {
 #if defined(__unix__) || defined(__APPLE__)
   struct stat st;
   if (lstat(_path.native().c_str(), &st) == 0) {
+    if (is_link) _w_time = st.st_mtime;
     if (auto* pw = getpwuid(st.st_uid)) _owner = pw->pw_name;
     else _owner = std::to_string(static_cast<unsigned long>(st.st_uid));
 
@@ -117,8 +118,10 @@ void DirItem::update(Type type, Perms perms) {
   }
 #endif
 
-  _w_time = last_write_time(_path, ec);
-  if (ec.failed()) _w_time = 0;
+  if (!is_link) {
+    _w_time = last_write_time(_path, ec);
+    if (ec.failed()) _w_time = 0;
+  }
   if (_type == boost::filesystem::directory_file) return;
   _size = file_size(_path, ec);
   if (ec.failed()) _size = -1;

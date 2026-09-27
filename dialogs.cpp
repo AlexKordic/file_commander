@@ -1014,11 +1014,12 @@ std::vector<DirItem> CopyDiscoveryProcess::take_items() {
   return std::move(_items);
 }
 
-void CopyDiscoveryProcess::_queue_link(Filepath const& location, Filepath const& destination, boost::filesystem::perms p) {
+void CopyDiscoveryProcess::_queue_link(Filepath const& location, Filepath const& destination, boost::filesystem::perms p, std::time_t source_time) {
   std::lock_guard<std::mutex> lock(_m);
   _progress.link_count++;
   auto& link = _items.emplace_back(location, boost::filesystem::symlink_file, p);
   link._set_symlink_target(destination);
+  link._set_write_time(source_time);
 }
 
 // item.path_ref() and new_record_path are same file
@@ -1041,7 +1042,7 @@ bool CopyDiscoveryProcess::_queue_dir(const DirItem& item, Filepath const& new_r
     }
     if (same) {
       // dir already copied, create link to it instead
-      _queue_link(new_record_path, visited.destination, item.perms());
+      _queue_link(new_record_path, visited.destination, item.perms(), item.write_time());
       return false;
     }
   }
@@ -1101,7 +1102,7 @@ void CopyDiscoveryProcess::_discover(const std::vector<DirItem>& files, Filepath
       const bool relative = item.symlink_ref()->is_relative();
       if (!_follow_links && _preserve_relative_links && relative) {
         // create relative symlink
-        _queue_link(new_record_path, *item.symlink_ref(), item.perms());
+        _queue_link(new_record_path, *item.symlink_ref(), item.perms(), item.write_time());
         return;
       }
       Filepath symlink_target = resolve_symlink(item.path_ref());
@@ -1129,7 +1130,7 @@ void CopyDiscoveryProcess::_discover(const std::vector<DirItem>& files, Filepath
       // create absolute symlink
       Filepath absolute_symlink_target = boost::filesystem::canonical(symlink_target, item.path_ref().parent_path(), ec);
       if (!ec.failed()) { symlink_target = absolute_symlink_target; }
-      _queue_link(new_record_path, symlink_target, item.perms());
+      _queue_link(new_record_path, symlink_target, item.perms(), item.write_time());
       return;
     }
     // Act on directory

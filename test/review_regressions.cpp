@@ -390,8 +390,33 @@ static void R16() {
   dialog.cancel();
 }
 
+static void R17() {
+  Fixture f;
+  auto target = f.file("target", "KEEP");
+  auto destination = f.root / "link";
+  fs::create_symlink(target, destination);
+  auto run = [&](CopyConflictMode mode, std::time_t source_time) {
+    DirItem link(destination, fs::symlink_file, fs::owner_all);
+    link._set_symlink_target("missing-new-target"); link._set_write_time(source_time);
+    auto job = std::make_shared<JobSpec>(JobSpec::Type::COPY, std::vector<DirItem>{link}, mode);
+    wait_job(file_operations().add_job(job));
+    require(job->_errors.empty(), "link conflict reported an error");
+    return job;
+  };
+  run(CopyConflictMode::Replace, std::time(nullptr));
+  require(fs::read_symlink(destination) == "missing-new-target" && read_file(target) == "KEEP", "replace followed old link");
+  auto skipped = run(CopyConflictMode::Skip, std::time(nullptr));
+  require(skipped->_items_skipped == 1 && fs::is_symlink(destination), "Skip failed for dangling link");
+  fs::remove(destination); f.file("link", "OLD"); fs::last_write_time(destination, std::time(nullptr) + 100);
+  run(CopyConflictMode::Update, std::time(nullptr));
+  require(read_file(destination) == "OLD", "Update replaced newer destination");
+  fs::last_write_time(destination, 1);
+  run(CopyConflictMode::Update, std::time(nullptr));
+  require(fs::is_symlink(destination), "Update did not replace older regular destination with link");
+}
+
 int main(int argc, char** argv) {
-  const std::vector<std::pair<std::string, void (*)()>> tests = {{"R01", R01}, {"R02", R02}, {"R03", R03}, {"R04", R04}, {"R05", R05}, {"R06", R06}, {"R07", R07}, {"R08", R08}, {"R09", R09}, {"R10", R10}, {"R11", R11}, {"R12", R12}, {"R13", R13}, {"R14", R14}, {"R15", R15}, {"R16", R16}};
+  const std::vector<std::pair<std::string, void (*)()>> tests = {{"R01", R01}, {"R02", R02}, {"R03", R03}, {"R04", R04}, {"R05", R05}, {"R06", R06}, {"R07", R07}, {"R08", R08}, {"R09", R09}, {"R10", R10}, {"R11", R11}, {"R12", R12}, {"R13", R13}, {"R14", R14}, {"R15", R15}, {"R16", R16}, {"R17", R17}};
   try {
     bool matched = false;
     for (const auto& [id, run] : tests) {

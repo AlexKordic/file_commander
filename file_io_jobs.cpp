@@ -696,10 +696,34 @@ class ThreadedFileJobs : public FileJobs {
         }
         ec.clear();
         lock.unlock();
-        // create_symlink(target, link_path): creates link_path pointing to target
-        // item.path_ref()    = where to create the new symlink (link_path)
-        // item.symlink_ref() = what the symlink points to (target)
-        boost::filesystem::create_symlink(*item.symlink_ref(), item.path_ref(), ec);
+        const auto destination = item.path_ref();
+        const auto present = boost::filesystem::symlink_status(destination, ec);
+        if (ec == boost::system::errc::no_such_file_or_directory) ec.clear();
+        const bool exists = boost::filesystem::exists(present);
+        bool skip_link = !ec && exists && job->_copy_conflict == CopyConflictMode::Skip;
+        if (!ec && exists && job->_copy_conflict == CopyConflictMode::Update)
+          skip_link = item.write_time() <= DirItem(destination).write_time();
+        if (skip_link) {
+          lock.lock();
+          item_skipped = true;
+          continue;
+        }
+        auto parent = destination.parent_path();
+        if (parent.empty()) parent = ".";
+        const auto temporary = parent / boost::filesystem::unique_path(".fc-link-%%%%-%%%%-%%%%");
+        if (!ec) boost::filesystem::create_symlink(*item.symlink_ref(), temporary, ec);
+        if (!ec) {
+          if (job->_copy_conflict == CopyConflictMode::Skip)
+            boost::filesystem::create_hard_link(temporary, destination, ec);
+          else
+            boost::filesystem::rename(temporary, destination, ec);
+          error_code cleanup;
+          boost::filesystem::remove(temporary, cleanup);
+          if (job->_copy_conflict == CopyConflictMode::Skip && ec == boost::system::errc::file_exists) {
+            ec.clear();
+            item_skipped = true;
+          }
+        }
         if (ec.failed()) file_operations().report_error("[symlink] " + item.path_ref().native());
         lock.lock();
         if (ec.failed()) {

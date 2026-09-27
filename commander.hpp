@@ -54,6 +54,8 @@ class DirItem {
   Type    type() const { return _type; }
   Perms   perms() const { return _perms; }
   int64_t size() const { return _size; }
+  std::time_t write_time() const { return _w_time; }
+  void _set_write_time(std::time_t value) { _w_time = value; }
 
   void _set_symlink_target(Filepath p) { _symlink = std::move(p); }
   void _set_warning(std::string w) { _warning = std::move(w); }

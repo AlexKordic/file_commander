@@ -338,15 +338,15 @@ The symlink branch unconditionally calls `create_symlink()` and returns before e
 
 **Fix direction:** define destination-type-aware conflict behavior before dispatching to regular-file/link/directory implementations. **Regression:** each policy with source links and existing regular files, valid links, and dangling links.
 
-**Implementation status:** Planned.
+**Implementation status:** Applied.
 
 **Planned solution:** define destination-type-aware conflict behavior before dispatching to regular-file/link/directory implementations.
 
-**Applied solution:** Pending.
+**Applied solution:** Symlink copy evaluates Replace/Update/Skip against destination entry metadata before creation. New links are staged and atomically renamed (replace/update) or linked without replacement (skip), preserving existing targets on errors. Discovery carries the source link timestamp and skipped links update job counters.
 
-**Plan deviations:** Pending.
+**Plan deviations:** Update compares the link entry timestamp from lstat, not the target timestamp. Existing directories are preserved when atomic replacement is invalid rather than recursively removed.
 
-**Validation:** Pending.
+**Validation:** Native build and R17 passed: replacing an existing link preserved its target, Skip retained a dangling link, Update retained a newer file and replaced an older file with the requested link.
 
 ### R18 — Copy-dialog shortcuts consume digits typed into inputs
 
