@@ -1,4 +1,5 @@
 #include "archive.hpp"
+#include "traversal.hpp"
 #include "runtime_paths.hpp"
 
 #include <boost/filesystem.hpp>
@@ -225,6 +226,19 @@ Err ArchiveService::resolve(const Location& location, ResolvedLocation& result, 
   return {};
 }
 
+void ArchiveService::set_cache_limits(size_t roots,uintmax_t bytes) {
+  { std::lock_guard lock(_mutex); _max_roots=roots; _max_bytes=bytes; }
+  trim_cache();
+}
+size_t ArchiveService::cached_roots() const { std::lock_guard lock(_mutex); return _cache.size(); }
+void ArchiveService::trim_cache() {
+  std::lock_guard lock(_mutex);
+  uintmax_t bytes=0; for(const auto& entry:_cache) bytes+=entry.bytes;
+  for(auto it=_cache.begin();it!=_cache.end() && (_cache.size()>_max_roots || bytes>_max_bytes);) {
+    if(it->lease.use_count()==1) {bytes-=it->bytes; it=_cache.erase(it);} else ++it;
+  }
+}
+
 void ArchiveService::set_tool_path(std::string tool_path) {
   std::lock_guard lock(_mutex);
   _tool_path = std::move(tool_path);
@@ -321,6 +335,12 @@ Err ArchiveService::extract_to_cache(const Filepath& archive_path, Filepath& ext
     return Err("archive extract failed (exit " + std::to_string(rc) + "): " + canonical_archive.native());
   }
 
+  uintmax_t extracted_bytes=0;
+  TraversalCallbacks measure;
+  measure.cancelled=[&] { return cancelled && cancelled->load(); };
+  measure.enter=[&](const TraversalEntry& e) { if(boost::filesystem::is_regular_file(e.status)) { boost::system::error_code ec; auto n=boost::filesystem::file_size(e.path,ec); if(!ec) extracted_bytes+=n; } return true; };
+  auto measured=traverse({extract_root},{},measure);
+  if(measured.cancelled || measured.truncated || measured.errors) return Err("cannot account for extracted archive within traversal budget");
   auto ownership=std::make_shared<ArchiveRoot>(extract_root);
   {
     std::lock_guard lock(_mutex);
@@ -328,13 +348,15 @@ Err ArchiveService::extract_to_cache(const Filepath& archive_path, Filepath& ext
       .lease = ownership,
       .root = extract_root,
       .canonical_archive = canonical_archive,
+      .bytes = extracted_bytes,
       .size = size,
       .mtime = mtime,
     });
   }
   cleanup.committed = true;
   extracted_root = extract_root;
-  if (lease) *lease = std::move(ownership);
+  if (lease) *lease = ownership;
+  trim_cache(); // ownership pins the root being returned, including legacy path-only callers.
   return Err();
 }
 

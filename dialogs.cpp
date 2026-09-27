@@ -1970,6 +1970,7 @@ Element JobListDialog::render_detail() {
 
   // Items section — all items shown; done items are dimmed by transform
   Elements items_section;
+  if (detail_job->_details_expired) items_section.push_back(text("Detail expired under history retention limits; summary retained."));
   if (!detail_job->_items.empty()) {
     items_section.push_back(text(std::format("  -- Items ({} total, {} remaining) --", items_total, remaining)) | bold);
     items_section.push_back(_detail_items->Render());

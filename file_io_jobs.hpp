@@ -53,6 +53,7 @@ struct JobInstructions {
   std::vector<DirItem> _errors;
   CopyConflictMode     _copy_conflict = CopyConflictMode::Replace;
 
+  size_t _error_count_total = 0;
   void report_error(DirItem item, std::string message);
 };
 struct JobStats {
@@ -81,6 +82,7 @@ struct JobStats {
 struct JobSnapshot : JobInstructions, JobStats {
   uint64_t _job_id = 0;
   int64_t _item_count = 0, _error_count = 0;
+  bool _details_expired = false;
   std::optional<DirItem> _focused_item;
   int64_t item_count() const { return _items_pending > 0 ? _items_pending : _item_count; }
   bool is_stopped() const { return _finished_time > 0; }
@@ -112,6 +114,8 @@ struct JobSpec : JobInstructions, JobStats, JobInterface {
   bool    is_stopped() const { return _stopped.load(std::memory_order_acquire); };
   std::shared_ptr<const JobSnapshot> snapshot(bool details = true);
   std::shared_ptr<const JobSnapshot> _completed_summary;
+  int64_t _retained_item_count = -1;
+  bool _details_expired = false;
 
   void _calculate_transfer_stats();
 };
@@ -143,6 +147,11 @@ struct JobEvent {
   uint64_t sequence;
   uint64_t job_id;
   bool completed;
+  bool history_expired = false;
+};
+struct JobRetention {
+  size_t history_count = 256, detail_count = 32, detail_bytes = 32 * 1024 * 1024;
+  size_t event_count = 4096, error_count = 1024, pending_count = 256;
 };
 
 // Manages a queue of file operation jobs to be performed in separate thread.
@@ -187,7 +196,7 @@ class FileJobs {
 // Cancellation before commit preserves both source and previous destination.
 bool move_by_copy(const Filepath& source, const Filepath& destination,
                   const boost::filesystem::copy_file_options& options, boost::system::error_code& ec);
-std::unique_ptr<FileJobs> make_file_jobs();
+std::unique_ptr<FileJobs> make_file_jobs(JobRetention limits = {});
 FileJobs& file_operations();
 
 }  // namespace Perun

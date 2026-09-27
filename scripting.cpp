@@ -250,6 +250,11 @@ bool LuaScripting::check_test_timeout_and_abort() {
 // --- fire_event ---
 
 void LuaScripting::fire_event(const std::string& name, const std::string& detail) {
+  while (_event_cursor>0 && !_event_log.empty()) { _event_log.pop_front(); --_event_cursor; }
+  if (_event_log.size()>=4095) {
+    while(_event_log.size()>=4094) _event_log.pop_front();
+    _event_log.push_back({"event_history_expired",now(),"resync application state"});
+  }
   _event_log.push_back({name, now(), detail});
 }
 
@@ -296,6 +301,7 @@ void LuaScripting::poll_async_events() {
 
   // Transitions are retained by the job manager even between UI frames.
   for (const auto& event : file_operations().events_since(_last_job_sequence)) {
+    if(event.history_expired) { fire_event("job_history_expired",std::to_string(event.sequence)); continue; }
     fire_event(event.completed ? "job_completed" : "job_started", std::to_string(event.job_id));
   }
   auto jobinfo = file_operations().get_running_job();
@@ -903,7 +909,8 @@ int LuaScripting::l_job_history(lua_State* L) {
   auto history = file_operations().get_job_history();
   lua_newtable(L);
   int idx = 1;
-  for (auto& job : history) {
+  for (auto& source : history) {
+    auto job=source->snapshot(false);
     lua_newtable(L);
 
     lua_pushinteger(L, static_cast<int>(job->_job_id));
@@ -937,7 +944,7 @@ int LuaScripting::l_job_history(lua_State* L) {
     lua_pushinteger(L, static_cast<int>(job->item_count()));
     lua_setfield(L, -2, "items_total");
 
-    lua_pushinteger(L, static_cast<int>(job->_errors.size()));
+    lua_pushinteger(L, static_cast<int>(job->_error_count));
     lua_setfield(L, -2, "errors");
 
     lua_pushnumber(L, job->_bytes_processed);

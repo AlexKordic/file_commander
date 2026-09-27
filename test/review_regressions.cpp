@@ -977,8 +977,39 @@ static void AR04() {
   require(scans==1 && panel.dir.items.size()==1,"ordinary watcher change forced full scan");
 }
 
+static void AR05() {
+  JobRetention limits; limits.history_count=20; limits.detail_count=0; limits.event_count=8; limits.error_count=4;
+  auto manager=make_file_jobs(limits);
+  for(int i=0;i<1000;++i) {
+    auto job=std::make_shared<JobSpec>(JobSpec::Type::DELETE,std::vector<DirItem>{});
+    job->report_error(DirItem("/synthetic","synthetic",fs::regular_file,fs::owner_all,0,1),"planned fixture failure");
+    require(manager->add_job(job)!=0,"bounded queue rejected paced job");
+    auto deadline=std::chrono::steady_clock::now()+std::chrono::seconds(2);
+    while(!manager->idle() && std::chrono::steady_clock::now()<deadline) std::this_thread::sleep_for(std::chrono::microseconds(100));
+    require(manager->idle(),"retention stress job hung");
+    manager->report_error("fixture error "+std::to_string(i));
+  }
+  auto history=manager->get_job_history(); require(history.size()==20,"history count unbounded");
+  for(auto& job:history) {auto summary=job->snapshot(); require(summary->_details_expired && summary->_items.empty() && summary->_errors.empty() && summary->_error_count==1,"detail expiry lost summary or retained detail");}
+  require(manager->get_errors(1000).size()==4,"global errors unbounded");
+  uint64_t cursor=0; auto events=manager->events_since(cursor);
+  require(events.size()==9 && events.front().history_expired && cursor==2000,"event expiry contract incorrect");
+  require(manager->events_since(cursor).empty(),"consumed events replayed");
+  for(auto& job:history) manager->dismiss_job(job->_job_id);
+  require(manager->get_job_history().empty(),"dismissal failed with retention"); manager->shutdown();
+  Fixture f; auto input=f.file("input","first"); auto archive=f.root/"version.7z";
+  ArchiveService service; service.set_cache_limits(0,0); ArchiveLease first,second; Filepath root1,root2;
+  require(service.create_archive(archive,{input},f.root).ok() && service.extract_to_cache(archive,root1,nullptr,&first).ok(),"first version failed");
+  f.file("input","second version with different length");
+  require(service.create_archive(archive,{input},f.root).ok() && service.extract_to_cache(archive,root2,nullptr,&second).ok(),"second version failed");
+  require(root1!=root2 && fs::exists(root1) && fs::exists(root2),"active version lease invalidated");
+  service.trim_cache(); require(service.cached_roots()==2,"cache evicted pinned roots");
+  first.reset(); service.trim_cache(); require(!fs::exists(root1) && fs::exists(root2),"cache did not evict only unpinned version");
+  second.reset(); service.trim_cache(); require(service.cached_roots()==0 && !fs::exists(root2),"cache budget leaked unpinned root");
+}
+
 int main(int argc, char** argv) {
-  const std::vector<std::pair<std::string, void (*)()>> tests = {{"AR04", AR04}, {"AR07", AR07}, {"AR03", AR03}, {"AR02", AR02}, {"AR01", AR01}, {"R01", R01}, {"R02", R02}, {"R03", R03}, {"R04", R04}, {"R05", R05}, {"R06", R06}, {"R07", R07}, {"R08", R08}, {"R09", R09}, {"R10", R10}, {"R11", R11}, {"R12", R12}, {"R13", R13}, {"R14", R14}, {"R15", R15}, {"R16", R16}, {"R17", R17}, {"R18", R18}, {"R19", R19}, {"R20", R20}, {"R21", R21}, {"R22", R22}, {"R23", R23}, {"R24", R24}, {"R25", R25}, {"R26", R26}, {"R27", R27}, {"R28", R28}, {"R29", R29}, {"R31", R31}, {"R35", R35}, {"R37", R37}};
+  const std::vector<std::pair<std::string, void (*)()>> tests = {{"AR05", AR05}, {"AR04", AR04}, {"AR07", AR07}, {"AR03", AR03}, {"AR02", AR02}, {"AR01", AR01}, {"R01", R01}, {"R02", R02}, {"R03", R03}, {"R04", R04}, {"R05", R05}, {"R06", R06}, {"R07", R07}, {"R08", R08}, {"R09", R09}, {"R10", R10}, {"R11", R11}, {"R12", R12}, {"R13", R13}, {"R14", R14}, {"R15", R15}, {"R16", R16}, {"R17", R17}, {"R18", R18}, {"R19", R19}, {"R20", R20}, {"R21", R21}, {"R22", R22}, {"R23", R23}, {"R24", R24}, {"R25", R25}, {"R26", R26}, {"R27", R27}, {"R28", R28}, {"R29", R29}, {"R31", R31}, {"R35", R35}, {"R37", R37}};
   try {
     bool matched = false;
     for (const auto& [id, run] : tests) {

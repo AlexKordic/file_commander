@@ -48,7 +48,8 @@ std::shared_ptr<const JobSnapshot> JobSpec::snapshot(bool details) {
   auto view = std::make_shared<JobSnapshot>();
   if (details) static_cast<JobInstructions&>(*view) = static_cast<const JobInstructions&>(*this);
   view->_type = _type; view->_copy_conflict = _copy_conflict;
-  view->_item_count = _items.size(); view->_error_count = _errors.size();
+  view->_item_count = _retained_item_count >= 0 ? _retained_item_count : _items.size(); view->_error_count = _error_count_total;
+  view->_details_expired = _details_expired;
   if (_current_item_index >= 0 && _current_item_index < _items.size()) view->_focused_item = _items[_current_item_index];
   view->_job_id = _job_id;
   view->_state = _state.load();
@@ -177,6 +178,9 @@ JobSpec::JobSpec(Type t, std::vector<DirItem> items, CopyConflictMode copy_confl
 }
 
 void JobInstructions::report_error(DirItem item, std::string message) {
+  ++_error_count_total;
+  if (_errors.size() >= 1024) return;
+  if (message.size()>65536) message.resize(65536);
   auto& inserted = _errors.emplace_back(item);
   inserted._set_warning(std::move(message));
 }
@@ -311,7 +315,8 @@ class ThreadedFileJobs : public FileJobs {
   void set_update_sink(std::function<void()> sink) override {
     std::lock_guard lock(_updates->mutex); _updates->callback = sink ? std::move(sink) : [] {};
   }
-  ThreadedFileJobs() {
+  JobRetention _limits;
+  explicit ThreadedFileJobs(JobRetention limits = {}) : _limits(limits), _queue(std::max(size_t{1},limits.pending_count)) {
     _thread = std::thread([this]() { this->run(); });
   }
   ~ThreadedFileJobs() override { shutdown(); }
@@ -333,8 +338,9 @@ class ThreadedFileJobs : public FileJobs {
     job->_job_id   = id;
     job->_queued_time = now();
     ++_outstanding;
-    if (_queue.push(std::move(job)) != FifoError::OK) {
+    if (_queue.try_push(job) != FifoError::OK) {
       --_outstanding;
+      report_error("Job queue is full or closed; submission rejected");
       return 0;
     }
     return id;
@@ -343,7 +349,9 @@ class ThreadedFileJobs : public FileJobs {
   std::vector<JobEvent> events_since(uint64_t& sequence) override {
     std::lock_guard lock(_m);
     std::vector<JobEvent> result;
-    for (const auto& event : _events) if (event.sequence > sequence) result.push_back(event);
+    if (!_events.empty() && sequence + 1 < _events.front().sequence) result.push_back({_events.front().sequence-1,0,false,true});
+    auto at=std::upper_bound(_events.begin(),_events.end(),sequence,[](uint64_t n,const JobEvent& e){return n<e.sequence;});
+    result.insert(result.end(),at,_events.end());
     if (!_events.empty()) sequence = _events.back().sequence;
     return result;
   }
@@ -400,7 +408,7 @@ class ThreadedFileJobs : public FileJobs {
 
   JobErrorInfo get_error(int64_t i) override {
     std::lock_guard lock(_m);
-    if (_errors.empty()) return JobErrorInfo();
+    if (i < 0 || i >= static_cast<int64_t>(_errors.size())) return JobErrorInfo();
     return _errors.at(i);
   }
 
@@ -427,7 +435,9 @@ class ThreadedFileJobs : public FileJobs {
       // Creating always increasing time order, giving each error unique time
       time = _errors.back().time + epsilon;
     }
+    if(message.size()>65536) message.resize(65536);
     _errors.emplace_back(std::move(message), time);
+    while(_errors.size()>_limits.error_count) _errors.pop_front();
   }
 
   void clear_errors() override {
@@ -437,6 +447,26 @@ class ThreadedFileJobs : public FileJobs {
   }
 
  private:
+  void record_event(uint64_t id,bool completed) {
+    _events.push_back({++_event_sequence,id,completed});
+    while(_events.size()>std::max(size_t{1},_limits.event_count)) _events.pop_front();
+  }
+  void retain_history() { // manager mutex held; stopped jobs only
+    while(_job_history.size()>_limits.history_count) _job_history.erase(_job_history.begin());
+    size_t bytes=0,count=0;
+    for(auto it=_job_history.rbegin();it!=_job_history.rend();++it) {
+      auto& job=**it; std::lock_guard lock(job._m);
+      job._archive_leases.clear(); // Execution is complete; details only contain display paths.
+      if(job._details_expired) continue;
+      size_t cost=(job._items.capacity()+job._errors.capacity())*sizeof(DirItem);
+      auto measure=[&](const auto& items) {for(const auto& item:items) cost+=item.path_ref().native().size()+item.filename_ref().size()+item.symlink_ref().value_or(Filepath()).native().size()+item.warning_ref().value_or("").size();};
+      measure(job._items);measure(job._errors);
+      if(++count>_limits.detail_count || cost>_limits.detail_bytes-bytes) {
+        job._retained_item_count=job._items.size(); job._details_expired=true;
+        std::vector<DirItem>().swap(job._items); std::vector<DirItem>().swap(job._errors); job._completed_summary.reset();
+      } else bytes+=cost;
+    }
+  }
   bool validate_mutation_paths(JobSpec* job) {
     for (const auto& item : job->_items) {
       std::vector<Filepath> paths;
@@ -483,7 +513,7 @@ class ThreadedFileJobs : public FileJobs {
       {
         std::lock_guard lock(_m);
         _active_job = std::move(job);
-        _events.push_back({++_event_sequence, _active_job->_job_id, false});
+        record_event(_active_job->_job_id,false);
         if (_shutdown.load()) _active_job->_cancel_requested = true;
       }
       _progress_monitor.add_job(_active_job);
@@ -511,7 +541,8 @@ class ThreadedFileJobs : public FileJobs {
       {
         std::lock_guard lock(_m);
         _job_history.push_back(_active_job);
-        _events.push_back({++_event_sequence, _active_job->_job_id, true});
+        record_event(_active_job->_job_id,true);
+        retain_history();
         --_outstanding;
       }
       _active_job->updated();
@@ -533,7 +564,7 @@ class ThreadedFileJobs : public FileJobs {
   }
 
   void run_delete(JobSpec* job) {
-    FifoQueue<DirItem>   files;
+    FifoQueue<DirItem>   files(1024);
     std::vector<DirItem> initial_items;
     {
       std::lock_guard lock(job->_m);
@@ -691,13 +722,13 @@ class ThreadedFileJobs : public FileJobs {
       if (!wait_for_resume_locked(job, lock)) {
         return;
       }
-      const auto errors_before = job->_errors.size();
+      const auto errors_before = job->_error_count_total;
       bool item_finished = true;
       bool item_skipped = false;
       Defer update_progress([&]() {
         if (!item_finished) return;
         ++job->_items_done;
-        if (job->_errors.size() > errors_before) ++job->_items_failed;
+        if (job->_error_count_total > errors_before) ++job->_items_failed;
         if (item_skipped) ++job->_items_skipped;
         ++job->_current_item_index;
       });
@@ -862,7 +893,7 @@ class ThreadedFileJobs : public FileJobs {
   std::atomic<uint64_t>                      _next_job_id{1};
   std::atomic<uint64_t> _outstanding{0};
   uint64_t _event_sequence = 0;
-  std::vector<JobEvent> _events;
+  std::deque<JobEvent> _events;
   std::vector<std::shared_ptr<JobSpec>>      _job_history;  // drained completed/paused/cancelled jobs
   std::deque<JobErrorInfo>                   _errors;
   int64_t                                    _err_last_access_index = 0;
@@ -921,7 +952,7 @@ class ThreadedFileJobs : public FileJobs {
   }
 };
 
-std::unique_ptr<FileJobs> make_file_jobs() { return std::make_unique<ThreadedFileJobs>(); }
+std::unique_ptr<FileJobs> make_file_jobs(JobRetention limits) { return std::make_unique<ThreadedFileJobs>(limits); }
 
 FileJobs& file_operations() {
   static ThreadedFileJobs jobs;

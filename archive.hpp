@@ -33,6 +33,9 @@ class ArchiveService {
   std::string tool_path() const;
   bool is_cached_path(const Filepath& path) const;
 
+  void set_cache_limits(size_t roots, uintmax_t bytes);
+  void trim_cache();
+  size_t cached_roots() const;
   Location logical_location(const Filepath&) const;
   ArchiveLease lease_for_path(const Filepath&) const;
   Err resolve(const Location&, ResolvedLocation&, std::atomic<bool>* cancelled = nullptr);
@@ -44,6 +47,7 @@ class ArchiveService {
     ArchiveLease lease;
     Filepath root;
     Filepath canonical_archive;
+    uintmax_t bytes = 0;
     uintmax_t size  = 0;
     std::time_t mtime = 0;
   };
@@ -51,6 +55,8 @@ class ArchiveService {
   mutable std::mutex    _mutex;
   std::string           _tool_path;
   std::vector<CacheEntry> _cache;
+  size_t _max_roots = 16;
+  uintmax_t _max_bytes = 256 * 1024 * 1024;
 };
 
 ArchiveService& archive_service();
