@@ -144,6 +144,10 @@ else()
   message(FATAL_ERROR "LuaJIT source not found at ${FC_LUAJIT_SOURCE_DIR}. Set FC_LUAJIT_SOURCE_DIR.")
 endif()
 
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/fc_framework.lua")
+file(READ "${CMAKE_CURRENT_SOURCE_DIR}/fc_framework.lua" FC_FRAMEWORK_SOURCE)
+configure_file(cmake/fc_framework.hpp.in "${CMAKE_CURRENT_BINARY_DIR}/generated/fc_framework.hpp" @ONLY)
+
 add_executable(fc
   main.cpp
   scripting.cpp
@@ -160,6 +164,7 @@ add_executable(fc
   archive.cpp
   runtime_paths.cpp
 )
+target_include_directories(fc PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/generated")
 if(APPLE)
   target_link_libraries(fc PRIVATE ftxui::component Boost::filesystem luajit "-framework CoreServices")
 else()
@@ -224,7 +229,7 @@ target_compile_definitions(fc PRIVATE FC_ARCHIVE_TOOL_DEFAULT="${_fc_archive_def
 get_target_property(_fc_test_sources fc SOURCES)
 list(REMOVE_ITEM _fc_test_sources main.cpp)
 add_executable(fc_review_tests EXCLUDE_FROM_ALL test/review_regressions.cpp ${_fc_test_sources})
-target_include_directories(fc_review_tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
+target_include_directories(fc_review_tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}" "${CMAKE_CURRENT_BINARY_DIR}/generated")
 get_target_property(_fc_test_libraries fc LINK_LIBRARIES)
 target_link_libraries(fc_review_tests PRIVATE ${_fc_test_libraries})
 get_target_property(_fc_test_definitions fc COMPILE_DEFINITIONS)

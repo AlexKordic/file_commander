@@ -626,15 +626,15 @@ Lua setup loads `fc_framework.lua` using a bare relative path. Running `fc run /
 
 **Fix direction:** embed the framework or install it as a runtime resource resolved relative to the executable/package. **Regression:** unpack the distribution into a temporary directory and run a trivial script from an unrelated working directory with no source checkout present.
 
-**Implementation status:** Planned.
+**Implementation status:** Applied.
 
 **Planned solution:** embed the framework or install it as a runtime resource resolved relative to the executable/package.
 
-**Applied solution:** Pending.
+**Applied solution:** CMake embeds fc_framework.lua in a generated C++ header and tracks it as a configure dependency. Lua loads the embedded buffer, so the executable carries its scripting framework into every distribution.
 
-**Plan deviations:** Pending.
+**Plan deviations:** Embedding removes the runtime resource lookup entirely; user scripts still resolve their own optional imports according to Lua rules.
 
-**Validation:** Pending.
+**Validation:** Native application/regression build and package_static_dist passed. R33 unpacked the actual tarball into a temporary directory and ran an absolute script from an unrelated working directory with no framework file; framework helpers and a normal zero exit were verified.
 
 ### R34 — Custom build rules do not depend on the source code they compile
 

@@ -1,3 +1,4 @@
+#include "fc_framework.hpp"
 #include "scripting.hpp"
 #include "app.hpp"
 
@@ -164,7 +165,7 @@ bool LuaScripting::setup(const std::string& script_path) {
 
   // 3. Load fc_framework.lua
   log("setup: loading framework");
-  if (luaL_dofile(_lua, "fc_framework.lua") != 0) {
+  if (luaL_loadbuffer(_lua, fc_lua_framework, sizeof(fc_lua_framework) - 1, "@fc_framework.lua") != 0 || lua_pcall(_lua, 0, 0, 0) != 0) {
     const char* err = lua_tostring(_lua, -1);
     std::string msg = std::string("[Lua framework] ") + (err ? err : "unknown error");
     log(msg);
