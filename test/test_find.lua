@@ -27,6 +27,7 @@ check(fc.wait_event("find_completed", 10000), "expected find completed")
 fc.key({"down", "ret"})
 check(fc.wait_event("dialog_closed", 2000), "expected find dialog to close after opening result")
 
+check(fc.wait_event("dir_changed", 2000), "expected result directory to finish loading")
 local expected_dir = src .. "/nested/deeper"
 local expected_file = expected_dir .. "/needle.txt"
 check(fc.left_path() == expected_dir, "expected left path %s, got %s", expected_dir, fc.left_path())

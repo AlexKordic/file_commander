@@ -608,15 +608,15 @@ The rebind test chooses F9, which is already assigned to JobList. Rebinding is r
 
 **Fix direction:** assert dialog identity, binding state, exact output/link contents, error state, and shell exit status. **Regression:** intentionally disable each behavior under test and confirm the corresponding test fails; add the concrete edge cases in this review.
 
-**Implementation status:** Planned.
+**Implementation status:** Applied.
 
 **Planned solution:** assert dialog identity, binding state, exact output/link contents, error state, and shell exit status.
 
-**Applied solution:** Pending.
+**Applied solution:** Integration tests now assert Copy dialog identity and saved binding state, invoke the editor through F4 with an absolute fake binary and exact file arguments, require both dangling-link outputs and target text, and verify cycle/self-copy errors. Navigation tests wait for asynchronous loading and conflict tests focus the policy control. A PTY suite runner requires a zero exit plus PASS markers and isolates fixture data/configuration.
 
-**Plan deviations:** Pending.
+**Plan deviations:** Negative controls suppress behavior at the scripting boundary or remove a just-copied fixture link instead of modifying production source. Each control must fail for its specific expected assertion. The runner retains terminal/debug logs under build/review-lua.
 
-**Validation:** Pending.
+**Validation:** All 13 original Lua integration scripts plus review_events passed, including 34 copy scenarios and the final suite marker. Five negative controls failed with the intended assertions: rejected rebinding, disabled editor action, missing absolute/relative dangling outputs and missing cycle errors.
 
 ### R33 — Script mode depends on the working directory and is absent from the distribution contract
 

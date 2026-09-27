@@ -724,6 +724,13 @@ int LuaScripting::l_state(lua_State* L) {
   lua_pushboolean(L, self->_app.single_panel_mode());
   lua_setfield(L, -2, "single_panel_mode");
 
+  lua_newtable(L);
+  for (const auto& command : commands().list_all()) {
+    lua_pushstring(L, event_to_token(command.key).c_str());
+    lua_setfield(L, -2, command.id.c_str());
+  }
+  lua_setfield(L, -2, "key_bindings");
+
   // jobs
   lua_newtable(L);
   auto jobinfo = file_operations().get_running_job();

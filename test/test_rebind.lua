@@ -13,18 +13,23 @@ h.create_file(src .. "/alpha.txt", "alpha\n")
 
 h.cd(src, dst)
 
--- Rebind copy from F5 to F9 using command palette rebind mode.
+-- Rebind copy from F5 to Ctrl+D using command palette rebind mode.
 fc.key("f1")
 check(fc.wait_event("dialog_opened", 2000), "expected command palette open")
 fc.key({"c", "o", "p", "y"})
 fc.key("cK")
-fc.key("f9")
+fc.key("cD")
 fc.key("esc")
 check(fc.wait_event("dialog_closed", 2000), "expected command palette close")
 
--- Verify new key executes copy dialog.
-fc.key("f9")
-check(fc.wait_event("dialog_opened", 2000), "expected copy dialog open on rebound f9")
+check(fc.state().key_bindings.copy == "cD", "copy binding did not change")
+fc.key("f5")
+check(fc.state().left.active_dialog == nil, "old F5 binding still opens a dialog")
+
+-- Verify new key executes the exact copy dialog.
+fc.key("cD")
+check(fc.wait_event("dialog_opened", 2000), "expected copy dialog open on rebound Ctrl+D")
+check(fc.state().left.active_dialog == "Copy", "rebound key opened the wrong dialog")
 fc.key("esc")
 check(fc.wait_event("dialog_closed", 2000), "expected copy dialog close")
 

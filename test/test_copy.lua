@@ -356,12 +356,8 @@ local function test_circular_symlinks()
   check(h.file_exists(dst .. "/normal.txt"), "11: normal file copied despite cycle")
   check(h.read_file(dst .. "/normal.txt") == "normal\n", "11: normal content matches")
 
-  -- The circular symlinks should be detected during discovery.
-  -- With default mode (preserve_relative=true, follow=false), absolute symlinks
-  -- go through resolve_symlink which detects the cycle.
-  -- Error "Cyclic symlink" should be reported in discovery.
-  -- Note: errors may or may not appear in fc.errors() depending on whether
-  -- discovery errors propagate there. They are shown as warnings in the file list.
+  check(new_errs >= 2, "11: cycles must report discovery errors")
+  check(not h.is_symlink(dst .. "/cyc_a") and not h.is_symlink(dst .. "/cyc_b"), "11: rejected cycles created outputs")
 
   h.cleanup(src, dst)
   test_pass("11_circular_symlinks")
@@ -384,6 +380,7 @@ local function test_self_referencing_symlink()
 
   -- Good file should be copied regardless of the problematic symlink
   check(h.file_exists(dst .. "/good.txt"), "12: good file copied")
+  check(new_errs >= 1 and not h.is_symlink(dst .. "/self_link"), "12: self-cycle must be reported and rejected")
 
   h.cleanup(src, dst)
   test_pass("12_self_referencing_symlink")
@@ -409,10 +406,9 @@ local function test_dangling_symlink()
   -- Good file should be copied
   check(h.file_exists(dst .. "/good.txt"), "13: good file copied")
 
-  -- Dangling symlink: behavior depends on implementation.
-  -- With preserve mode, it may be recreated as a symlink to the nonexistent target.
-  -- With follow mode, it would fail (can't read nonexistent target).
-  -- Just verify the operation completes without crashing.
+  check(new_errs == 0, "13: preserve mode reported errors")
+  check(h.is_symlink(dst .. "/dangling_link"), "13: destination dangling link is missing")
+  check(h.read_symlink(dst .. "/dangling_link") == "/nonexistent/path/file.txt", "13: dangling absolute target changed")
 
   h.cleanup(src, dst)
   test_pass("13_dangling_symlink")
@@ -785,12 +781,9 @@ local function test_dangling_relative_symlink()
 
   -- Dangling relative symlink should be preserved as-is (preserve_relative_links=true)
   -- since the target string is relative and the flag is on
-  if h.is_symlink(dst .. "/dangling_rel") then
-    check(h.read_symlink(dst .. "/dangling_rel") == "./nonexistent.txt",
-          "26: dangling relative target preserved: got %s",
-          h.read_symlink(dst .. "/dangling_rel"))
-  end
-  -- Either way, no crash
+  check(new_errs == 0, "26: preserve mode reported errors")
+  check(h.is_symlink(dst .. "/dangling_rel"), "26: destination dangling link is missing")
+  check(h.read_symlink(dst .. "/dangling_rel") == "./nonexistent.txt", "26: dangling relative target changed")
 
   h.cleanup(src, dst)
   test_pass("26_dangling_relative_symlink")
@@ -817,6 +810,10 @@ local function test_three_way_circular()
 
   -- Safe file should be copied regardless
   check(h.file_exists(dst .. "/safe.txt"), "27: safe file copied")
+  check(new_errs >= 3, "27: three-way cycle errors must be reported")
+  for _, name in ipairs({"cyc_a", "cyc_b", "cyc_c"}) do
+    check(not h.is_symlink(dst .. "/" .. name), "27: rejected cycle created output")
+  end
 
   h.cleanup(src, dst)
   test_pass("27_three_way_circular")
@@ -1138,7 +1135,7 @@ local function test_copy_dir_into_subdir_guard()
 
   -- Left panel on parent (selects src), right panel inside src subtree.
   local new_errs = run_copy_test(parent, dst)
-  check(new_errs == 0, "34: no new global errors, got %d", new_errs)
+  check(new_errs >= 1, "34: expected an explicit self-copy error")
   check(not h.dir_exists(dst .. "/src"), "34: src was not copied into its own subtree")
 
   h.cleanup(parent)

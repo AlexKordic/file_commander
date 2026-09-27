@@ -47,7 +47,7 @@ end
 
 --- Generate a unique temp directory path.
 function M.tmpdir(name)
-  return "/tmp/fc_test_" .. name .. "_" .. tostring(os.time()) .. "_" .. tostring(math.random(10000, 99999))
+  return (os.getenv("FC_TEST_TMPDIR") or "/tmp") .. "/fc_test_" .. name .. "_" .. tostring(os.time()) .. "_" .. tostring(math.random(10000, 99999))
 end
 
 --- Create a file with given content.
@@ -213,11 +213,11 @@ function M.do_copy(opts)
   end
 
   if opts.conflict_mode == "update" then
-    -- Copy dialog supports quick conflict-mode keys: 1=replace, 2=update, 3=skip.
-    fc.key("2")
+    -- Focus the conflict control before its digit shortcut: 1=replace, 2=update, 3=skip.
+    fc.key({"down", "down", "down", "2"})
     confirm_with_copy_hotkey = true
   elseif opts.conflict_mode == "skip" then
-    fc.key("3")
+    fc.key({"down", "down", "down", "3"})
     confirm_with_copy_hotkey = true
   end
 

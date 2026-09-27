@@ -34,6 +34,7 @@ fc.key("cB")
 check(fc.wait_event("dialog_opened", 2000), "expected bookmarks dialog open (second)")
 fc.key("ret")
 check(fc.wait_event("dialog_closed", 2000), "expected bookmarks dialog close after open")
+check(fc.wait_event("dir_changed", 2000), "expected bookmarked directory to load")
 check(fc.left_path() == src1, "expected left path restored from bookmark")
 h.ensure_left_focus()
 

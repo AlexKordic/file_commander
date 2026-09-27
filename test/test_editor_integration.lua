@@ -2,18 +2,14 @@
 -- Deterministic editor integration test using a fake Fresh binary.
 --
 -- Run:
--- FC_FRESH_BIN=./test/fakes/fresh_fake.sh \
+-- FC_FRESH_BIN="$PWD/test/fakes/fresh_fake.sh" \
 -- FC_FRESH_FAKE_LOG=/tmp/fc_fresh_fake.log \
 -- ./build/fc run test/test_editor_integration.lua
 
 local h = dofile("test/helpers.lua")
 
 local fake_bin = os.getenv("FC_FRESH_BIN") or ""
-if fake_bin == "" then
-  test_pass("editor_integration_skipped_no_FC_FRESH_BIN")
-  fc.quit()
-  return
-end
+check(fake_bin:sub(1, 1) == "/", "FC_FRESH_BIN must name the absolute fake Fresh path")
 
 local log_path = os.getenv("FC_FRESH_FAKE_LOG") or "/tmp/fc_fresh_fake.log"
 os.remove(log_path)
@@ -65,13 +61,15 @@ h.create_file(src .. "/b.txt", "b\n")
 h.cd(src, dst)
 h.ensure_left_focus()
 
--- Open selected files in editor (F9).
+-- Open selected files in editor (F4).
 fc.key("cA")
 check(#fc.selected() > 0, "expected selected files before opening editor")
-fc.key("f9")
+fc.key("f4")
 
 local log_txt = wait_for_log_contains("args=[--cmd][session][open-file]", 5000)
 check(log_txt:find("args=[-a][", 1, true), "expected attach command after open-file")
+check(log_txt:find("[" .. h.realpath(src .. "/a.txt") .. "]", 1, true), "editor did not receive a.txt")
+check(log_txt:find("[" .. h.realpath(src .. "/b.txt") .. "]", 1, true), "editor did not receive b.txt")
 
 local initial_lines = count_lines(log_txt)
 check(initial_lines >= 2, "expected at least open-file + attach calls")
