@@ -7,15 +7,19 @@ function M.shell_quote(value)
   return "'" .. value:gsub("'", "'\\''") .. "'"
 end
 
-function M.tree_manifest(path)
-  local python = os.getenv("FC_TEST_PYTHON") or "python3"
-  local tool = os.getenv("FC_TEST_FIXTURE_TOOL") or "test/fixture_tool.py"
-  local command = M.shell_quote(python) .. " " .. M.shell_quote(tool) .. " manifest " .. M.shell_quote(path)
+local function fixture(operation, ...)
+  local command = M.shell_quote(os.getenv("FC_TEST_PYTHON") or "python3") .. " " ..
+    M.shell_quote(os.getenv("FC_TEST_FIXTURE_TOOL") or "test/fixture_tool.py") .. " " .. operation
+  for _, value in ipairs({...}) do command = command .. " " .. M.shell_quote(value) end
   local stream = assert(io.popen(command, "r"))
   local output = stream:read("*a")
   local ok = stream:close()
-  check(ok and output:sub(1, 1) == "{", "fixture manifest failed for %s", path)
+  check(ok, "fixture %s failed", operation)
   return output
+end
+
+function M.tree_manifest(path)
+  return fixture("manifest", path)
 end
 
 function M.wait_event(name, timeout_ms, message)
@@ -96,23 +100,17 @@ end
 
 --- Check if a directory exists.
 function M.dir_exists(path)
-  local ok = os.execute("test -d '" .. path .. "'")
-  return ok == 0 or ok == true
+  return fixture("isdir", path) == "1\n"
 end
 
 --- Check if a symlink exists (does not follow the link).
 function M.symlink_exists(path)
-  local ok = os.execute("test -L '" .. path .. "'")
-  return ok == 0 or ok == true
+  return fixture("islink", path) == "1\n"
 end
 
 --- Read symlink target (returns the raw target string).
 function M.read_symlink(path)
-  local f = io.popen("readlink '" .. path .. "'")
-  if not f then return nil end
-  local target = f:read("*l")
-  f:close()
-  return target
+  return fixture("readlink", path)
 end
 
 --- Read entire file content.
@@ -135,29 +133,22 @@ end
 
 --- Count files in a directory (non-recursive, excludes . and ..).
 function M.count_items(path)
-  local count = 0
-  local f = io.popen("ls -1A '" .. path .. "' 2>/dev/null")
-  if f then
-    for _ in f:lines() do count = count + 1 end
-    f:close()
-  end
-  return count
+  return tonumber(fixture("count", path))
 end
 
 --- Create a symlink.  target is what the link points to, link_path is where the link is created.
 function M.create_symlink(target, link_path)
-  local ok = os.execute("ln -s '" .. target .. "' '" .. link_path .. "'")
-  assert(ok == 0 or ok == true, "failed to create symlink: " .. link_path .. " -> " .. target)
+  fixture("symlink", target, link_path)
 end
 
 --- Remove directory recursively.
 function M.rmdir(path)
-  os.execute("rm -rf '" .. path .. "'")
+  fixture("rmdir", path)
 end
 
 --- Create a directory (with parents).
 function M.mkdir(path)
-  os.execute("mkdir -p '" .. path .. "'")
+  fixture("mkdir", path)
 end
 
 --- Check if path is a symlink (not following).
@@ -167,11 +158,7 @@ end
 
 --- Get real/canonical path.
 function M.realpath(path)
-  local f = io.popen("realpath '" .. path .. "' 2>/dev/null")
-  if not f then return nil end
-  local result = f:read("*l")
-  f:close()
-  return result
+  return fixture("realpath", path)
 end
 
 --- Execute a copy operation in fc:

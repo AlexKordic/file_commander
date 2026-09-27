@@ -13,6 +13,9 @@ import argparse
 import os
 import uuid
 import tempfile
+import shlex
+import subprocess
+from fixture_tool import manifest as tree_manifest
 from lua_runner import run_script
 
 repo = Path(__file__).resolve().parent.parent
@@ -21,6 +24,7 @@ parser.add_argument('--binary', type=Path, default=Path(os.environ.get('FC_TEST_
 parser.add_argument('--logs', type=Path, default=repo / 'build/review-lua')
 parser.add_argument('--negative-only', action='store_true')
 parser.add_argument('--negative-controls', action='store_true')
+parser.add_argument('--retain-failures', action='store_true', help='Retain fixtures up to 16 MiB for replay')
 parser.add_argument('--case', help='Run one declared copy case')
 parser.add_argument('--negative-case', help='Run one negative control')
 parser.add_argument('--suite', help='Manifest suite ID for one replacement/negative-control script')
@@ -58,17 +62,39 @@ def run(script, name, expect_success=True, expected_error=None, suite=None):
             'FC_TEST_TMPDIR': str(fixtures),
             'FC_FRESH_FAKE_LOG': str(Path(config) / 'fresh.log'),
         })
-        result_path = Path(config) / 'results.jsonl'
-        protocol = result_path.read_bytes() if result_path.exists() else b''
-        debug_path = Path(config) / 'lua-debug.log'
-        debug = debug_path.read_text() if debug_path.exists() else ''
-    (logs / (name + '.results.jsonl')).write_bytes(protocol)
-    (logs / (name + '.log')).write_bytes(output)
-    (logs / (name + '.debug.log')).write_text(debug)
-    markers = re.findall(rb'\[PASS\] ([^\r\n\x1b]+)', output)
-    validate_result(name, rc, killed, output, debug, expected_error if not expect_success else None)
-    if expect_success:
-        validate_protocol(suite, specification, protocol)
+        def tail(path, limit=2*1024*1024):
+            if not path.exists(): return b''
+            with path.open('rb') as stream:
+                stream.seek(max(0, path.stat().st_size-limit))
+                return stream.read(limit)
+        protocol = tail(Path(config) / 'results.jsonl', 512*1024)
+        debug = tail(Path(config) / 'lua-debug.log').decode(errors='replace')
+        (logs / (name + '.results.jsonl')).write_bytes(protocol)
+        (logs / (name + '.log')).write_bytes(output)
+        (logs / (name + '.debug.log')).write_text(debug)
+        markers = re.findall(rb'\[PASS\] ([^\r\n\x1b]+)', output)
+        metadata = dict(case=name, suite=suite, returncode=rc, timed_out=killed, seconds=seconds,
+                        binary=str(args.binary.resolve()), script=str(script),
+                        revision=subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=repo, text=True).strip(),
+                        replay=shlex.join([sys.executable, str(Path(__file__).resolve()), *sys.argv[1:]]))
+        (logs / (name + '.metadata.json')).write_text(json.dumps(metadata, indent=2))
+        try:
+            validate_result(name, rc, killed, output, debug, expected_error if not expect_success else None)
+            if expect_success:
+                validate_protocol(suite, specification, protocol)
+        except Exception:
+            # Capture structure and bytes hashes before TemporaryDirectory cleans up.
+            try:
+                snapshot = tree_manifest(fixtures, max_entries=5000, max_bytes=16*1024*1024)
+            except (OSError, ValueError) as error:
+                snapshot = {'incomplete': str(error)}
+            (logs / (name + '.fixture.json')).write_text(json.dumps(snapshot, indent=2))
+            if args.retain_failures:
+                import shutil
+                total = sum(p.lstat().st_size for p in fixtures.rglob('*') if not p.is_symlink())
+                if total <= 16*1024*1024:
+                    shutil.copytree(fixtures, logs / (name + '.fixtures'), symlinks=True)
+            raise
     print(f'PASS {name}: exit={rc}, markers={len(markers)}, {seconds:.2f}s', flush=True)
 
 

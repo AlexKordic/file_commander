@@ -103,5 +103,10 @@
     "script": "test/review_events.lua",
     "cases": [],
     "completion": "review_events"
+  },
+  "test_fixture_paths": {
+    "script": "test/test_fixture_paths.lua",
+    "cases": [],
+    "completion": "fixture_paths"
   }
 }
