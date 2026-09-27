@@ -6,7 +6,7 @@
 #include "location.hpp"
 #include <memory>
 
-#include <ctime>
+#include <cstdint>
 #include <atomic>
 #include <mutex>
 #include <string>
@@ -43,13 +43,21 @@ class ArchiveService {
   Err create_archive(const Filepath& archive_path, const std::vector<Filepath>& sources, const Filepath& preferred_cwd = Filepath(), ArchiveConflict conflict = ArchiveConflict::Replace, std::atomic<bool>* cancelled = nullptr, bool* skipped = nullptr);
 
  private:
+  struct SourceIdentity {
+    uintmax_t device = 0, inode = 0, size = 0;
+    int64_t modified_seconds = 0, modified_nanoseconds = 0;
+    int64_t changed_seconds = 0, changed_nanoseconds = 0;
+    bool reusable = false;
+    bool operator==(const SourceIdentity&) const = default;
+  };
+  static Err read_source_identity(const Filepath&, SourceIdentity&);
+
   struct CacheEntry {
     ArchiveLease lease;
     Filepath root;
     Filepath canonical_archive;
     uintmax_t bytes = 0;
-    uintmax_t size  = 0;
-    std::time_t mtime = 0;
+    SourceIdentity source;
   };
 
   mutable std::mutex    _mutex;

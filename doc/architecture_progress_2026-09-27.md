@@ -15,6 +15,7 @@ Each improvement records its plan before implementation, applied changes, valida
 | 7 | [AR06](architecture_progress/AR06.md) | Separate operation services from UI | Implemented |
 | 8 | [AR08](architecture_progress/AR08.md) | Unify commands and application events | Implemented |
 | 9 | [AR09](architecture_progress/AR09.md) | Enforce module, build and test boundaries | Implemented |
+| 10 | [AR07 follow-up](architecture_progress/AR07-cache-identity.md) | Invalidate cache after same-size archive replacement | Implemented |
 
 ## Validation policy
 
@@ -22,9 +23,9 @@ Add a regression for each reproduced failure and focused contract tests for extr
 
 ## Combined validation
 
-All nine accepted improvements are implemented, with a separate verified implementation commit per improvement and the planned/applied differences above. The resulting targets and runtime contracts are described in [build boundaries](build_boundaries.md).
+All nine accepted improvements are implemented, with a separate verified implementation commit per improvement and the planned/applied differences above. A final archive-cache acceptance case has its own follow-up fix and progress record. The resulting targets and runtime contracts are described in [build boundaries](build_boundaries.md).
 
-- Native CTest: all seven suites passed, including 40 regression cases, headless services, 14 Lua scripts, five negative controls, seven process-exit cases, package execution and all three dependency rebuild checks.
+- Native CTest: all seven suites passed at AR09, including 40 regression cases, headless services, 14 Lua scripts, five negative controls, seven process-exit cases, package execution and all three dependency rebuild checks. The archive follow-up increases the native regression count to 41; its final run repeats the six runtime/package suites. The unaffected dependency-rebuild checks retain their AR09 result.
 - UBSan: headless services and all native regressions passed.
 - Core-only: configure, build and CTest passed without terminal/Lua/editor/LZMA checkouts.
 - Linux x86-64: clean cross-build produced static ELF application and core-test binaries; runtime execution was unavailable.

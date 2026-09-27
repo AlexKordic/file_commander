@@ -959,6 +959,49 @@ static void AR07() {
   require(!archive_service().resolve(missing,result).ok(),"missing archive restored successfully");
 }
 
+static void AR07_cache_identity() {
+  Fixture f;
+  // A controlled extractor exposes cache identity separately from compression.
+  auto tool = f.file("extract.sh", "#!/bin/sh\nfor arg in \"$@\"; do\n  case \"$arg\" in -o*) output=${arg#-o};; esac\n  source=$arg\ndone\ncp \"$source\" \"$output/payload\"\n");
+  fs::permissions(tool, fs::owner_all);
+  auto archive = f.file("version.7z", "FIRST");
+  fs::last_write_time(archive, 1000000000);
+  ArchiveService service;
+  service.set_tool_path(tool.native());
+  ArchiveLease first, second;
+  Filepath root1, root2, unchanged;
+  require(service.extract_to_cache(archive, root1, nullptr, &first).ok(), "initial controlled extract failed");
+  require(service.extract_to_cache(archive, unchanged).ok() && unchanged == root1, "unchanged archive missed the cache");
+  auto replacement = f.file("replacement.7z", "OTHER");
+  fs::last_write_time(replacement, fs::last_write_time(archive));
+  require(fs::file_size(replacement) == fs::file_size(archive), "replacement fixture changed size");
+  fs::rename(replacement, archive);
+  require(service.extract_to_cache(archive, root2, nullptr, &second).ok(), "replacement extraction failed");
+  require(root2 != root1 && read_file(root2 / "payload") == "OTHER", "same-size replacement with preserved mtime reused stale cache");
+  require(read_file(root1 / "payload") == "FIRST", "replacement invalidated the active old lease");
+
+  // An in-place writer retains the inode and can restore the modification time.
+  f.file("version.7z", "THIRD");
+  fs::last_write_time(archive, 1000000000);
+  Filepath root3;
+  ArchiveLease third;
+  require(service.extract_to_cache(archive, root3, nullptr, &third).ok(), "in-place replacement extraction failed");
+  require(root3 != root2 && read_file(root3 / "payload") == "THIRD", "in-place replacement with preserved mtime reused stale cache");
+  require(read_file(root2 / "payload") == "OTHER", "in-place replacement invalidated an active lease");
+
+  auto changing = f.file("changing.7z", "START");
+  auto changing_tool = f.file("changing-extract.sh", read_file(tool) +
+      "printf AFTER > \"$source\"\nprintf '%s' \"$output\" > \"$source.extract-root\"\n");
+  fs::permissions(changing_tool, fs::owner_all);
+  ArchiveService unstable;
+  unstable.set_tool_path(changing_tool.native());
+  Filepath unpublished = "unchanged";
+  require(!unstable.extract_to_cache(changing, unpublished).ok(), "changed source was published after extraction");
+  require(unpublished == Filepath("unchanged") && unstable.cached_roots() == 0, "failed extraction published cache state");
+  auto rejected_root = Filepath(read_file(Filepath(changing.native() + ".extract-root")));
+  require(!rejected_root.empty() && !fs::exists(rejected_root), "changed-source extraction leaked its temporary root");
+}
+
 static void AR04() {
   std::vector<double> times;
   for(int count:{10000,20000}) {
@@ -1067,7 +1110,7 @@ static void AR08() {
 }
 
 int main(int argc, char** argv) {
-  const std::vector<std::pair<std::string, void (*)()>> tests = {{"AR08", AR08}, {"AR06", AR06}, {"AR05", AR05}, {"AR04", AR04}, {"AR07", AR07}, {"AR03", AR03}, {"AR02", AR02}, {"AR01", AR01}, {"R01", R01}, {"R02", R02}, {"R03", R03}, {"R04", R04}, {"R05", R05}, {"R06", R06}, {"R07", R07}, {"R08", R08}, {"R09", R09}, {"R10", R10}, {"R11", R11}, {"R12", R12}, {"R13", R13}, {"R14", R14}, {"R15", R15}, {"R16", R16}, {"R17", R17}, {"R18", R18}, {"R19", R19}, {"R20", R20}, {"R21", R21}, {"R22", R22}, {"R23", R23}, {"R24", R24}, {"R25", R25}, {"R26", R26}, {"R27", R27}, {"R28", R28}, {"R29", R29}, {"R31", R31}, {"R35", R35}, {"R37", R37}};
+  const std::vector<std::pair<std::string, void (*)()>> tests = {{"AR07_cache_identity", AR07_cache_identity}, {"AR08", AR08}, {"AR06", AR06}, {"AR05", AR05}, {"AR04", AR04}, {"AR07", AR07}, {"AR03", AR03}, {"AR02", AR02}, {"AR01", AR01}, {"R01", R01}, {"R02", R02}, {"R03", R03}, {"R04", R04}, {"R05", R05}, {"R06", R06}, {"R07", R07}, {"R08", R08}, {"R09", R09}, {"R10", R10}, {"R11", R11}, {"R12", R12}, {"R13", R13}, {"R14", R14}, {"R15", R15}, {"R16", R16}, {"R17", R17}, {"R18", R18}, {"R19", R19}, {"R20", R20}, {"R21", R21}, {"R22", R22}, {"R23", R23}, {"R24", R24}, {"R25", R25}, {"R26", R26}, {"R27", R27}, {"R28", R28}, {"R29", R29}, {"R31", R31}, {"R35", R35}, {"R37", R37}};
   try {
     bool matched = false;
     for (const auto& [id, run] : tests) {

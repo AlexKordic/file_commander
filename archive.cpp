@@ -14,6 +14,7 @@
 
 #if defined(__unix__) || defined(__APPLE__)
 #include <sys/wait.h>
+#include <sys/stat.h>
 #include <unistd.h>
 #include <signal.h>
 #include <thread>
@@ -113,13 +114,6 @@ Filepath absolute_path_safe(const Filepath& path) {
   const Filepath cwd = boost::filesystem::current_path(ec);
   if (!ec.failed()) return (cwd / path).lexically_normal();
   return path.lexically_normal();
-}
-
-std::time_t file_mtime_safe(const Filepath& path) {
-  boost::system::error_code ec;
-  auto t = boost::filesystem::last_write_time(path, ec);
-  if (ec.failed()) return 0;
-  return t;
 }
 
 Filepath common_prefix_path(const std::vector<Filepath>& paths) {
@@ -269,6 +263,39 @@ std::string archive_mutation_error(const Filepath& path) {
   return {};
 }
 
+Err ArchiveService::read_source_identity(const Filepath& path, SourceIdentity& identity) {
+#if defined(__unix__) || defined(__APPLE__)
+  struct stat info {};
+  if (::stat(path.c_str(), &info) != 0)
+    return Err("cannot inspect archive: " + path.native() + ": " + boost::system::error_code(errno, boost::system::generic_category()).message());
+  if (!S_ISREG(info.st_mode)) return Err("archive must be a file: " + path.native());
+  identity.device = info.st_dev;
+  identity.inode = info.st_ino;
+  identity.size = info.st_size;
+#if defined(__APPLE__)
+  identity.modified_seconds = info.st_mtimespec.tv_sec;
+  identity.modified_nanoseconds = info.st_mtimespec.tv_nsec;
+  identity.changed_seconds = info.st_ctimespec.tv_sec;
+  identity.changed_nanoseconds = info.st_ctimespec.tv_nsec;
+#else
+  identity.modified_seconds = info.st_mtim.tv_sec;
+  identity.modified_nanoseconds = info.st_mtim.tv_nsec;
+  identity.changed_seconds = info.st_ctim.tv_sec;
+  identity.changed_nanoseconds = info.st_ctim.tv_nsec;
+#endif
+  identity.reusable = true;
+#else
+  // Retain ownership of extracted roots, but do not reuse them without a
+  // sufficiently precise source identity on this platform.
+  boost::system::error_code ec;
+  identity.size = boost::filesystem::file_size(path, ec);
+  if (ec) return Err("cannot read archive size: " + ec.message());
+  identity.modified_seconds = boost::filesystem::last_write_time(path, ec);
+  if (ec) return Err("cannot read archive modification time: " + ec.message());
+#endif
+  return Err();
+}
+
 Err ArchiveService::extract_to_cache(const Filepath& archive_path, Filepath& extracted_root, std::atomic<bool>* cancelled, ArchiveLease* lease) {
   if (!is_archive_file_path(archive_path)) return Err("unsupported archive type: " + archive_path.native());
 
@@ -285,14 +312,14 @@ Err ArchiveService::extract_to_cache(const Filepath& archive_path, Filepath& ext
   Filepath canonical_candidate = boost::filesystem::canonical(archive_abs, ec);
   if (!ec.failed()) canonical_archive = canonical_candidate;
 
-  const uintmax_t size = boost::filesystem::file_size(canonical_archive, ec);
-  if (ec.failed()) return Err("cannot read archive size: " + canonical_archive.native());
-  const std::time_t mtime = file_mtime_safe(canonical_archive);
+  SourceIdentity identity;
+  auto inspected = read_source_identity(canonical_archive, identity);
+  if (!inspected.ok()) return inspected;
 
   {
     std::lock_guard lock(_mutex);
     for (const auto& entry : _cache) {
-      if (entry.canonical_archive == canonical_archive && entry.size == size && entry.mtime == mtime && dir_exists(entry.root)) {
+      if (identity.reusable && entry.canonical_archive == canonical_archive && entry.source == identity && dir_exists(entry.root)) {
         extracted_root = entry.root;
         if (lease) *lease = entry.lease;
         return Err();
@@ -341,6 +368,10 @@ Err ArchiveService::extract_to_cache(const Filepath& archive_path, Filepath& ext
   measure.enter=[&](const TraversalEntry& e) { if(boost::filesystem::is_regular_file(e.status)) { boost::system::error_code ec; auto n=boost::filesystem::file_size(e.path,ec); if(!ec) extracted_bytes+=n; } return true; };
   auto measured=traverse({extract_root},{},measure);
   if(measured.cancelled || measured.truncated || measured.errors) return Err("cannot account for extracted archive within traversal budget");
+  SourceIdentity after;
+  inspected = read_source_identity(canonical_archive, after);
+  if (!inspected.ok()) return inspected;
+  if (after != identity) return Err("archive changed during extraction: " + canonical_archive.native());
   auto ownership=std::make_shared<ArchiveRoot>(extract_root);
   {
     std::lock_guard lock(_mutex);
@@ -349,8 +380,7 @@ Err ArchiveService::extract_to_cache(const Filepath& archive_path, Filepath& ext
       .root = extract_root,
       .canonical_archive = canonical_archive,
       .bytes = extracted_bytes,
-      .size = size,
-      .mtime = mtime,
+      .source = identity,
     });
   }
   cleanup.committed = true;
