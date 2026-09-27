@@ -87,10 +87,16 @@ add_subdirectory(boost/filesystem)
 
 add_library(fc_core STATIC
   commander.cpp operation.cpp copy_planner.cpp file_io_jobs.cpp archive.cpp location.cpp
-  traversal.cpp settings.cpp runtime_paths.cpp log.cpp err.cpp)
+  traversal.cpp settings.cpp runtime_paths.cpp scheduled_updates.cpp log.cpp err.cpp)
 target_include_directories(fc_core PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
 target_link_libraries(fc_core PUBLIC Boost::filesystem Boost::json Threads::Threads)
 if(BUILD_TESTING)
+  add_executable(fc_lifetime_tests test/lifetime_contracts.cpp)
+  target_link_libraries(fc_lifetime_tests PRIVATE fc_core)
+  foreach(_case latest mailbox queue jobs scheduler)
+    add_test(NAME fc.lifetime.${_case} COMMAND fc_lifetime_tests ${_case})
+    set_tests_properties(fc.lifetime.${_case} PROPERTIES LABELS "core;unit;lifetime" TIMEOUT 20)
+  endforeach()
   add_executable(fc_file_fault_tests test/file_faults.cpp)
   target_link_libraries(fc_file_fault_tests PRIVATE fc_core)
   foreach(_case copy settings move partial exdev)

@@ -43,6 +43,8 @@ struct Defer {
 
 double now();
 double now_ms();
+// Elapsed-time deadlines; independent of wall-clock corrections.
+double monotonic_now();
 
 std::string _trace(char const* function, char const* file, long line, char const* message);
 

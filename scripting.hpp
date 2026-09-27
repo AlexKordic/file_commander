@@ -26,40 +26,7 @@ extern "C" {
 class FileCommander;
 class Panel;
 
-// =====================================================================
-// ScheduledUpdates — general-purpose timer thread for screen refresh
-// =====================================================================
-
-class ScheduledUpdates {
-public:
-  explicit ScheduledUpdates(std::function<void()> notify = [] {}) : _notify(std::move(notify)) {}
-  ~ScheduledUpdates();  // calls stop()
-
-  void start();   // launches background thread (idempotent)
-  void stop();    // signals exit, joins thread
-
-  /// Schedule a one-shot screen update at a specific timestamp (now()-based).
-  void schedule_at(double timestamp);
-
-  /// Start periodic screen updates every interval_ms milliseconds.
-  /// Replaces any previous periodic interval. 0 = disable.
-  void start_periodic(int interval_ms);
-
-  /// Stop periodic updates (equivalent to start_periodic(0)).
-  void stop_periodic();
-
-private:
-  std::function<void()> _notify;
-  // Min-heap: soonest timestamp on top
-  std::priority_queue<double, std::vector<double>, std::greater<double>> _timers;
-  std::mutex              _mutex;
-  std::condition_variable _cv;
-  std::atomic<bool>       _running{false};
-  int                     _periodic_ms = 0;
-  std::thread             _thread;
-
-  void run();  // thread function
-};
+#include "scheduled_updates.hpp"
 
 // =====================================================================
 // LuaScripting — owns all Lua state, event log, poll state, C callbacks
@@ -162,6 +129,7 @@ private:
   static int l_wait_event(lua_State* L);
   static int l_wait_for_jobs(lua_State* L);
   static int l_sleep(lua_State* L);
+  static int l_monotonic_ms(lua_State* L);
   static int l_set_transfer_rate(lua_State* L);
   static int l_cancel_job(lua_State* L);
   static int l_pause_job(lua_State* L);

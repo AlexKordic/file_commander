@@ -4,6 +4,7 @@
 #include "log.hpp"
 
 #include <iomanip>
+#include <chrono>
 #include <iostream>
 #include <map>
 #include <mutex>
@@ -14,6 +15,10 @@
 #include <time.h>
 
 namespace Perun {
+
+double monotonic_now() {
+  return std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count();
+}
 
 double now() {
   struct timeval tv;

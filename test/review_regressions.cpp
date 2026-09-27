@@ -3,6 +3,7 @@
 #include "scripting.hpp"
 #include "ui_dispatcher.hpp"
 #include "traversal.hpp"
+#include "support/contracts.hpp"
 #include <ftxui/component/loop.hpp>
 
 #include <fstream>
@@ -869,6 +870,24 @@ static void AR01() {
   dispatcher.poster()([&] { ++delivered; }); auto late = dispatcher.poster();
   dispatcher.close(); late([&] { ++delivered; }); dispatcher.drain();
   require(delivered == 1, "closed dispatcher delivered callbacks");
+}
+
+static void TS05_archive_suspend() {
+  Fixture f; auto input=f.file("payload","archive delivery");auto archive=f.root/"fixture.7z";
+  require(archive_service().create_archive(archive,{input},f.root).ok(),"archive fixture failed");
+  test::Gate gate;UiDispatcher dispatcher;std::atomic<bool> reading=false,posted=false;
+  Panel panel(f.root,[&](Panel*){return f.root;},[&](auto task){dispatcher.poster()(std::move(task));if(reading)posted=true;},
+    [&](Dir& result,const Filepath& path,const std::atomic<bool>* cancelled){
+      if(path!=f.root){reading=true;if(!gate.arrive())return Err("archive gate timeout");}
+      return result.move_to(path,cancelled);
+    });
+  test::Gate::Release release{gate};
+  test::until([&]{dispatcher.drain();return !panel.loading();},"initial panel load");
+  dispatcher.suspend();require(panel.enter_archive(archive),"archive navigation rejected");gate.await();gate.open();
+  test::until([&]{return posted.load();},"archive result was not posted");
+  require(panel.loading()&&!dispatcher.drain(),"archive completion ran during suspension");
+  dispatcher.resume();dispatcher.drain();require(!panel.loading()&&panel.location().read_only(),"archive completion lost on resume");
+  require(test::read(panel.dir.path/"payload")=="archive delivery","archive publication wrong content");
 }
 
 static void AR02() {

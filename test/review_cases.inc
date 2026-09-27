@@ -1,3 +1,4 @@
+FC_REVIEW_CASE(TS05_archive_suspend, "suspended_archive_delivery")
 FC_REVIEW_CASE(AR07_cache_identity, "archive_cache_identity")
 FC_REVIEW_CASE(AR08, "command_routing")
 FC_REVIEW_CASE(AR06, "async_small_operations")

@@ -11,91 +11,6 @@ using namespace ftxui;
 using namespace Perun;
 
 // =====================================================================
-// ScheduledUpdates implementation
-// =====================================================================
-
-ScheduledUpdates::~ScheduledUpdates() { stop(); }
-
-void ScheduledUpdates::start() {
-  if (_running.exchange(true)) return;  // already running
-  _thread = std::thread([this]() { run(); });
-}
-
-void ScheduledUpdates::stop() {
-  if (!_running.exchange(false)) return;  // already stopped
-  _cv.notify_all();
-  if (_thread.joinable()) _thread.join();
-}
-
-void ScheduledUpdates::schedule_at(double timestamp) {
-  std::lock_guard lock(_mutex);
-  _timers.push(timestamp);
-  _cv.notify_all();
-}
-
-void ScheduledUpdates::start_periodic(int interval_ms) {
-  std::lock_guard lock(_mutex);
-  _periodic_ms = interval_ms;
-  _cv.notify_all();
-}
-
-void ScheduledUpdates::stop_periodic() {
-  start_periodic(0);
-}
-
-void ScheduledUpdates::run() {
-  while (_running) {
-    std::unique_lock lock(_mutex);
-
-    // Compute next wake time
-    double next_wake = 0;
-    bool   has_wake  = false;
-
-    // Check one-shot timers
-    if (!_timers.empty()) {
-      next_wake = _timers.top();
-      has_wake  = true;
-    }
-
-    // Check periodic interval
-    if (_periodic_ms > 0) {
-      double periodic_wake = now() + _periodic_ms / 1000.0;
-      if (!has_wake || periodic_wake < next_wake) {
-        next_wake = periodic_wake;
-      }
-      has_wake = true;
-    }
-
-    if (!has_wake) {
-      // Nothing scheduled — wait until notified
-      _cv.wait(lock, [this]() { return !_running || _periodic_ms > 0 || !_timers.empty(); });
-      continue;
-    }
-
-    if (!_running) break;
-
-    // Wait until next_wake or notification
-    double wait_seconds = next_wake - now();
-    if (wait_seconds > 0) {
-      _cv.wait_for(lock, std::chrono::duration<double>(wait_seconds));
-    }
-
-    if (!_running) break;
-
-    // Remove expired one-shot timers
-    double current = now();
-    while (!_timers.empty() && _timers.top() <= current) {
-      _timers.pop();
-    }
-
-    lock.unlock();
-
-    // Wake the FTXUI event loop
-    _notify();
-  }
-}
-
-// =====================================================================
 // LuaScripting implementation
 // =====================================================================
 
@@ -154,6 +69,7 @@ bool LuaScripting::setup(const std::string& script_path) {
   reg("wait_event",        l_wait_event);
   reg("wait_for_jobs",     l_wait_for_jobs);
   reg("sleep",             l_sleep);
+  reg("monotonic_ms",      l_monotonic_ms);
   reg("set_transfer_rate", l_set_transfer_rate);
   reg("cancel_job",        l_cancel_job);
   reg("pause_job",         l_pause_job);
@@ -231,7 +147,7 @@ void LuaScripting::tick() {
 }
 
 void LuaScripting::heartbeat_test_timeout() {
-  _test_deadline = now() + _test_timeout_window_sec;
+  _test_deadline = monotonic_now() + _test_timeout_window_sec;
   _scheduler.schedule_at(_test_deadline);
 }
 
@@ -239,7 +155,7 @@ bool LuaScripting::check_test_timeout_and_abort() {
   if (_finished) return true;
   if (_test_deadline <= 0.0) return false;
   const double deadline = _pending_wait ? std::max(_test_deadline, _pending_wait->deadline + 1.0) : _test_deadline;
-  if (now() <= deadline) return false;
+  if (monotonic_now() <= deadline) return false;
 
   std::string msg = "[Lua] FAIL: hard timeout exceeded 6s";
   log("ERROR: " + msg);
@@ -289,7 +205,7 @@ void LuaScripting::finish_script(int exit_code) {
 
 void LuaScripting::execution_hook(lua_State* L, lua_Debug*) {
   auto* self = from_lua(L);
-  if (self->_test_deadline > 0 && now() > self->_test_deadline)
+  if (self->_test_deadline > 0 && monotonic_now() > self->_test_deadline)
     luaL_error(L, "hard timeout exceeded 6s");
 }
 
@@ -346,7 +262,7 @@ void LuaScripting::check_waits() {
   }
 
   // Check deadline
-  if (now() > _pending_wait->deadline) {
+  if (monotonic_now() > _pending_wait->deadline) {
     bool was_sleep = _pending_wait->sleep_mode;
     _pending_wait.reset();
     if (was_sleep) {
@@ -720,7 +636,7 @@ int LuaScripting::l_wait_event(lua_State* L) {
   }
 
   // Not yet — set up wait and yield
-  double deadline = now() + timeout_ms / 1000.0;
+  double deadline = monotonic_now() + timeout_ms / 1000.0;
   self->_pending_wait = PendingWait{std::move(names), deadline, false, false, detail};
   self->_event_cursor = self->_event_log.size();
   self->_scheduler.schedule_at(deadline);
@@ -731,17 +647,19 @@ int LuaScripting::l_wait_event(lua_State* L) {
 int LuaScripting::l_wait_for_jobs(lua_State* L) {
   auto* self = from_lua(L);
   if (file_operations().idle()) { lua_pushboolean(L, 1); return 1; }
-  const double deadline = now() + luaL_optinteger(L, 1, 30000) / 1000.0;
+  const double deadline = monotonic_now() + luaL_optinteger(L, 1, 30000) / 1000.0;
   self->_pending_wait = PendingWait{{}, deadline, false, true};
   self->_scheduler.schedule_at(deadline);
   return lua_yield(L, 0);
 }
 
 // fc.sleep(ms)
+int LuaScripting::l_monotonic_ms(lua_State* L) { lua_pushnumber(L,monotonic_now()*1000.0); return 1; }
+
 int LuaScripting::l_sleep(lua_State* L) {
   auto* self = from_lua(L);
   int ms = (int)luaL_checknumber(L, 1);
-  double deadline = now() + ms / 1000.0;
+  double deadline = monotonic_now() + ms / 1000.0;
   self->_pending_wait = PendingWait{{}, deadline, true};
   self->_scheduler.schedule_at(deadline);
   return lua_yield(L, 0);

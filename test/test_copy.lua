@@ -31,8 +31,8 @@ local function run_copy_test(src, dst, opts)
 end
 
 local function wait_until_job_items_done(min_items_done, timeout_ms)
-  local deadline = os.clock() + ((timeout_ms or 5000) / 1000.0)
-  while os.clock() < deadline do
+  local deadline = fc.monotonic_ms() + (timeout_ms or 5000)
+  while fc.monotonic_ms() < deadline do
     local s = fc.state()
     if s.jobs.items_done >= min_items_done then
       return true
