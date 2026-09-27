@@ -59,9 +59,13 @@ def run_script(binary, script, cwd, config, timeout=45, extra_env=None,
 
     try:
         Path(config).mkdir(parents=True, exist_ok=True)
+        for name in ('home', 'data', 'cache', 'runtime'):
+            (Path(config)/name).mkdir(exist_ok=True)
         master, slave = pty.openpty()
         fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack('HHHH', 40, 140, 0, 0))
-        env = dict(os.environ, TERM='xterm-256color', XDG_CONFIG_HOME=str(config),
+        env = dict(os.environ, TERM='xterm-256color', HOME=str(Path(config)/'home'),
+                   XDG_DATA_HOME=str(Path(config)/'data'), XDG_CACHE_HOME=str(Path(config)/'cache'),
+                   XDG_RUNTIME_DIR=str(Path(config)/'runtime'), XDG_CONFIG_HOME=str(config),
                    FC_LUA_DEBUG_LOG=str(Path(config) / 'lua-debug.log'))
         env.update(extra_env or {})
         process = subprocess.Popen([*(command_prefix or []), str(Path(binary).resolve()), 'run', str(script)],

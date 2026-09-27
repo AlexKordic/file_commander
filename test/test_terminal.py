@@ -12,7 +12,7 @@ from lua_runner import run_script
 from test_results import require, validate_result
 repo = Path(__file__).resolve().parent.parent
 binary = Path(sys.argv[1] if len(sys.argv)>1 else repo/'build/fc')
-logs = repo/'build/test-logs/terminal'/uuid.uuid4().hex
+logs = Path(os.environ.get('FC_TEST_LOG_ROOT',repo/'build/test-logs'))/'terminal'/uuid.uuid4().hex
 logs.mkdir(parents=True)
 with tempfile.TemporaryDirectory(prefix='fc-terminal-') as directory:
     root=Path(directory)

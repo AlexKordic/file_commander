@@ -1,0 +1,27 @@
+{
+  "version": 3,
+  "cmakeMinimumRequired": {"major": 3, "minor": 21, "patch": 0},
+  "configurePresets": [
+    {"name": "native", "generator": "Ninja", "binaryDir": "${sourceDir}/build-native", "cacheVariables": {"CMAKE_BUILD_TYPE": "Debug", "BUILD_TESTING": "ON"}},
+    {"name": "core", "inherits": "native", "binaryDir": "${sourceDir}/build-core", "cacheVariables": {"FC_CORE_ONLY": "ON"}},
+    {"name": "asan-ubsan", "inherits": "core", "binaryDir": "${sourceDir}/build-asan-ubsan", "cacheVariables": {"CMAKE_CXX_FLAGS": "-fsanitize=address,undefined -fno-omit-frame-pointer", "CMAKE_EXE_LINKER_FLAGS": "-fsanitize=address,undefined"}},
+    {"name": "ubsan", "inherits": "core", "binaryDir": "${sourceDir}/build-ubsan", "cacheVariables": {"CMAKE_CXX_FLAGS": "-fsanitize=undefined -fno-omit-frame-pointer", "CMAKE_EXE_LINKER_FLAGS": "-fsanitize=undefined"}},
+    {"name": "tsan", "inherits": "core", "binaryDir": "${sourceDir}/build-tsan", "cacheVariables": {"CMAKE_CXX_FLAGS": "-fsanitize=thread -fno-omit-frame-pointer", "CMAKE_EXE_LINKER_FLAGS": "-fsanitize=thread"}},
+    {"name": "release", "inherits": "native", "binaryDir": "${sourceDir}/build-release", "cacheVariables": {"CMAKE_BUILD_TYPE": "Release", "FC_TEST_DEPENDENCY_REBUILDS": "ON"}}
+  ],
+  "buildPresets": [
+    {"name": "native", "configurePreset": "native", "jobs": 6},
+    {"name": "core", "configurePreset": "core", "jobs": 6},
+    {"name": "asan-ubsan", "configurePreset": "asan-ubsan", "jobs": 6},
+    {"name": "ubsan", "configurePreset": "ubsan", "jobs": 6},
+    {"name": "tsan", "configurePreset": "tsan", "jobs": 6},
+    {"name": "release", "configurePreset": "release", "jobs": 6}
+  ],
+  "testPresets": [
+    {"name": "native", "configurePreset": "native", "output": {"outputOnFailure": true}, "execution": {"jobs": 6}, "filter": {"exclude": {"label": "slow|extended|benchmark"}}},
+    {"name": "core", "configurePreset": "core", "output": {"outputOnFailure": true}, "execution": {"jobs": 6}, "filter": {"exclude": {"label": "extended|benchmark"}}},
+    {"name": "asan-ubsan", "configurePreset": "asan-ubsan", "output": {"outputOnFailure": true}, "environment": {"ASAN_OPTIONS": "halt_on_error=1", "UBSAN_OPTIONS": "halt_on_error=1:print_stacktrace=1"}, "filter": {"exclude": {"label": "extended|benchmark"}}},
+    {"name": "ubsan", "configurePreset": "ubsan", "output": {"outputOnFailure": true}, "environment": {"UBSAN_OPTIONS": "halt_on_error=1:print_stacktrace=1"}, "filter": {"exclude": {"label": "extended|benchmark"}}},
+    {"name": "tsan", "configurePreset": "tsan", "output": {"outputOnFailure": true}, "environment": {"TSAN_OPTIONS": "halt_on_error=1"}, "filter": {"include": {"label": "lifetime"}}}
+  ]
+}

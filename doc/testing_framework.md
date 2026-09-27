@@ -25,6 +25,19 @@ isProject: false
 
 # LuaJIT Testing Framework (Revised)
 
+## Current execution contract (2026-09-27)
+
+Use [CTest and the committed presets](build_test_setup.md) for automated results. Registered Lua tests declare exact case/completion IDs in `test/lua_suites.json`; `test_pass` writes a JSON-lines sidecar when the runner supplies its environment. Arbitrary `fc run script.lua` scripts remain supported without this protocol. PASS display text alone does not establish registered-suite completion.
+
+The runner owns a PTY, bounded output tail, descendant teardown, isolated HOME/config fixtures and unique logs. Failure metadata contains a replay command and pre-cleanup fixture manifest; optional retained fixtures are capped. Python runner failures remain active with `-O`. See [coverage and qualification evidence](test_suite_progress_2026-09-27.md).
+
+`ScheduledUpdates` now lives in `scheduled_updates.hpp/.cpp` in `fc_core`. It accepts an injected clock; production scheduling and Lua watchdog/sleep/event deadlines use `Perun::monotonic_now()`. Scripts can call `fc.monotonic_ms()` for elapsed deadlines. Event timestamps remain wall-clock values.
+
+Workers notify/post to the owned `UiDispatcher`, not to a terminal-owned callback. The main UI loop drains the mailbox; suspension holds completions until resume and close discards late work. Application and Lua event streams are bounded and signal expired history. The historical diagrams below illustrate coroutine sequencing; references to direct worker screen posting and the old scheduler source location are superseded by this contract.
+
+`fc.key` invokes UI events directly; it does not test byte decoding. `fc.terminal.input_resize` sends actual PTY bytes and sizes. `fc.extended.fresh_success` and `fc.extended.fresh_failure` invoke the pinned real editor and verify return input/terminal modes.
+
+
 ## 1. Same-Thread Lua Execution with Coroutines
 
 Run Lua on the main UI thread instead of a background thread. This eliminates all synchronization complexity: no promises, no futures, no data races.

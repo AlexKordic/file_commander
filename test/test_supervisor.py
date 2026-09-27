@@ -39,6 +39,15 @@ with tempfile.TemporaryDirectory(prefix='fc-supervisor-') as directory:
     result = run(noisy)
     require(result[0] == 0 and len(result[3]) <= 4096 and b'FINAL' in result[3], 'noisy output is not bounded tail')
     require(run(hang)[2], 'deadline not reported')
+    def callback_failure(master, elapsed):
+        raise RuntimeError('deliberate callback failure')
+    try:
+        run_script(hang,root/'unused',root,root/'callback-config',on_tick=callback_failure)
+    except RuntimeError as error:
+        require(str(error)=='deliberate callback failure','wrong callback error')
+    else:
+        raise RuntimeError('callback failure swallowed')
+    require(len(list(descriptors.iterdir()))==before,'callback failure leaks descriptors')
     with ThreadPoolExecutor(max_workers=4) as pool:
         results = list(pool.map(run, [quick]*8))
     require(all(r[0] == 0 and b'[PASS] quick' in r[3] for r in results), 'parallel runs interfere')

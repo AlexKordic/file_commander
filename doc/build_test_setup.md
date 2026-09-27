@@ -1,110 +1,96 @@
-# Build and Test Setup
+# Build and test setup
 
-This project is currently built and tested with Ninja in `build/`.
+Use the pinned inputs described in [build boundaries](build_boundaries.md). Full builds validate `dependencies.json`; intentional dependency development requires the explicit `FC_ALLOW_UNPINNED_DEPENDENCIES` override. C++20, Python 3.12+, Ninja and CMake 3.21+ are needed for the presets (manual CMake configuration still supports 3.19).
 
-## Configure
+## Native and headless builds
 
-Use this exact command:
+```sh
+cmake --preset native
+cmake --build --preset native
+ctest --preset native
 
-```bash
-/opt/homebrew/bin/cmake \
-  -DCMAKE_BUILD_TYPE:STRING=Debug \
-  -DPKG_CONFIG_PATH:STRING=/Users/alexkordic/compiled/lib/pkgconfig \
-  -DC_INCLUDE_PATH:STRING=${C_INCLUDE_PATH:-}:/Users/alexkordic/compiled/include \
-  -DLD_LIBRARY_PATH:STRING=/Users/alexkordic/compiled/lib \
-  -DPERPETUAL:STRING=1 \
-  -DLOAD_BALANCE:STRING=1 \
-  -DCMAKE_PREFIX_PATH:STRING=/Users/alexkordic/compiled \
-  -DCMAKE_EXPORT_COMPILE_COMMANDS:BOOL=TRUE \
-  -DCMAKE_C_COMPILER:FILEPATH=/usr/bin/clang \
-  -DCMAKE_CXX_COMPILER:FILEPATH=/usr/bin/clang++ \
-  --no-warn-unused-cli \
-  -S/Users/alexkordic/code/file_commander \
-  -B/Users/alexkordic/code/file_commander/build \
-  -G Ninja
+cmake --preset core
+cmake --build --preset core
+ctest --preset core
 ```
 
-Notes:
-- CMake is configured to use a local Boost tarball (`boost-1.90.0-cmake.tar.gz`) from the repo.
-- Generator is `Ninja`.
+`native` uses the pinned sibling dependency directories by default. Override `FC_FTXUI_SOURCE_DIR`, `FC_LUAJIT_SOURCE_DIR`, `FC_FRESH_SOURCE_DIR` and `FC_LZMA_SOURCE_DIR` at configure time for another layout. Core-only builds require repository sources and checksum-verified Boost, with no FTXUI, LuaJIT, Fresh or 7zr checkout.
 
-## Build
+For an existing build:
 
-Use 10 parallel jobs:
-
-```bash
-cmake --build /Users/alexkordic/code/file_commander/build -j10
+```sh
+cmake -S . -B build -G Ninja
+cmake --build build -j6
+ctest --test-dir build -LE 'slow|extended|benchmark' --output-on-failure -j6
+ctest --test-dir build -R 'fc.contract.locations|fc.fault.copy' --output-on-failure
+ctest --test-dir build -N
 ```
 
-The executable is generated at:
+CTest has independent native, core, command, Lua/copy, negative-control, process-exit and harness cases. Each blocking test has an external deadline. `test/review_cases.inc`, `test/command_cases.inc`, `test/lua_suites.json` and `test/negative_controls.json` are the case registries. Aggregate native and Lua smoke commands remain available.
 
-```bash
-./build/fc
+## Lanes and evidence
+
+```sh
+python3 tools/run_test_lane.py fast --build build
+python3 tools/run_test_lane.py integration --build build
+python3 tools/run_test_lane.py extended --build build
 ```
 
-## Test
+The runner writes CTest output, JUnit and platform/revision/command metadata into a unique `BUILD/test-logs/lane-*` directory. `--expect-os Linux --expect-arch x86_64` prevents a cross build or a different host from being mistaken for native qualification. Per-test logs are under `BUILD/test-logs`; package evidence is under `BUILD/dist/test-logs`.
 
-Run the copy test suite with:
+The extended lane includes resource cycles, measurement-only benchmarks, real Fresh handoff and real EXDEV. EXDEV verifies different `st_dev` values, using `FC_TEST_EXDEV_ROOT` or `/dev/shm`. On macOS, `python3 tools/test_exdev_volume.py --binary build/fc_file_fault_tests` creates and tears down a disposable APFS volume for this case. An unavailable capability reports a skip; `FC_REQUIRE_EXDEV=1` makes it fail. Resource tests check live descriptors/threads and owned history/detail/event bounds. Benchmarks report timings without percentage gates; compare results only on a named Release-build machine.
 
-```bash
-./build/fc run test/test_copy.lua
+```sh
+cmake --preset asan-ubsan
+cmake --build --preset asan-ubsan
+ctest --preset asan-ubsan
+
+cmake --preset tsan
+cmake --build --preset tsan
+ctest --preset tsan
 ```
 
-Expected success signal includes:
+ASan+UBSan and TSan are separate configurations. `ubsan` is also available. On the current macOS host, minimal programs reproduce an ASan pre-main hang and a TSan pre-main segmentation fault; these remain failed infrastructure qualification, not exemptions. See [test progress](test_suite_progress_2026-09-27.md).
 
-```text
-[PASS] ALL COPY TESTS PASSED
+## Lua cases and replay
+
+```sh
+python3 test/run_lua_suite.py --binary build/fc
+python3 test/run_lua_suite.py --binary build/fc --suite test_copy --case 1_basic_single_file test/test_copy.lua
+python3 test/run_lua_suite.py --binary build/fc --negative-case archive_payload_corrupted
+python3 test/run_lua_suite.py --binary build/fc --retain-failures test/test_archive.lua
 ```
 
-Run editor integration test with a fake Fresh binary:
+Every invocation owns a config/fixture directory and unique logs. Committed tests must emit their exact declared JSON-lines case/completion sequence, exit successfully and print a PASS marker. Python optimization cannot remove runner failures. Direct `fc run your_script.lua` remains supported for arbitrary scripts without the registered-suite protocol.
 
-```bash
-FC_FRESH_BIN=./test/fakes/fresh_fake.sh \
-FC_FRESH_FAKE_LOG=/tmp/fc_fresh_fake.log \
-./build/fc run test/test_editor_integration.lua
+Failure evidence includes bounded terminal/debug tails, protocol records, revision/replay metadata and a fixture manifest before cleanup. Optional fixture retention is capped at 16 MiB. The supervisor tracks descendant ancestry, including separate process groups; immediate double-fork daemonization before observation needs OS isolation. Lua fixtures use quoted native helper operations and binary-safe manifests, including filenames containing quotes/newlines.
+
+## Packages and release qualification
+
+```sh
+cmake --build build --target package_static_dist
+ctest --test-dir build -R '^fc.package$' --output-on-failure
 ```
 
-Run static-plan smoke tests:
+The relocated package runs from an unrelated directory with isolated HOME/XDG settings. A sandbox denies source/dependency reads: `sandbox-exec` on macOS, `bwrap` on Linux. Read probes prove the restriction. The test verifies archive contents and actual bundled helper paths, plus the real Fresh version command. Separate Fresh PTY tests cover actual attach/quit and failed invocation with restored input/modes. Missing optional helper/isolation capabilities are explicit skips.
 
-```bash
-cmake --build /Users/alexkordic/code/file_commander/build -j10 --target smoke_lua_suite
+```sh
+cmake --preset release
+cmake --build --preset release
+FC_TEST_EXDEV_ROOT=/path/on/second/filesystem \
+  python3 tools/run_test_lane.py release --build build-release --expect-os Darwin --expect-arch arm64
 ```
 
-## Packaging
+Release enables source-timestamp rebuild checks and rejects every skip, missing result or absent required capability. A macOS release runner must provision a writable second volume; a Linux runner normally uses `/dev/shm`. The slow rebuild check only touches timestamps and restores them; it runs serially with packaging. The dependency self-test mutates disposable copies, never developer checkouts.
 
-Create a self-contained distribution tarball:
+## Repository CI
 
-```bash
-cmake --build /Users/alexkordic/code/file_commander/build -j10 --target package_static_dist
-```
+`.github/workflows/tests.yml` defines native macOS arm64, Linux x86-64 and Linux arm64 jobs, plus separate native macOS/Linux sanitizer jobs. Actions are pinned to commits. It runs on pushes/manual dispatch, with extended work nightly and strict release on manual request. It does not run untrusted fork PR code on the private runners.
 
-Expected output:
-- `/Users/alexkordic/code/file_commander/build/dist/fc-Darwin-arm64.tar.gz`
-- Tarball contains `bin/fc`, `bin/fresh` (if built), and `bin/7zr` (if built).
+Provision self-hosted runners labelled `fc-pinned`, with the matching OS/architecture labels, the build tools above, a pinned-compatible Rust toolchain, Linux bubblewrap, and these environment variables:
 
-## Linux static (Zig)
+- `FC_FTXUI_MIRROR`: reachable mirror containing the exact FTXUI revision. The manifest's localhost/private URL is not a hosted-runner dependency source.
+- `FC_LZMA_SDK`: provisioned SDK 26.00 source directory, verified by the manifest fingerprint.
+- `FC_TEST_EXDEV_ROOT`: second-filesystem fixture parent when `/dev/shm` is unavailable.
 
-Requires `zig` available on `PATH`.
-
-Configure:
-
-```bash
-cmake -S /Users/alexkordic/code/file_commander \
-  -B /Users/alexkordic/code/file_commander/build-static-linux-x86_64 \
-  -G Ninja \
-  -DCMAKE_BUILD_TYPE=Release \
-  -DCMAKE_TOOLCHAIN_FILE=/Users/alexkordic/code/file_commander/cmake/toolchains/zig-musl-x86_64.cmake \
-  -DFC_STATIC_MODE=ON \
-  -DFC_BUILD_FRESH=OFF \
-  -DFC_BUILD_LZMA_TOOL=OFF
-```
-
-For ARM64 Linux, use `cmake/toolchains/zig-musl-aarch64.cmake`.
-
-## Troubleshooting
-
-If CMake reports a generator mismatch in `build/_deps/boost-subbuild`, clear only the Boost subbuild folders and re-run configure:
-
-```bash
-rm -rf build/_deps/boost-subbuild build/_deps/boost-build
-```
+`tools/bootstrap_dependencies.py --root build-ci-deps --ftxui-url "$FC_FTXUI_MIRROR" --lzma-source "$FC_LZMA_SDK"` creates isolated checkouts at the declared revisions and validates them. It refuses mismatched existing inputs instead of resetting them. CI builds from this isolated root and uploads JUnit/logs/distributions even after failures. Defining the workflow does not constitute a native Linux run; qualification status is recorded separately.

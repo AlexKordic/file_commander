@@ -2,3 +2,4 @@ build
 .cache
 boost-1.90.0-cmake.tar.gz
 build-*
+__pycache__/

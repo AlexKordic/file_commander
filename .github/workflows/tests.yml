@@ -1,0 +1,82 @@
+name: Native qualification
+'on':
+  workflow_dispatch:
+    inputs:
+      release:
+        description: Run strict release gates (requires a second filesystem)
+        type: boolean
+        default: false
+  push:
+    branches: [main, pack_release]
+  schedule:
+    - cron: '23 2 * * *'
+permissions:
+  contents: read
+jobs:
+  native:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {os: macOS, arch: ARM64, system: Darwin, machine: arm64}
+          - {os: Linux, arch: X64, system: Linux, machine: x86_64}
+          - {os: Linux, arch: ARM64, system: Linux, machine: arm64}
+    runs-on: [self-hosted, fc-pinned, '${{ matrix.os }}', '${{ matrix.arch }}']
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Provision isolated pinned sources
+        run: python3 tools/bootstrap_dependencies.py --root build-ci-deps --ftxui-url "$FC_FTXUI_MIRROR" --lzma-source "$FC_LZMA_SDK"
+      - name: Configure and build native binaries
+        shell: bash
+        run: |
+          cmake -S . -B build-ci -G Ninja -DCMAKE_BUILD_TYPE=Release -DFC_TEST_DEPENDENCY_REBUILDS=ON \
+            -DFC_FTXUI_SOURCE_DIR="$PWD/build-ci-deps/ftxui" -DFC_LUAJIT_SOURCE_DIR="$PWD/build-ci-deps/luajit" \
+            -DFC_FRESH_SOURCE_DIR="$PWD/build-ci-deps/fresh" -DFC_LZMA_SOURCE_DIR="$PWD/build-ci-deps/lzma"
+          cmake --build build-ci -j6
+      - name: Fast contracts
+        run: python3 tools/run_test_lane.py fast --build build-ci --expect-os '${{ matrix.system }}' --expect-arch '${{ matrix.machine }}'
+      - name: Native integration and relocation
+        run: python3 tools/run_test_lane.py integration --build build-ci --expect-os '${{ matrix.system }}' --expect-arch '${{ matrix.machine }}'
+      - name: Extended native tests
+        if: github.event_name == 'schedule' || inputs.release
+        run: python3 tools/run_test_lane.py extended --build build-ci --expect-os '${{ matrix.system }}' --expect-arch '${{ matrix.machine }}'
+      - name: Strict release (no skipped capabilities)
+        if: inputs.release
+        run: python3 tools/run_test_lane.py release --build build-ci --expect-os '${{ matrix.system }}' --expect-arch '${{ matrix.machine }}'
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: native-${{ matrix.system }}-${{ matrix.machine }}
+          path: |
+            build-ci/test-logs
+            build-ci/Testing
+            build-ci/dist
+  sanitizers:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macOS, Linux]
+        preset: [asan-ubsan, tsan]
+        include:
+          - {os: macOS, arch: ARM64}
+          - {os: Linux, arch: X64}
+    runs-on: [self-hosted, fc-pinned, '${{ matrix.os }}', '${{ matrix.arch }}']
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - run: cmake --preset '${{ matrix.preset }}'
+      - run: cmake --build --preset '${{ matrix.preset }}'
+      - name: Execute instrumented contracts
+        shell: bash
+        run: |
+          lane=sanitizer
+          if [ '${{ matrix.preset }}' = tsan ]; then lane=thread; fi
+          python3 tools/run_test_lane.py "$lane" --build 'build-${{ matrix.preset }}'
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: sanitizer-${{ matrix.os }}-${{ matrix.preset }}
+          path: |
+            build-${{ matrix.preset }}/test-logs
+            build-${{ matrix.preset }}/Testing
