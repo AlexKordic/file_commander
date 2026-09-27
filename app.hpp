@@ -907,32 +907,35 @@ class FileCommander : public DialogOverlay {
 
   void reset_theme_colors() { theme().reset_color_defaults(); }
 
-  bool rebind_palette_command(const std::string& id, const Event& key, std::string& error) {
-    const std::string token = event_to_token(key);
-    if (token.empty()) {
-      error = "Unsupported key for binding";
-      return false;
+  bool apply_key_bindings(const std::map<std::string, std::string>& bindings, std::string& error) {
+    error.clear();
+    auto proposed = commands().list_all();
+    for (const auto& [id, token] : bindings) {
+      auto item = std::find_if(proposed.begin(), proposed.end(), [&](const Command& command) { return command.id == id; });
+      if (item == proposed.end() || !theme_key_for_command(id)) { error = "Unknown command id: " + id; return false; }
+      auto key = event_from_string(token);
+      if (key == Event::Custom || event_to_token(key).empty()) { error = "Unsupported key for " + id + ": " + token; return false; }
+      if (key == theme().key_command_palette) { error = "Key is reserved for the command palette"; return false; }
+      item->key = key;
     }
-
-    auto available = commands().list_all();
-    for (const auto& c : available) {
-      if (c.id != id && c.key == key) {
-        error = "Key is already bound to '" + c.description + "'";
-        return false;
+    for (size_t i = 0; i < proposed.size(); ++i) {
+      for (size_t j = 0; j < i; ++j) {
+        if (proposed[i].key == proposed[j].key) {
+          error = "Key conflict between " + proposed[i].id + " and " + proposed[j].id;
+          return false;
+        }
       }
     }
-
-    Event* theme_key = theme_key_for_command(id);
-    if (!theme_key) {
-      error = "Unknown command id: " + id;
-      return false;
-    }
-    *theme_key = key;
-    if (!commands().set_key(id, key)) {
-      error = "Failed to update command binding";
-      return false;
+    // Validation is complete before either the catalog or Theme is changed.
+    for (const auto& command : proposed) {
+      *theme_key_for_command(command.id) = command.key;
+      commands().set_key(command.id, command.key);
     }
     return true;
+  }
+
+  bool rebind_palette_command(const std::string& id, const Event& key, std::string& error) {
+    return apply_key_bindings({{id, event_to_token(key)}}, error);
   }
 
   void load_settings(bool restore_paths) {
@@ -1029,12 +1032,8 @@ class FileCommander : public DialogOverlay {
     std::string key_bindings_obj;
     if (fc_settings_detail::extract_json_object(json, "key_bindings", key_bindings_obj)) {
       const auto bindings = fc_settings_detail::parse_string_map_object(key_bindings_obj);
-      for (const auto& [id, token] : bindings) {
-        Event       e = event_from_string(token);
-        std::string err;
-        if (e == Event::Custom) continue;
-        rebind_palette_command(id, e, err);
-      }
+      std::string error;
+      if (!apply_key_bindings(bindings, error)) file_operations().report_error("[Settings bindings] " + error);
     }
 
     std::string fresh_binary_path;

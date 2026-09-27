@@ -554,15 +554,15 @@ Settings restore bindings one at a time through the interactive conflict checker
 
 **Fix direction:** parse and validate the entire mapping, then apply it transactionally after clearing/replacing the old map. **Regression:** save/reload two-key swaps and larger cycles, and report invalid mappings rather than silently discarding them.
 
-**Implementation status:** Planned.
+**Implementation status:** Applied.
 
 **Planned solution:** parse and validate the entire mapping, then apply it transactionally after clearing/replacing the old map.
 
-**Applied solution:** Pending.
+**Applied solution:** Saved bindings are parsed into a complete proposed command map, validated for unknown commands, unsupported/reserved keys and collisions, then applied to Theme and the command catalog as one transaction. Loading reports validation failures instead of silently ignoring individual entries; interactive rebinding uses the same validator.
 
-**Plan deviations:** Pending.
+**Plan deviations:** Partial settings maps overlay the current mapping before whole-map validation, retaining compatibility with existing settings files. The command-palette key is explicitly reserved.
 
-**Validation:** Pending.
+**Validation:** Native build and R29 passed: saved two-key swaps and three-key cycles survived reload, while duplicate, reserved, unsupported and unknown-command mappings failed without any partial mutation.
 
 ### R30 — Lua runtime failures hang, while watchdog failures return success to the shell
 

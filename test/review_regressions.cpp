@@ -27,6 +27,16 @@ struct Fixture {
   }
 };
 
+struct EnvOverride {
+  std::string key;
+  std::optional<std::string> previous;
+  EnvOverride(std::string name, const std::string& value) : key(std::move(name)) {
+    if (auto old = std::getenv(key.c_str())) previous = old;
+    setenv(key.c_str(), value.c_str(), 1);
+  }
+  ~EnvOverride() { if (previous) setenv(key.c_str(), previous->c_str(), 1); else unsetenv(key.c_str()); }
+};
+
 struct UiQueue {
   std::mutex mutex;
   std::vector<std::function<void()>> posted;
@@ -700,8 +710,33 @@ static void R28() {
   require(manager.switch_prev(error) && manager.last_session_id() == sessions[2].id, "reverse cycle failed around dead session");
 }
 
+static void R29() {
+  Fixture f; EnvOverride config("XDG_CONFIG_HOME", f.root.string());
+  UiQueue ui;
+  FileCommander app(f.root, f.root, [&](auto work) { ui.post(std::move(work)); }, [] { return 100; });
+  ui.wait(app.get_left()); ui.wait(app.get_right());
+  std::map<std::string, std::string> original;
+  for (const auto& command : commands().list_all()) original[command.id] = event_to_token(command.key);
+  std::string error;
+  for (const auto& permutation : std::vector<std::map<std::string, std::string>>{
+      {{"copy", "f6"}, {"move", "f5"}},
+      {{"copy", "f6"}, {"move", "f8"}, {"delete", "f5"}}}) {
+    require(app.apply_key_bindings(permutation, error), "valid permutation was rejected: " + error);
+    app.save_settings();
+    require(app.apply_key_bindings(original, error), "default restoration failed");
+    app.load_settings(false);
+    for (const auto& [id, token] : permutation) require(commands().find_by_id(id)->key == event_from_string(token), "saved permutation was lost");
+    require(app.apply_key_bindings(original, error), "default restoration failed");
+  }
+  for (const auto& invalid : std::vector<std::map<std::string, std::string>>{
+      {{"copy", "f6"}}, {{"copy", "f1"}}, {{"copy", "not-a-key"}}, {{"copy", "f6"}, {"unknown", "f5"}}}) {
+    require(!app.apply_key_bindings(invalid, error) && !error.empty(), "invalid mapping was accepted");
+    for (const auto& [id, token] : original) require(commands().find_by_id(id)->key == event_from_string(token), "invalid mapping partially mutated bindings");
+  }
+}
+
 int main(int argc, char** argv) {
-  const std::vector<std::pair<std::string, void (*)()>> tests = {{"R01", R01}, {"R02", R02}, {"R03", R03}, {"R04", R04}, {"R05", R05}, {"R06", R06}, {"R07", R07}, {"R08", R08}, {"R09", R09}, {"R10", R10}, {"R11", R11}, {"R12", R12}, {"R13", R13}, {"R14", R14}, {"R15", R15}, {"R16", R16}, {"R17", R17}, {"R18", R18}, {"R19", R19}, {"R20", R20}, {"R21", R21}, {"R22", R22}, {"R23", R23}, {"R24", R24}, {"R25", R25}, {"R26", R26}, {"R27", R27}, {"R28", R28}};
+  const std::vector<std::pair<std::string, void (*)()>> tests = {{"R01", R01}, {"R02", R02}, {"R03", R03}, {"R04", R04}, {"R05", R05}, {"R06", R06}, {"R07", R07}, {"R08", R08}, {"R09", R09}, {"R10", R10}, {"R11", R11}, {"R12", R12}, {"R13", R13}, {"R14", R14}, {"R15", R15}, {"R16", R16}, {"R17", R17}, {"R18", R18}, {"R19", R19}, {"R20", R20}, {"R21", R21}, {"R22", R22}, {"R23", R23}, {"R24", R24}, {"R25", R25}, {"R26", R26}, {"R27", R27}, {"R28", R28}, {"R29", R29}};
   try {
     bool matched = false;
     for (const auto& [id, run] : tests) {
