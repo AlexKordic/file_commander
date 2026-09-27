@@ -59,6 +59,9 @@ struct JobStats {
 
   // use this index to find current item in _items vector and display file name and path
   int          _current_item_index = 0;
+  int64_t      _items_done = 0; // finalized attempts, including failed/skipped
+  int64_t      _items_failed = 0;
+  int64_t      _items_skipped = 0;
   ProgressInfo _current_item;
   ProgressInfo _total;
   int64_t      _items_pending = -1;

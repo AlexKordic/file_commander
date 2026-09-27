@@ -21,7 +21,7 @@ class ArchiveService {
   std::string tool_path() const;
 
   Err extract_to_cache(const Filepath& archive_path, Filepath& extracted_root);
-  Err create_archive(const Filepath& archive_path, const std::vector<Filepath>& sources, const Filepath& preferred_cwd = Filepath(), ArchiveConflict conflict = ArchiveConflict::Replace, std::atomic<bool>* cancelled = nullptr);
+  Err create_archive(const Filepath& archive_path, const std::vector<Filepath>& sources, const Filepath& preferred_cwd = Filepath(), ArchiveConflict conflict = ArchiveConflict::Replace, std::atomic<bool>* cancelled = nullptr, bool* skipped = nullptr);
 
  private:
   struct CacheEntry {

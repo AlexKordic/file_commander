@@ -1881,7 +1881,7 @@ JobListDialog::JobListDialog(std::function<void()> close_dialog) : Dialog(nullpt
     }
 
     std::string icon    = state_icon(state);
-    int items_done      = job->_current_item_index;
+    int items_done      = static_cast<int>(job->_items_done);
     int items_total     = static_cast<int>(job->item_count());
     int errors          = static_cast<int>(job->_errors.size());
 
@@ -1941,7 +1941,7 @@ JobListDialog::JobListDialog(std::function<void()> close_dialog) : Dialog(nullpt
   _detail_items_data_source.transform = [this](DSRenderContext& ctx) -> Element {
     if (!detail_job || ctx.id < 0 || ctx.id >= (int64_t)detail_job->_items.size()) return text("<invalid>");
     auto& item   = detail_job->_items[ctx.id];
-    bool is_done = ctx.id < detail_job->_current_item_index;
+    bool is_done = ctx.id < detail_job->_items_done;
 
     Element name;
     if (item.type() == boost::filesystem::directory_file) {
@@ -2066,7 +2066,7 @@ Element JobListDialog::render_detail() {
   case JobInstructions::Type::ARCHIVE_CREATE: type_str = "ARCHIVE"; break;
   }
 
-  int items_done  = detail_job->_current_item_index;
+  int items_done  = static_cast<int>(detail_job->_items_done);
   int items_total = static_cast<int>(detail_job->item_count());
   int errors      = static_cast<int>(detail_job->_errors.size());
   int remaining   = items_total - items_done;

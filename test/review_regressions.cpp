@@ -320,8 +320,34 @@ static void R13() {
   require(std::chrono::steady_clock::now() - start < std::chrono::seconds(2), "archive subprocess ignored cancellation");
 }
 
+static void R14() {
+  Fixture f;
+  auto source = f.file("source");
+  DirItem item(source); item._set_symlink_target(f.root / "moved");
+  auto move = std::make_shared<JobSpec>(JobSpec::Type::MOVE, std::vector<DirItem>{item});
+  wait_job(file_operations().add_job(move));
+  require(move->_items_done == 1 && move->_items_failed == 0, "move completed count wrong");
+  auto tree = f.dir("tree"); f.file("tree/child");
+  auto del = std::make_shared<JobSpec>(JobSpec::Type::DELETE, std::vector<DirItem>{DirItem(tree)});
+  wait_job(file_operations().add_job(del));
+  require(del->_items_done == 2 && del->item_count() == 2, "delete count is not finalized attempts");
+  DirItem copy(f.root / "moved"); copy._set_symlink_target(f.root / "existing"); f.file("existing");
+  auto skip = std::make_shared<JobSpec>(JobSpec::Type::COPY, std::vector<DirItem>{copy}, CopyConflictMode::Skip);
+  wait_job(file_operations().add_job(skip));
+  require(skip->_items_done == 1 && skip->_items_skipped == 1, "copy skip count wrong");
+  DirItem bad(f.root / "missing", fs::status_error, fs::no_perms);
+  auto failed = std::make_shared<JobSpec>(JobSpec::Type::COPY, std::vector<DirItem>{bad});
+  wait_job(file_operations().add_job(failed));
+  require(failed->_items_done == 1 && failed->_items_failed == 1, "copy failure count wrong");
+  auto archive_path = f.file("existing.7z", "OLD");
+  DirItem input(f.root / "moved"); input._set_symlink_target(archive_path);
+  auto arch = std::make_shared<JobSpec>(JobSpec::Type::ARCHIVE_CREATE, std::vector<DirItem>{input}, CopyConflictMode::Skip);
+  wait_job(file_operations().add_job(arch));
+  require(arch->_items_done == 1 && arch->_items_skipped == 1, "archive skip count wrong");
+}
+
 int main(int argc, char** argv) {
-  const std::vector<std::pair<std::string, void (*)()>> tests = {{"R01", R01}, {"R02", R02}, {"R03", R03}, {"R04", R04}, {"R05", R05}, {"R06", R06}, {"R07", R07}, {"R08", R08}, {"R09", R09}, {"R10", R10}, {"R11", R11}, {"R12", R12}, {"R13", R13}};
+  const std::vector<std::pair<std::string, void (*)()>> tests = {{"R01", R01}, {"R02", R02}, {"R03", R03}, {"R04", R04}, {"R05", R05}, {"R06", R06}, {"R07", R07}, {"R08", R08}, {"R09", R09}, {"R10", R10}, {"R11", R11}, {"R12", R12}, {"R13", R13}, {"R14", R14}};
   try {
     bool matched = false;
     for (const auto& [id, run] : tests) {

@@ -266,7 +266,8 @@ Err ArchiveService::extract_to_cache(const Filepath& archive_path, Filepath& ext
   return Err();
 }
 
-Err ArchiveService::create_archive(const Filepath& archive_path, const std::vector<Filepath>& sources, const Filepath& preferred_cwd, ArchiveConflict conflict, std::atomic<bool>* cancelled) {
+Err ArchiveService::create_archive(const Filepath& archive_path, const std::vector<Filepath>& sources, const Filepath& preferred_cwd, ArchiveConflict conflict, std::atomic<bool>* cancelled, bool* skipped) {
+  if (skipped) *skipped = false;
   if (!is_archive_file_path(archive_path)) return Err("unsupported archive destination: " + archive_path.native());
   if (sources.empty()) return Err("no input files selected for archive creation");
 
@@ -296,7 +297,7 @@ Err ArchiveService::create_archive(const Filepath& archive_path, const std::vect
     return Err("cannot inspect archive destination: " + ec.message());
   ec.clear();
   if (boost::filesystem::exists(destination_status)) {
-    if (conflict == ArchiveConflict::Skip) return Err();
+    if (conflict == ArchiveConflict::Skip) { if (skipped) *skipped = true; return Err(); }
     if (conflict == ArchiveConflict::Update)
       return Err("Update if newer is unavailable for archives; choose Replace or Skip");
   }
@@ -362,7 +363,7 @@ Err ArchiveService::create_archive(const Filepath& archive_path, const std::vect
     boost::filesystem::rename(staged_archive, archive_abs, ec);
   } else {
     boost::filesystem::create_hard_link(staged_archive, archive_abs, ec);
-    if (conflict == ArchiveConflict::Skip && ec == boost::system::errc::file_exists) return Err();
+    if (conflict == ArchiveConflict::Skip && ec == boost::system::errc::file_exists) { if (skipped) *skipped = true; return Err(); }
   }
   if (ec.failed()) return Err("cannot commit archive: " + ec.message());
   return Err();

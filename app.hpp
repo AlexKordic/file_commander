@@ -695,7 +695,7 @@ struct JobProgressBar {
     switch (job->_type) {
     case JobInstructions::Type::COPY: {
       if (!item.symlink_ref()) return text(task_info + " [item target missing]") | theme().progress_operation;
-      std::string total_info = std::format(" [{:3}] {:5}[{:5}] Mbps {}/{} items ", std::lround(job->_total.percentage), std::lround(job->_total.Mbps), std::lround(job->_total.average_Mbps), job->_current_item_index + 1, items_total);
+      std::string total_info = std::format(" [{:3}] {:5}[{:5}] Mbps {}/{} items ", std::lround(job->_total.percentage), std::lround(job->_total.Mbps), std::lround(job->_total.average_Mbps), job->_items_done, items_total);
       std::string curr_info  = std::format(" [{:3}] {:5}Mbps {} ", std::lround(job->_current_item.percentage), std::lround(job->_current_item.Mbps), item.path_ref().native());
       return hbox({
         text(task_info) | theme().progress_operation,
@@ -710,8 +710,8 @@ struct JobProgressBar {
     } break;
     case JobInstructions::Type::MOVE: {
       // just _current_item_index is being updated
-      float       item_percentage = std::max(0.0, std::min(100.0, job->_current_item_index * 100.0 / items_total));
-      std::string count_info      = std::format(" [{:3}] {}/{} items ", std::lround(item_percentage), std::lround(job->_current_item_index), items_total);
+      float       item_percentage = std::max(0.0, std::min(100.0, job->_items_done * 100.0 / items_total));
+      std::string count_info      = std::format(" [{:3}] {}/{} items ", std::lround(item_percentage), job->_items_done, items_total);
       return hbox({
         text(task_info) | theme().progress_operation,
         text("|"),
@@ -723,9 +723,9 @@ struct JobProgressBar {
     } break;
     case JobInstructions::Type::DELETE: {
       float       byte_percentage = std::max(0.0, std::min(100.0, 100.0 * job->_bytes_processed / job->_bytes_total));
-      float       item_percentage = std::max(0.0, std::min(100.0, job->_current_item_index * 100.0 / items_total));
+      float       item_percentage = std::max(0.0, std::min(100.0, job->_items_done * 100.0 / items_total));
       std::string byte_info       = std::format(" [{:3}] {}/{} bytes ", std::lround(byte_percentage), std::lround(job->_bytes_processed), std::lround(job->_bytes_total));
-      std::string count_info      = std::format(" [{:3}] {}/{} items ", std::lround(item_percentage), std::lround(job->_current_item_index), items_total);
+      std::string count_info      = std::format(" [{:3}] {}/{} items ", std::lround(item_percentage), job->_items_done, items_total);
       return hbox({
         text(task_info) | theme().progress_operation,
         text("|"),
@@ -738,8 +738,8 @@ struct JobProgressBar {
       });
     } break;
     case JobInstructions::Type::ARCHIVE_CREATE: {
-      float       item_percentage = std::max(0.0, std::min(100.0, items_total > 0 ? job->_current_item_index * 100.0 / items_total : 100.0));
-      std::string count_info      = std::format(" [{:3}] indexing {}/{} items ", std::lround(item_percentage), std::lround(job->_current_item_index), items_total);
+      float       item_percentage = std::max(0.0, std::min(100.0, items_total > 0 ? job->_items_done * 100.0 / items_total : 100.0));
+      std::string count_info      = std::format(" [{:3}] indexing {}/{} items ", std::lround(item_percentage), job->_items_done, items_total);
       return hbox({
         text(task_info) | theme().progress_operation,
         text("|"),

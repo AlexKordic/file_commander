@@ -306,7 +306,7 @@ void LuaScripting::poll_async_events() {
     }
     {
       std::lock_guard lock(jobinfo.job->_m);
-      current_job_items_done = jobinfo.job->_current_item_index;
+      current_job_items_done = static_cast<int>(jobinfo.job->_items_done);
     }
     _had_running_job = !jobinfo.job->is_stopped();
   } else {
@@ -769,7 +769,7 @@ int LuaScripting::l_state(lua_State* L) {
     lua_setfield(L, -2, "progress");
     lua_pushinteger(L, jobinfo.job->item_count());
     lua_setfield(L, -2, "items_total");
-    lua_pushinteger(L, jobinfo.job->_current_item_index);
+    lua_pushinteger(L, jobinfo.job->_items_done);
     lua_setfield(L, -2, "items_done");
   } else {
     lua_pushnil(L);
@@ -925,7 +925,7 @@ int LuaScripting::l_job_history(lua_State* L) {
     lua_pushstring(L, state_str);
     lua_setfield(L, -2, "state");
 
-    lua_pushinteger(L, job->_current_item_index);
+    lua_pushinteger(L, job->_items_done);
     lua_setfield(L, -2, "items_done");
 
     lua_pushinteger(L, static_cast<int>(job->item_count()));

@@ -53,6 +53,9 @@ std::shared_ptr<const JobSnapshot> JobSpec::snapshot() {
   view->_job_id = _job_id;
   view->_state = _state.load();
   view->_current_item_index = _current_item_index;
+  view->_items_done = _items_done;
+  view->_items_failed = _items_failed;
+  view->_items_skipped = _items_skipped;
   view->_current_item = _current_item;
   view->_total = _total;
   view->_items_pending = _items_pending;
@@ -234,7 +237,8 @@ struct DelayedUpdateDelete {
         job->_bytes_processed += std::max(int64_t{0}, item.size());
         job->_items.emplace_back(std::move(item));
       }
-      job->_current_item_index = job->_items.size() - 1;
+      job->_items_done = job->_items.size();
+      job->_current_item_index = static_cast<int>(job->_items_done);
     }
     items_deleted.clear();
     job->updated();
@@ -441,7 +445,7 @@ class ThreadedFileJobs : public FileJobs {
         std::lock_guard lock(_active_job->_m);
         _active_job->_finished_time = now();
         // Determine final state (if not already set by pause/cancel in future steps)
-        if (_active_job->_state != JobState::CANCELLED) {
+        if (_active_job->_state != JobState::CANCELLED && _active_job->_state != JobState::COMPLETED_WITH_ERRORS) {
           _active_job->_state = _active_job->_errors.empty()
             ? JobState::COMPLETED
             : JobState::COMPLETED_WITH_ERRORS;
@@ -523,6 +527,7 @@ class ThreadedFileJobs : public FileJobs {
         file_operations().report_error("[Delete] " + item.path_ref().native());
         std::lock_guard lock(job->_m);
         job->report_error(item, "Failed to delete file: " + ec.message());
+        ++job->_items_failed;
       }
       update.file_deleted(item, job);
     }
@@ -540,6 +545,7 @@ class ThreadedFileJobs : public FileJobs {
       if (!wait_for_resume(job)) {
         return;
       }
+      { std::lock_guard lock(job->_m); job->_current_item_index = i; }
       auto&      item = job->_items.at(i);
       error_code ec;
       boost::filesystem::rename(item.path_ref(), *item.symlink_ref(), ec);
@@ -564,13 +570,14 @@ class ThreadedFileJobs : public FileJobs {
         job->report_error(item, "Failed to move file: " + ec.message());
       }
 
-      if (update.is_time_to_update()) {
-        {
-          std::lock_guard lock(job->_m);
-          job->_current_item_index = i;
-        }
-        job->updated();
+      {
+        std::lock_guard lock(job->_m);
+        ++job->_items_done;
+        if (ec) ++job->_items_failed;
+        else job->_bytes_processed += std::max(int64_t{0}, item.size());
+        job->_current_item_index = i + 1;
       }
+      if (update.is_time_to_update()) job->updated();
     }
   }
 
@@ -612,12 +619,21 @@ class ThreadedFileJobs : public FileJobs {
     Filepath preferred_cwd = sources.front().parent_path();
     const auto conflict = job->_copy_conflict == CopyConflictMode::Skip ? ArchiveConflict::Skip
       : job->_copy_conflict == CopyConflictMode::Update ? ArchiveConflict::Update : ArchiveConflict::Replace;
-    Err err = archive_service().create_archive(archive_path, sources, preferred_cwd, conflict, &job->_cancel_requested);
+    bool skipped = false;
+    Err err = archive_service().create_archive(archive_path, sources, preferred_cwd, conflict, &job->_cancel_requested, &skipped);
     if (job->_cancel_requested.load()) { job->_state = JobState::CANCELLED; return; }
     if (!err.ok()) {
       file_operations().report_error("[Archive create] " + err.steps.front());
       std::lock_guard lock(job->_m);
       job->report_error(job->_items.front(), err.steps.front());
+    }
+    {
+      std::lock_guard lock(job->_m);
+      job->_items_done = job->_items.size();
+      job->_items_failed = err.ok() ? 0 : job->_items_done;
+      job->_items_skipped = skipped ? job->_items_done : 0;
+      job->_current_item_index = static_cast<int>(job->_items_done);
+      if (err.ok() && !skipped) job->_bytes_processed = job->_bytes_total;
     }
   }
 
@@ -633,7 +649,16 @@ class ThreadedFileJobs : public FileJobs {
       if (!wait_for_resume_locked(job, lock)) {
         return;
       }
-      Defer update_progress([&]() { job->_current_item_index++; });
+      const auto errors_before = job->_errors.size();
+      bool item_finished = true;
+      bool item_skipped = false;
+      Defer update_progress([&]() {
+        if (!item_finished) return;
+        ++job->_items_done;
+        if (job->_errors.size() > errors_before) ++job->_items_failed;
+        if (item_skipped) ++job->_items_skipped;
+        ++job->_current_item_index;
+      });
       // if type is dir path is to be mkdired
       // if type is link path is where to place link and symlink_ref is link target
       // else path is source file and symlink_ref is destination file for copy operation
@@ -688,6 +713,7 @@ class ThreadedFileJobs : public FileJobs {
         continue;
       }
       auto skip_current_file = [&]() {
+        item_skipped = true;
         job->_bytes_total = std::max(0.0, job->_bytes_total - double(std::max(int64_t{0}, item.size())));
         job->_total.update(job->_bytes_processed, job->_bytes_total);
       };
@@ -735,7 +761,8 @@ class ThreadedFileJobs : public FileJobs {
       cfo.checkpoint_context = job;
       boost::filesystem::copy_file(item.path_ref(), destination_path, cfo, ec);
       if (ec.failed() && job->_cancel_requested.load(std::memory_order_relaxed)) {
-        // Cancel during copy_file — boost already removed partial dest file.
+        item_finished = false;
+        // Cancel during copy_file — only the owned staged output is removed.
         // Don't report as an error; set CANCELLED and exit.
         lock.lock();
         job->_state = JobState::CANCELLED;

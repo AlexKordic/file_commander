@@ -284,15 +284,15 @@ Copy treats `_current_item_index` as a completed count, but delete assigns `size
 
 **Fix direction:** separate current-item index from completed/failed/skipped counts and publish final values for every operation. **Regression:** one-item and multi-item success/failure/cancel cases for all job types.
 
-**Implementation status:** Planned.
+**Implementation status:** Applied.
 
 **Planned solution:** separate current-item index from completed/failed/skipped counts and publish final values for every operation.
 
-**Applied solution:** Pending.
+**Applied solution:** Added separate finalized-attempt, failed and skipped counters while retaining the current-item index for transfer tracking. Move/delete counters now flush every completed attempt, archive counts describe the completed operation rather than input collection, and copy cancellation does not count an unfinished file. UI and Lua done values use the new count; snapshots preserve it.
 
-**Plan deviations:** Pending.
+**Plan deviations:** items_done counts all finalized outcomes (success, failure or skip), with failed/skipped exposed separately in the C++ model; successful count is their difference. This preserves useful done/total progress even when some items fail.
 
-**Validation:** Pending.
+**Validation:** Native build and accumulated R01–R14 regressions passed. R14 checks one-file move, two-entry delete, failed/skipped copy and skipped archive counts. git diff --check passed.
 
 ### R15 — Dangling and cyclic symlinks disappear from directory listings
 
