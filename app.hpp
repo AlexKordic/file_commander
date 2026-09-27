@@ -105,10 +105,7 @@ class DialogOverlay {
 // DialogOverlay supports drawing overlay dialogs on top of this Panel.
 class Panel : public DialogOverlay {
  public:
-  struct ArchiveView {
-    Filepath archive_file;
-    Filepath extracted_root;
-  };
+  using ArchiveView = ResolvedArchive;
 
   struct TabState {
     Dir         dir;
@@ -258,6 +255,8 @@ class Panel : public DialogOverlay {
     if (on_event) on_event("tab_switched", std::to_string(_active_tab));
   }
 
+  Location location() const { return archive_service().logical_location(dir.path); }
+
   void move_to(const Filepath& where, Filepath focus = {}) {
     load_directory(where, false, false, std::move(focus));
   }
@@ -278,11 +277,17 @@ class Panel : public DialogOverlay {
                     generation, result, where, archive, recover, stack, focus, background_refresh](const LatestWork::Token& cancelled) mutable {
       Err error;
       try {
+        if (where.native().rfind("fc-archive:",0)==0) {
+          ResolvedLocation resolved;
+          error=archive_service().resolve(Location::decode(where.native()),resolved,cancelled.get());
+          if (error.ok()) { where=resolved.path; stack=std::move(resolved.archives); }
+        }
         if (archive) {
           Filepath extracted;
-          error = archive_service().extract_to_cache(where, extracted, cancelled.get());
+          ArchiveLease lease;
+          error = archive_service().extract_to_cache(where, extracted, cancelled.get(), &lease);
           if (error.ok()) {
-            stack.push_back(ArchiveView{where.lexically_normal(), extracted.lexically_normal()});
+            stack.push_back(ArchiveView{where.lexically_normal(), extracted.lexically_normal(), std::move(lease)});
             where = extracted;
           }
         }
@@ -324,6 +329,7 @@ class Panel : public DialogOverlay {
         }
         _archive_stack = stack;
         _prune_archive_stack(where);
+        dir.path_txt = location().display();
         _restore_focus_after_update(old_focus, old_index);
         start_watcher(where);
         sync_active_tab_state();
@@ -657,7 +663,7 @@ class FileCommander : public DialogOverlay {
   Panel              left, right;
   JobProgressBar     progress_bar;
   std::deque<double> clear_errors_sequence;
-  std::vector<Filepath> _bookmarks;
+  std::vector<Location> _bookmarks;
   bool _last_main_focus_left = true;
   bool _single_panel_mode = false;
   EditorManager _editor_manager;
@@ -815,7 +821,7 @@ class FileCommander : public DialogOverlay {
       if (restore_paths) {
         auto navigate = [](Panel& panel, const std::string& path) {
           boost::system::error_code ec;
-          if (!path.empty() && boost::filesystem::is_directory(path,ec) && !ec) panel.move_to(path);
+          if (!path.empty() && (Location::decode(path).read_only() || (boost::filesystem::is_directory(path,ec) && !ec))) panel.move_to(path);
         };
         navigate(left,s.left.path); navigate(right,s.right.path);
       }
@@ -827,11 +833,11 @@ class FileCommander : public DialogOverlay {
       AppSettings s;
       auto capture = [](const Panel& panel) {
         auto state = panel.get_shared_state();
-        return PanelSettings{panel.dir.path.native(), panel.dir.order_by, state->show_permissions_column, state->show_owner_group_column};
+        return PanelSettings{panel.location().encode(), panel.dir.order_by, state->show_permissions_column, state->show_owner_group_column};
       };
       s.left = capture(left); s.right = capture(right);
       s.single_panel = _single_panel_mode; s.focused_panel = _last_main_focus_left ? "left" : "right";
-      for (const auto& p : _bookmarks) s.bookmarks.push_back(p.native());
+      for (const auto& p : _bookmarks) s.bookmarks.push_back(p.encode());
       for (const auto& command : commands().list_all()) {
         s.command_use_count[command.id] = std::max(0,command.use_count);
         s.key_bindings[command.id] = event_to_token(command.key);
@@ -843,21 +849,19 @@ class FileCommander : public DialogOverlay {
   }
 
   std::vector<Filepath> list_bookmarks() const {
-    return _bookmarks;
+    std::vector<Filepath> paths; for (const auto& p:_bookmarks) paths.emplace_back(p.encode()); return paths;
   }
-
   void add_bookmark(const Filepath& path) {
-    Filepath normalized = path.lexically_normal();
-    auto it = std::find(_bookmarks.begin(), _bookmarks.end(), normalized);
-    if (it == _bookmarks.end()) {
-      _bookmarks.push_back(normalized);
-      std::sort(_bookmarks.begin(), _bookmarks.end(), [](const Filepath& a, const Filepath& b) { return a.native() < b.native(); });
+    auto location=Location::decode(path.native());
+    if (!location.read_only()) location=archive_service().logical_location(location.local);
+    if (std::find(_bookmarks.begin(),_bookmarks.end(),location)==_bookmarks.end()) {
+      _bookmarks.push_back(std::move(location));
+      std::sort(_bookmarks.begin(),_bookmarks.end(),[](const auto& a,const auto& b){return a.display()<b.display();});
     }
   }
-
   void remove_bookmark(const Filepath& path) {
-    Filepath normalized = path.lexically_normal();
-    _bookmarks.erase(std::remove(_bookmarks.begin(), _bookmarks.end(), normalized), _bookmarks.end());
+    auto location=Location::decode(path.native());
+    _bookmarks.erase(std::remove(_bookmarks.begin(),_bookmarks.end(),location),_bookmarks.end());
   }
 
   void open_bookmark(const Filepath& path) {

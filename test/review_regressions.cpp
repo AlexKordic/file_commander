@@ -913,8 +913,45 @@ static void AR03() {
   wait_job(file_operations().add_job(job)); require(!fs::exists(root) && fs::exists(dst),"delete followed links or failed postorder");
 }
 
+static void AR07() {
+  Fixture f; EnvOverride config("XDG_CONFIG_HOME",f.dir("config").native());
+  auto input=f.file("inputs/sub/file.txt","original"); auto inner=f.root/"inner.7z", outer=f.root/"outer.7z";
+  require(archive_service().create_archive(inner,{input.parent_path()},input.parent_path().parent_path()).ok(),"inner archive creation failed");
+  require(archive_service().create_archive(outer,{inner},f.root).ok(),"outer archive creation failed");
+  UiQueue ui; std::string identity; std::vector<Filepath> roots;
+  {
+    FileCommander app(f.root,f.root,[&](auto fn){ui.post(std::move(fn));},[]{return 100;});
+    auto& panel=app.get_left(); ui.wait(panel); ui.wait(app.get_right());
+    panel.enter_archive(outer); ui.wait(panel); roots.push_back(panel.dir.path);
+    panel.enter_archive(panel.dir.path/"inner.7z"); ui.wait(panel); roots.push_back(panel.dir.path);
+    panel.move_to(panel.dir.path/"sub"); ui.wait(panel);
+    identity=panel.location().encode(); require(Location::decode(identity).archives.size()==2,"nested identity lost: "+identity+" physical="+panel.dir.path.native());
+    app.add_bookmark(panel.dir.path); app.save_settings();
+    auto json=read_file(SettingsStore::path());
+    require(json.find("extract-")==std::string::npos && json.find("outer.7z")!=std::string::npos,"settings persisted physical cache");
+  }
+  for(const auto& root:roots) fs::remove_all(root); // Simulate cache loss between sessions.
+  {
+    FileCommander restored(f.root,f.root,[&](auto fn){ui.post(std::move(fn));},[]{return 100;},{},true);
+    restored.load_settings(true); restored.start_initial_navigation(); ui.wait(restored.get_left()); ui.wait(restored.get_right());
+    require(restored.get_left().location().encode()==identity,"archive location failed to restore");
+    require(read_file(restored.get_left().dir.path/"file.txt")=="original","restored archive has wrong content");
+    auto bookmarks=restored.list_bookmarks(); require(bookmarks.size()==1 && bookmarks.front().native()==identity,"archive bookmark was lost");
+    restored.get_left().move_to(f.root); ui.wait(restored.get_left()); restored.get_left().navigation->TakeFocus();
+    restored.open_bookmark(bookmarks.front()); ui.wait(restored.get_left());
+    require(restored.get_left().location().encode()==identity,"bookmark failed to reopen");
+  }
+  ArchiveLease lease; Filepath retained;
+  { ArchiveService service; require(service.extract_to_cache(inner,retained,nullptr,&lease).ok(),"leased extract failed"); }
+  require(fs::exists(retained),"service destruction invalidated active lease"); lease.reset(); require(!fs::exists(retained),"unowned archive root leaked");
+  bool rejected=false; try {Location::decode("fc-archive:%2Ftmp%2Fa.7z!%2E%2E%2Fescape");} catch(...) {rejected=true;}
+  require(rejected,"location accepted parent escape");
+  ResolvedLocation result; auto missing=Location::decode(identity); missing.archives[0]=f.root/"missing.7z";
+  require(!archive_service().resolve(missing,result).ok(),"missing archive restored successfully");
+}
+
 int main(int argc, char** argv) {
-  const std::vector<std::pair<std::string, void (*)()>> tests = {{"AR03", AR03}, {"AR02", AR02}, {"AR01", AR01}, {"R01", R01}, {"R02", R02}, {"R03", R03}, {"R04", R04}, {"R05", R05}, {"R06", R06}, {"R07", R07}, {"R08", R08}, {"R09", R09}, {"R10", R10}, {"R11", R11}, {"R12", R12}, {"R13", R13}, {"R14", R14}, {"R15", R15}, {"R16", R16}, {"R17", R17}, {"R18", R18}, {"R19", R19}, {"R20", R20}, {"R21", R21}, {"R22", R22}, {"R23", R23}, {"R24", R24}, {"R25", R25}, {"R26", R26}, {"R27", R27}, {"R28", R28}, {"R29", R29}, {"R31", R31}, {"R35", R35}, {"R37", R37}};
+  const std::vector<std::pair<std::string, void (*)()>> tests = {{"AR07", AR07}, {"AR03", AR03}, {"AR02", AR02}, {"AR01", AR01}, {"R01", R01}, {"R02", R02}, {"R03", R03}, {"R04", R04}, {"R05", R05}, {"R06", R06}, {"R07", R07}, {"R08", R08}, {"R09", R09}, {"R10", R10}, {"R11", R11}, {"R12", R12}, {"R13", R13}, {"R14", R14}, {"R15", R15}, {"R16", R16}, {"R17", R17}, {"R18", R18}, {"R19", R19}, {"R20", R20}, {"R21", R21}, {"R22", R22}, {"R23", R23}, {"R24", R24}, {"R25", R25}, {"R26", R26}, {"R27", R27}, {"R28", R28}, {"R29", R29}, {"R31", R31}, {"R35", R35}, {"R37", R37}};
   try {
     bool matched = false;
     for (const auto& [id, run] : tests) {

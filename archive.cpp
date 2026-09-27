@@ -181,13 +181,48 @@ bool path_is_under(const Filepath& parent, const Filepath& child) {
   return child_text.rfind(prefix, 0) == 0;
 }
 
-ArchiveService::~ArchiveService() {
-  // Roots are uniquely created and owned by this service. Keep old versions
-  // alive until shutdown so panels and copy-out jobs can retain their paths.
-  for (const auto& entry : _cache) {
-    boost::system::error_code ec;
-    boost::filesystem::remove_all(entry.root, ec);
+ArchiveRoot::~ArchiveRoot() {
+  boost::system::error_code ec; boost::filesystem::remove_all(root,ec);
+}
+ArchiveService::~ArchiveService() = default;
+
+ArchiveLease ArchiveService::lease_for_path(const Filepath& path) const {
+  std::lock_guard lock(_mutex);
+  for (const auto& entry:_cache) if (path_is_under(entry.root,path)) return entry.lease;
+  return {};
+}
+Location ArchiveService::logical_location(const Filepath& path) const {
+  Filepath archive, internal;
+  {
+    std::lock_guard lock(_mutex);
+    for (const auto& entry:_cache) if (path_is_under(entry.root,path)) {
+      archive=entry.canonical_archive; internal=path.lexically_relative(entry.root); break;
+    }
   }
+  if (archive.empty()) return Location{path.lexically_normal(),{}, {}};
+  auto location=logical_location(archive);
+  location.archives.push_back(location.read_only()?location.internal:location.local);
+  location.local.clear(); location.internal=internal; return location;
+}
+Err ArchiveService::resolve(const Location& location, ResolvedLocation& result, std::atomic<bool>* cancelled) {
+  if (!location.read_only()) { result.path=location.local; return {}; }
+  Filepath root;
+  for (const auto& part:location.archives) {
+    auto archive=root.empty()?part:root/part;
+    if (!root.empty()) {
+      boost::system::error_code ec;
+      auto actual=boost::filesystem::canonical(archive,ec);
+      if (ec || !path_is_under(root,actual)) return Err("Nested archive is missing or escapes its root");
+    }
+    ArchiveLease lease;
+    auto error=extract_to_cache(archive,root,cancelled,&lease); if (!error.ok()) return error;
+    result.archives.push_back({archive,root,std::move(lease)});
+  }
+  result.path=(root/location.internal).lexically_normal();
+  boost::system::error_code ec;
+  auto actual=boost::filesystem::canonical(result.path,ec);
+  if (ec || !path_is_under(root,actual)) return Err("Archive location is missing or escapes the extraction root");
+  return {};
 }
 
 void ArchiveService::set_tool_path(std::string tool_path) {
@@ -220,7 +255,7 @@ std::string archive_mutation_error(const Filepath& path) {
   return {};
 }
 
-Err ArchiveService::extract_to_cache(const Filepath& archive_path, Filepath& extracted_root, std::atomic<bool>* cancelled) {
+Err ArchiveService::extract_to_cache(const Filepath& archive_path, Filepath& extracted_root, std::atomic<bool>* cancelled, ArchiveLease* lease) {
   if (!is_archive_file_path(archive_path)) return Err("unsupported archive type: " + archive_path.native());
 
   const Filepath archive_abs = absolute_path_safe(archive_path);
@@ -245,6 +280,7 @@ Err ArchiveService::extract_to_cache(const Filepath& archive_path, Filepath& ext
     for (const auto& entry : _cache) {
       if (entry.canonical_archive == canonical_archive && entry.size == size && entry.mtime == mtime && dir_exists(entry.root)) {
         extracted_root = entry.root;
+        if (lease) *lease = entry.lease;
         return Err();
       }
     }
@@ -253,6 +289,8 @@ Err ArchiveService::extract_to_cache(const Filepath& archive_path, Filepath& ext
   boost::system::error_code tmp_ec;
   Filepath cache_base = boost::filesystem::temp_directory_path(tmp_ec);
   if (tmp_ec.failed()) cache_base = Filepath("/tmp");
+  cache_base = boost::filesystem::weakly_canonical(cache_base, tmp_ec);
+  if (tmp_ec) return Err("cannot resolve temporary directory");
   cache_base /= "file_commander_archive_cache";
   boost::filesystem::create_directories(cache_base, tmp_ec);
   if (tmp_ec.failed()) return Err("cannot create archive cache dir: " + cache_base.native());
@@ -283,9 +321,11 @@ Err ArchiveService::extract_to_cache(const Filepath& archive_path, Filepath& ext
     return Err("archive extract failed (exit " + std::to_string(rc) + "): " + canonical_archive.native());
   }
 
+  auto ownership=std::make_shared<ArchiveRoot>(extract_root);
   {
     std::lock_guard lock(_mutex);
     _cache.push_back(CacheEntry{
+      .lease = ownership,
       .root = extract_root,
       .canonical_archive = canonical_archive,
       .size = size,
@@ -294,6 +334,7 @@ Err ArchiveService::extract_to_cache(const Filepath& archive_path, Filepath& ext
   }
   cleanup.committed = true;
   extracted_root = extract_root;
+  if (lease) *lease = std::move(ownership);
   return Err();
 }
 

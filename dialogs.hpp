@@ -2,6 +2,7 @@
 #define _PERUN_FC_DIALOGS_
 
 #include "commander.hpp"
+#include "archive.hpp"
 #include "file_io_jobs.hpp"
 #include "shared_state.hpp"
 
@@ -189,6 +190,7 @@ struct CopyDiscoveryProcess {
 
   PanelSharedState::P  _state;
   std::unique_ptr<Dir> _dir;
+  std::vector<ArchiveLease> _archive_leases;
   std::shared_ptr<CommandArgs> _input_paths;
   Filepath                     _target;
   std::thread                  _thread;

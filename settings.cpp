@@ -1,4 +1,5 @@
 #include "settings.hpp"
+#include "location.hpp"
 #include <boost/json.hpp>
 #include <fstream>
 #include <limits>
@@ -65,6 +66,8 @@ std::optional<AppSettings> SettingsStore::load(const Filepath& path) {
     auto n=kv.value().as_int64(); if (n<0 || n>std::numeric_limits<int>::max()) throw std::runtime_error("invalid command use count");
     s.command_use_count[std::string(kv.key())]=static_cast<int>(n);
   }
+  Location::decode(s.left.path); Location::decode(s.right.path);
+  for (const auto& bookmark:s.bookmarks) Location::decode(bookmark);
   return s;
 }
 void SettingsStore::save(const Filepath& path, const AppSettings& s) {

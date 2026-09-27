@@ -162,6 +162,7 @@ class ProgressMonitor {
 };
 
 JobSpec::JobSpec(Type t, std::vector<DirItem> items, CopyConflictMode copy_conflict) {
+  for (const auto& item:items) if (auto lease=archive_service().lease_for_path(item.path_ref())) _archive_leases.push_back(std::move(lease));
   _type          = t;
   _items         = std::move(items);
   _copy_conflict = copy_conflict;

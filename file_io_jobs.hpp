@@ -2,6 +2,7 @@
 #define _PERUN_FILE_IO_H_
 
 #include "commander.hpp"
+#include "archive.hpp"
 #include "fifo_queue.hpp"
 
 #include <ftxui/component/component_options.hpp>
@@ -94,6 +95,7 @@ struct JobInterface {
 // Specifies single operation to be performed on a set of files.
 // Operation steps are defined in advance and FileJobs will execute them in order
 struct JobSpec : JobInstructions, JobStats, JobInterface {
+  std::vector<ArchiveLease> _archive_leases;
   uint64_t           _job_id = 0;
   std::atomic<bool>  _cancel_requested{false};
   std::atomic<uint64_t> _copy_bytes{0};

@@ -950,6 +950,7 @@ CopyDiscoveryProcess::CopyDiscoveryProcess(CopyDialog* parent, Filepath target) 
   _notify = parent->app->notify;
   _sequence_id             = g_copy_discovery_sequence.fetch_add(1, std::memory_order_relaxed);
   _input_paths             = std::make_shared<CommandArgs>(*parent->app->action.arguments);
+  for (const auto& p:_input_paths->selected) if (auto lease=archive_service().lease_for_path(p)) _archive_leases.push_back(std::move(lease));
   _target                  = target;
   _follow_links            = parent->b_follow_links;
   _preserve_relative_links = parent->b_preserve_relative_links;
@@ -2021,7 +2022,7 @@ BookmarksDialog::BookmarksDialog(
   _data_source.count_items_before = [](int64_t id) -> int64_t { return id; };
   _data_source.transform = [this](DSRenderContext& c) -> Element {
     if (c.id < 0 || c.id >= static_cast<int64_t>(bookmarks.size())) return text("<invalid>");
-    Element row = text(" " + bookmarks.at(c.id).native());
+    Element row = text(" " + Location::decode(bookmarks.at(c.id).native()).display());
     if (c.focused) {
       row |= c.component_focused ? bgcolor(Color::DarkBlue) : bgcolor(Color::GrayDark);
       row |= ftxui::focus;
