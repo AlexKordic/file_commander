@@ -91,8 +91,7 @@ void ScheduledUpdates::run() {
     lock.unlock();
 
     // Wake the FTXUI event loop
-    auto* screen = ScreenInteractive::Active();
-    if (screen) screen->Post(Event::Custom);
+    _notify();
   }
 }
 
@@ -101,7 +100,7 @@ void ScheduledUpdates::run() {
 // =====================================================================
 
 LuaScripting::LuaScripting(FileCommander& app, ftxui::Component root)
-    : _app(app), _root(std::move(root)) {}
+    : _app(app), _root(std::move(root)), _scheduler(app.get_left().get_shared_state()->notify) {}
 
 LuaScripting::~LuaScripting() { cleanup(); }
 

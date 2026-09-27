@@ -947,6 +947,7 @@ CopyDiscoveryProcess::~CopyDiscoveryProcess() {
 }
 
 CopyDiscoveryProcess::CopyDiscoveryProcess(CopyDialog* parent, Filepath target) {
+  _notify = parent->app->notify;
   _sequence_id             = g_copy_discovery_sequence.fetch_add(1, std::memory_order_relaxed);
   _input_paths             = std::make_shared<CommandArgs>(*parent->app->action.arguments);
   _target                  = target;
@@ -987,8 +988,7 @@ void CopyDiscoveryProcess::_run() {
   if (_running) _discover(selected, _target);
   _running = false;
   // Notify the FTXUI event loop so tick() can detect completion
-  auto* screen = ScreenInteractive::Active();
-  if (screen) screen->Post(Event::Custom);
+  _notify();
 }
 
 CopyDiscoveryProgress CopyDiscoveryProcess::get_progress() {
@@ -1602,14 +1602,12 @@ void FindDialog::start_search() {
       }
 
       if (it_ec.failed()) _errors.fetch_add(1, std::memory_order_relaxed);
-      auto* screen = ScreenInteractive::Active();
-      if (screen) screen->Post(Event::Custom);
+      app->notify();
     }
 
     _running.store(false, std::memory_order_relaxed);
     _completed.store(true, std::memory_order_relaxed);
-    auto* screen = ScreenInteractive::Active();
-    if (screen) screen->Post(Event::Custom);
+    app->notify();
   });
 }
 

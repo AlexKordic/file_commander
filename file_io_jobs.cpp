@@ -20,12 +20,7 @@ namespace Perun {
 constexpr int64_t LARGE_FILE_SIZE_FROM     = 10 * 1024 * 1024;  // 10MB
 constexpr auto    PROGRESS_UPDATE_INTERVAL = std::chrono::milliseconds(200);
 
-JobInterface::JobInterface() {
-  updated = []() {
-    auto screen = ftxui::ScreenInteractive::Active();
-    if (screen) screen->PostEvent(ftxui::Event::Custom);
-  };
-}
+JobInterface::JobInterface() { updated = [] {}; }
 
 //
 // Calculate progress and throughput
@@ -303,6 +298,15 @@ bool move_by_copy(const Filepath& source, const Filepath& destination,
 
 class ThreadedFileJobs : public FileJobs {
  public:
+  struct UpdateSink {
+    std::mutex mutex;
+    std::function<void()> callback = [] {};
+    void notify() { std::function<void()> fn; { std::lock_guard lock(mutex); fn = callback; } fn(); }
+  };
+  std::shared_ptr<UpdateSink> _updates = std::make_shared<UpdateSink>();
+  void set_update_sink(std::function<void()> sink) override {
+    std::lock_guard lock(_updates->mutex); _updates->callback = sink ? std::move(sink) : [] {};
+  }
   ThreadedFileJobs() {
     _thread = std::thread([this]() { this->run(); });
   }
@@ -320,6 +324,7 @@ class ThreadedFileJobs : public FileJobs {
     });
   }
   uint64_t add_job(std::shared_ptr<JobSpec> job) override {
+    job->updated = [updates = _updates] { updates->notify(); };
     uint64_t id    = _next_job_id.fetch_add(1);
     job->_job_id   = id;
     job->_queued_time = now();

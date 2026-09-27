@@ -32,7 +32,7 @@ class Panel;
 
 class ScheduledUpdates {
 public:
-  ScheduledUpdates() = default;
+  explicit ScheduledUpdates(std::function<void()> notify = [] {}) : _notify(std::move(notify)) {}
   ~ScheduledUpdates();  // calls stop()
 
   void start();   // launches background thread (idempotent)
@@ -49,6 +49,7 @@ public:
   void stop_periodic();
 
 private:
+  std::function<void()> _notify;
   // Min-heap: soonest timestamp on top
   std::priority_queue<double, std::vector<double>, std::greater<double>> _timers;
   std::mutex              _mutex;

@@ -29,6 +29,7 @@ struct PanelSharedState {
   using P = std::shared_ptr<PanelSharedState>;
 
   Dir*             dir;
+  std::function<void()> notify = [] {};
   ftxui::Component filter;
   std::string      filter_txt;
   struct Action {

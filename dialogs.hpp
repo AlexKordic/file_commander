@@ -200,6 +200,7 @@ struct CopyDiscoveryProcess {
   std::mutex                   _m;
   CopyDiscoveryProgress        _progress;
   std::vector<DirItem>          _items; // worker plan, guarded by _m
+  std::function<void()> _notify = [] {};
 
   CopyDiscoveryProcess(CopyDialog* parent, Filepath target);
   ~CopyDiscoveryProcess();

@@ -1,5 +1,6 @@
 #include "app.hpp"
 #include "scripting.hpp"
+#include "ui_dispatcher.hpp"
 #include <ftxui/component/loop.hpp>
 
 #include <fstream>
@@ -821,8 +822,47 @@ static void R37() {
   }
 }
 
+static void AR01() {
+  Fixture f; auto slow = f.dir("slow"); f.file("slow/item");
+  UiDispatcher dispatcher;
+  auto screen = ScreenInteractive::FixedSize(100, 30);
+  auto root = Container::Vertical({}); Loop loop(&screen, root);
+  std::atomic<bool> entered{false}, release{false}, finished{false}, posted{false};
+  Panel panel(f.root, [&](Panel*) { return f.root; },
+    [&, post = dispatcher.poster()](auto fn) { post(std::move(fn)); if (finished) posted = true; },
+    [&](Dir& result, const Filepath& path, const std::atomic<bool>* cancelled) {
+      if (path == slow) { entered = true; while (!release && !cancelled->load()) std::this_thread::sleep_for(std::chrono::milliseconds(1)); }
+      auto error = result.move_to(path, cancelled); if (path == slow) finished = true; return error;
+    });
+  root->Add(panel.navigation);
+  auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+  while (panel.loading() && std::chrono::steady_clock::now() < deadline) { dispatcher.drain(); std::this_thread::sleep_for(std::chrono::milliseconds(1)); }
+  require(!panel.loading(), "initial mailbox load failed");
+  panel.move_to(slow);
+  auto jobs = make_file_jobs(); jobs->set_update_sink(dispatcher.notifier());
+  dispatcher.suspend();
+  screen.WithRestoredIO([&] {
+    release = true;
+    jobs->add_job(std::make_shared<JobSpec>(JobSpec::Type::DELETE, std::vector<DirItem>{}));
+    while ((!posted || !jobs->idle()) && std::chrono::steady_clock::now() < deadline) std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    require(posted && jobs->idle(), "work did not finish during suspension");
+    require(!dispatcher.drain() && panel.loading(), "suspended dispatcher ran callbacks");
+  })();
+  dispatcher.resume(); require(dispatcher.drain(), "resume lost dirty state");
+  require(!panel.loading() && panel.dir.path == slow, "terminal handoff lost directory completion");
+  jobs->shutdown();
+  int delivered = 0;
+  dispatcher.suspend(); dispatcher.poster()([&] { ++delivered; }); dispatcher.resume(); dispatcher.drain(); dispatcher.drain();
+  require(delivered == 1, "completion delivered more than once");
+  { auto gone = std::make_unique<Panel>(f.root, [&](Panel*) { return f.root; }, dispatcher.poster()); }
+  dispatcher.drain(); // Destroyed panel's generation/lifetime guards discard its publication.
+  dispatcher.poster()([&] { ++delivered; }); auto late = dispatcher.poster();
+  dispatcher.close(); late([&] { ++delivered; }); dispatcher.drain();
+  require(delivered == 1, "closed dispatcher delivered callbacks");
+}
+
 int main(int argc, char** argv) {
-  const std::vector<std::pair<std::string, void (*)()>> tests = {{"R01", R01}, {"R02", R02}, {"R03", R03}, {"R04", R04}, {"R05", R05}, {"R06", R06}, {"R07", R07}, {"R08", R08}, {"R09", R09}, {"R10", R10}, {"R11", R11}, {"R12", R12}, {"R13", R13}, {"R14", R14}, {"R15", R15}, {"R16", R16}, {"R17", R17}, {"R18", R18}, {"R19", R19}, {"R20", R20}, {"R21", R21}, {"R22", R22}, {"R23", R23}, {"R24", R24}, {"R25", R25}, {"R26", R26}, {"R27", R27}, {"R28", R28}, {"R29", R29}, {"R31", R31}, {"R35", R35}, {"R37", R37}};
+  const std::vector<std::pair<std::string, void (*)()>> tests = {{"AR01", AR01}, {"R01", R01}, {"R02", R02}, {"R03", R03}, {"R04", R04}, {"R05", R05}, {"R06", R06}, {"R07", R07}, {"R08", R08}, {"R09", R09}, {"R10", R10}, {"R11", R11}, {"R12", R12}, {"R13", R13}, {"R14", R14}, {"R15", R15}, {"R16", R16}, {"R17", R17}, {"R18", R18}, {"R19", R19}, {"R20", R20}, {"R21", R21}, {"R22", R22}, {"R23", R23}, {"R24", R24}, {"R25", R25}, {"R26", R26}, {"R27", R27}, {"R28", R28}, {"R29", R29}, {"R31", R31}, {"R35", R35}, {"R37", R37}};
   try {
     bool matched = false;
     for (const auto& [id, run] : tests) {

@@ -1,6 +1,7 @@
 
 #include "app.hpp"
 #include "scripting.hpp"
+#include "ui_dispatcher.hpp"
 
 #include <ftxui/component/loop.hpp>
 
@@ -8,33 +9,44 @@
 
 // cache logs issued in current screen loop, and flush them at the end of screen loop
 class LogAdapter {
+  struct State {
+    std::mutex mutex;
+    std::vector<std::pair<std::string, char>> records;
+    bool scheduled = false;
+    bool closed = false;
+    std::function<void(std::string const&, char)> print;
+  };
+  std::shared_ptr<State> state = std::make_shared<State>();
  public:
-  explicit LogAdapter(ScreenInteractive& screen) {
-    print_log  = l.produce;
-    flush_logs = screen.WithRestoredIO([&] {
-      printing = false;
-      for (const auto& x : log_queue) { print_log(x.first, x.second); }
-      log_queue.clear();
-    });
-    l.produce  = [this, &screen](std::string const& txt, const char level) {
-      log_queue.push_back(std::make_pair(txt, level));
-      if (printing == false) {
-        printing = true;
-        screen.Post(flush_logs);
+  LogAdapter(ScreenInteractive& screen, UiDispatcher& dispatcher) {
+    state->print = l.produce;
+    auto flush = [state = state, &screen, &dispatcher] {
+      std::vector<std::pair<std::string, char>> records;
+      { std::lock_guard lock(state->mutex);
+        if (state->closed) return;
+        state->scheduled = false;
+        records.swap(state->records);
       }
+      dispatcher.suspend();
+      Defer resume([&] { dispatcher.resume(); });
+      screen.WithRestoredIO([&] { for (const auto& [text, level] : records) state->print(text, level); })();
+    };
+    l.produce = [state = state, post = dispatcher.poster(), flush](const std::string& text, char level) {
+      { std::lock_guard lock(state->mutex);
+        if (state->closed) return;
+        state->records.emplace_back(text, level);
+        if (state->scheduled) return;
+        state->scheduled = true;
+      }
+      post(flush);
     };
   }
   ~LogAdapter() {
-    l.produce = print_log;
-    for (const auto& x : log_queue) { print_log(x.first, x.second); }
+    l.produce = state->print;
+    std::lock_guard lock(state->mutex);
+    state->closed = true;
+    for (const auto& [text, level] : state->records) state->print(text, level);
   }
-
- protected:
-  bool printing = false;
-
-  std::vector<std::pair<std::string, char>>                     log_queue;
-  std::function<void(std::string const& txt, const char level)> print_log;
-  std::function<void()>                                         flush_logs;
 };
 
 void set_console_size(int width, int height) { std::cout << "\e[8;" << height << ";" << width << "t"; }
@@ -54,13 +66,14 @@ int main(int argc, char** argv) {
   auto left_path  = (!lua_mode && argc > 1) ? boost::filesystem::path(argv[1]) : cwd;
   auto right_path = (!lua_mode && argc > 2) ? boost::filesystem::path(argv[2]) : cwd;
 
-  auto exec = [&screen](std::function<void()> f) -> void {
-    screen.Post(f);
-    screen.Post(Event::Custom);
-  };
+  UiDispatcher dispatcher;
+  auto exec = dispatcher.poster();
+  file_operations().set_update_sink(dispatcher.notifier());
   // auto          redraw = [&screen]() -> void { screen.Post(Event::Custom); };
   auto          dimx = [&screen]() -> int { return screen.dimx(); };
-  auto run_with_restored_io = [&screen](std::function<int()> fn) -> int {
+  auto run_with_restored_io = [&screen, &dispatcher](std::function<int()> fn) -> int {
+    dispatcher.suspend();
+    Defer resume([&] { dispatcher.resume(); });
     int rc = -1;
     auto wrapped = screen.WithRestoredIO([&]() { rc = fn(); });
     wrapped();
@@ -77,7 +90,7 @@ int main(int argc, char** argv) {
     app.load_settings(!explicit_panel_paths);
   }
 
-  LogAdapter adapt_logs(screen);
+  LogAdapter adapt_logs(screen, dispatcher);
 
   // screen.TrackMouse(false);
 
@@ -97,17 +110,24 @@ int main(int argc, char** argv) {
 
     // Explicit Loop — Lua tick() runs after every render pass
     while (!loop.HasQuitted()) {
-      loop.RunOnceBlocking();
+      if (dispatcher.drain()) screen.Post(Event::Custom);
+      loop.RunOnce();
       scripting.tick();   // first call starts coroutine; thereafter checks waits
+      dispatcher.wait();
     }
     exit_code = scripting.exit_code();
     scripting.cleanup();
   } else {
     // Normal mode — no Lua
-    loop.Run();
+    while (!loop.HasQuitted()) {
+      if (dispatcher.drain()) screen.Post(Event::Custom);
+      loop.RunOnce();
+      dispatcher.wait();
+    }
     app.save_settings();
   }
 
   file_operations().shutdown();
+  dispatcher.close();
   return exit_code;
 }

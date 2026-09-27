@@ -319,6 +319,7 @@ class Panel : public DialogOverlay {
     dir.path = location;
     dir.path_txt = location.native();
     _state                      = std::make_shared<PanelSharedState>(&dir);
+    _state->notify = [post = e] { post([] {}); };
     navigation                  = Container::Tab({}, &_active_dialog);
     _state->move_to             = [this](Filepath where, Filepath focus) { this->move_to(where, focus); };
     _state->enter_archive       = [this](const Filepath& where) { return this->enter_archive(where); };

@@ -148,6 +148,7 @@ class FileJobs {
  public:
   virtual ~FileJobs() = default;
   virtual void shutdown() = 0;
+  virtual void set_update_sink(std::function<void()> sink) = 0;
 
   // Add a new job to the queue. Returns assigned job ID.
   virtual uint64_t add_job(std::shared_ptr<JobSpec> job) = 0;
