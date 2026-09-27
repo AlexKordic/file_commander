@@ -1,4 +1,5 @@
 """R30: errors, watchdogs and explicit waits have reliable process outcomes."""
+from test_results import require, validate_result
 from pathlib import Path
 import sys
 import os
@@ -22,9 +23,13 @@ with tempfile.TemporaryDirectory(prefix="fc-exit-test-") as temp:
         script = root / (name + ".lua")
         script.write_text(text)
         rc, seconds, killed, output = run_script(binary, script, repo, root / "config", timeout)
-        assert not killed, f"{name}: process hung past {timeout}s"
-        assert (rc == 0) == success and rc >= 0, f"{name}: unexpected exit {rc}"
-        assert seconds >= minimum, f"{name}: returned early at {seconds:.2f}s"
+        debug = (root / 'config/lua-debug.log').read_text()
+        category = {'syntax': '[Lua load]', 'runtime': 'deliberate regression failure',
+                    'yield_watchdog': 'hard timeout exceeded', 'loop_watchdog': 'hard timeout exceeded'}.get(name)
+        validate_result(name, rc, killed, output, debug, category)
+        require(not killed, f"{name}: process hung past {timeout}s")
+        require((rc == 0) == success and rc >= 0, f"{name}: unexpected exit {rc}")
+        require(seconds >= minimum, f"{name}: returned early at {seconds:.2f}s")
         if success:
-            assert b"[PASS]" in output, f"{name}: completion marker missing"
+            require(b"[PASS]" in output, f"{name}: completion marker missing")
         print(f"PASS {name}: exit={rc}, elapsed={seconds:.2f}s", flush=True)

@@ -1,8 +1,25 @@
 # Test suite review and expansion proposal — 2026-09-27
 
-Reviewed revision: `5ef288fb9e9a215f1697f1c206fbd606e42d197f`, including R01–R37, AR01–AR09 and the archive cache identity follow-up. Status: **proposal; additions below are not implemented**.
+Reviewed revision: `5ef288fb9e9a215f1697f1c206fbd606e42d197f`, including R01–R37, AR01–AR09 and the archive cache identity follow-up. Status: **implementation in progress**. The original findings and proposal remain below; applied changes are recorded in the implementation ledger.
 
 The existing suite is a useful regression baseline. Its strongest coverage is copy/link behavior, previous destructive-operation failures, and specific UI lifetime bugs. The next investment should first make test results trustworthy, then systematically cover failure boundaries, asynchronous ordering and supported platforms. More successful UI workflows alone would leave the most consequential gaps open.
+
+## Implementation ledger
+
+Each improvement records its plan before editing, its applied solution and validation before commit, and differences from the proposal. Historical evidence below describes the reviewed revision.
+
+| Improvement | Planned solution | Status / applied solution | Validation / differences |
+| --- | --- | --- | --- |
+| TS01 | Explicit Python runner failures and optimization-mode self-tests | Implemented: shared explicit validation; all Python runner assertions replaced; process failures check diagnostic category | Normal, `-O`, environment optimization and empty-binary CLI controls pass; 14 Lua, five negative and seven exit cases pass. No deviation. |
+| TS02 | Declared Lua case/completion protocol and incomplete-suite controls | Planned | Pending |
+| TS03 | Independent content/tree assertions and corruption/missing-link controls | Planned | Pending |
+| TS08 | Per-case discovery, deadlines and isolated process results | Planned | Pending |
+| TS10 | Bounded PTY supervision, fixture helpers and failure artifacts | Planned | Pending |
+| TS04 | Typed operation/fault-boundary matrices and cross-device test | Planned | Pending |
+| TS05 | Barrier-driven lifetime schedules and monotonic deadlines | Planned | Pending |
+| TS06 | Codec/view/traversal/retention/event boundary and generated cases | Planned | Pending |
+| TS07 | Real command behavior/availability and view/input contracts | Planned | Pending |
+| TS09 | Platform/package/tool qualification, presets/CI and bounded stress lanes | Planned | Pending |
 
 ## Evidence and current baseline
 

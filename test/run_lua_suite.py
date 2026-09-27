@@ -4,6 +4,7 @@ Usage: python3 test/run_lua_suite.py [--negative-controls] [script.lua ...]
 Use --binary or FC_TEST_BINARY to select fc, and --logs for output.
 Each invocation has separate logs; each process has isolated settings and fixtures.
 """
+from test_results import validate_result
 from pathlib import Path
 import re
 import sys
@@ -44,11 +45,7 @@ def run(script, name, expect_success=True, expected_error=None):
     (logs / (name + '.log')).write_bytes(output)
     (logs / (name + '.debug.log')).write_text(debug)
     markers = re.findall(rb'\[PASS\] ([^\r\n\x1b]+)', output)
-    if expect_success:
-        assert not killed and rc == 0 and markers, f'{name}: exit={rc}, timeout={killed}; see {logs / (name + ".log")}'
-    else:
-        assert not killed and rc > 0, f'{name}: negative control unexpectedly passed or hung (exit={rc})'
-        assert expected_error in debug, f'{name}: failed for an unrelated reason; see debug log'
+    validate_result(name, rc, killed, output, debug, expected_error if not expect_success else None)
     print(f'PASS {name}: exit={rc}, markers={len(markers)}, {seconds:.2f}s', flush=True)
 
 
