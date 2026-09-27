@@ -86,6 +86,7 @@ struct JobInterface {
 struct JobSpec : JobInstructions, JobStats, JobInterface {
   uint64_t           _job_id = 0;
   std::atomic<bool>  _cancel_requested{false};
+  std::atomic<uint64_t> _copy_bytes{0};
   std::atomic<bool>  _pause_requested{false};
   std::condition_variable _pause_cv;
 

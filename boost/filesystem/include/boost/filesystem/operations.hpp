@@ -73,6 +73,7 @@ struct copy_file_options
     copy_options options = copy_options::none;
     uint64_t bytes_per_second = 0;              // 0 = unlimited
     std::atomic<bool>* cancel_requested = nullptr; // null = no cancel support
+    std::atomic<uint64_t>* bytes_copied = nullptr; // progress of the private output
 };
 
 //--------------------------------------------------------------------------------------//

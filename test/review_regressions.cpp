@@ -54,8 +54,39 @@ static void R01() {
   require(!fs::exists(tree) && fs::exists(valuable), "nested/cyclic symlink escaped delete tree");
 }
 
+static std::string read_file(const Filepath& path) {
+  std::ifstream input(path.string(), std::ios::binary);
+  return std::string(std::istreambuf_iterator<char>(input), {});
+}
+
+static void R02() {
+  Fixture f;
+  auto destination = f.file("destination", "KEEP");
+  std::atomic<bool> cancelled{true};
+  fs::copy_file_options options;
+  options.options = fs::copy_options::overwrite_existing;
+  options.cancel_requested = &cancelled;
+  boost::system::error_code ec;
+  fs::copy_file(f.root / "missing", destination, options, ec);
+  require(ec && read_file(destination) == "KEEP", "failed copy removed untouched destination");
+  fs::copy_file(destination, destination, options, ec);
+  require(ec && read_file(destination) == "KEEP", "self-copy damaged destination");
+  auto source = f.file("source", std::string(1024 * 1024, 'x'));
+  cancelled = false;
+  options.bytes_per_second = 1024 * 1024;
+  std::thread cancel([&] { std::this_thread::sleep_for(std::chrono::milliseconds(30)); cancelled = true; });
+  fs::copy_file(source, destination, options, ec);
+  cancel.join();
+  require(ec && read_file(destination) == "KEEP", "in-flight cancel replaced old destination");
+  cancelled = false;
+  options.bytes_per_second = 0;
+  require(fs::copy_file(source, destination, options, ec), "successful replacement failed");
+  require(!ec && read_file(destination) == read_file(source), "replacement contents differ");
+  require(std::distance(fs::directory_iterator(f.root), fs::directory_iterator()) == 2, "staged output leaked");
+}
+
 int main(int argc, char** argv) {
-  const std::vector<std::pair<std::string, void (*)()>> tests = {{"R01", R01}};
+  const std::vector<std::pair<std::string, void (*)()>> tests = {{"R01", R01}, {"R02", R02}};
   try {
     bool matched = false;
     for (const auto& [id, run] : tests) {

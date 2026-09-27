@@ -64,15 +64,15 @@ The extended `copy_file()` wrapper treats any failure as cancellation if the fla
 
 **Fix direction:** track ownership of an actual partial output, preferably copy to a unique temporary sibling and atomically commit it. Cancellation must preserve the old destination. **Regression:** cancellation combined with missing source, permission failure, destination conflict, and self-copy must not unlink an untouched file.
 
-**Implementation status:** Planned.
+**Implementation status:** Applied.
 
 **Planned solution:** track ownership of an actual partial output, preferably copy to a unique temporary sibling and atomically commit it. Cancellation must preserve the old destination.
 
-**Applied solution:** Pending.
+**Applied solution:** Cancellable POSIX copies write into an exclusively owned temporary sibling directory, clean up only that directory, and commit by atomic rename (replace) or hard-link creation (no replace). Self-copy is rejected before writing. Progress is reported through an atomic byte counter so the UI need not observe the destination while it is staged.
 
-**Plan deviations:** Pending.
+**Plan deviations:** Used a private sibling directory rather than a bare temporary file to establish cleanup ownership. Atomic replacement replaces the destination entry instead of mutating an existing inode; this intentionally preserves other hard links and symlink targets. The unextended Boost overload and Windows fallback retain their existing behavior.
 
-**Validation:** Pending.
+**Validation:** Native build and fc_review_tests R02 passed: missing source, self-copy and in-flight cancellation preserve KEEP; success replaces contents; no staging files remain. git diff --check passed.
 
 ### R03 — Archive creation deletes the previous archive before success is possible
 

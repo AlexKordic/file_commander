@@ -55,10 +55,7 @@ void JobSpec::_calculate_transfer_stats() {
   int64_t    bytes_processed = _bytes_processed;
   if (is_large_file) {
     // Only for large files we calculate precise progress
-    error_code ec;
-    int64_t    latest_size = file_size(*item.symlink_ref(), ec);
-    // Expect `system:2` error on when file_size was invoked before copy creates a file
-    if (ec.failed()) return;
+    const int64_t latest_size = _copy_bytes.load(std::memory_order_relaxed);
     bytes_processed += latest_size;
     _current_item.update(latest_size, item.size());
   } else {
@@ -632,6 +629,7 @@ class ThreadedFileJobs : public FileJobs {
       // else path is source file and target is destination file for copy operation
       // this operation is blocking. progress will be updated by separate thread.
       job->_current_item = ProgressInfo();
+      job->_copy_bytes = 0;
       ec.clear();
       lock.unlock();
       boost::filesystem::copy_file_options cfo;
@@ -640,6 +638,7 @@ class ThreadedFileJobs : public FileJobs {
         : copy_options::overwrite_existing;
       cfo.bytes_per_second = _transfer_rate;  // TODO: make configurable per-job
       cfo.cancel_requested = &job->_cancel_requested;
+      cfo.bytes_copied = &job->_copy_bytes;
       boost::filesystem::copy_file(item.path_ref(), destination_path, cfo, ec);
       if (ec.failed() && job->_cancel_requested.load(std::memory_order_relaxed)) {
         // Cancel during copy_file — boost already removed partial dest file.

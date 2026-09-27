@@ -621,6 +621,7 @@ struct copy_file_context
 {
     uint64_t bytes_per_second;       // 0 = unlimited
     std::atomic<bool>* cancel_requested; // null = no cancel support
+    std::atomic<uint64_t>* bytes_copied;
 };
 
 static thread_local copy_file_context* tls_copy_ctx = nullptr;
@@ -786,6 +787,9 @@ int copy_file_data_read_write_impl(int infile, int outfile, char* buf, std::size
 
             sz_wrote += sz;
         }
+
+        if (tctx && tctx->bytes_copied)
+            tctx->bytes_copied->fetch_add(static_cast<uint64_t>(sz_read), std::memory_order_relaxed);
 
         // Rate limiting: sleep to maintain target bytes_per_second
         if (tctx && tctx->bytes_per_second > 0)
@@ -3457,48 +3461,69 @@ BOOST_FILESYSTEM_DECL
 bool copy_file(path const& from, path const& to, copy_file_options const& opts, error_code* ec)
 {
     // Fast path: no throttle/cancel, delegate directly to the standard implementation
-    if (opts.bytes_per_second == 0 && opts.cancel_requested == nullptr)
+    if (opts.bytes_per_second == 0 && opts.cancel_requested == nullptr && opts.bytes_copied == nullptr)
         return copy_file(from, to, opts.options, ec);
 
 #if defined(BOOST_POSIX_API)
 
-    // Set thread-local context so copy_file_data implementations pick up throttle/cancel
+    // Only our private output is eligible for cleanup. The old destination is
+    // untouched until the complete replacement can be committed atomically.
+    error_code local_ec;
+    auto fail = [&](int value) -> bool {
+        local_ec.assign(value, system::system_category());
+        if (ec) { *ec = local_ec; return false; }
+        BOOST_FILESYSTEM_THROW(filesystem_error("boost::filesystem::copy_file", from, to, local_ec));
+    };
+    if (ec) ec->clear();
+    if (opts.bytes_copied) opts.bytes_copied->store(0, std::memory_order_relaxed);
+    struct stat source_stat, dest_stat;
+    if (::stat(from.c_str(), &source_stat) != 0) return fail(errno);
+    const bool destination_exists = ::stat(to.c_str(), &dest_stat) == 0;
+    if (destination_exists && source_stat.st_dev == dest_stat.st_dev && source_stat.st_ino == dest_stat.st_ino)
+        return fail(EEXIST);
+    const bool overwrite = (opts.options & copy_options::overwrite_existing) != copy_options::none;
+    const bool update = (opts.options & copy_options::update_existing) != copy_options::none;
+    const bool skip = (opts.options & copy_options::skip_existing) != copy_options::none;
+    if (destination_exists && !overwrite && !update) {
+        if (skip) return false;
+        return fail(EEXIST);
+    }
+    if (destination_exists && update && source_stat.st_mtime <= dest_stat.st_mtime) return false;
+    if (opts.cancel_requested && opts.cancel_requested->load(std::memory_order_relaxed)) return fail(ECANCELED);
+
+    std::string directory = to.native() + ".fc-copy-XXXXXX";
+    if (!::mkdtemp(&directory[0])) return fail(errno);
+    const path staged(directory + "/data");
+    struct cleanup_output {
+        path file;
+        std::string directory;
+        ~cleanup_output() { ::unlink(file.c_str()); ::rmdir(directory.c_str()); }
+    } cleanup{staged, directory};
+
     copy_file_context ctx;
     ctx.bytes_per_second = opts.bytes_per_second;
     ctx.cancel_requested = opts.cancel_requested;
-
-    copy_file_context* prev = tls_copy_ctx;
+    ctx.bytes_copied = opts.bytes_copied;
+    struct restore_context {
+        copy_file_context* previous;
+        ~restore_context() { tls_copy_ctx = previous; }
+    } restore{tls_copy_ctx};
     tls_copy_ctx = &ctx;
-
-    error_code local_ec;
-    bool result = copy_file(from, to, opts.options, &local_ec);
-
-    tls_copy_ctx = prev;
-
-    if (local_ec)
-    {
-        bool was_cancelled = (local_ec.value() == ECANCELED);
-        if (!was_cancelled && opts.cancel_requested)
-            was_cancelled = opts.cancel_requested->load(std::memory_order_relaxed);
-
-        if (was_cancelled)
-        {
-            // Remove partial destination file
-            error_code cleanup_ec;
-            remove(to, &cleanup_ec);
+    const bool copied = copy_file(from, staged, opts.options, &local_ec);
+    if (local_ec) return fail(local_ec.value());
+    if (!copied) return false;
+    if (opts.cancel_requested && opts.cancel_requested->load(std::memory_order_relaxed)) return fail(ECANCELED);
+    if (overwrite || update) {
+        if (::rename(staged.c_str(), to.c_str()) != 0) return fail(errno);
+    } else {
+        // link() provides an atomic no-replace commit, including competing
+        // creators and dangling destination symlinks.
+        if (::link(staged.c_str(), to.c_str()) != 0) {
+            if (errno == EEXIST && skip) return false;
+            return fail(errno);
         }
-
-        if (ec)
-        {
-            *ec = local_ec;
-            return false;
-        }
-        BOOST_FILESYSTEM_THROW(filesystem_error("boost::filesystem::copy_file", from, to, local_ec));
     }
-
-    if (ec)
-        ec->clear();
-    return result;
+    return true;
 
 #else // defined(BOOST_POSIX_API)
 
