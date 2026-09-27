@@ -8,6 +8,7 @@
 #include "archive.hpp"
 #include "latest_work.hpp"
 #include "commander.hpp"
+#include "settings.hpp"
 #include "dialogs.hpp"
 #include "editor_manager.hpp"
 #include "file_io_jobs.hpp"
@@ -41,169 +42,6 @@
 
 using namespace ftxui;
 using namespace Perun;
-
-namespace fc_settings_detail {
-
-inline std::string json_escape(const std::string& input) {
-  std::string out;
-  out.reserve(input.size() + 16);
-  for (char c : input) {
-    switch (c) {
-    case '\\': out += "\\\\"; break;
-    case '"': out += "\\\""; break;
-    case '\n': out += "\\n"; break;
-    case '\r': out += "\\r"; break;
-    case '\t': out += "\\t"; break;
-    default: out += c; break;
-    }
-  }
-  return out;
-}
-
-inline std::string json_unescape(const std::string& input) {
-  std::string out;
-  out.reserve(input.size());
-  bool escaped = false;
-  for (char c : input) {
-    if (escaped) {
-      switch (c) {
-      case 'n': out += '\n'; break;
-      case 'r': out += '\r'; break;
-      case 't': out += '\t'; break;
-      case '\\': out += '\\'; break;
-      case '"': out += '"'; break;
-      default: out += c; break;
-      }
-      escaped = false;
-      continue;
-    }
-    if (c == '\\') {
-      escaped = true;
-      continue;
-    }
-    out += c;
-  }
-  return out;
-}
-
-inline bool extract_json_object(const std::string& json, const std::string& key, std::string& object_out) {
-  const std::string quoted_key = "\"" + key + "\"";
-  size_t            key_pos    = json.find(quoted_key);
-  if (key_pos == std::string::npos) return false;
-  size_t brace_pos = json.find('{', key_pos + quoted_key.size());
-  if (brace_pos == std::string::npos) return false;
-  bool   in_string = false;
-  bool   escaped   = false;
-  size_t depth     = 0;
-  for (size_t i = brace_pos; i < json.size(); ++i) {
-    const char c = json[i];
-    if (escaped) {
-      escaped = false;
-      continue;
-    }
-    if (c == '\\') {
-      escaped = true;
-      continue;
-    }
-    if (c == '"') {
-      in_string = !in_string;
-      continue;
-    }
-    if (in_string) continue;
-    if (c == '{') depth++;
-    if (c == '}') {
-      depth--;
-      if (depth == 0) {
-        object_out = json.substr(brace_pos, i - brace_pos + 1);
-        return true;
-      }
-    }
-  }
-  return false;
-}
-
-inline bool extract_json_array(const std::string& json, const std::string& key, std::string& array_out) {
-  const std::string quoted_key = "\"" + key + "\"";
-  size_t            key_pos    = json.find(quoted_key);
-  if (key_pos == std::string::npos) return false;
-  size_t bracket_pos = json.find('[', key_pos + quoted_key.size());
-  if (bracket_pos == std::string::npos) return false;
-  bool   in_string = false;
-  bool   escaped   = false;
-  size_t depth     = 0;
-  for (size_t i = bracket_pos; i < json.size(); ++i) {
-    const char c = json[i];
-    if (escaped) {
-      escaped = false;
-      continue;
-    }
-    if (c == '\\') {
-      escaped = true;
-      continue;
-    }
-    if (c == '"') {
-      in_string = !in_string;
-      continue;
-    }
-    if (in_string) continue;
-    if (c == '[') depth++;
-    if (c == ']') {
-      depth--;
-      if (depth == 0) {
-        array_out = json.substr(bracket_pos, i - bracket_pos + 1);
-        return true;
-      }
-    }
-  }
-  return false;
-}
-
-inline bool extract_json_string_field(const std::string& json, const std::string& key, std::string& value_out) {
-  const std::regex re("\"" + key + "\"\\s*:\\s*\"((?:\\\\.|[^\"\\\\])*)\"");
-  std::smatch      match;
-  if (!std::regex_search(json, match, re)) return false;
-  if (match.size() < 2) return false;
-  value_out = json_unescape(match[1].str());
-  return true;
-}
-
-inline bool extract_json_bool_field(const std::string& json, const std::string& key, bool& value_out) {
-  const std::regex re("\"" + key + "\"\\s*:\\s*(true|false)");
-  std::smatch      match;
-  if (!std::regex_search(json, match, re)) return false;
-  if (match.size() < 2) return false;
-  value_out = match[1].str() == "true";
-  return true;
-}
-
-inline std::map<std::string, std::string> parse_string_map_object(const std::string& obj_json) {
-  std::map<std::string, std::string> out;
-  const std::regex                   pair_re("\"((?:\\\\.|[^\"\\\\])*)\"\\s*:\\s*\"((?:\\\\.|[^\"\\\\])*)\"");
-  for (auto it = std::sregex_iterator(obj_json.begin(), obj_json.end(), pair_re); it != std::sregex_iterator(); ++it) {
-    out[json_unescape((*it)[1].str())] = json_unescape((*it)[2].str());
-  }
-  return out;
-}
-
-inline std::map<std::string, int> parse_int_map_object(const std::string& obj_json) {
-  std::map<std::string, int> out;
-  const std::regex           pair_re("\"((?:\\\\.|[^\"\\\\])*)\"\\s*:\\s*(-?\\d+)");
-  for (auto it = std::sregex_iterator(obj_json.begin(), obj_json.end(), pair_re); it != std::sregex_iterator(); ++it) {
-    out[json_unescape((*it)[1].str())] = std::stoi((*it)[2].str());
-  }
-  return out;
-}
-
-inline std::vector<std::string> parse_string_array(const std::string& array_json) {
-  std::vector<std::string> out;
-  const std::regex         str_re("\"((?:\\\\.|[^\"\\\\])*)\"");
-  for (auto it = std::sregex_iterator(array_json.begin(), array_json.end(), str_re); it != std::sregex_iterator(); ++it) {
-    out.push_back(json_unescape((*it)[1].str()));
-  }
-  return out;
-}
-
-}  // namespace fc_settings_detail
 
 class Panel;
 
@@ -313,7 +151,7 @@ class Panel : public DialogOverlay {
     pending_changes.close();
   }
 
-  Panel(Filepath location, TargetFunc get_target, ExecuteOnUiThread e, DirectoryReader reader = {})
+  Panel(Filepath location, TargetFunc get_target, ExecuteOnUiThread e, DirectoryReader reader = {}, bool defer_load = false)
       : get_target(get_target), run_on_ui(e), _read_directory(std::move(reader)) {
     if (!_read_directory) _read_directory = [](Dir& result, const Filepath& path, const std::atomic<bool>* cancelled) { return result.move_to(path, cancelled); };
     dir.path = location;
@@ -355,7 +193,7 @@ class Panel : public DialogOverlay {
     _tabs.push_back(TabState{});
     _tabs[0].dir = dir;
     sync_active_tab_state();
-    move_to(location);
+    if (!defer_load) move_to(location);
   }
 
   int tab_count() const { return static_cast<int>(_tabs.size()); }
@@ -435,7 +273,6 @@ class Panel : public DialogOverlay {
     _loading = true;
     _loading_path = where;
     auto result = std::make_shared<Dir>();
-    result->order_by = dir.order_by;
     auto stack = _archive_stack;
     _loader.submit([this, alive = _callback_alive, post = run_on_ui, reader = _read_directory,
                     generation, result, where, archive, recover, stack, focus, background_refresh](const LatestWork::Token& cancelled) mutable {
@@ -479,7 +316,7 @@ class Panel : public DialogOverlay {
             if (auto item = _state->get_focused_item()) old_focus = *item;
           }
         }
-        dir = std::move(*result);
+        dir.publish(DirectorySnapshot{std::move(result->path), std::move(result->items)});
         ++items_revision;
         dir.apply_filter(_state->filter_txt, true);
         for (int i = 0; i < dir.items.size(); ++i) {
@@ -948,189 +785,61 @@ class FileCommander : public DialogOverlay {
     return apply_key_bindings({{id, event_to_token(key)}}, error);
   }
 
+  void start_initial_navigation() {
+    if (!left.loading()) left.move_to(left.dir.path);
+    if (!right.loading()) right.move_to(right.dir.path);
+  }
+
   void load_settings(bool restore_paths) {
-    load_theme_colors();
-
-    std::ifstream in(settings_file_path());
-    if (!in.good()) return;
-    std::stringstream ss;
-    ss << in.rdbuf();
-    const std::string json = ss.str();
-    if (json.empty()) return;
-
-    std::string left_path_txt;
-    std::string right_path_txt;
-    if (restore_paths && fc_settings_detail::extract_json_string_field(json, "left_path", left_path_txt)) {
-      Filepath p(left_path_txt);
-      boost::system::error_code ec;
-      if (boost::filesystem::is_directory(p, ec) && !ec.failed()) left.move_to(p);
-    }
-    if (restore_paths && fc_settings_detail::extract_json_string_field(json, "right_path", right_path_txt)) {
-      Filepath p(right_path_txt);
-      boost::system::error_code ec;
-      if (boost::filesystem::is_directory(p, ec) && !ec.failed()) right.move_to(p);
-    }
-
-    std::string left_sort_txt;
-    if (fc_settings_detail::extract_json_string_field(json, "left_sort", left_sort_txt)) {
-      if (Orderby parsed; parse_sort_order(left_sort_txt, parsed)) {
-        left.dir.order_by = parsed;
-        left.dir._sort();
-        left.dir._calculate();
-      }
-    }
-    std::string right_sort_txt;
-    if (fc_settings_detail::extract_json_string_field(json, "right_sort", right_sort_txt)) {
-      if (Orderby parsed; parse_sort_order(right_sort_txt, parsed)) {
-        right.dir.order_by = parsed;
-        right.dir._sort();
-        right.dir._calculate();
-      }
-    }
-
-    bool left_show_perm = false;
-    if (fc_settings_detail::extract_json_bool_field(json, "left_show_permissions", left_show_perm)) {
-      left.get_shared_state()->show_permissions_column = left_show_perm;
-    }
-    bool right_show_perm = false;
-    if (fc_settings_detail::extract_json_bool_field(json, "right_show_permissions", right_show_perm)) {
-      right.get_shared_state()->show_permissions_column = right_show_perm;
-    }
-    bool left_show_owner_group = false;
-    if (fc_settings_detail::extract_json_bool_field(json, "left_show_owner_group", left_show_owner_group)) {
-      left.get_shared_state()->show_owner_group_column = left_show_owner_group;
-    }
-    bool right_show_owner_group = false;
-    if (fc_settings_detail::extract_json_bool_field(json, "right_show_owner_group", right_show_owner_group)) {
-      right.get_shared_state()->show_owner_group_column = right_show_owner_group;
-    }
-
-    bool single_mode = false;
-    if (fc_settings_detail::extract_json_bool_field(json, "single_panel_mode", single_mode)) {
-      set_single_panel_mode(single_mode);
-    }
-    std::string focused_side;
-    if (fc_settings_detail::extract_json_string_field(json, "focused_panel", focused_side)) {
-      if (focused_side == "left") {
-        _last_main_focus_left = true;
-        left.navigation->TakeFocus();
-      } else if (focused_side == "right") {
-        _last_main_focus_left = false;
-        right.navigation->TakeFocus();
-      }
-    }
-
-    std::string bookmarks_array_json;
-    if (fc_settings_detail::extract_json_array(json, "bookmarks", bookmarks_array_json)) {
-      _bookmarks.clear();
-      for (const auto& p : fc_settings_detail::parse_string_array(bookmarks_array_json)) {
-        if (p.empty()) continue;
-        Filepath fp(p);
-        boost::system::error_code ec;
-        if (boost::filesystem::exists(fp, ec) && !ec.failed()) add_bookmark(fp);
-      }
-    }
-
-    std::string use_count_obj;
-    if (fc_settings_detail::extract_json_object(json, "command_use_count", use_count_obj)) {
-      const auto counts = fc_settings_detail::parse_int_map_object(use_count_obj);
-      for (const auto& [id, count] : counts) {
-        commands().set_use_count(id, count);
-      }
-    }
-
-    std::string key_bindings_obj;
-    if (fc_settings_detail::extract_json_object(json, "key_bindings", key_bindings_obj)) {
-      const auto bindings = fc_settings_detail::parse_string_map_object(key_bindings_obj);
+    try {
+      auto settings = SettingsStore::load(SettingsStore::path());
+      auto colors = SettingsStore::load_colors();
+      if (!settings) { theme().import_color_tokens(colors); return; }
+      const auto& s = *settings;
       std::string error;
-      if (!apply_key_bindings(bindings, error)) file_operations().report_error("[Settings bindings] " + error);
-    }
-
-    std::string fresh_binary_path;
-    if (fc_settings_detail::extract_json_string_field(json, "fresh_binary_path", fresh_binary_path)) {
-      _editor_manager.set_binary_override(fresh_binary_path);
-    }
-    std::string last_editor_session_id;
-    if (fc_settings_detail::extract_json_string_field(json, "last_editor_session_id", last_editor_session_id)) {
-      _editor_manager.set_last_session_id(last_editor_session_id);
-    }
+      if (!apply_key_bindings(s.key_bindings, error)) throw std::runtime_error(error);
+      auto apply = [](Panel& panel, const PanelSettings& p) {
+        panel.dir.order_by = p.sort; panel.dir._sort(); panel.dir._calculate();
+        panel.get_shared_state()->show_permissions_column = p.permissions;
+        panel.get_shared_state()->show_owner_group_column = p.owner_group;
+      };
+      apply(left, s.left); apply(right, s.right);
+      set_single_panel_mode(s.single_panel);
+      _last_main_focus_left = s.focused_panel == "left";
+      (_last_main_focus_left ? left : right).navigation->TakeFocus();
+      _bookmarks.clear(); for (const auto& p : s.bookmarks) if (!p.empty()) add_bookmark(p);
+      for (const auto& [id,count] : s.command_use_count) commands().set_use_count(id,count);
+      _editor_manager.set_binary_override(s.fresh_binary_path);
+      _editor_manager.set_last_session_id(s.last_editor_session_id);
+      theme().import_color_tokens(colors);
+      if (restore_paths) {
+        auto navigate = [](Panel& panel, const std::string& path) {
+          boost::system::error_code ec;
+          if (!path.empty() && boost::filesystem::is_directory(path,ec) && !ec) panel.move_to(path);
+        };
+        navigate(left,s.left.path); navigate(right,s.right.path);
+      }
+    } catch (const std::exception& e) { file_operations().report_error("[Settings] " + std::string(e.what())); }
   }
 
   void save_settings() const {
-    save_theme_colors();
-
-    const std::string settings = settings_file_path();
-    if (settings.empty()) return;
-
-    const Filepath settings_path(settings);
-    const Filepath settings_dir = settings_path.parent_path();
-    boost::system::error_code mk_ec;
-    boost::filesystem::create_directories(settings_dir, mk_ec);
-
-    std::ofstream out(settings, std::ios::trunc);
-    if (!out.good()) return;
-
-    auto write_quoted = [&out](const std::string& value) {
-      out << "\"" << fc_settings_detail::json_escape(value) << "\"";
-    };
-
-    out << "{\n";
-    out << "  \"version\": 1,\n";
-    out << "  \"left_path\": ";
-    write_quoted(left.dir.path.native());
-    out << ",\n";
-    out << "  \"right_path\": ";
-    write_quoted(right.dir.path.native());
-    out << ",\n";
-    out << "  \"left_sort\": ";
-    write_quoted(sort_order_to_string(left.dir.order_by));
-    out << ",\n";
-    out << "  \"right_sort\": ";
-    write_quoted(sort_order_to_string(right.dir.order_by));
-    out << ",\n";
-    out << "  \"left_show_permissions\": " << (left.get_shared_state()->show_permissions_column ? "true" : "false") << ",\n";
-    out << "  \"right_show_permissions\": " << (right.get_shared_state()->show_permissions_column ? "true" : "false") << ",\n";
-    out << "  \"left_show_owner_group\": " << (left.get_shared_state()->show_owner_group_column ? "true" : "false") << ",\n";
-    out << "  \"right_show_owner_group\": " << (right.get_shared_state()->show_owner_group_column ? "true" : "false") << ",\n";
-    out << "  \"single_panel_mode\": " << (_single_panel_mode ? "true" : "false") << ",\n";
-    out << "  \"focused_panel\": ";
-    write_quoted(_last_main_focus_left ? "left" : "right");
-    out << ",\n";
-
-    out << "  \"bookmarks\": [";
-    for (size_t i = 0; i < _bookmarks.size(); ++i) {
-      if (i > 0) out << ", ";
-      write_quoted(_bookmarks[i].native());
-    }
-    out << "],\n";
-
-    const auto all_commands = commands().list_all();
-    out << "  \"command_use_count\": {\n";
-    for (size_t i = 0; i < all_commands.size(); ++i) {
-      out << "    ";
-      write_quoted(all_commands[i].id);
-      out << ": " << std::max(0, all_commands[i].use_count);
-      out << (i + 1 < all_commands.size() ? ",\n" : "\n");
-    }
-    out << "  },\n";
-
-    out << "  \"key_bindings\": {\n";
-    for (size_t i = 0; i < all_commands.size(); ++i) {
-      out << "    ";
-      write_quoted(all_commands[i].id);
-      out << ": ";
-      write_quoted(event_to_token(all_commands[i].key));
-      out << (i + 1 < all_commands.size() ? ",\n" : "\n");
-    }
-    out << "  },\n";
-
-    out << "  \"fresh_binary_path\": ";
-    write_quoted(_editor_manager.binary_override());
-    out << ",\n";
-    out << "  \"last_editor_session_id\": ";
-    write_quoted(_editor_manager.last_session_id());
-    out << "\n";
-    out << "}\n";
+    try {
+      AppSettings s;
+      auto capture = [](const Panel& panel) {
+        auto state = panel.get_shared_state();
+        return PanelSettings{panel.dir.path.native(), panel.dir.order_by, state->show_permissions_column, state->show_owner_group_column};
+      };
+      s.left = capture(left); s.right = capture(right);
+      s.single_panel = _single_panel_mode; s.focused_panel = _last_main_focus_left ? "left" : "right";
+      for (const auto& p : _bookmarks) s.bookmarks.push_back(p.native());
+      for (const auto& command : commands().list_all()) {
+        s.command_use_count[command.id] = std::max(0,command.use_count);
+        s.key_bindings[command.id] = event_to_token(command.key);
+      }
+      s.fresh_binary_path = _editor_manager.binary_override(); s.last_editor_session_id = _editor_manager.last_session_id();
+      SettingsStore::save(SettingsStore::path(),s);
+      save_theme_colors();
+    } catch (const std::exception& e) { file_operations().report_error("[Settings] " + std::string(e.what())); }
   }
 
   std::vector<Filepath> list_bookmarks() const {
@@ -1267,8 +976,8 @@ class FileCommander : public DialogOverlay {
     }
   }
 
-  FileCommander(Filepath l, Filepath r, ExecuteOnUiThread exec, std::function<int()> dimx, RunWithRestoredIO run_with_restored_io = {})
-      : left(l, get_target(), exec), right(r, get_target(), exec), _get_dimx(dimx), _run_with_restored_io(std::move(run_with_restored_io)) {
+  FileCommander(Filepath l, Filepath r, ExecuteOnUiThread exec, std::function<int()> dimx, RunWithRestoredIO run_with_restored_io = {}, bool defer_load = false)
+      : left(l, get_target(), exec, {}, defer_load), right(r, get_target(), exec, {}, defer_load), _get_dimx(dimx), _run_with_restored_io(std::move(run_with_restored_io)) {
     _close_dialog         = [this]() { close_dialog(); };
     _editor_manager.set_run_foreground([this](const std::function<int()>& run) -> int {
       if (_run_with_restored_io) return _run_with_restored_io(run);
@@ -1379,112 +1088,9 @@ class FileCommander : public DialogOverlay {
   }
 
  private:
-  static std::string sort_order_to_string(Orderby o) {
-    switch (o) {
-    case Orderby::NAME_ASC: return "NAME_ASC";
-    case Orderby::NAME_DESC: return "NAME_DESC";
-    case Orderby::SIZE_ASC: return "SIZE_ASC";
-    case Orderby::SIZE_DESC: return "SIZE_DESC";
-    case Orderby::TIME_ASC: return "TIME_ASC";
-    case Orderby::TIME_DESC: return "TIME_DESC";
-    }
-    return "NAME_ASC";
-  }
-
-  static bool parse_sort_order(const std::string& txt, Orderby& out) {
-    if (txt == "NAME_ASC") {
-      out = Orderby::NAME_ASC;
-      return true;
-    }
-    if (txt == "NAME_DESC") {
-      out = Orderby::NAME_DESC;
-      return true;
-    }
-    if (txt == "SIZE_ASC") {
-      out = Orderby::SIZE_ASC;
-      return true;
-    }
-    if (txt == "SIZE_DESC") {
-      out = Orderby::SIZE_DESC;
-      return true;
-    }
-    if (txt == "TIME_ASC") {
-      out = Orderby::TIME_ASC;
-      return true;
-    }
-    if (txt == "TIME_DESC") {
-      out = Orderby::TIME_DESC;
-      return true;
-    }
-    return false;
-  }
-
-  static std::string settings_file_path() {
-    const char* xdg = std::getenv("XDG_CONFIG_HOME");
-    if (xdg && *xdg) {
-      return (Filepath(xdg) / "file_commander" / "settings.json").native();
-    }
-    const char* home = std::getenv("HOME");
-    if (!home || !*home) return "";
-    return (Filepath(home) / ".config" / "file_commander" / "settings.json").native();
-  }
-
-  static std::string theme_colors_file_path() {
-    const char* xdg = std::getenv("XDG_CONFIG_HOME");
-    if (xdg && *xdg) {
-      return (Filepath(xdg) / "file_commander" / "theme_colors.json").native();
-    }
-    const char* home = std::getenv("HOME");
-    if (!home || !*home) return "";
-    return (Filepath(home) / ".config" / "file_commander" / "theme_colors.json").native();
-  }
-
   static void save_theme_colors() {
-    const std::string settings = theme_colors_file_path();
-    if (settings.empty()) return;
-
-    const Filepath settings_path(settings);
-    const Filepath settings_dir = settings_path.parent_path();
-    boost::system::error_code mk_ec;
-    boost::filesystem::create_directories(settings_dir, mk_ec);
-
-    std::ofstream out(settings, std::ios::trunc);
-    if (!out.good()) return;
-
-    auto write_quoted = [&out](const std::string& value) {
-      out << "\"" << fc_settings_detail::json_escape(value) << "\"";
-    };
-
-    const auto colors = theme().export_color_tokens();
-    out << "{\n";
-    out << "  \"version\": 1,\n";
-    out << "  \"colors\": {\n";
-    size_t i = 0;
-    for (const auto& [id, token] : colors) {
-      out << "    ";
-      write_quoted(id);
-      out << ": ";
-      write_quoted(token);
-      out << (i + 1 < colors.size() ? ",\n" : "\n");
-      i++;
-    }
-    out << "  }\n";
-    out << "}\n";
-  }
-
-  static void load_theme_colors() {
-    theme().reset_color_defaults();
-
-    std::ifstream in(theme_colors_file_path());
-    if (!in.good()) return;
-    std::stringstream ss;
-    ss << in.rdbuf();
-    const std::string json = ss.str();
-    if (json.empty()) return;
-
-    std::string colors_obj;
-    if (!fc_settings_detail::extract_json_object(json, "colors", colors_obj)) return;
-    theme().import_color_tokens(fc_settings_detail::parse_string_map_object(colors_obj));
+    try { SettingsStore::save_colors(theme().export_color_tokens()); }
+    catch (const std::exception& e) { file_operations().report_error("[Theme settings] " + std::string(e.what())); }
   }
 
   static Event* theme_key_for_command(const std::string& id) {

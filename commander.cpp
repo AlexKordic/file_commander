@@ -159,6 +159,11 @@ DirItem::DirItem(Filepath p, DirItem::Type type, DirItem::Perms perms) : _path(s
 
 DirItem::DirItem(Filepath p, std::string name, Type type, Perms perms, std::time_t t, int64_t size) : _path(std::move(p)), _filename(std::move(name)), _w_time(t), _size(size) {}
 
+void Dir::publish(DirectorySnapshot snapshot) {
+  path = std::move(snapshot.path); path_txt = path.native(); items = std::move(snapshot.items);
+  _sort(); apply_filter(filter.phrase, true); _calculate();
+}
+
 Err Dir::leave_dir() {
   auto parent_dir = path.parent_path();
   if (parent_dir == path) { return Err("leave_dir() on root"); }

@@ -113,14 +113,26 @@ struct CommandArgs {
   bool selected_share_same_dir();
 };
 
-class Dir {
+struct DirectorySnapshot {
+  Filepath path;
+  std::vector<DirItem> items;
+};
+struct PanelViewState {
+  Orderby order_by = Orderby::NAME_ASC;
+  int cursor_pos = 0;
+  struct Filter {
+    int         cursor_position = 0;
+    std::string phrase;
+  };
+  Filter filter;
+};
+
+class Dir : public PanelViewState {
  public:
   // selection
   Filepath             path;
   std::string          path_txt;
   std::vector<DirItem> items;
-  Orderby              order_by   = Orderby::NAME_ASC;
-  int                  cursor_pos = 0;
 
   // TODO: use boost accumulators
   struct Stats {
@@ -132,6 +144,7 @@ class Dir {
     int64_t largest_item_bytes = 0;
   };
 
+  void publish(DirectorySnapshot snapshot);
   Err   move_to(const Filepath path, const std::atomic<bool>* cancelled = nullptr);
   void  partial_refresh(UpdatedFiles changes);
   Err   refresh();  // TODO: add system notifications for current dir
@@ -147,15 +160,10 @@ class Dir {
 
   CommandArgs::P take_selected();
 
-  struct Filter {
-    int         cursor_position = 0;
-    std::string phrase;
-  };
   int next_visible(int index);
   int prev_visible(int index);
   int offset_vissible(int curr, int offset);
 
-  Filter filter;
   Stats  _calculated;
   void   _calculate();
   void   _sort();

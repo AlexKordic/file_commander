@@ -83,12 +83,14 @@ int main(int argc, char** argv) {
   // panels can launch their initial directory workers.
   auto root = Container::Vertical({});
   ftxui::Loop loop(&screen, root);
-  FileCommander app(left_path, right_path, exec, dimx, run_with_restored_io);
+  FileCommander app(left_path, right_path, exec, dimx, run_with_restored_io, true);
   root->Add(app.renderer);
   if (!lua_mode) {
     const bool explicit_panel_paths = argc > 1;
     app.load_settings(!explicit_panel_paths);
   }
+
+  app.start_initial_navigation();
 
   LogAdapter adapt_logs(screen, dispatcher);
 

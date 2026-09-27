@@ -853,3 +853,7 @@ All four groups below are complete; each R01–R37 finding has its own fix commi
 2. Establish synchronized discovery/job snapshots and explicit shutdown/ownership rules for R05–R10, then fix the pause/cancel state machine in R12–R14.
 3. Correct link semantics, panel/filter/tab/watch behavior, archive workflow, and editor/persistence behavior in R15–R29.
 4. Fix test exit semantics and assertions before relying on the suite as a release gate; add targeted regressions for the repaired mechanisms. Complete runtime packaging and build dependency fixes, then the small P3 corrections.
+
+## Accepted architecture follow-up
+
+The subsequent high-level findings AR01–AR09, their planned solutions, applied solutions, validation and differences are tracked in [architecture implementation progress](architecture_progress_2026-09-27.md). Each linked finding document records the plan before implementation and is committed with its verified change.

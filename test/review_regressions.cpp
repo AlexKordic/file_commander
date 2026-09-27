@@ -861,8 +861,35 @@ static void AR01() {
   require(delivered == 1, "closed dispatcher delivered callbacks");
 }
 
+static void AR02() {
+  Fixture f; auto left=f.dir("left"), right=f.dir("right"); EnvOverride config("XDG_CONFIG_HOME",f.dir("config").native());
+  UiQueue queue;
+  for (int order=0;order<6;++order) {
+    AppSettings saved; saved.left.path=left.native(); saved.right.path=right.native();
+    saved.left.sort=static_cast<Orderby>(order); saved.right.sort=static_cast<Orderby>(5-order);
+    SettingsStore::save(SettingsStore::path(),saved);
+    FileCommander app(left,right,[&](auto fn){queue.post(std::move(fn));},[]{return 100;},{},true);
+    app.load_settings(true); app.start_initial_navigation(); queue.wait(app.get_left()); queue.wait(app.get_right());
+    require(app.get_left().dir.order_by==saved.left.sort && app.get_right().dir.order_by==saved.right.sort,"startup discarded saved order");
+    app.get_left().move_to(left); app.get_left().dir.order_by=Orderby::TIME_DESC; queue.wait(app.get_left());
+    require(app.get_left().dir.order_by==Orderby::TIME_DESC,"refresh discarded newer view state");
+    SettingsStore::atomic_write(SettingsStore::path(),R"({"version":1,"left_sort":"NAME_ASC","single_panel_mode":"wrong"})");
+    app.load_settings(false);
+    require(app.get_left().dir.order_by==Orderby::TIME_DESC,"invalid settings partially applied");
+  }
+  auto path=f.file("atomic/settings.json","previous"); bool failed=false;
+  try { SettingsStore::atomic_write(path,"replacement",[](auto&,auto&){throw std::runtime_error("injected rename failure");}); }
+  catch (...) { failed=true; }
+  std::ifstream in(path.string()); std::string actual; in>>actual;
+  require(failed && actual=="previous","failed save replaced previous settings");
+  require(std::distance(fs::directory_iterator(path.parent_path()),fs::directory_iterator())==1,"failed save leaked temporary file");
+  SettingsStore::atomic_write(path,R"({"version":2})"); failed=false;
+  try { SettingsStore::load(path); } catch (...) {failed=true;}
+  require(failed,"unknown settings version accepted");
+}
+
 int main(int argc, char** argv) {
-  const std::vector<std::pair<std::string, void (*)()>> tests = {{"AR01", AR01}, {"R01", R01}, {"R02", R02}, {"R03", R03}, {"R04", R04}, {"R05", R05}, {"R06", R06}, {"R07", R07}, {"R08", R08}, {"R09", R09}, {"R10", R10}, {"R11", R11}, {"R12", R12}, {"R13", R13}, {"R14", R14}, {"R15", R15}, {"R16", R16}, {"R17", R17}, {"R18", R18}, {"R19", R19}, {"R20", R20}, {"R21", R21}, {"R22", R22}, {"R23", R23}, {"R24", R24}, {"R25", R25}, {"R26", R26}, {"R27", R27}, {"R28", R28}, {"R29", R29}, {"R31", R31}, {"R35", R35}, {"R37", R37}};
+  const std::vector<std::pair<std::string, void (*)()>> tests = {{"AR02", AR02}, {"AR01", AR01}, {"R01", R01}, {"R02", R02}, {"R03", R03}, {"R04", R04}, {"R05", R05}, {"R06", R06}, {"R07", R07}, {"R08", R08}, {"R09", R09}, {"R10", R10}, {"R11", R11}, {"R12", R12}, {"R13", R13}, {"R14", R14}, {"R15", R15}, {"R16", R16}, {"R17", R17}, {"R18", R18}, {"R19", R19}, {"R20", R20}, {"R21", R21}, {"R22", R22}, {"R23", R23}, {"R24", R24}, {"R25", R25}, {"R26", R26}, {"R27", R27}, {"R28", R28}, {"R29", R29}, {"R31", R31}, {"R35", R35}, {"R37", R37}};
   try {
     bool matched = false;
     for (const auto& [id, run] : tests) {

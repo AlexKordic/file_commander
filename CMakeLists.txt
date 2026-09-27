@@ -43,7 +43,7 @@ include(ExternalProject)
 # NOTE: filesystem is NOT in this list -- we build it from our local git subtree (boost/filesystem/).
 # All of filesystem's direct and transitive dependencies must be listed here so their CMake targets exist.
 set(BOOST_INCLUDE_LIBRARIES
-  thread system smart_ptr                                                     # project deps (ftxui uses smart_ptr, thread)
+  json thread system smart_ptr                                                     # project deps (ftxui uses smart_ptr, thread)
   assert config container_hash core detail io iterator predef scope type_traits # filesystem deps
 )
 set(BOOST_ENABLE_CMAKE ON)
@@ -169,6 +169,7 @@ add_executable(fc
   scripting.cpp
   log.cpp
   err.cpp
+  settings.cpp
   commander.cpp
   theme.cpp
   custom_controls.cpp
@@ -182,9 +183,9 @@ add_executable(fc
 )
 target_include_directories(fc PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/generated")
 if(APPLE)
-  target_link_libraries(fc PRIVATE ftxui::component Boost::filesystem luajit "-framework CoreServices")
+  target_link_libraries(fc PRIVATE ftxui::component Boost::filesystem Boost::json luajit "-framework CoreServices")
 else()
-  target_link_libraries(fc PRIVATE ftxui::component Boost::filesystem luajit)
+  target_link_libraries(fc PRIVATE ftxui::component Boost::filesystem Boost::json luajit)
 endif()
 
 set(_fc_fresh_default_bin "fresh")
