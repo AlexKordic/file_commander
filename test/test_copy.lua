@@ -244,7 +244,7 @@ local function test_absolute_symlink()
   -- points to the *source* location's canonical path, not the destination copy)
   -- This is expected behavior — the absolute symlink target is preserved.
   local link_target = h.read_symlink(dst .. "/abs_link.txt")
-  check(link_target ~= nil, "8: can read symlink target")
+  check(link_target == h.realpath(src .. "/target.txt"), "8: absolute symlink target changed")
 
   h.cleanup(src, dst)
   test_pass("8_absolute_symlink")
@@ -843,10 +843,9 @@ local function test_symlink_outside_tree()
 
   -- The symlink should be recreated (absolute target since it's not relative)
   -- It should resolve to the external file
-  if h.is_symlink(dst .. "/sub/ext_link.txt") then
-    check(h.read_file(dst .. "/sub/ext_link.txt") == "external\n",
-          "28: external symlink resolves")
-  end
+  check(h.is_symlink(dst .. "/sub/ext_link.txt"), "28: external symlink is missing")
+  check(h.read_symlink(dst .. "/sub/ext_link.txt") == h.realpath(external .. "/external.txt"), "28: external symlink target changed")
+  check(h.read_file(dst .. "/sub/ext_link.txt") == "external\n", "28: external symlink resolves")
 
   h.cleanup(src, dst, external)
   test_pass("28_symlink_outside_tree")

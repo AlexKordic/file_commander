@@ -46,6 +46,8 @@ def run(script, name, expect_success=True, expected_error=None, suite=None):
             'FC_FRESH_BIN': str(repo / 'test/fakes/fresh_fake.sh'),
             'FC_TEST_RESULT_FILE': str(Path(config) / 'results.jsonl'),
             'FC_TEST_SUITE': suite,
+            'FC_TEST_PYTHON': sys.executable,
+            'FC_TEST_FIXTURE_TOOL': str(repo / 'test/fixture_tool.py'),
             'FC_TEST_COMPLETION': specification['completion'],
             'FC_TEST_TMPDIR': str(fixtures),
             'FC_FRESH_FAKE_LOG': str(Path(config) / 'fresh.log'),
@@ -69,6 +71,8 @@ for script in scripts:
 
 if negative:
     controls = [
+        ('archive_payload_corrupted', 'test_archive.lua', 'local raw=fc.wait_for_jobs; fc.wait_for_jobs=function(t) local ok=raw(t); local f=io.open(fc.left_path().."/alpha.txt","w"); if f then f:write("CORRUPT"); f:close() end; return ok end\n', "archive output manifest differs"),
+        ('external_link_missing', 'test_copy.lua', 'local raw=fc.wait_for_jobs; fc.wait_for_jobs=function(t) local ok=raw(t); os.remove(fc.right_path().."/sub/ext_link.txt"); return ok end\n', "28: external symlink is missing"),
         ('rebind_disabled', 'test_rebind.lua', 'local raw=fc.key; fc.key=function(k) if k=="cD" then return raw("f9") else return raw(k) end end\n', "copy binding did not change"),
         ('editor_disabled', 'test_editor_integration.lua', 'local raw=fc.key; fc.key=function(k) if k~="f4" then return raw(k) end end\n', "timeout waiting for log entry containing"),
         ('absolute_link_missing', 'test_copy.lua', 'local raw=fc.wait_for_jobs; fc.wait_for_jobs=function(t) local ok=raw(t); os.remove(fc.right_path().."/dangling_link"); return ok end\n', "13: destination dangling link is missing"),

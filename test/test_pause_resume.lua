@@ -10,6 +10,8 @@ local dst = h.tmpdir("pause_dst")
 h.mkdir(src)
 h.mkdir(dst)
 h.create_file_sized(src .. "/big.bin", 512 * 1024)
+local expected_manifest = h.tree_manifest(src)
+local errors_before = #fc.errors()
 
 h.cd(src, dst)
 h.ensure_left_focus()
@@ -40,9 +42,11 @@ fc.pause_job() -- resume
 check(fc.wait_for_jobs(15000), "expected job completion after resume")
 
 local s = fc.state()
-check(s.jobs.state == "completed" or s.jobs.state == "completed_with_errors", "expected completed state, got %s", tostring(s.jobs.state))
+check(s.jobs.state == "completed", "expected clean completed state, got %s", tostring(s.jobs.state))
 check(h.file_exists(dst .. "/big.bin"), "expected destination file created")
 check(h.file_size(dst .. "/big.bin") == 512 * 1024, "expected destination size 512KiB")
+check(h.tree_manifest(dst) == expected_manifest, "paused/resumed copy changed contents")
+check(#fc.errors() == errors_before, "pause/resume reported unexpected errors")
 
 h.cleanup(src, dst)
 test_pass("pause_resume_copy_basic")

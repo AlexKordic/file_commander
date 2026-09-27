@@ -43,6 +43,11 @@ int main() {
     first->add_job(job);
     wait(*first);
     check(fs::exists(root / "dst/src/file") && job->_state == JobState::COMPLETED, "headless copy failed");
+    std::ifstream copied((root / "dst/src/file").string(), std::ios::binary);
+    check(std::string(std::istreambuf_iterator<char>(copied), {}) == "typed copy", "headless copy changed bytes");
+    auto summary = job->snapshot(false);
+    check(summary->_error_count == 0 && summary->_items_failed == 0 && summary->_items_skipped == 0 && summary->_items_done == 2,
+          "headless copy counters disagree with the plan");
     OperationPlan failed;
     failed.steps.push_back({Operation::Kind::CopyFile, root / "missing", root / "dst/missing"});
     first->add_job(std::make_shared<JobSpec>(std::make_shared<const OperationPlan>(failed)));

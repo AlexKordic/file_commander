@@ -17,6 +17,8 @@ h.mkdir(out)
 h.mkdir(src .. "/sub")
 h.create_file(src .. "/alpha.txt", "alpha\n")
 h.create_file(src .. "/sub/bravo.txt", "bravo\n")
+local expected_manifest = h.tree_manifest(src)
+local errors_before = #fc.errors()
 
 h.cd(src, dst)
 h.ensure_left_focus()
@@ -61,6 +63,8 @@ check(fc.wait_for_jobs(30000), "expected extraction copy job completion")
 
 check(h.file_exists(out .. "/alpha.txt"), "alpha should be extracted")
 check(h.file_exists(out .. "/sub/bravo.txt"), "bravo should be extracted")
+check(h.tree_manifest(out) == expected_manifest, "archive output manifest differs")
+check(#fc.errors() == errors_before, "archive workflow reported unexpected errors")
 
 -- Leave archive root and return to parent directory with archive file focused.
 fc.key("?")

@@ -3,6 +3,21 @@
 
 local M = {}
 
+function M.shell_quote(value)
+  return "'" .. value:gsub("'", "'\\''") .. "'"
+end
+
+function M.tree_manifest(path)
+  local python = os.getenv("FC_TEST_PYTHON") or "python3"
+  local tool = os.getenv("FC_TEST_FIXTURE_TOOL") or "test/fixture_tool.py"
+  local command = M.shell_quote(python) .. " " .. M.shell_quote(tool) .. " manifest " .. M.shell_quote(path)
+  local stream = assert(io.popen(command, "r"))
+  local output = stream:read("*a")
+  local ok = stream:close()
+  check(ok and output:sub(1, 1) == "{", "fixture manifest failed for %s", path)
+  return output
+end
+
 function M.wait_event(name, timeout_ms, message)
   local ok = fc.wait_event(name, timeout_ms or 2000)
   check(ok, message or ("expected event: " .. tostring(name)))
