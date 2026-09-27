@@ -28,10 +28,7 @@ fc.cmd = function(command_id)
   _raw_key(command_id)
 end
 
--- Shorthand: wait for all background jobs to finish
-fc.wait_for_jobs = function(timeout_ms)
-  return fc.wait_event("job_completed", timeout_ms or 30000)
-end
+-- fc.wait_for_jobs is registered by C++ and checks the queue-drained predicate.
 
 -- Test assertion with formatted message
 function check(cond, fmt, ...)

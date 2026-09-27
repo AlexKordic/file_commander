@@ -293,13 +293,16 @@ class Panel : public DialogOverlay {
   DirectoryReader _read_directory;
   LatestWork _loader;
   uint64_t _load_generation = 0;
+  uint64_t items_revision = 0;
   bool _loading = false;
+  bool _refresh_after_load = false;
   Filepath _loading_path;
   bool loading() const { return _loading; }
   void cancel_loading() {
     ++_load_generation;
     _loader.cancel();
     _loading = false;
+    _refresh_after_load = false;
     if (!dir.path.empty()) start_watcher(dir.path);
   }
 
@@ -422,6 +425,7 @@ class Panel : public DialogOverlay {
 
   void load_directory(Filepath where, bool archive, bool recover, Filepath focus = {}, bool background_refresh = false) {
     const auto generation = ++_load_generation;
+    if (!background_refresh) _refresh_after_load = false;
     if (archive || where != dir.path) {
       ++_watch_generation;
       update_funnel.reset();
@@ -475,6 +479,7 @@ class Panel : public DialogOverlay {
           }
         }
         dir = std::move(*result);
+        ++items_revision;
         dir.apply_filter(_state->filter_txt, true);
         for (int i = 0; i < dir.items.size(); ++i) {
           if (std::find(selected.begin(), selected.end(), dir.items[i].path_ref()) != selected.end()) dir.item_toggle_select(i);
@@ -484,7 +489,8 @@ class Panel : public DialogOverlay {
         _restore_focus_after_update(old_focus, old_index);
         start_watcher(where);
         sync_active_tab_state();
-        if (on_event) on_event(background_refresh && same ? "items_updated" : "dir_changed", where.native());
+        if (on_event && (!background_refresh || !same)) on_event("dir_changed", where.native());
+        if (std::exchange(_refresh_after_load, false)) load_directory(dir.path, false, true, {}, true);
       });
     });
   }
@@ -625,7 +631,10 @@ class Panel : public DialogOverlay {
       relevant |= special || change.path.parent_path().lexically_normal() == dir.path.lexically_normal();
       recover |= special;
     }
-    if (relevant) load_directory(dir.path, false, recover, {}, true);
+    if (relevant) {
+      if (_loading) _refresh_after_load = true;
+      else load_directory(dir.path, false, recover, {}, true);
+    }
   }
 
  private:

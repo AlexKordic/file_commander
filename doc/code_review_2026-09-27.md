@@ -590,15 +590,15 @@ A Lua exception sets `_finished` and posts a redraw, but does not exit the loop.
 
 **Fix direction:** publish events at state transitions with stable job IDs and sequence numbers, initialize baselines before actions, and implement an actual queue-drained predicate. **Regression:** multiple queued jobs, several completions between UI frames, same-count renames, and the first selection change of a script.
 
-**Implementation status:** Planned.
+**Implementation status:** Applied.
 
 **Planned solution:** publish events at state transitions with stable job IDs and sequence numbers, initialize baselines before actions, and implement an actual queue-drained predicate.
 
-**Applied solution:** Pending.
+**Applied solution:** The job manager retains sequenced start/completion records with stable job IDs and tracks all accepted outstanding jobs, including the dequeue/publication gap. Lua wait_for_jobs checks that count. Script baselines initialize after panel startup and before actions; commands establish event checkpoints, consecutive waits preserve trailing events, and optional detail matching identifies a result. Panel revisions detect same-count changes; discovery/find completions use request IDs. Watcher refreshes no longer supersede explicit navigation.
 
-**Plan deviations:** Pending.
+**Plan deviations:** Event records remain available for the application session, matching retained job history. waits now return event detail as a second value and can filter by a third argument; input/navigation commands establish a fresh checkpoint to exclude stale notifications. Background scans publish completed snapshots rather than per-entry events.
 
-**Validation:** Pending.
+**Validation:** Native R31 passed: 20 queued jobs retained all 40 ordered transitions, queue-drained waiting included two transfers, and the first scripted selection generated an event. PTY events, archive, focus-refresh, tabs and review_events tests passed; the latter verifies same-count rename/metadata changes and two searches in the same Find dialog.
 
 ### R32 — Existing integration tests can pass without verifying their claimed behavior
 

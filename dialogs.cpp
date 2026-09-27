@@ -47,6 +47,7 @@ namespace ftxui {
 
 namespace {
 std::atomic<uint64_t> g_copy_discovery_sequence{1};
+std::atomic<uint64_t> g_find_sequence{1};
 }
 
 Element screen_render_time() {
@@ -1560,6 +1561,7 @@ void FindDialog::start_search() {
   _files_scanned.store(0, std::memory_order_relaxed);
   _errors.store(0, std::memory_order_relaxed);
   status.clear();
+  _sequence_id = g_find_sequence.fetch_add(1);
   _completed.store(false, std::memory_order_relaxed);
   _running.store(true, std::memory_order_relaxed);
 

@@ -151,6 +151,7 @@ bool LuaScripting::setup(const std::string& script_path) {
   reg("errors",            l_errors);
   reg("state",             l_state);
   reg("wait_event",        l_wait_event);
+  reg("wait_for_jobs",     l_wait_for_jobs);
   reg("sleep",             l_sleep);
   reg("set_transfer_rate", l_set_transfer_rate);
   reg("cancel_job",        l_cancel_job);
@@ -208,6 +209,12 @@ void LuaScripting::tick() {
 
   // First call: start the Lua coroutine
   if (!_started && _lua_co) {
+    if (_app.get_left().loading() || _app.get_right().loading()) return;
+    // Startup publication must finish before scripts can operate on panels.
+    poll_async_events();
+    _event_log.clear();
+    _event_cursor = 0;
+    heartbeat_test_timeout();
     _started = true;
     log("tick: starting Lua coroutine (initial resume)");
     int status = lua_resume(_lua_co, 0);
@@ -287,24 +294,14 @@ void LuaScripting::poll_async_events() {
   const std::string current_focus_side = focused_side();
   const bool        current_single_panel_mode = _app.single_panel_mode();
 
-  // Job start/completion — detect by timestamps to avoid missing fast jobs
+  // Transitions are retained by the job manager even between UI frames.
+  for (const auto& event : file_operations().events_since(_last_job_sequence)) {
+    fire_event(event.completed ? "job_completed" : "job_started", std::to_string(event.job_id));
+  }
   auto jobinfo = file_operations().get_running_job();
-  int  current_job_items_done = -1;
+  int current_job_items_done = -1;
   std::string current_job_state = job_state_name(jobinfo.job);
   if (jobinfo.job) {
-    auto view = jobinfo.job->snapshot();
-    // Detect job start
-    if (view->_started_time > 0 && view->_started_time != _last_job_started_time) {
-      _last_job_started_time = view->_started_time;
-      log("poll: job_started");
-      fire_event("job_started", "");
-    }
-    // Detect job completion
-    if (view->_finished_time > 0 && view->_finished_time != _last_job_finished_time) {
-      _last_job_finished_time = view->_finished_time;
-      log("poll: job_completed");
-      fire_event("job_completed", "");
-    }
     {
       std::lock_guard lock(jobinfo.job->_m);
       current_job_items_done = static_cast<int>(jobinfo.job->_items_done);
@@ -314,62 +311,18 @@ void LuaScripting::poll_async_events() {
     _had_running_job = false;
   }
 
-  // Copy discovery completion — check both panels
-  bool     discovery_running = false;
-  uint64_t current_discovery_id = 0;
+  // Completion identity is per request, including repeated searches in one dialog.
   for (auto* panel : {&_app.get_left(), &_app.get_right()}) {
-    auto copy_dlg = std::dynamic_pointer_cast<CopyDialog>(panel->get_overlay_dialog("Copy"));
-    if (copy_dlg && copy_dlg->_discovery_process) {
-      current_discovery_id = copy_dlg->_discovery_process->_sequence_id;
-      if (copy_dlg->_discovery_process->_running) {
-        discovery_running = true;
-      }
+    auto copy = std::dynamic_pointer_cast<CopyDialog>(panel->get_overlay_dialog("Copy"));
+    if (copy && copy->_discovery_process) {
+      auto* discovery = copy->_discovery_process.get();
+      if (!discovery->_running.load() && _completed_discoveries.insert(discovery->_sequence_id).second)
+        fire_event("discovery_completed", std::to_string(discovery->_sequence_id));
     }
+    auto find = std::dynamic_pointer_cast<FindDialog>(panel->get_overlay_dialog("Find"));
+    if (find && find->_completed.load() && !find->_running.load() && _completed_searches.insert(find->_sequence_id).second)
+      fire_event("find_completed", std::to_string(find->_sequence_id));
   }
-  if (_poll_count <= 5 || (_poll_count % 20 == 0)) {
-    log("poll #" + std::to_string(_poll_count) + ": disc_id=" +
-        std::to_string(current_discovery_id) + " disc_run=" +
-        std::to_string(discovery_running) + " had_disc=" + std::to_string(_had_discovery));
-  }
-  // Fire discovery_completed when:
-  // 1. Normal case: we previously saw a running discovery, now it's done
-  // 2. Fast-completion case: a new discovery process exists but already finished
-  //    (completed between polls — track by process pointer identity)
-  if (current_discovery_id != 0 && !discovery_running) {
-    if (_had_discovery || current_discovery_id != _last_discovery_id) {
-      log("poll: discovery_completed");
-      fire_event("discovery_completed", "");
-      _last_discovery_id = current_discovery_id;
-    }
-  }
-  if (current_discovery_id == 0) {
-    _last_discovery_id = 0;  // reset when process is cleared
-  }
-  _had_discovery = discovery_running;
-
-  // Find dialog completion — event-driven replacement for fixed sleeps.
-  bool  find_running = false;
-  bool  find_completed = false;
-  void* current_find = nullptr;
-  for (auto* panel : {&_app.get_left(), &_app.get_right()}) {
-    if (panel->_active_dialog_name != "Find") continue;
-    auto find_dlg = std::dynamic_pointer_cast<FindDialog>(panel->get_overlay_dialog("Find"));
-    if (!find_dlg) continue;
-    current_find = find_dlg.get();
-    find_running = find_dlg->_running.load();
-    find_completed = find_dlg->_completed.load();
-    break;
-  }
-  if (current_find && !find_running && find_completed) {
-    if (_had_find || current_find != _last_find_ptr) {
-      fire_event("find_completed", "");
-      _last_find_ptr = current_find;
-    }
-  }
-  if (!current_find) {
-    _last_find_ptr = nullptr;
-  }
-  _had_find = find_running;
 
   auto count_selected = [](Panel& panel) -> int {
     int selected = 0;
@@ -388,6 +341,8 @@ void LuaScripting::poll_async_events() {
     _event_baseline_initialized = true;
     _last_left_item_count       = left_item_count;
     _last_right_item_count      = right_item_count;
+    _last_left_revision = _app.get_left().items_revision;
+    _last_right_revision = _app.get_right().items_revision;
     _last_left_selected_count   = left_selected_count;
     _last_right_selected_count  = right_selected_count;
     _last_error_count           = error_count;
@@ -411,8 +366,8 @@ void LuaScripting::poll_async_events() {
     fire_event("job_progress", std::to_string(current_job_items_done));
   }
 
-  const bool left_items_changed  = left_item_count != _last_left_item_count;
-  const bool right_items_changed = right_item_count != _last_right_item_count;
+  const bool left_items_changed  = left_item_count != _last_left_item_count || _app.get_left().items_revision != _last_left_revision;
+  const bool right_items_changed = right_item_count != _last_right_item_count || _app.get_right().items_revision != _last_right_revision;
   if (left_items_changed || right_items_changed) {
     std::string detail = "both";
     if (left_items_changed && !right_items_changed) detail = "left";
@@ -436,6 +391,8 @@ void LuaScripting::poll_async_events() {
     fire_event("errors_cleared", std::to_string(error_count));
   }
 
+  _last_left_revision = _app.get_left().items_revision;
+  _last_right_revision = _app.get_right().items_revision;
   _last_left_item_count      = left_item_count;
   _last_right_item_count     = right_item_count;
   _last_left_selected_count  = left_selected_count;
@@ -483,19 +440,29 @@ void LuaScripting::check_waits() {
   // Poll for async events
   poll_async_events();
 
+  if (_pending_wait->jobs_mode && file_operations().idle()) {
+    _pending_wait.reset();
+    heartbeat_test_timeout();
+    lua_pushboolean(_lua_co, 1);
+    handle_resume_status(lua_resume(_lua_co, 1));
+    return;
+  }
+
   // Check event log for match (only if we have event names to match)
   if (!_pending_wait->event_names.empty()) {
     for (size_t i = _event_cursor; i < _event_log.size(); i++) {
       for (auto& name : _pending_wait->event_names) {
-        if (_event_log[i].name == name) {
+        if (_event_log[i].name == name && (!_pending_wait->detail || *_pending_wait->detail == _event_log[i].detail)) {
           // Match! Resume coroutine with true
+          const auto detail = _event_log[i].detail;
           _pending_wait.reset();
           // Advance only past the matched event. This preserves trailing events
           // that may have been produced in the same poll cycle for subsequent waits.
           _event_cursor = i + 1;
           lua_pushboolean(_lua_co, 1);
+          lua_pushstring(_lua_co, detail.c_str());
           heartbeat_test_timeout();
-          int status = lua_resume(_lua_co, 1);
+          int status = lua_resume(_lua_co, 2);
           handle_resume_status(status);
           return;
         }
@@ -527,10 +494,19 @@ void LuaScripting::check_waits() {
 // Lua C callbacks — static methods, access 'this' via from_lua()
 // =====================================================================
 
+// A command establishes the event checkpoint for its subsequent waits. Poll
+// first so old asynchronous changes cannot masquerade as its result. Consecutive
+// waits still preserve trailing events produced by that command.
+void LuaScripting::begin_action() {
+  poll_async_events();
+  _event_cursor = _event_log.size();
+}
+
 // fc.key(name_or_table)
 int LuaScripting::l_key(lua_State* L) {
   auto* self = from_lua(L);
   if (!self->_root) return luaL_error(L, "fc not initialized");
+  self->begin_action();
   auto dispatch_name = [self](const std::string& name) {
     if (name.size() == 1) {
       self->_root->OnEvent(Event::Character(name[0]));
@@ -576,6 +552,7 @@ int LuaScripting::l_quit(lua_State* L) {
 // fc.left_cd(path)
 int LuaScripting::l_left_cd(lua_State* L) {
   auto* self = from_lua(L);
+  self->begin_action();
   auto path = boost::filesystem::path(luaL_checkstring(L, 1));
   self->_app.get_left().move_to(path);
   return 0;
@@ -584,6 +561,7 @@ int LuaScripting::l_left_cd(lua_State* L) {
 // fc.right_cd(path)
 int LuaScripting::l_right_cd(lua_State* L) {
   auto* self = from_lua(L);
+  self->begin_action();
   auto path = boost::filesystem::path(luaL_checkstring(L, 1));
   self->_app.get_right().move_to(path);
   return 0;
@@ -654,6 +632,8 @@ void LuaScripting::push_panel_state(lua_State* L, Panel& panel) {
   // path
   lua_pushstring(L, panel.dir.path.native().c_str());
   lua_setfield(L, -2, "path");
+  lua_pushboolean(L, panel.loading());
+  lua_setfield(L, -2, "loading");
   // item_count (visible items)
   lua_pushinteger(L, panel.dir._calculated.items_visible);
   lua_setfield(L, -2, "item_count");
@@ -831,6 +811,8 @@ int LuaScripting::l_wait_event(lua_State* L) {
     names.push_back(luaL_checkstring(L, 1));
   }
   int timeout_ms = luaL_optinteger(L, 2, 5000);
+  std::optional<std::string> detail;
+  if (!lua_isnoneornil(L, 3)) detail = luaL_checkstring(L, 3);
 
   // Poll once to catch events that already happened
   self->poll_async_events();
@@ -838,19 +820,30 @@ int LuaScripting::l_wait_event(lua_State* L) {
   // Check if event already in log since last cursor position
   for (size_t i = self->_event_cursor; i < self->_event_log.size(); i++) {
     for (auto& name : names) {
-      if (self->_event_log[i].name == name) {
+      if (self->_event_log[i].name == name && (!detail || *detail == self->_event_log[i].detail)) {
         // Preserve trailing already-logged events for the caller's next wait.
         self->_event_cursor = i + 1;
         lua_pushboolean(L, 1);
-        return 1;  // already happened, no yield
+        lua_pushstring(L, self->_event_log[i].detail.c_str());
+        return 2;  // already happened, no yield
       }
     }
   }
 
   // Not yet — set up wait and yield
   double deadline = now() + timeout_ms / 1000.0;
-  self->_pending_wait = PendingWait{std::move(names), deadline, false};
+  self->_pending_wait = PendingWait{std::move(names), deadline, false, false, detail};
   self->_event_cursor = self->_event_log.size();
+  self->_scheduler.schedule_at(deadline);
+  return lua_yield(L, 0);
+}
+
+// fc.wait_for_jobs(timeout_ms): includes jobs popped but not yet published active.
+int LuaScripting::l_wait_for_jobs(lua_State* L) {
+  auto* self = from_lua(L);
+  if (file_operations().idle()) { lua_pushboolean(L, 1); return 1; }
+  const double deadline = now() + luaL_optinteger(L, 1, 30000) / 1000.0;
+  self->_pending_wait = PendingWait{{}, deadline, false, true};
   self->_scheduler.schedule_at(deadline);
   return lua_yield(L, 0);
 }
@@ -874,6 +867,7 @@ int LuaScripting::l_set_transfer_rate(lua_State* L) {
 
 // fc.cancel_job() — cancel the currently running job
 int LuaScripting::l_cancel_job(lua_State* L) {
+  from_lua(L)->begin_action();
   auto jobinfo = file_operations().get_running_job();
   if (jobinfo.job && !jobinfo.job->is_stopped()) {
     file_operations().cancel_job(jobinfo.job.get());
@@ -886,6 +880,7 @@ int LuaScripting::l_cancel_job(lua_State* L) {
 
 // fc.pause_job() — toggle pause/resume for the currently running job
 int LuaScripting::l_pause_job(lua_State* L) {
+  from_lua(L)->begin_action();
   auto jobinfo = file_operations().get_running_job();
   if (jobinfo.job && !jobinfo.job->is_stopped()) {
     file_operations().pause_job(jobinfo.job.get());

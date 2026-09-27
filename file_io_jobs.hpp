@@ -134,6 +134,12 @@ struct JobErrorInfo {
   bool valid() const { return time != -1.0; }
 };
 
+struct JobEvent {
+  uint64_t sequence;
+  uint64_t job_id;
+  bool completed;
+};
+
 // Manages a queue of file operation jobs to be performed in separate thread.
 // Jobs are executed in order and can be cancelled.
 // When a job is cancelled or completed reference to it is removed.
@@ -149,6 +155,8 @@ class FileJobs {
   virtual JobError pause_job(JobSpec* job)               = 0;
 
   virtual RunningJobsInfo get_running_job() = 0;
+  virtual bool idle() const = 0;
+  virtual std::vector<JobEvent> events_since(uint64_t& sequence) = 0;
 
   /// Get all jobs in history (completed, paused, cancelled, errored).
   virtual std::vector<std::shared_ptr<JobSpec>> get_job_history() = 0;

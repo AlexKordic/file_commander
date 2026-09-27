@@ -323,8 +323,20 @@ class ThreadedFileJobs : public FileJobs {
     uint64_t id    = _next_job_id.fetch_add(1);
     job->_job_id   = id;
     job->_queued_time = now();
-    _queue.push(std::move(job));
+    ++_outstanding;
+    if (_queue.push(std::move(job)) != FifoError::OK) {
+      --_outstanding;
+      return 0;
+    }
     return id;
+  }
+  bool idle() const override { return _outstanding.load() == 0; }
+  std::vector<JobEvent> events_since(uint64_t& sequence) override {
+    std::lock_guard lock(_m);
+    std::vector<JobEvent> result;
+    for (const auto& event : _events) if (event.sequence > sequence) result.push_back(event);
+    if (!_events.empty()) sequence = _events.back().sequence;
+    return result;
   }
   JobError cancel_job(JobSpec* job) override {
     if (!job) return JobError::NOT_FOUND;
@@ -462,6 +474,7 @@ class ThreadedFileJobs : public FileJobs {
       {
         std::lock_guard lock(_m);
         _active_job = std::move(job);
+        _events.push_back({++_event_sequence, _active_job->_job_id, false});
         if (_shutdown.load()) _active_job->_cancel_requested = true;
       }
       _progress_monitor.add_job(_active_job);
@@ -489,6 +502,8 @@ class ThreadedFileJobs : public FileJobs {
       {
         std::lock_guard lock(_m);
         _job_history.push_back(_active_job);
+        _events.push_back({++_event_sequence, _active_job->_job_id, true});
+        --_outstanding;
       }
       _active_job->updated();
     }
@@ -850,6 +865,9 @@ class ThreadedFileJobs : public FileJobs {
   std::shared_ptr<JobSpec>                   _active_job;
   Perun::FifoQueue<std::shared_ptr<JobSpec>> _queue;
   std::atomic<uint64_t>                      _next_job_id{1};
+  std::atomic<uint64_t> _outstanding{0};
+  uint64_t _event_sequence = 0;
+  std::vector<JobEvent> _events;
   std::vector<std::shared_ptr<JobSpec>>      _job_history;  // drained completed/paused/cancelled jobs
   std::deque<JobErrorInfo>                   _errors;
   int64_t                                    _err_last_access_index = 0;

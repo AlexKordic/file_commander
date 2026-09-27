@@ -303,6 +303,7 @@ struct FindDialog : Dialog {
   std::thread           _worker;
   std::atomic<bool>     _running{false};
   std::atomic<bool>     _completed{false};
+  uint64_t _sequence_id = 0;
   std::atomic<int64_t>  _dirs_scanned{0};
   std::atomic<int64_t>  _files_scanned{0};
   std::atomic<int64_t>  _errors{0};

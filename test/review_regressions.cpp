@@ -1,4 +1,5 @@
 #include "app.hpp"
+#include "scripting.hpp"
 #include <ftxui/component/loop.hpp>
 
 #include <fstream>
@@ -735,8 +736,50 @@ static void R29() {
   }
 }
 
+static void R31() {
+  Fixture f; auto source = f.file("source", std::string(512 * 1024, 'x'));
+  auto manager = make_file_jobs(); manager->set_transfer_rate(512 * 1024);
+  DirItem first(source); first._set_symlink_target(f.root / "first");
+  std::vector<uint64_t> ids;
+  ids.push_back(manager->add_job(std::make_shared<JobSpec>(JobSpec::Type::COPY, std::vector<DirItem>{first})));
+  for (int i = 0; i < 19; ++i) ids.push_back(manager->add_job(std::make_shared<JobSpec>(JobSpec::Type::DELETE, std::vector<DirItem>{})));
+  require(!manager->idle(), "queued jobs reported idle");
+  auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+  while (!manager->idle() && std::chrono::steady_clock::now() < deadline) std::this_thread::sleep_for(std::chrono::milliseconds(2));
+  require(manager->idle(), "queue did not drain");
+  uint64_t cursor = 0; auto events = manager->events_since(cursor);
+  require(events.size() == 40, "transitions between polls were lost");
+  for (size_t i = 0; i < ids.size(); ++i) {
+    require(events[2*i].job_id == ids[i] && !events[2*i].completed, "start identity mismatch");
+    require(events[2*i+1].job_id == ids[i] && events[2*i+1].completed, "completion identity mismatch");
+    require(events[2*i+1].sequence == 2*i+2, "event sequence mismatch");
+  }
+  require(manager->events_since(cursor).empty(), "events replayed after cursor");
+  manager->shutdown();
+  UiQueue ui;
+  FileCommander app(f.root, f.root, [&](auto work) { ui.post(std::move(work)); }, [] { return 100; });
+  ui.wait(app.get_left()); ui.wait(app.get_right()); app.get_left().navigation->TakeFocus();
+  auto interactive = ScreenInteractive::FixedSize(100, 30);
+  Loop loop(&interactive, app.renderer);
+  const auto before = file_operations().get_job_history().size();
+  file_operations().set_transfer_rate(512 * 1024);
+  for (int i = 0; i < 2; ++i) {
+    DirItem item(source); item._set_symlink_target(f.root / ("queued" + std::to_string(i)));
+    file_operations().add_job(std::make_shared<JobSpec>(JobSpec::Type::COPY, std::vector<DirItem>{item}));
+  }
+  auto script = f.file("wait.lua", "fc.cmd('select_all'); assert(fc.wait_event('selection_changed', 1000)); assert(fc.wait_for_jobs(5000)); assert(#fc.job_history() >= " + std::to_string(before + 2) + ")");
+  LuaScripting lua(app, app.renderer); require(lua.setup(script.string()), "Lua setup failed");
+  deadline = std::chrono::steady_clock::now() + std::chrono::seconds(7);
+  while (!lua.finished() && std::chrono::steady_clock::now() < deadline) {
+    ui.drain(); loop.RunOnce(); lua.tick(); std::this_thread::sleep_for(std::chrono::milliseconds(2));
+  }
+  file_operations().set_transfer_rate(0);
+  require(lua.finished() && lua.exit_code() == 0, "Lua first-action event or all-jobs wait failed");
+  require(fs::exists(f.root / "queued0") && fs::exists(f.root / "queued1"), "Lua wait returned before both copies");
+}
+
 int main(int argc, char** argv) {
-  const std::vector<std::pair<std::string, void (*)()>> tests = {{"R01", R01}, {"R02", R02}, {"R03", R03}, {"R04", R04}, {"R05", R05}, {"R06", R06}, {"R07", R07}, {"R08", R08}, {"R09", R09}, {"R10", R10}, {"R11", R11}, {"R12", R12}, {"R13", R13}, {"R14", R14}, {"R15", R15}, {"R16", R16}, {"R17", R17}, {"R18", R18}, {"R19", R19}, {"R20", R20}, {"R21", R21}, {"R22", R22}, {"R23", R23}, {"R24", R24}, {"R25", R25}, {"R26", R26}, {"R27", R27}, {"R28", R28}, {"R29", R29}};
+  const std::vector<std::pair<std::string, void (*)()>> tests = {{"R01", R01}, {"R02", R02}, {"R03", R03}, {"R04", R04}, {"R05", R05}, {"R06", R06}, {"R07", R07}, {"R08", R08}, {"R09", R09}, {"R10", R10}, {"R11", R11}, {"R12", R12}, {"R13", R13}, {"R14", R14}, {"R15", R15}, {"R16", R16}, {"R17", R17}, {"R18", R18}, {"R19", R19}, {"R20", R20}, {"R21", R21}, {"R22", R22}, {"R23", R23}, {"R24", R24}, {"R25", R25}, {"R26", R26}, {"R27", R27}, {"R28", R28}, {"R29", R29}, {"R31", R31}};
   try {
     bool matched = false;
     for (const auto& [id, run] : tests) {

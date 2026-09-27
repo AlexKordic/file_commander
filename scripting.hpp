@@ -8,6 +8,7 @@
 #include <mutex>
 #include <optional>
 #include <queue>
+#include <set>
 #include <string>
 #include <thread>
 #include <vector>
@@ -114,6 +115,8 @@ private:
     std::vector<std::string> event_names;
     double                   deadline;
     bool                     sleep_mode = false;
+    bool                     jobs_mode = false;
+    std::optional<std::string> detail;
   };
   std::optional<PendingWait> _pending_wait;
 
@@ -122,8 +125,11 @@ private:
   bool   _had_discovery   = false;
   uint64_t _last_discovery_id = 0;  // track process identity for fast-completion detection
   int    _poll_count = 0;
-  double _last_job_finished_time = -1;
-  double _last_job_started_time  = -1;
+  uint64_t _last_job_sequence = 0;
+  uint64_t _last_left_revision = 0;
+  uint64_t _last_right_revision = 0;
+  std::set<uint64_t> _completed_discoveries;
+  std::set<uint64_t> _completed_searches;
   bool   _event_baseline_initialized = false;
   int    _last_left_item_count = -1;
   int    _last_right_item_count = -1;
@@ -150,6 +156,7 @@ private:
   void  log(const std::string& msg) { log(msg.c_str()); }
 
   // --- Internal methods (replaces free functions) ---
+  void begin_action();
   void poll_async_events();     // detect job_started/completed, discovery_completed
   void finish_script(int exit_code);
   static void execution_hook(lua_State* L, lua_Debug*);
@@ -172,6 +179,7 @@ private:
   static int l_errors(lua_State* L);
   static int l_state(lua_State* L);
   static int l_wait_event(lua_State* L);
+  static int l_wait_for_jobs(lua_State* L);
   static int l_sleep(lua_State* L);
   static int l_set_transfer_rate(lua_State* L);
   static int l_cancel_job(lua_State* L);
