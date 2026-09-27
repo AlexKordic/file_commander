@@ -17,12 +17,15 @@ Accepted plan: [test suite review](test_suite_review_2026-09-27.md). Each row wa
 | `5b1285c` | Real commands through three adapters | All 34 commands have behavior and busy-dialog availability expectations; copy/move/delete now honor panel job services |
 | `8535855` | Tiny-screen rendering and actual terminal decoding | 36/36 command/render/PTY cases; fixed negative clipped menu height without changing the pinned FTXUI tree |
 | `f56fd59` | Isolated relocation and real Fresh terminal handoff | Source/dependency reads denied, exact real archive output and helper provenance; Fresh attach/quit and failure restore input/modes |
+| `08623af` | Native CI/presets, strict lanes, bootstrap controls and resource/performance evidence | 23/23 fast; 17/17 headless and UBSan; real APFS EXDEV; stable resources; real render/allocation measurements; visible sanitizer infrastructure failures |
 
 ## Validation and remaining qualification
 
-Native macOS arm64 is the available execution host. The expanded suite ran 170 cases: 169 passed and the unconfigured EXDEV case skipped. Final discovery contains 173 cases, including the disabled-by-default slow rebuild check. After the additional registrations, the fast lane passes 23/23 and the extended lane passes five cases with one unconfigured EXDEV skip; real EXDEV passes separately on an APFS fixture volume. JUnit: `build/test-logs/expanded-suite.xml`; log: `build/architecture-validation/expanded-suite.log`.
+Native macOS arm64 is the available execution host. Final CTest discovery contains **173 cases**. At implementation revision `08623af`, the regular integration lane passes **166/166 with no skips** in 35.26 seconds. The extended lane passes its five runnable cases; its unconfigured EXDEV entry skips, and the same real EXDEV case passes separately on a disposable APFS volume. The slow dependency rebuild case also passes separately for LuaJIT, 7zr and Fresh. Thus every registered native case has passing execution evidence across these runs; instrumented/platform qualification has the limits below.
 
-- Core-only: **17/17** cases pass with all UI/Lua/editor/LZMA source-directory options pointing to a nonexistent path; log: `/tmp/fc-core-final-tests.log`.
+Final integration JUnit and metadata: `build/test-logs/lane-integration-a539ecf946/`. Summary log: `build/architecture-validation/final-integration.log`. Fast/extended logs: `final-fast-lane.log`, `final-extended.log` in the same validation directory. Slow rebuild evidence: `TS09-dependency-rebuild.log`; dependency revisions/fingerprints remain clean after the checks.
+
+- Core-only: **17/17** cases pass with all UI/Lua/editor/LZMA source-directory options pointing to a nonexistent path; log: `build/architecture-validation/final-core-only.log`.
 - UBSan: **17/17** core/fault/lifetime tests pass; artifacts under `build-ubsan/test-logs/lane-sanitizer-*`.
 - Resource stress: **30 cycles pass**, with stable descriptor/thread counts and bounded job history/details/events.
 - Benchmarks: 1k/10k/100k publication/selection/delta, event polling, and real UI rendering at 0/1/10/100% selection pass as non-gating measurements. Render records include p50/p95/max and median C++ allocation-call counts (direct library malloc calls are excluded). Current local measurements are Debug, not a Release performance baseline.
