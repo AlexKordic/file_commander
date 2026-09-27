@@ -25,6 +25,7 @@
 #include <boost/cstdint.hpp>
 #include <atomic>
 #include <cstdint>
+#include <cstddef>
 #include <ctime>
 #include <string>
 
@@ -67,10 +68,22 @@ enum class copy_options : unsigned int
 
 BOOST_BITMASK(copy_options)
 
+// Optional per-call I/O seam. Null callbacks use the native syscall. The caller
+// owns context for the duration of the synchronous copy. fault returns errno
+// (zero continues) at named open/flush/close/commit and owned move boundaries.
+struct copy_file_io_hooks
+{
+    void* context = nullptr;
+    std::ptrdiff_t (*read)(void*, int, void*, std::size_t) = nullptr;
+    std::ptrdiff_t (*write)(void*, int, const void*, std::size_t) = nullptr;
+    int (*fault)(void*, const char*) = nullptr;
+};
+
 //! Extended options for copy_file with transfer rate limiting and cancellation support.
 struct copy_file_options
 {
     copy_options options = copy_options::none;
+    const copy_file_io_hooks* io = nullptr;
     uint64_t bytes_per_second = 0;              // 0 = unlimited
     std::atomic<bool>* cancel_requested = nullptr; // null = no cancel support
     std::atomic<uint64_t>* bytes_copied = nullptr; // progress of the private output

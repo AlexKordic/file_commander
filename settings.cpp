@@ -79,19 +79,27 @@ void SettingsStore::save(const Filepath& path, const AppSettings& s) {
   j::object counts; for (const auto& [k,v]:s.command_use_count) counts[k]=v; o["command_use_count"]=std::move(counts);
   atomic_write(path,j::serialize(o)+"\n");
 }
-void SettingsStore::atomic_write(const Filepath& path, const std::string& data, Replace replace) {
+void SettingsStore::atomic_write(const Filepath& path, const std::string& data, Replace replace, const boost::filesystem::copy_file_io_hooks* io) {
   boost::filesystem::create_directories(path.parent_path());
   auto pattern=path.string()+".XXXXXX";
   int fd=::mkstemp(pattern.data()); if (fd<0) throw std::runtime_error("cannot create settings temporary file");
   Filepath temp(pattern);
   try {
+    auto fault = [&](const char* phase) {
+      if (io && io->fault && io->fault(io->context, phase))
+        throw std::runtime_error(std::string("settings ") + phase + " failed");
+    };
+    fault("open");
     size_t at=0; while (at<data.size()) {
-      auto n=::write(fd,data.data()+at,data.size()-at);
+      auto n=io && io->write ? io->write(io->context,fd,data.data()+at,data.size()-at) : ::write(fd,data.data()+at,data.size()-at);
       if (n<0 && errno==EINTR) continue;
       if (n<=0) throw std::runtime_error("cannot write settings"); at+=n;
     }
+    fault("flush");
     if (::fsync(fd)!=0) throw std::runtime_error("cannot flush settings");
+    fault("close");
     auto rc=::close(fd); fd=-1; if (rc!=0) throw std::runtime_error("cannot close settings");
+    fault("commit");
     if (replace) replace(temp,path); else boost::filesystem::rename(temp,path);
   } catch (...) {
     if (fd>=0) ::close(fd);

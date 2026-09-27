@@ -27,5 +27,5 @@ class SettingsStore {
   static void save_colors(const std::map<std::string, std::string>& colors);
   // The injectable replacement permits deterministic failure testing.
   using Replace = std::function<void(const Filepath&, const Filepath&)>;
-  static void atomic_write(const Filepath&, const std::string&, Replace replace = {});
+  static void atomic_write(const Filepath&, const std::string&, Replace replace = {}, const boost::filesystem::copy_file_io_hooks* io = nullptr);
 };

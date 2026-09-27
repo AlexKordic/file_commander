@@ -619,6 +619,7 @@ namespace {
 //! When non-null, copy_file_data implementations check for rate limiting and cancellation.
 struct copy_file_context
 {
+    const copy_file_io_hooks* io;
     uint64_t bytes_per_second;       // 0 = unlimited
     std::atomic<bool>* cancel_requested; // null = no cancel support
     std::atomic<uint64_t>* bytes_copied;
@@ -627,6 +628,10 @@ struct copy_file_context
 };
 
 static thread_local copy_file_context* tls_copy_ctx = nullptr;
+static int copy_fault(const char* phase) {
+    const auto* io = tls_copy_ctx ? tls_copy_ctx->io : nullptr;
+    return io && io->fault ? io->fault(io->context, phase) : 0;
+}
 
 //! Flushes buffered data and attributes written to the file to permanent storage
 inline int full_sync(int fd)
@@ -764,7 +769,7 @@ int copy_file_data_read_write_impl(int infile, int outfile, char* buf, std::size
         if (tctx && tctx->cancel_requested && tctx->cancel_requested->load(std::memory_order_relaxed))
             return ECANCELED;
 
-        ssize_t sz_read = ::read(infile, buf, buf_size);
+        ssize_t sz_read = tctx && tctx->io && tctx->io->read ? tctx->io->read(tctx->io->context, infile, buf, buf_size) : ::read(infile, buf, buf_size);
         if (sz_read == 0)
             break;
         if (BOOST_UNLIKELY(sz_read < 0))
@@ -779,7 +784,8 @@ int copy_file_data_read_write_impl(int infile, int outfile, char* buf, std::size
         // Marc Rochkind, Addison-Wesley, 2004, page 94
         for (ssize_t sz_wrote = 0; sz_wrote < sz_read;)
         {
-            ssize_t sz = ::write(outfile, buf + sz_wrote, static_cast< std::size_t >(sz_read - sz_wrote));
+            ssize_t sz = tctx && tctx->io && tctx->io->write ? tctx->io->write(tctx->io->context, outfile, buf + sz_wrote, sz_read - sz_wrote) : ::write(outfile, buf + sz_wrote, static_cast< std::size_t >(sz_read - sz_wrote));
+            if (sz == 0) return EIO;
             if (BOOST_UNLIKELY(sz < 0))
             {
                 int err = errno;
@@ -3316,6 +3322,7 @@ bool copy_file(path const& from, path const& to, copy_options options, error_cod
 
     if ((options & (copy_options::synchronize_data | copy_options::synchronize)) != copy_options::none)
     {
+        if ((err = copy_fault("flush")) != 0) goto fail;
         if ((options & copy_options::synchronize) != copy_options::none)
             err = full_sync(outfile.get());
         else
@@ -3327,6 +3334,7 @@ bool copy_file(path const& from, path const& to, copy_options options, error_cod
 
     // We have to explicitly close the output file descriptor in order to handle a possible error returned from it. The error may indicate
     // a failure of a prior write operation.
+    if ((err = copy_fault("close")) != 0) goto fail;
     err = close_fd(outfile.get());
     outfile.release();
     if (BOOST_UNLIKELY(err < 0))
@@ -3471,7 +3479,7 @@ BOOST_FILESYSTEM_DECL
 bool copy_file(path const& from, path const& to, copy_file_options const& opts, error_code* ec)
 {
     // Fast path: no throttle/cancel, delegate directly to the standard implementation
-    if (opts.bytes_per_second == 0 && opts.cancel_requested == nullptr && opts.bytes_copied == nullptr && opts.checkpoint == nullptr)
+    if (opts.bytes_per_second == 0 && opts.cancel_requested == nullptr && opts.bytes_copied == nullptr && opts.checkpoint == nullptr && opts.io == nullptr)
         return copy_file(from, to, opts.options, ec);
 
 #if defined(BOOST_POSIX_API)
@@ -3511,6 +3519,7 @@ bool copy_file(path const& from, path const& to, copy_file_options const& opts, 
     } cleanup{staged, directory};
 
     copy_file_context ctx;
+    ctx.io = opts.io;
     ctx.bytes_per_second = opts.bytes_per_second;
     ctx.cancel_requested = opts.cancel_requested;
     ctx.bytes_copied = opts.bytes_copied;
@@ -3521,10 +3530,12 @@ bool copy_file(path const& from, path const& to, copy_file_options const& opts, 
         ~restore_context() { tls_copy_ctx = previous; }
     } restore{tls_copy_ctx};
     tls_copy_ctx = &ctx;
+    if (int err = copy_fault("open")) return fail(err);
     const bool copied = copy_file(from, staged, opts.options, &local_ec);
     if (local_ec) return fail(local_ec.value());
     if (!copied) return false;
     if (opts.cancel_requested && opts.cancel_requested->load(std::memory_order_relaxed)) return fail(ECANCELED);
+    if (int err = copy_fault("commit")) return fail(err);
     if (overwrite || update) {
         if (::rename(staged.c_str(), to.c_str()) != 0) return fail(errno);
     } else {

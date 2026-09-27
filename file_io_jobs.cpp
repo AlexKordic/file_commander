@@ -296,10 +296,17 @@ bool move_by_copy(const Filepath& source, const Filepath& destination,
   } cleanup{staging};
   const auto output = staging / "entry";
   if (!copy_move_tree(source, output, options, ec) || !transfer_checkpoint(options, ec)) return false;
+  auto fault = [&](const char* phase) {
+    int error = options.io && options.io->fault ? options.io->fault(options.io->context,phase) : 0;
+    if (error) ec.assign(error,boost::system::system_category());
+    return error != 0;
+  };
+  if (fault("move_commit")) return false;
   boost::filesystem::rename(output, destination, ec);
   if (ec) return false;
   // Commit boundary: the complete destination now exists. Finish source cleanup
   // even if cancellation arrives here, rather than leaving a half-deleted source.
+  if (fault("source_remove")) return false;
   boost::filesystem::remove_all(source, ec);
   return !ec;
 }
@@ -637,9 +644,13 @@ class ThreadedFileJobs : public FileJobs {
       auto&      item = job->_items.at(i);
       const auto& op=job->_plan->steps.at(i);
       error_code ec;
-      boost::filesystem::rename(op.source, op.destination, ec);
+      const auto* io = _services.file_io.get();
+      int injected = io && io->fault ? io->fault(io->context,"move_rename") : 0;
+      if (injected) ec.assign(injected,boost::system::system_category());
+      else boost::filesystem::rename(op.source, op.destination, ec);
       if (ec.value() == boost::system::errc::cross_device_link) {
         boost::filesystem::copy_file_options options;
+        options.io = _services.file_io.get();
         options.cancel_requested = &job->_cancel_requested;
         options.bytes_per_second = _transfer_rate.load();
         options.bytes_copied = &job->_copy_bytes;
@@ -862,6 +873,7 @@ class ThreadedFileJobs : public FileJobs {
       ec.clear();
       lock.unlock();
       boost::filesystem::copy_file_options cfo;
+      cfo.io = _services.file_io.get();
       cfo.options = (job->_copy_conflict == CopyConflictMode::Skip)
         ? copy_options::none
         : copy_options::overwrite_existing;

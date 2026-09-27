@@ -156,6 +156,7 @@ struct JobRetention {
 
 struct FileJobServices {
   ArchiveService* archives = nullptr;
+  std::shared_ptr<const boost::filesystem::copy_file_io_hooks> file_io;
   std::function<Err(const std::string&)> clipboard = push_to_clipboard;
 };
 
