@@ -12,13 +12,15 @@
 bool is_archive_file_path(const Filepath& path);
 bool path_is_under(const Filepath& parent, const Filepath& child);
 
+enum class ArchiveConflict { Replace, Update, Skip };
+
 class ArchiveService {
  public:
   void        set_tool_path(std::string tool_path);
   std::string tool_path() const;
 
   Err extract_to_cache(const Filepath& archive_path, Filepath& extracted_root);
-  Err create_archive(const Filepath& archive_path, const std::vector<Filepath>& sources, const Filepath& preferred_cwd = Filepath());
+  Err create_archive(const Filepath& archive_path, const std::vector<Filepath>& sources, const Filepath& preferred_cwd = Filepath(), ArchiveConflict conflict = ArchiveConflict::Replace);
 
  private:
   struct CacheEntry {

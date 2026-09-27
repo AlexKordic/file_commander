@@ -861,7 +861,7 @@ void CopyDialog::run_copy() {
       auto& item = items.emplace_back(source);
       item._set_symlink_target(target);
     }
-    auto job = std::make_shared<JobSpec>(JobSpec::Type::ARCHIVE_CREATE, std::move(items));
+    auto job = std::make_shared<JobSpec>(JobSpec::Type::ARCHIVE_CREATE, std::move(items), to_job_copy_conflict(_conflict));
     _clear_operation_state();
     file_operations().add_job(job);
     app->dir->clear_selection();

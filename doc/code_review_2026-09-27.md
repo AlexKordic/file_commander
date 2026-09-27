@@ -82,15 +82,15 @@ The extended `copy_file()` wrapper treats any failure as cancellation if the fla
 
 **Fix direction:** validate inputs and conflict policy, create a temporary archive, and replace the destination only after successful creation. **Regression:** failed creation and Skip must preserve the original byte-for-byte; reject output/source identity.
 
-**Implementation status:** Planned.
+**Implementation status:** Applied.
 
 **Planned solution:** validate inputs and conflict policy, create a temporary archive, and replace the destination only after successful creation.
 
-**Applied solution:** Pending.
+**Applied solution:** Archive creation validates inputs, rejects output within a selected input, writes to an owned sibling staging directory, and commits only after successful output validation. The copy conflict mode reaches the archive worker; Skip uses a no-replace commit.
 
-**Plan deviations:** Pending.
+**Plan deviations:** Existing archives in Update mode are explicitly rejected with guidance to choose Replace or Skip; archive freshness cannot safely be inferred from one directory timestamp. Temporary output is cleaned on every failure.
 
-**Validation:** Pending.
+**Validation:** Native build, fc_review_tests R03, and git diff --check passed. Failed tool, Skip, self-input, unsupported Update and staging cleanup were checked against an unchanged OLD archive.
 
 ### R04 — Copy confirmation can ignore the edited destination
 

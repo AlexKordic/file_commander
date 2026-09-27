@@ -233,7 +233,7 @@ Err ArchiveService::extract_to_cache(const Filepath& archive_path, Filepath& ext
   return Err();
 }
 
-Err ArchiveService::create_archive(const Filepath& archive_path, const std::vector<Filepath>& sources, const Filepath& preferred_cwd) {
+Err ArchiveService::create_archive(const Filepath& archive_path, const std::vector<Filepath>& sources, const Filepath& preferred_cwd, ArchiveConflict conflict) {
   if (!is_archive_file_path(archive_path)) return Err("unsupported archive destination: " + archive_path.native());
   if (sources.empty()) return Err("no input files selected for archive creation");
 
@@ -248,7 +248,33 @@ Err ArchiveService::create_archive(const Filepath& archive_path, const std::vect
 
   std::vector<Filepath> source_abs;
   source_abs.reserve(sources.size());
-  for (const auto& p : sources) source_abs.push_back(absolute_path_safe(p));
+  for (const auto& p : sources) {
+    const auto input = absolute_path_safe(p);
+    const auto canonical_input = boost::filesystem::canonical(input, ec);
+    if (ec.failed()) return Err("cannot read archive input: " + input.native());
+    const bool same = input == archive_abs || boost::filesystem::equivalent(input, archive_abs, ec);
+    ec.clear();
+    if (same || (dir_exists(input) && path_is_under(canonical_input, archive_abs)))
+      return Err("archive output must be outside its selected inputs");
+    source_abs.push_back(input);
+  }
+  const auto destination_status = boost::filesystem::symlink_status(archive_abs, ec);
+  if (ec.failed() && ec != boost::system::errc::no_such_file_or_directory)
+    return Err("cannot inspect archive destination: " + ec.message());
+  ec.clear();
+  if (boost::filesystem::exists(destination_status)) {
+    if (conflict == ArchiveConflict::Skip) return Err();
+    if (conflict == ArchiveConflict::Update)
+      return Err("Update if newer is unavailable for archives; choose Replace or Skip");
+  }
+  const Filepath staging_dir = archive_parent / boost::filesystem::unique_path(".fc-archive-%%%%-%%%%-%%%%");
+  if (!boost::filesystem::create_directory(staging_dir, ec) || ec.failed())
+    return Err("cannot create private archive staging directory: " + ec.message());
+  struct Cleanup {
+    Filepath root;
+    ~Cleanup() { boost::system::error_code ignored; boost::filesystem::remove_all(root, ignored); }
+  } cleanup{staging_dir};
+  const Filepath staged_archive = staging_dir / "output.7z";
 
   Filepath working_dir;
   if (!preferred_cwd.empty()) {
@@ -284,7 +310,7 @@ Err ArchiveService::create_archive(const Filepath& archive_path, const std::vect
   args.push_back(tool_path());
   args.push_back("a");
   args.push_back("-y");
-  args.push_back(archive_abs.native());
+  args.push_back(staged_archive.native());
 
   for (const auto& src : source_abs) {
     boost::system::error_code rel_ec;
@@ -293,14 +319,18 @@ Err ArchiveService::create_archive(const Filepath& archive_path, const std::vect
     args.push_back(rel.native());
   }
 
-  boost::filesystem::remove(archive_abs, ec);
-  ec.clear();
   const int rc = run_command(working_dir, args);
   if (rc != 0) return Err("archive create failed (exit " + std::to_string(rc) + "): " + archive_abs.native());
 
-  if (!boost::filesystem::exists(archive_abs, ec) || ec.failed()) {
+  if (!boost::filesystem::is_regular_file(staged_archive, ec) || ec.failed())
     return Err("archive create reported success but output file is missing: " + archive_abs.native());
+  if (conflict == ArchiveConflict::Replace) {
+    boost::filesystem::rename(staged_archive, archive_abs, ec);
+  } else {
+    boost::filesystem::create_hard_link(staged_archive, archive_abs, ec);
+    if (conflict == ArchiveConflict::Skip && ec == boost::system::errc::file_exists) return Err();
   }
+  if (ec.failed()) return Err("cannot commit archive: " + ec.message());
   return Err();
 }
 

@@ -528,7 +528,9 @@ class ThreadedFileJobs : public FileJobs {
     }
 
     Filepath preferred_cwd = sources.front().parent_path();
-    Err      err = archive_service().create_archive(archive_path, sources, preferred_cwd);
+    const auto conflict = job->_copy_conflict == CopyConflictMode::Skip ? ArchiveConflict::Skip
+      : job->_copy_conflict == CopyConflictMode::Update ? ArchiveConflict::Update : ArchiveConflict::Replace;
+    Err err = archive_service().create_archive(archive_path, sources, preferred_cwd, conflict);
     if (!err.ok()) {
       file_operations().report_error("[Archive create] " + err.steps.front());
       std::lock_guard lock(job->_m);

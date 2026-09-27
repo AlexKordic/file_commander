@@ -85,8 +85,24 @@ static void R02() {
   require(std::distance(fs::directory_iterator(f.root), fs::directory_iterator()) == 2, "staged output leaked");
 }
 
+static void R03() {
+  Fixture f;
+  auto source = f.file("input", "data");
+  auto archive = f.file("existing.7z", "OLD");
+  ArchiveService service;
+  service.set_tool_path("/usr/bin/false");
+  require(!service.create_archive(archive, {source}, f.root).ok(), "failed tool reported success");
+  require(read_file(archive) == "OLD", "failed tool removed old archive");
+  require(service.create_archive(archive, {source}, f.root, ArchiveConflict::Skip).ok(), "Skip invoked failing tool");
+  require(read_file(archive) == "OLD", "Skip changed archive");
+  require(!service.create_archive(archive, {archive}, f.root).ok(), "archive allowed self-input");
+  require(read_file(archive) == "OLD", "self-input damaged archive");
+  require(!service.create_archive(archive, {source}, f.root, ArchiveConflict::Update).ok(), "ambiguous archive Update accepted");
+  require(std::distance(fs::directory_iterator(f.root), fs::directory_iterator()) == 2, "archive staging leaked");
+}
+
 int main(int argc, char** argv) {
-  const std::vector<std::pair<std::string, void (*)()>> tests = {{"R01", R01}, {"R02", R02}};
+  const std::vector<std::pair<std::string, void (*)()>> tests = {{"R01", R01}, {"R02", R02}, {"R03", R03}};
   try {
     bool matched = false;
     for (const auto& [id, run] : tests) {
