@@ -268,8 +268,31 @@ static void R11() {
   require(second->_state == JobState::COMPLETED_WITH_ERRORS, "explicit discovery error was dropped");
 }
 
+static void R12() {
+  Fixture f;
+  auto source = f.file("source", std::string(1024 * 1024, 'x'));
+  DirItem item(source); item._set_symlink_target(f.root / "destination");
+  auto job = std::make_shared<JobSpec>(JobSpec::Type::COPY, std::vector<DirItem>{item});
+  file_operations().set_transfer_rate(1024 * 1024);
+  auto id = file_operations().add_job(job);
+  while (job->_copy_bytes.load() == 0 && !job->is_stopped()) std::this_thread::yield();
+  file_operations().pause_job(job.get());
+  for (int i = 0; job->_state != JobState::PAUSED && i < 1000; ++i)
+    std::this_thread::sleep_for(std::chrono::milliseconds(2));
+  require(job->_state == JobState::PAUSED && !job->is_stopped(), "pause was not acknowledged during final file");
+  auto bytes = job->_copy_bytes.load();
+  std::this_thread::sleep_for(std::chrono::milliseconds(100));
+  require(job->_copy_bytes.load() == bytes, "paused copy kept writing");
+  file_operations().pause_job(job.get());
+  wait_job(id);
+  file_operations().set_transfer_rate(0);
+  require(job->_state == JobState::COMPLETED && !job->_pause_requested, "finished job remained paused");
+  require(read_file(f.root / "destination") == read_file(source), "resumed copy contents differ");
+  require(file_operations().pause_job(job.get()) == JobError::NOT_FOUND, "terminal job accepted pause");
+}
+
 int main(int argc, char** argv) {
-  const std::vector<std::pair<std::string, void (*)()>> tests = {{"R01", R01}, {"R02", R02}, {"R03", R03}, {"R04", R04}, {"R05", R05}, {"R06", R06}, {"R07", R07}, {"R08", R08}, {"R09", R09}, {"R10", R10}, {"R11", R11}};
+  const std::vector<std::pair<std::string, void (*)()>> tests = {{"R01", R01}, {"R02", R02}, {"R03", R03}, {"R04", R04}, {"R05", R05}, {"R06", R06}, {"R07", R07}, {"R08", R08}, {"R09", R09}, {"R10", R10}, {"R11", R11}, {"R12", R12}};
   try {
     bool matched = false;
     for (const auto& [id, run] : tests) {

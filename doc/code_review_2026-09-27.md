@@ -248,15 +248,15 @@ A mode-000 directory containing a file produced `file_count=0, error_count=0`. A
 
 **Fix direction:** distinguish pause requested from pause acknowledged, and finalize every finished job to a terminal state. **Regression:** pause at several offsets in a one-file copy, including just before completion.
 
-**Implementation status:** Planned.
+**Implementation status:** Applied.
 
 **Planned solution:** distinguish pause requested from pause acknowledged, and finalize every finished job to a terminal state.
 
-**Applied solution:** Pending.
+**Applied solution:** Pause now changes only the request flag; workers acknowledge PAUSED/RUNNING at synchronized checkpoints. Cancellable copies invoke checkpoints between chunks and during bounded throttle sleeps, allowing the final file to pause without being falsely marked stopped. Finalization always chooses a terminal result and clears pending pause; stopped jobs reject pause.
 
-**Plan deviations:** Pending.
+**Plan deviations:** Added intra-file pause checkpoints rather than retaining only per-file pause granularity. Linux accelerated copy paths fall back to the checkpoint-aware buffered path when extended controls are active.
 
-**Validation:** Pending.
+**Validation:** Native build and R12 passed: a one-file transfer paused with stable byte count, resumed with matching contents, completed terminally, and rejected a later pause. Linux fallback changes were reviewed statically.
 
 ### R13 — Cancellation does not reach several long-running operations
 

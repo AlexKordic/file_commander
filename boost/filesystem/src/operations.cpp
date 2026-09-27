@@ -622,6 +622,8 @@ struct copy_file_context
     uint64_t bytes_per_second;       // 0 = unlimited
     std::atomic<bool>* cancel_requested; // null = no cancel support
     std::atomic<uint64_t>* bytes_copied;
+    bool (*checkpoint)(void*);
+    void* checkpoint_context;
 };
 
 static thread_local copy_file_context* tls_copy_ctx = nullptr;
@@ -757,6 +759,7 @@ int copy_file_data_read_write_impl(int infile, int outfile, char* buf, std::size
     // as we can read from the input file.
     while (true)
     {
+        if (tctx && tctx->checkpoint && !tctx->checkpoint(tctx->checkpoint_context)) return ECANCELED;
         // Check for cancellation
         if (tctx && tctx->cancel_requested && tctx->cancel_requested->load(std::memory_order_relaxed))
             return ECANCELED;
@@ -797,8 +800,13 @@ int copy_file_data_read_write_impl(int infile, int outfile, char* buf, std::size
             throttle_bytes += static_cast< uint64_t >(sz_read);
             double expected = static_cast< double >(throttle_bytes) / static_cast< double >(tctx->bytes_per_second);
             double elapsed = std::chrono::duration< double >(clock_type::now() - throttle_start).count();
-            if (expected > elapsed)
-                std::this_thread::sleep_for(std::chrono::duration< double >(expected - elapsed));
+            while (expected > elapsed) {
+                if (tctx->cancel_requested && tctx->cancel_requested->load(std::memory_order_relaxed)) return ECANCELED;
+                if (tctx->checkpoint && !tctx->checkpoint(tctx->checkpoint_context)) return ECANCELED;
+                const double delay = (expected - elapsed) < 0.05 ? expected - elapsed : 0.05;
+                std::this_thread::sleep_for(std::chrono::duration<double>(delay));
+                elapsed = std::chrono::duration<double>(clock_type::now() - throttle_start).count();
+            }
             // Reset window periodically to avoid precision drift on large transfers
             if (throttle_bytes >= tctx->bytes_per_second)
             {
@@ -861,6 +869,7 @@ struct copy_file_data_sendfile
     //! copy_file implementation that uses sendfile loop. Requires sendfile to support file descriptors.
     static int impl(int infile, int outfile, uintmax_t size, std::size_t blksize)
     {
+        if (tls_copy_ctx) return copy_file_data_read_write(infile, outfile, size, blksize);
         // sendfile will not send more than this amount of data in one call
         BOOST_CONSTEXPR_OR_CONST std::size_t max_batch_size = 0x7ffff000u;
         uintmax_t offset = 0u;
@@ -950,6 +959,7 @@ struct copy_file_data_copy_file_range
     //! copy_file implementation that uses copy_file_range loop. Requires copy_file_range to support cross-filesystem copying.
     static int impl(int infile, int outfile, uintmax_t size, std::size_t blksize)
     {
+        if (tls_copy_ctx) return copy_file_data_read_write(infile, outfile, size, blksize);
         // Although copy_file_range does not document any particular upper limit of one transfer, still use some upper bound to guarantee
         // that size_t is not overflown in case if off_t is larger and the file size does not fit in size_t.
         BOOST_CONSTEXPR_OR_CONST std::size_t max_batch_size = 0x7ffff000u;
@@ -3461,7 +3471,7 @@ BOOST_FILESYSTEM_DECL
 bool copy_file(path const& from, path const& to, copy_file_options const& opts, error_code* ec)
 {
     // Fast path: no throttle/cancel, delegate directly to the standard implementation
-    if (opts.bytes_per_second == 0 && opts.cancel_requested == nullptr && opts.bytes_copied == nullptr)
+    if (opts.bytes_per_second == 0 && opts.cancel_requested == nullptr && opts.bytes_copied == nullptr && opts.checkpoint == nullptr)
         return copy_file(from, to, opts.options, ec);
 
 #if defined(BOOST_POSIX_API)
@@ -3504,6 +3514,8 @@ bool copy_file(path const& from, path const& to, copy_file_options const& opts, 
     ctx.bytes_per_second = opts.bytes_per_second;
     ctx.cancel_requested = opts.cancel_requested;
     ctx.bytes_copied = opts.bytes_copied;
+    ctx.checkpoint = opts.checkpoint;
+    ctx.checkpoint_context = opts.checkpoint_context;
     struct restore_context {
         copy_file_context* previous;
         ~restore_context() { tls_copy_ctx = previous; }

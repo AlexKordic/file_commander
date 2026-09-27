@@ -274,27 +274,14 @@ class ThreadedFileJobs : public FileJobs {
   }
   JobError pause_job(JobSpec* job) override {
     if (!job) return JobError::NOT_FOUND;
-    const bool was_paused = job->_pause_requested.load(std::memory_order_relaxed);
-    const bool pause_now  = !was_paused;
-    bool       notify_ui  = false;
-    job->_pause_requested.store(pause_now, std::memory_order_relaxed);
-
-    if (pause_now) {
-      // Make pause observable immediately in UI/state APIs.
-      if (job->_state.load(std::memory_order_relaxed) == JobState::RUNNING) {
-        job->_state = JobState::PAUSED;
-        notify_ui   = true;
-      }
-    } else {
-      // Resume and wake workers that are waiting at a pause checkpoint.
-      if (job->_state.load(std::memory_order_relaxed) == JobState::PAUSED) {
-        job->_state = JobState::RUNNING;
-        notify_ui   = true;
-      }
-      job->_pause_cv.notify_all();
+    {
+      std::lock_guard lock(job->_m);
+      if (job->is_stopped()) return JobError::NOT_FOUND;
+      job->_pause_requested = !job->_pause_requested.load();
     }
-
-    if (notify_ui) { job->updated(); }
+    // Only the worker acknowledges PAUSED/RUNNING at a checkpoint.
+    job->_pause_cv.notify_all();
+    job->updated();
     return JobError::OK;
   }
   RunningJobsInfo get_running_job() override {
@@ -398,11 +385,12 @@ class ThreadedFileJobs : public FileJobs {
         std::lock_guard lock(_active_job->_m);
         _active_job->_finished_time = now();
         // Determine final state (if not already set by pause/cancel in future steps)
-        if (_active_job->_state == JobState::RUNNING) {
+        if (_active_job->_state != JobState::CANCELLED) {
           _active_job->_state = _active_job->_errors.empty()
             ? JobState::COMPLETED
             : JobState::COMPLETED_WITH_ERRORS;
         }
+        _active_job->_pause_requested = false;
         _active_job->_stopped.store(true, std::memory_order_release);
       }
       // Store in job history directly (under _m, which we already use for _active_job)
@@ -685,6 +673,8 @@ class ThreadedFileJobs : public FileJobs {
       cfo.bytes_per_second = _transfer_rate;  // TODO: make configurable per-job
       cfo.cancel_requested = &job->_cancel_requested;
       cfo.bytes_copied = &job->_copy_bytes;
+      cfo.checkpoint = [](void* context) { return wait_for_resume(static_cast<JobSpec*>(context)); };
+      cfo.checkpoint_context = job;
       boost::filesystem::copy_file(item.path_ref(), destination_path, cfo, ec);
       if (ec.failed() && job->_cancel_requested.load(std::memory_order_relaxed)) {
         // Cancel during copy_file — boost already removed partial dest file.
