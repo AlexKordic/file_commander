@@ -383,7 +383,15 @@ class ThreadedFileJobs : public FileJobs {
   void _discover_files(JobSpec* job, std::vector<DirItem>& items, FifoQueue<DirItem>& files, DelayedUpdateDiscovery& update) {
     error_code ec;
     for (DirItem const& item : items) {
-      if (item.type() == boost::filesystem::file_type::directory_file) {
+      // Inspect the entry itself: a directory symlink must be unlinked, never
+      // traversed. Recheck here instead of trusting an earlier followed stat.
+      const auto entry_status = boost::filesystem::symlink_status(item.path_ref(), ec);
+      if (ec.failed()) {
+        std::lock_guard lock(job->_m);
+        job->report_error(item, "Failed to inspect deletion target: " + ec.message());
+        continue;
+      }
+      if (boost::filesystem::is_directory(entry_status)) {
         std::vector<DirItem> subdir_items;
         for (boost::filesystem::directory_entry& subdir_item : boost::filesystem::directory_iterator(item.path_ref(), ec)) { subdir_items.emplace_back(DirItem(subdir_item.path())); }
         _discover_files(job, subdir_items, files, update);

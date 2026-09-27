@@ -220,6 +220,16 @@ endif()
 
 target_compile_definitions(fc PRIVATE FC_ARCHIVE_TOOL_DEFAULT="${_fc_archive_default_bin}")
 
+# Filesystem and component regressions run without a terminal or real user data.
+get_target_property(_fc_test_sources fc SOURCES)
+list(REMOVE_ITEM _fc_test_sources main.cpp)
+add_executable(fc_review_tests EXCLUDE_FROM_ALL test/review_regressions.cpp ${_fc_test_sources})
+target_include_directories(fc_review_tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
+get_target_property(_fc_test_libraries fc LINK_LIBRARIES)
+target_link_libraries(fc_review_tests PRIVATE ${_fc_test_libraries})
+get_target_property(_fc_test_definitions fc COMPILE_DEFINITIONS)
+target_compile_definitions(fc_review_tests PRIVATE ${_fc_test_definitions})
+
 set(_fc_dist_root "${CMAKE_BINARY_DIR}/dist")
 set(_fc_dist_name "fc-${CMAKE_SYSTEM_NAME}-${CMAKE_SYSTEM_PROCESSOR}")
 set(_fc_pack_script "${CMAKE_BINARY_DIR}/cmake/package_dist.cmake")

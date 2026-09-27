@@ -46,15 +46,15 @@ The disposable probe selected only the symlink; `outside/valuable.txt` disappear
 
 **Fix direction:** classify deletion targets with `symlink_status()`/`lstat`; remove a link itself and never recurse through it. **Regression:** delete a selected link and a tree containing external/cyclic directory links; all external targets must survive.
 
-**Implementation status:** Planned.
+**Implementation status:** Applied.
 
 **Planned solution:** classify deletion targets with `symlink_status()`/`lstat`; remove a link itself and never recurse through it.
 
-**Applied solution:** Pending.
+**Applied solution:** Delete discovery now checks symlink_status at traversal time and only descends into actual directories. Added the fc_review_tests target and an isolated external-link/cycle regression.
 
-**Plan deviations:** Pending.
+**Plan deviations:** None. Link classification is localized to delete; the listing semantics are addressed separately in R15.
 
-**Validation:** Pending.
+**Validation:** Native application and regression target built; fc_review_tests R01 passed for a selected directory link and nested external/cyclic links.
 
 ### R02 — Cancellation cleanup can remove a destination that this copy never touched
 
