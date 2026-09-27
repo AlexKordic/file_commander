@@ -41,13 +41,17 @@ using Perun::CopyConflictMode;
 using Perun::JobInstructions;
 using Perun::JobSpec;
 using Perun::JobState;
+using Perun::JobSnapshot;
+using Perun::Operation;
+using Perun::OperationPlan;
+using Perun::OperationType;
+using Perun::selection_plan;
 
 std::string time_to_string(double time);
 
 namespace ftxui {
 
 namespace {
-std::atomic<uint64_t> g_copy_discovery_sequence{1};
 std::atomic<uint64_t> g_find_sequence{1};
 }
 
@@ -418,7 +422,28 @@ MkdirDialog::MkdirDialog(PanelSharedState::P s) : Dialog(std::move(s)) {
   renderer   = Renderer(navigation, [this]() -> Element { return this->render(); });
 }
 
+bool Dialog::submit(OperationPlan plan,std::function<void(const JobSnapshot&)> apply) {
+  if(_pending) return false;
+  auto generation=++_submission_generation;
+  auto job=std::make_shared<JobSpec>(std::make_shared<const OperationPlan>(std::move(plan)));
+  job->completed=[this,alive=_alive,generation,post=app->post,apply=std::move(apply)](auto result) {
+    post([this,alive,generation,result,apply] {
+      if(!alive->load() || generation!=_submission_generation) return;
+      _pending.reset();apply(*result);
+    });
+  };
+  _pending=job;
+  if(!(app->jobs?*app->jobs:file_operations()).add_job(job)) {_pending.reset();return false;}
+  return true;
+}
+void Dialog::cancel_submission() {
+  ++_submission_generation;
+  if(_pending) (app->jobs?*app->jobs:file_operations()).cancel_job(_pending.get());
+  _pending.reset();
+}
+
 void MkdirDialog::OnShow() {
+  cancel_submission();
   new_dir_name.clear();
   error.clear();
 }
@@ -442,17 +467,15 @@ void MkdirDialog::ok() {
   const auto dir_path = app->action.arguments->origin / new_dir_name;
   error = archive_mutation_error(dir_path);
   if (!error.empty()) return;
-  boost::system::error_code ec;
-  // Create one directory only; missing parent paths are reported to the user.
-  const bool created = boost::filesystem::create_directory(dir_path, ec);
-  if (ec || !created) {
-    error = "Cannot create " + dir_path.native() + ": " + (ec ? ec.message() : "already exists");
-    return;
-  }
-  app->action.close_dialog();
+  OperationPlan plan;plan.type=OperationType::MKDIR;
+  plan.steps.push_back({Operation::Kind::CreateDirectory,{},dir_path});
+  submit(std::move(plan),[this,dir_path](const JobSnapshot& result) {
+    if(result._state==JobState::COMPLETED) app->action.close_dialog();
+    else error="Cannot create "+dir_path.native()+": "+(result._errors.empty()?"cancelled or failed":result._errors.front().warning_ref().value_or("failed"));
+  });
 }
 
-void MkdirDialog::cancel() { app->action.close_dialog(); }
+void MkdirDialog::cancel() { cancel_submission();app->action.close_dialog(); }
 
 namespace {
 
@@ -630,6 +653,7 @@ RenameDialog::RenameDialog(PanelSharedState::P d) : Dialog(std::move(d)) {
 }
 
 void RenameDialog::OnShow() {
+  cancel_submission();
   // remove old data
   menu->DetachAllChildren();
   rows.clear();
@@ -667,32 +691,22 @@ void RenameDialog::OnShow() {
 }
 
 void RenameDialog::ok() {
-  int selected_count = app->action.arguments->selected.size();
-  for (int i = selected_count - 1; i >= 0; --i) {
-    error_code ec;
-    auto       original = app->action.arguments->selected.at(i);
-    auto       new_path = original.parent_path() / rows.at(i)->content;
-    auto error = archive_mutation_error(original);
-    if (error.empty()) error = archive_mutation_error(new_path);
-    if (!error.empty()) { file_operations().report_error(error); continue; }
-    boost::filesystem::rename(original, new_path, ec);
-    if (ec.failed()) {
-      Perun::l.e("Rename failed", ec.to_string(), {{"original", original.native()}, {"new", new_path.native()}});
-      continue;
+  if(_pending) return;
+  OperationPlan plan;plan.type=OperationType::RENAME;
+  for(size_t i=0;i<app->action.arguments->selected.size();++i) {
+    auto source=app->action.arguments->selected[i];
+    plan.steps.push_back({Operation::Kind::RenameEntry,source,source.parent_path()/rows[i]->content});
+  }
+  submit(std::move(plan),[this](const JobSnapshot& result) {
+    for(int i=static_cast<int>(rows.size())-1;i>=0;--i) {
+      if(i>=result._step_errors.size() || !result._step_errors[i].empty()) continue;
+      rows.erase(rows.begin()+i);app->action.arguments->selected.erase(app->action.arguments->selected.begin()+i);menu->ChildAt(i)->Detach();
     }
-    rows.erase(rows.begin() + i);
-    app->action.arguments->selected.erase(app->action.arguments->selected.begin() + i);
-    menu->ChildAt(i)->Detach();
-  }
-  if (app->action.arguments->selected.empty()) {
-    app->dir->clear_selection();
-    app->action.close_dialog();
-    return;
-  }
-  menu->TakeFocus();
+    if(rows.empty()) {app->dir->clear_selection();app->action.close_dialog();}
+    else menu->TakeFocus();
+  });
 }
-
-void RenameDialog::cancel() { app->action.close_dialog(); }
+void RenameDialog::cancel() { cancel_submission();app->action.close_dialog(); }
 
 //
 // Copy
@@ -724,37 +738,6 @@ CopyConflictMode to_job_copy_conflict(CopyConflict conflict) {
   }
 }
 
-Filepath resolve_symlink(Filepath path) {
-  std::vector<Filepath> chain;
-  Filepath current = std::move(path);
-  for (;;) {
-    error_code ec;
-    auto parent = boost::filesystem::canonical(current.parent_path(), ec);
-    const auto identity = ec.failed() ? current.lexically_normal() : parent / current.filename();
-    // Compare the link paths, resolving only their parent directories. Using
-    // equivalent() here dereferences the link and confuses chains with cycles.
-    if (std::find(chain.begin(), chain.end(), identity) != chain.end()) return {};
-    chain.push_back(identity);
-    auto target = boost::filesystem::read_symlink(current, ec);
-    if (ec.failed() || target.empty()) return current;
-    if (target.is_relative()) target = current.parent_path() / target;
-    current = target.lexically_normal();
-  }
-}
-
-bool is_subpath(Filepath parent, Filepath child) {
-  parent = parent.lexically_normal();
-  child  = child.lexically_normal();
-  const std::string parent_text = parent.native();
-  const std::string child_text  = child.native();
-  if (parent_text.empty()) return false;
-  if (child_text == parent_text) return true;
-  std::string prefix = parent_text;
-  if (prefix.back() != boost::filesystem::path::preferred_separator) {
-    prefix.push_back(boost::filesystem::path::preferred_separator);
-  }
-  return child_text.rfind(prefix, 0) == 0;
-}
 
 /*
 TODO:
@@ -857,10 +840,10 @@ void CopyDialog::run_copy() {
     file_operations().report_error(error);
     return;
   }
-  if (_discovery_process->_target != target ||
-      _discovery_process->_follow_links != b_follow_links ||
-      _discovery_process->_preserve_relative_links != b_preserve_relative_links ||
-      _discovery_process->_input_paths->selected != app->action.arguments->selected) {
+  if (_discovery_process->request().conflict != to_job_copy_conflict(_conflict) || _discovery_process->request().destination != target ||
+      _discovery_process->request().follow_links != b_follow_links ||
+      _discovery_process->request().preserve_relative_links != b_preserve_relative_links ||
+      _discovery_process->request().sources != app->action.arguments->selected) {
     _start_new_discovery();
     _confirm_when_ready = true;
     return;
@@ -870,13 +853,9 @@ void CopyDialog::run_copy() {
     return;
   }
   if (is_archive_file_path(target)) {
-    std::vector<DirItem> items;
-    items.reserve(app->action.arguments->selected.size());
-    for (const auto& source : app->action.arguments->selected) {
-      auto& item = items.emplace_back(source);
-      item._set_symlink_target(target);
-    }
-    auto job = std::make_shared<JobSpec>(JobSpec::Type::ARCHIVE_CREATE, std::move(items), to_job_copy_conflict(_conflict));
+    auto plan=selection_plan(OperationType::ARCHIVE_CREATE,app->action.arguments->selected,target);
+    plan.conflict=to_job_copy_conflict(_conflict);
+    auto job=std::make_shared<JobSpec>(std::make_shared<const OperationPlan>(std::move(plan)));
     _clear_operation_state();
     file_operations().add_job(job);
     app->dir->clear_selection();
@@ -884,9 +863,7 @@ void CopyDialog::run_copy() {
     return;
   }
 
-  auto job = std::make_shared<JobSpec>(JobSpec::Type::COPY,
-                                       _discovery_process->take_items(),
-                                       to_job_copy_conflict(_conflict));
+  auto job = std::make_shared<JobSpec>(_discovery_process->take_plan());
   _clear_operation_state();
   file_operations().add_job(job);
   app->dir->clear_selection();
@@ -941,24 +918,11 @@ void CopyDialog::_clear_operation_state() {
   _discovery_process.reset();
 }
 
-CopyDiscoveryProcess::~CopyDiscoveryProcess() {
-  _running = false;
-  if (_thread.joinable()) { _thread.join(); }
-}
-
-CopyDiscoveryProcess::CopyDiscoveryProcess(CopyDialog* parent, Filepath target) {
-  _notify = parent->app->notify;
-  _sequence_id             = g_copy_discovery_sequence.fetch_add(1, std::memory_order_relaxed);
-  _input_paths             = std::make_shared<CommandArgs>(*parent->app->action.arguments);
-  for (const auto& p:_input_paths->selected) if (auto lease=archive_service().lease_for_path(p)) _archive_leases.push_back(std::move(lease));
-  _target                  = target;
-  _follow_links            = parent->b_follow_links;
-  _preserve_relative_links = parent->b_preserve_relative_links;
-  _conflict                = parent->_conflict;
-
+CopyDiscoveryProcess::CopyDiscoveryProcess(CopyDialog* parent, Filepath target)
+  : CopyPlanner(CopyRequest{parent->app->action.arguments->selected,target,parent->b_follow_links,parent->b_preserve_relative_links,to_job_copy_conflict(parent->_conflict)},parent->app->notify) {
   _dir           = std::make_unique<Dir>();
-  _dir->path     = _target;
-  _dir->path_txt = _target.native();
+  _dir->path     = target;
+  _dir->path_txt = target.native();
   _state         = std::make_shared<PanelSharedState>(_dir.get());
   // TODO: filter must be part of parent
   _state->filter = Input(&_state->filter_txt, &(_dir->path_txt), filelist_filter_opt(parent->filter_cursor_pos));
@@ -974,108 +938,13 @@ CopyDiscoveryProcess::CopyDiscoveryProcess(CopyDialog* parent, Filepath target) 
   auto   screen = ScreenInteractive::Active();
   if (screen) { min_y = theme().copyfiles_height_screen_portion * screen->dimy(); }
   _data_source.min_y = min_y;
-  // start thread
-  _thread = std::thread([this]() { this->_run(); });
 }
-
-void CopyDiscoveryProcess::_run() {
-  std::vector<DirItem> selected;
-  selected.reserve(_input_paths->selected.size());
-  for (auto& p : _input_paths->selected) {
-    if (!_running) break;
-    _stat_file(p);
-    selected.emplace_back(p);
-  }
-  if (_running) _discover(selected, _target);
-  _running = false;
-  // Notify the FTXUI event loop so tick() can detect completion
-  _notify();
-}
-
-CopyDiscoveryProgress CopyDiscoveryProcess::get_progress() {
-  std::lock_guard<std::mutex> lock(_m);
-  return _progress;
-}
-
 void CopyDiscoveryProcess::publish_preview() {
-  {
-    std::lock_guard lock(_m);
-    if (_dir->items.size() == _items.size()) return;
-    _dir->items.insert(_dir->items.end(), _items.begin() + _dir->items.size(), _items.end());
+  { std::lock_guard lock(_m);
+    if(_dir->items.size()==_plan.steps.size()) return;
+    for(size_t i=_dir->items.size();i<_plan.steps.size();++i) _dir->items.push_back(operation_display(_plan.steps[i]));
   }
-  _dir->apply_filter(_dir->filter.phrase, true);
-  _dir->_calculate();
-}
-
-std::vector<DirItem> CopyDiscoveryProcess::take_items() {
-  if (_running.load()) return {};
-  if (_thread.joinable()) _thread.join();
-  std::lock_guard lock(_m);
-  return std::move(_items);
-}
-
-void CopyDiscoveryProcess::_queue_link(Filepath const& location, Filepath const& destination, boost::filesystem::perms p, std::time_t source_time) {
-  std::lock_guard<std::mutex> lock(_m);
-  _progress.link_count++;
-  auto& link = _items.emplace_back(location, boost::filesystem::symlink_file, p);
-  link._set_symlink_target(destination);
-  link._set_write_time(source_time);
-}
-
-// item.path_ref() and new_record_path are same file
-void CopyDiscoveryProcess::_queue_error(const DirItem& item, Filepath const& new_record_path, std::string error_message) {
-  std::lock_guard<std::mutex> lock(_m);
-  _progress.error_count++;
-  auto& created = _items.emplace_back(DirItem(item.path_ref(), boost::filesystem::status_error, item.perms()));
-  created._set_symlink_target(new_record_path);
-  created._set_warning(error_message);
-}
-
-void CopyDiscoveryProcess::_stat_file(Filepath const& item_path) {
-  std::lock_guard<std::mutex> lock(_m);
-  _progress.current_file = item_path.native();
-}
-
-void CopyDiscoveryProcess::_queue_file(const DirItem& item, Filepath const& new_record_path) {
-  std::lock_guard<std::mutex> lock(_m);
-  auto&                       created = _items.emplace_back(item);
-  created._set_symlink_target(new_record_path);
-  _progress.file_count++;
-  _progress.byte_count += item.size();
-}
-
-// This traversal should be depth first because we want to create tree like depiction in our list
-void CopyDiscoveryProcess::_discover(const std::vector<DirItem>& files, Filepath destination) {
-  std::vector<Filepath> roots; for (const auto& item:files) roots.push_back(item.path_ref());
-  TraversalCallbacks cb;
-  cb.cancelled = [this] { return !_running.load(); };
-  cb.error = [&](const Filepath& path,const std::string& message) { _queue_error(DirItem(path),destination/path.filename(),message); };
-  cb.enter = [&](const TraversalEntry& e) {
-    auto target=destination/e.relative;
-    DirItem item(e.path);
-    error_code ec;
-    if (boost::filesystem::equivalent(e.path,target,ec) && !ec) { _queue_error(item,target,"Copy to self"); return false; }
-    if (e.duplicate_of) { _queue_link(target,destination / *e.duplicate_of,item.perms(),item.write_time()); return false; }
-    if (e.link_text && !_follow_links) {
-      auto text=*e.link_text;
-      if (!(_preserve_relative_links && text.is_relative())) {
-        text=resolve_symlink(e.path);
-        if (text.empty()) { _queue_error(item,target,"Cyclic symlink"); return false; }
-        auto canonical=boost::filesystem::canonical(text,e.path.parent_path(),ec);
-        if (!ec) text=canonical;
-      }
-      _queue_link(target,text,item.perms(),item.write_time()); return false;
-    }
-    if (boost::filesystem::is_directory(e.status)) {
-      auto source=boost::filesystem::canonical(e.path,ec);
-      auto resolved=boost::filesystem::weakly_canonical(target,ec);
-      if (!ec && is_subpath(source,resolved)) { _queue_error(item,target,"Copy dir into itself"); return false; }
-      std::lock_guard lock(_m); ++_progress.dir_count; _progress.current_dir=e.path.native();
-      _items.emplace_back(target,boost::filesystem::directory_file,item.perms());
-    } else { _stat_file(e.path); _queue_file(item,target); }
-    return true;
-  };
-  traverse(roots,TraversalPolicy{_follow_links},cb);
+  _dir->apply_filter(_dir->filter.phrase,true);_dir->_calculate();
 }
 
 void CopyDialog::_start_new_discovery() {
@@ -1155,10 +1024,7 @@ void DeleteDialog::OnShow() {
 }
 
 void DeleteDialog::ok() {
-  // Delete doesn't have modes of operation like Copy. Queue all selected items, ThreadedFileJobs will handle recursion.
-  std::vector<DirItem> items;
-  for (auto& p : app->action.arguments->selected) { items.emplace_back(p); }
-  auto job = std::make_shared<JobSpec>(JobSpec::Type::DELETE, std::move(items));
+  auto job=std::make_shared<JobSpec>(std::make_shared<const OperationPlan>(selection_plan(OperationType::DELETE,app->action.arguments->selected)));
   file_operations().add_job(job);
   app->dir->clear_selection();
   app->action.close_dialog();
@@ -1220,15 +1086,7 @@ void MoveDialog::OnShow() {
 }
 
 void MoveDialog::ok() {
-  // Delete doesn't have modes of operation like Copy. Queue all selected items, ThreadedFileJobs will handle recursion.
-  std::vector<DirItem> items;
-  items.reserve(app->action.arguments->selected.size());
-  Filepath destination_path = app->action.arguments->target;
-  for (auto& p : app->action.arguments->selected) {
-    auto& inserted = items.emplace_back(p);
-    inserted._set_symlink_target(destination_path / p.filename());
-  }
-  auto job = std::make_shared<JobSpec>(JobSpec::Type::MOVE, std::move(items));
+  auto job=std::make_shared<JobSpec>(std::make_shared<const OperationPlan>(selection_plan(OperationType::MOVE,app->action.arguments->selected,app->action.arguments->target)));
   file_operations().add_job(job);
   app->dir->clear_selection();
   app->action.close_dialog();
@@ -1246,6 +1104,7 @@ ToClipboardDialog::ToClipboardDialog(PanelSharedState::P d) : Dialog(std::move(d
 }
 
 void ToClipboardDialog::OnShow() {
+  cancel_submission();
   app->action.arguments->use_focused_as_alternative();
   items_copied                          = 0;
   std::vector<Filepath>& selected       = app->action.arguments->selected;
@@ -1271,8 +1130,8 @@ void ToClipboardDialog::OnShow() {
     text.pop_back();
   }
   // copy to clipboard
-  Err e = push_to_clipboard(text);
-  if (e.ok()) items_copied = selected.size();
+  OperationPlan plan;plan.type=OperationType::CLIPBOARD;plan.steps.push_back({Operation::Kind::ClipboardText,{}, {}, {},text});
+  submit(std::move(plan),[this,count=selected.size()](const JobSnapshot& result){if(result._state==JobState::COMPLETED)items_copied=count;});
 }
 
 Element ToClipboardDialog::render() {
@@ -1547,9 +1406,9 @@ ErrorListDialog::ErrorListDialog(std::function<void()> close_dialog) : Dialog(nu
 
   button_hide                     = Button(" Hide ", close_dialog, ascii_button);
   button_clear                    = Button(" Clear ", [this] { this->clear(); }, ascii_button);
-  _data_source.dataset_size       = []() -> DataSize { return file_operations().dataset_size(); };
-  _data_source.count_items_before = [this](int64_t id) -> int64_t { return file_operations().count_items_before(id); };
-  _data_source.move_id_by         = [this](int64_t& id, int64_t delta) -> bool { return file_operations().move_id_by(id, delta); };
+  _data_source.dataset_size       = []() -> DataSize { auto n=file_operations().error_count(); return {n,0,std::max(int64_t{0},n-1)}; };
+  _data_source.count_items_before = [this](int64_t id) -> int64_t { return id; };
+  _data_source.move_id_by         = [this](int64_t& id, int64_t delta) -> bool { auto old=id; id=std::clamp(id+delta,int64_t{0},std::max(int64_t{0},file_operations().error_count()-1));return old!=id; };
   _data_source.on_event           = [this](DSEventContext c) -> bool {
     if (c.event == Event::Return) {
       this->button_hide->TakeFocus();
@@ -1578,7 +1437,7 @@ ErrorListDialog::ErrorListDialog(std::function<void()> close_dialog) : Dialog(nu
                           close_on_esc(this));
   renderer   = Renderer(navigation, [this]() -> Element {
     // add items in render method
-    auto s = file_operations().dataset_size();
+    auto n=file_operations().error_count(); DataSize s{n,0,std::max(int64_t{0},n-1)};
     return window(hbox({text(" Error History [" + std::to_string(s.total) + "]"), screen_render_time()}) | bold | hcenter,
                     vbox({
                     hbox({
@@ -1759,6 +1618,9 @@ JobListDialog::JobListDialog(std::function<void()> close_dialog) : Dialog(nullpt
     case JobInstructions::Type::MOVE:   type_str = "MOVE"; break;
     case JobInstructions::Type::DELETE: type_str = "DEL "; break;
     case JobInstructions::Type::ARCHIVE_CREATE: type_str = "ARCH"; break;
+    case JobInstructions::Type::MKDIR: type_str = "MKDIR"; break;
+    case JobInstructions::Type::RENAME: type_str = "RENAME"; break;
+    case JobInstructions::Type::CLIPBOARD: type_str = "CLIP"; break;
     }
 
     std::string icon    = state_icon(state);
@@ -1945,6 +1807,9 @@ Element JobListDialog::render_detail() {
   case JobInstructions::Type::MOVE:   type_str = "MOVE"; break;
   case JobInstructions::Type::DELETE: type_str = "DELETE"; break;
   case JobInstructions::Type::ARCHIVE_CREATE: type_str = "ARCHIVE"; break;
+  case JobInstructions::Type::MKDIR: type_str = "MKDIR"; break;
+  case JobInstructions::Type::RENAME: type_str = "RENAME"; break;
+  case JobInstructions::Type::CLIPBOARD: type_str = "CLIPBOARD"; break;
   }
 
   int items_done  = static_cast<int>(detail_job->_items_done);

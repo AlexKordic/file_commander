@@ -341,7 +341,7 @@ void LuaScripting::poll_async_events() {
   const int right_item_count     = static_cast<int>(_app.get_right().dir._calculated.items_visible);
   const int left_selected_count  = count_selected(_app.get_left());
   const int right_selected_count = count_selected(_app.get_right());
-  const int error_count          = static_cast<int>(file_operations().dataset_size().total);
+  const int error_count          = static_cast<int>(file_operations().error_count());
 
   if (!_event_baseline_initialized) {
     _event_baseline_initialized = true;
@@ -764,6 +764,9 @@ int LuaScripting::l_state(lua_State* L) {
     case JobInstructions::Type::MOVE: jtype = "move"; break;
     case JobInstructions::Type::DELETE: jtype = "delete"; break;
     case JobInstructions::Type::ARCHIVE_CREATE: jtype = "archive_create"; break;
+    case JobInstructions::Type::MKDIR: jtype = "mkdir"; break;
+    case JobInstructions::Type::RENAME: jtype = "rename"; break;
+    case JobInstructions::Type::CLIPBOARD: jtype = "clipboard"; break;
     }
     lua_pushstring(L, jtype);
     lua_setfield(L, -2, "type");
@@ -922,6 +925,9 @@ int LuaScripting::l_job_history(lua_State* L) {
     case JobInstructions::Type::MOVE:   type_str = "move"; break;
     case JobInstructions::Type::DELETE: type_str = "delete"; break;
     case JobInstructions::Type::ARCHIVE_CREATE: type_str = "archive_create"; break;
+    case JobInstructions::Type::MKDIR: type_str = "mkdir"; break;
+    case JobInstructions::Type::RENAME: type_str = "rename"; break;
+    case JobInstructions::Type::CLIPBOARD: type_str = "clipboard"; break;
     }
     lua_pushstring(L, type_str);
     lua_setfield(L, -2, "type");

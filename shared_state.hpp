@@ -9,6 +9,7 @@
 #include <functional>
 #include <memory>
 
+namespace Perun { class FileJobs; }
 class Dir;
 class DirItem;
 struct CommandArgs;
@@ -30,6 +31,8 @@ struct PanelSharedState {
 
   Dir*             dir;
   std::function<void()> notify = [] {};
+  std::function<void(std::function<void()>)> post = [](auto fn) { fn(); };
+  Perun::FileJobs* jobs = nullptr;
   ftxui::Component filter;
   std::string      filter_txt;
   struct Action {

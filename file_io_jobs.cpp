@@ -5,13 +5,13 @@
 #include "fifo_queue.hpp"
 #include "log.hpp"
 
-#include <ftxui/component/screen_interactive.hpp>
 
 #include <algorithm>
 #include <condition_variable>
 #include <cstdint>
 #include <mutex>
 #include <thread>
+#include <unordered_map>
 
 using boost::filesystem::copy_options;
 using boost::system::error_code;
@@ -47,9 +47,9 @@ std::shared_ptr<const JobSnapshot> JobSpec::snapshot(bool details) {
   if (!details && _completed_summary) return _completed_summary;
   auto view = std::make_shared<JobSnapshot>();
   if (details) static_cast<JobInstructions&>(*view) = static_cast<const JobInstructions&>(*this);
-  view->_type = _type; view->_copy_conflict = _copy_conflict;
+  view->_type = _type; view->_copy_conflict = _copy_conflict; view->_plan = details ? _plan : nullptr;
   view->_item_count = _retained_item_count >= 0 ? _retained_item_count : _items.size(); view->_error_count = _error_count_total;
-  view->_details_expired = _details_expired;
+  view->_details_expired = _details_expired; if(details) view->_step_errors = _step_errors;
   if (_current_item_index >= 0 && _current_item_index < _items.size()) view->_focused_item = _items[_current_item_index];
   view->_job_id = _job_id;
   view->_state = _state.load();
@@ -73,7 +73,6 @@ void JobSpec::_calculate_transfer_stats() {
   const bool current_index_valid = _current_item_index >= 0 && _current_item_index < _items.size();
   if (!current_index_valid) return;
   const DirItem& item = _items.at(_current_item_index);
-  if (!item.symlink_ref()) return;
   const bool is_large_file   = item.size() > LARGE_FILE_SIZE_FROM;
   int64_t    bytes_processed = _bytes_processed;
   if (is_large_file) {
@@ -167,13 +166,14 @@ class ProgressMonitor {
   }
 };
 
-JobSpec::JobSpec(Type t, std::vector<DirItem> items, CopyConflictMode copy_conflict) {
-  for (const auto& item:items) if (auto lease=archive_service().lease_for_path(item.path_ref())) _archive_leases.push_back(std::move(lease));
-  _type          = t;
-  _items         = std::move(items);
-  _copy_conflict = copy_conflict;
-  for (DirItem const& item : _items) {
-    if (item.type() == boost::filesystem::regular_file) { _bytes_total += item.size(); }
+JobSpec::JobSpec(Type t,std::vector<DirItem> items,CopyConflictMode conflict)
+  : JobSpec(std::make_shared<const OperationPlan>(legacy_plan(t,items,conflict))) {}
+JobSpec::JobSpec(std::shared_ptr<const OperationPlan> plan) {
+  if(!plan) throw std::invalid_argument("missing operation plan");
+  _plan=std::move(plan);_type=_plan->type;_copy_conflict=_plan->conflict;
+  for(const auto& op:_plan->steps) {
+    _items.push_back(operation_display(op));
+    if(op.kind==Operation::Kind::CopyFile || op.kind==Operation::Kind::MoveEntry || op.kind==Operation::Kind::ArchiveInput) _bytes_total+=std::max(int64_t{0},op.bytes);
   }
 }
 
@@ -316,7 +316,9 @@ class ThreadedFileJobs : public FileJobs {
     std::lock_guard lock(_updates->mutex); _updates->callback = sink ? std::move(sink) : [] {};
   }
   JobRetention _limits;
-  explicit ThreadedFileJobs(JobRetention limits = {}) : _limits(limits), _queue(std::max(size_t{1},limits.pending_count)) {
+  FileJobServices _services;
+  ArchiveService& _archives;
+  explicit ThreadedFileJobs(JobRetention limits = {},FileJobServices services = {}) : _limits(limits), _services(std::move(services)), _archives(_services.archives?*_services.archives:archive_service()), _queue(std::max(size_t{1},limits.pending_count)) {
     _thread = std::thread([this]() { this->run(); });
   }
   ~ThreadedFileJobs() override { shutdown(); }
@@ -333,13 +335,16 @@ class ThreadedFileJobs : public FileJobs {
     });
   }
   uint64_t add_job(std::shared_ptr<JobSpec> job) override {
+    for(const auto& op:job->_plan->steps) if(auto lease=_archives.lease_for_path(op.source)) job->_archive_leases.push_back(std::move(lease));
     job->updated = [updates = _updates] { updates->notify(); };
     uint64_t id    = _next_job_id.fetch_add(1);
     job->_job_id   = id;
     job->_queued_time = now();
+    { std::lock_guard lock(_m); _jobs_by_id[id]=job; }
     ++_outstanding;
     if (_queue.try_push(job) != FifoError::OK) {
       --_outstanding;
+      { std::lock_guard lock(_m); _jobs_by_id.erase(id); }
       report_error("Job queue is full or closed; submission rejected");
       return 0;
     }
@@ -389,6 +394,7 @@ class ThreadedFileJobs : public FileJobs {
 
   void dismiss_job(uint64_t job_id) override {
     std::lock_guard lock(_m);
+    _jobs_by_id.erase(job_id);
     _job_history.erase(
       std::remove_if(_job_history.begin(), _job_history.end(),
         [job_id](const auto& j) { return j->_job_id == job_id; }),
@@ -412,19 +418,14 @@ class ThreadedFileJobs : public FileJobs {
     return _errors.at(i);
   }
 
-  ftxui::DataSize dataset_size() override {
-    std::lock_guard lock(_m);
-    return {static_cast<int64_t>(_errors.size()), 0, static_cast<int64_t>(_errors.size() - 1)};
-  }
-  int64_t count_items_before(int64_t i) override { return i; }
-  bool    move_id_by(int64_t& i, int64_t offset) override {
-    std::lock_guard lock(_m);
-    const int64_t   initial = i;
-    const int64_t   size    = static_cast<int64_t>(_errors.size());
-    if (size == 0) return false;
-    i = std::max(int64_t{0}, std::min(i + offset, size - 1));
-    // return false when offset would go out of bounds.
-    return i != initial;
+  int64_t error_count() override { std::lock_guard lock(_m);return _errors.size(); }
+  JobError cancel(uint64_t id) override { return control(id,true); }
+  JobError pause(uint64_t id) override { return control(id,false); }
+  JobError control(uint64_t id,bool cancelling) {
+    std::shared_ptr<JobSpec> job;
+    {std::lock_guard lock(_m);auto found=_jobs_by_id.find(id);if(found!=_jobs_by_id.end()) job=found->second.lock();}
+    if(!job) return JobError::NOT_FOUND;
+    return cancelling?cancel_job(job.get()):pause_job(job.get());
   }
 
   void report_error(std::string message) override {
@@ -452,7 +453,7 @@ class ThreadedFileJobs : public FileJobs {
     while(_events.size()>std::max(size_t{1},_limits.event_count)) _events.pop_front();
   }
   void retain_history() { // manager mutex held; stopped jobs only
-    while(_job_history.size()>_limits.history_count) _job_history.erase(_job_history.begin());
+    while(_job_history.size()>_limits.history_count) { _jobs_by_id.erase(_job_history.front()->_job_id);_job_history.erase(_job_history.begin()); }
     size_t bytes=0,count=0;
     for(auto it=_job_history.rbegin();it!=_job_history.rend();++it) {
       auto& job=**it; std::lock_guard lock(job._m);
@@ -461,39 +462,22 @@ class ThreadedFileJobs : public FileJobs {
       size_t cost=(job._items.capacity()+job._errors.capacity())*sizeof(DirItem);
       auto measure=[&](const auto& items) {for(const auto& item:items) cost+=item.path_ref().native().size()+item.filename_ref().size()+item.symlink_ref().value_or(Filepath()).native().size()+item.warning_ref().value_or("").size();};
       measure(job._items);measure(job._errors);
+      if(job._plan) for(const auto& op:job._plan->steps) cost+=sizeof(Operation)+op.source.native().size()+op.destination.native().size()+op.link_text.native().size()+op.message.size();
       if(++count>_limits.detail_count || cost>_limits.detail_bytes-bytes) {
         job._retained_item_count=job._items.size(); job._details_expired=true;
-        std::vector<DirItem>().swap(job._items); std::vector<DirItem>().swap(job._errors); job._completed_summary.reset();
+        std::vector<DirItem>().swap(job._items); std::vector<DirItem>().swap(job._errors); job._completed_summary.reset(); job._plan.reset(); std::vector<std::string>().swap(job._step_errors);
       } else bytes+=cost;
     }
   }
   bool validate_mutation_paths(JobSpec* job) {
-    for (const auto& item : job->_items) {
+    for(const auto& op:job->_plan->steps) {
       std::vector<Filepath> paths;
-      switch (job->_type) {
-      case JobSpec::Type::DELETE: paths.push_back(item.path_ref()); break;
-      case JobSpec::Type::MOVE:
-        paths.push_back(item.path_ref());
-        if (item.symlink_ref()) paths.push_back(*item.symlink_ref());
-        break;
-      case JobSpec::Type::COPY:
-        if (item.type() == boost::filesystem::directory_file || item.type() == boost::filesystem::symlink_file)
-          paths.push_back(item.path_ref());
-        else if (item.symlink_ref()) paths.push_back(*item.symlink_ref());
-        break;
-      case JobSpec::Type::ARCHIVE_CREATE:
-        if (item.symlink_ref()) paths.push_back(*item.symlink_ref());
-        break;
-      }
-      for (const auto& path : paths) {
-        auto error = archive_mutation_error(path);
-        if (error.empty()) continue;
-        report_error(error);
-        std::lock_guard lock(job->_m);
-        job->report_error(item, error);
-        job->_items_done = job->_items.size();
-        job->_items_failed = job->_items_done;
-        return false;
+      if(op.kind==Operation::Kind::MoveEntry || op.kind==Operation::Kind::RenameEntry || op.kind==Operation::Kind::DeleteEntry) paths.push_back(op.source);
+      if(!op.destination.empty()) paths.push_back(op.destination);
+      for(const auto& path:paths) {
+        auto error=_archives.is_cached_path(path)?"Archive contents are read-only; copy files out before editing: "+path.native():std::string();if(error.empty())continue;
+        report_error(error);std::lock_guard lock(job->_m);job->report_error(operation_display(op),error);
+        job->_items_done=job->_items.size();job->_items_failed=job->_items_done;return false;
       }
     }
     return true;
@@ -524,6 +508,7 @@ class ThreadedFileJobs : public FileJobs {
       case JobSpec::Type::MOVE: run_move(_active_job.get()); break;
       case JobSpec::Type::DELETE: run_delete(_active_job.get()); break;
       case JobSpec::Type::ARCHIVE_CREATE: run_archive_create(_active_job.get()); break;
+      case JobSpec::Type::MKDIR: case JobSpec::Type::RENAME: case JobSpec::Type::CLIPBOARD: run_small(_active_job.get()); break;
       }
       {
         std::lock_guard lock(_active_job->_m);
@@ -536,6 +521,9 @@ class ThreadedFileJobs : public FileJobs {
         }
         _active_job->_pause_requested = false;
         _active_job->_stopped.store(true, std::memory_order_release);
+      }
+      if (auto completed=std::move(_active_job->completed)) {
+        try { completed(_active_job->snapshot()); } catch (const std::exception& e) { report_error(e.what()); }
       }
       // Store in job history directly (under _m, which we already use for _active_job)
       {
@@ -597,7 +585,7 @@ class ThreadedFileJobs : public FileJobs {
       if (err == FifoError::Destroyed) { break; }
       boost::filesystem::remove(item.path_ref(), ec);
       if (ec.failed()) {
-        file_operations().report_error("[Delete] " + item.path_ref().native());
+        report_error("[Delete] " + item.path_ref().native());
         std::lock_guard lock(job->_m);
         job->report_error(item, "Failed to delete file: " + ec.message());
         ++job->_items_failed;
@@ -606,6 +594,26 @@ class ThreadedFileJobs : public FileJobs {
     }
     update.flush(job);
     if (discovery_thread.joinable()) discovery_thread.join();
+  }
+
+  void run_small(JobSpec* job) {
+    {std::lock_guard lock(job->_m);job->_step_errors.assign(job->_plan->steps.size(),"not executed");}
+    for(size_t i=0;i<job->_plan->steps.size();++i) {
+      if(job->_cancel_requested || !wait_for_resume(job)) {job->_state=JobState::CANCELLED;return;}
+      const auto& op=job->_plan->steps[i]; error_code ec;std::string message;
+      switch(op.kind) {
+        case Operation::Kind::CreateDirectory:
+          if(!boost::filesystem::create_directory(op.destination,ec) && !ec) message="already exists";break;
+        case Operation::Kind::RenameEntry: boost::filesystem::rename(op.source,op.destination,ec);break;
+        case Operation::Kind::ClipboardText: {auto error=_services.clipboard(op.message);if(!error.ok()) message=error.steps.front();break;}
+        default:message="Invalid small operation";break;
+      }
+      if(ec) message=ec.message();
+      if(!message.empty()) report_error(message);
+      {std::lock_guard lock(job->_m);job->_step_errors[i]=message;++job->_items_done;job->_current_item_index=i+1;
+        if(!message.empty()){++job->_items_failed;job->report_error(operation_display(op),message);}}
+      job->updated();
+    }
   }
 
   void run_move(JobSpec* job) {
@@ -620,8 +628,9 @@ class ThreadedFileJobs : public FileJobs {
       }
       { std::lock_guard lock(job->_m); job->_current_item_index = i; }
       auto&      item = job->_items.at(i);
+      const auto& op=job->_plan->steps.at(i);
       error_code ec;
-      boost::filesystem::rename(item.path_ref(), *item.symlink_ref(), ec);
+      boost::filesystem::rename(op.source, op.destination, ec);
       if (ec.value() == boost::system::errc::cross_device_link) {
         boost::filesystem::copy_file_options options;
         options.cancel_requested = &job->_cancel_requested;
@@ -629,7 +638,7 @@ class ThreadedFileJobs : public FileJobs {
         options.bytes_copied = &job->_copy_bytes;
         options.checkpoint = [](void* context) { return wait_for_resume(static_cast<JobSpec*>(context)); };
         options.checkpoint_context = job;
-        move_by_copy(item.path_ref(), *item.symlink_ref(), options, ec);
+        move_by_copy(op.source, op.destination, options, ec);
         if (job->_cancel_requested.load() && ec) {
           job->_state = JobState::CANCELLED;
           return;
@@ -638,7 +647,7 @@ class ThreadedFileJobs : public FileJobs {
 
       if (ec.failed()) {
         // "Failed to move file: Cross-device link"
-        file_operations().report_error("[Move] " + item.path_ref().native());
+        report_error("[Move] " + item.path_ref().native());
         std::lock_guard lock(job->_m);
         job->report_error(item, "Failed to move file: " + ec.message());
       }
@@ -665,9 +674,9 @@ class ThreadedFileJobs : public FileJobs {
     }
 
     Filepath archive_path;
-    if (job->_items.front().symlink_ref()) archive_path = *job->_items.front().symlink_ref();
+    archive_path = job->_plan->steps.front().destination;
     if (archive_path.empty()) {
-      file_operations().report_error("[Archive create] destination missing");
+      report_error("[Archive create] destination missing");
       std::lock_guard lock(job->_m);
       job->report_error(job->_items.front(), "Archive destination not set");
       return;
@@ -693,10 +702,10 @@ class ThreadedFileJobs : public FileJobs {
     const auto conflict = job->_copy_conflict == CopyConflictMode::Skip ? ArchiveConflict::Skip
       : job->_copy_conflict == CopyConflictMode::Update ? ArchiveConflict::Update : ArchiveConflict::Replace;
     bool skipped = false;
-    Err err = archive_service().create_archive(archive_path, sources, preferred_cwd, conflict, &job->_cancel_requested, &skipped);
+    Err err = _archives.create_archive(archive_path, sources, preferred_cwd, conflict, &job->_cancel_requested, &skipped);
     if (job->_cancel_requested.load()) { job->_state = JobState::CANCELLED; return; }
     if (!err.ok()) {
-      file_operations().report_error("[Archive create] " + err.steps.front());
+      report_error("[Archive create] " + err.steps.front());
       std::lock_guard lock(job->_m);
       job->report_error(job->_items.front(), err.steps.front());
     }
@@ -714,7 +723,8 @@ class ThreadedFileJobs : public FileJobs {
     error_code       ec;
     std::unique_lock lock(job->_m);
     // _job->_items is not to be modified by other threads
-    for (auto& item : job->_items) {
+    for (const auto& op : job->_plan->steps) {
+      auto item=operation_display(op);
       if (job->_cancel_requested.load(std::memory_order_relaxed)) {
         job->_state = JobState::CANCELLED;
         return;
@@ -732,27 +742,24 @@ class ThreadedFileJobs : public FileJobs {
         if (item_skipped) ++job->_items_skipped;
         ++job->_current_item_index;
       });
-      // if type is dir path is to be mkdired
-      // if type is link path is where to place link and symlink_ref is link target
-      // else path is source file and symlink_ref is destination file for copy operation
-      if (item.type() == boost::filesystem::file_type::status_error) {
-        const auto message = item.warning_ref().value_or("Discovery failed");
+      if (op.kind == Operation::Kind::DiscoveryFailure) {
+        const auto message = op.message;
         job->report_error(item, message);
         lock.unlock();
-        file_operations().report_error("[Discovery] " + item.path_ref().native() + ": " + message);
+        report_error("[Discovery] " + item.path_ref().native() + ": " + message);
         lock.lock();
         continue;
       }
-      if (item.type() == boost::filesystem::file_type::directory_file) {
+      if (op.kind == Operation::Kind::CreateDirectory) {
         ec.clear();
         lock.unlock();
-        boost::filesystem::create_directory(item.path_ref(), ec);
+        boost::filesystem::create_directory(op.destination, ec);
         if (ec.failed()) {
           error_code check_ec;
-          const bool already_directory = boost::filesystem::is_directory(item.path_ref(), check_ec);
+          const bool already_directory = boost::filesystem::is_directory(op.destination, check_ec);
           if (!check_ec.failed() && already_directory) { ec.clear(); }
         }
-        if (ec.failed()) file_operations().report_error("[mkdir] " + item.path_ref().native());
+        if (ec.failed()) report_error("[mkdir] " + item.path_ref().native());
         lock.lock();
         if (ec.failed()) {
           // report error
@@ -761,15 +768,15 @@ class ThreadedFileJobs : public FileJobs {
         }
         continue;
       }
-      if (item.type() == boost::filesystem::file_type::symlink_file) {
-        if (!item.symlink_ref()) {
+      if (op.kind == Operation::Kind::CreateSymlink) {
+        if (op.link_text.empty()) {
           job->report_error(item, "Symlink target not set");
-          file_operations().report_error("[Symlink target not set] " + item.path_ref().native());
+          report_error("[Symlink target not set] " + item.path_ref().native());
           continue;
         }
         ec.clear();
         lock.unlock();
-        const auto destination = item.path_ref();
+        const auto destination = op.destination;
         const auto present = boost::filesystem::symlink_status(destination, ec);
         if (ec == boost::system::errc::no_such_file_or_directory) ec.clear();
         const bool exists = boost::filesystem::exists(present);
@@ -784,7 +791,7 @@ class ThreadedFileJobs : public FileJobs {
         auto parent = destination.parent_path();
         if (parent.empty()) parent = ".";
         const auto temporary = parent / boost::filesystem::unique_path(".fc-link-%%%%-%%%%-%%%%");
-        if (!ec) boost::filesystem::create_symlink(*item.symlink_ref(), temporary, ec);
+        if (!ec) boost::filesystem::create_symlink(op.link_text, temporary, ec);
         if (!ec) {
           if (job->_copy_conflict == CopyConflictMode::Skip)
             boost::filesystem::create_hard_link(temporary, destination, ec);
@@ -797,7 +804,7 @@ class ThreadedFileJobs : public FileJobs {
             item_skipped = true;
           }
         }
-        if (ec.failed()) file_operations().report_error("[symlink] " + item.path_ref().native());
+        if (ec.failed()) report_error("[symlink] " + item.path_ref().native());
         lock.lock();
         if (ec.failed()) {
           // report error
@@ -805,7 +812,7 @@ class ThreadedFileJobs : public FileJobs {
         }
         continue;
       }
-      if (!item.symlink_ref()) {
+      if (op.destination.empty()) {
         job->report_error(item, "Copy destination not set");
         continue;
       }
@@ -814,7 +821,7 @@ class ThreadedFileJobs : public FileJobs {
         job->_bytes_total = std::max(0.0, job->_bytes_total - double(std::max(int64_t{0}, item.size())));
         job->_total.update(job->_bytes_processed, job->_bytes_total);
       };
-      const Filepath destination_path = *item.symlink_ref();
+      const Filepath destination_path = op.destination;
       if (job->_copy_conflict != CopyConflictMode::Replace) {
         error_code exists_ec;
         const bool destination_exists = boost::filesystem::exists(destination_path, exists_ec);
@@ -856,7 +863,7 @@ class ThreadedFileJobs : public FileJobs {
       cfo.bytes_copied = &job->_copy_bytes;
       cfo.checkpoint = [](void* context) { return wait_for_resume(static_cast<JobSpec*>(context)); };
       cfo.checkpoint_context = job;
-      boost::filesystem::copy_file(item.path_ref(), destination_path, cfo, ec);
+      boost::filesystem::copy_file(op.source, destination_path, cfo, ec);
       if (ec.failed() && job->_cancel_requested.load(std::memory_order_relaxed)) {
         item_finished = false;
         // Cancel during copy_file — only the owned staged output is removed.
@@ -871,7 +878,7 @@ class ThreadedFileJobs : public FileJobs {
       if (exists_conflict) {
         skip_current_file();
       } else if (ec.failed()) {
-        file_operations().report_error("[Copy] " + item.path_ref().native());
+        report_error("[Copy] " + item.path_ref().native());
         job->report_error(item, "Failed to copy file: " + ec.message());
         job->_bytes_total -= item.size();
       } else {
@@ -894,6 +901,7 @@ class ThreadedFileJobs : public FileJobs {
   std::atomic<uint64_t> _outstanding{0};
   uint64_t _event_sequence = 0;
   std::deque<JobEvent> _events;
+  std::unordered_map<uint64_t,std::weak_ptr<JobSpec>> _jobs_by_id;
   std::vector<std::shared_ptr<JobSpec>>      _job_history;  // drained completed/paused/cancelled jobs
   std::deque<JobErrorInfo>                   _errors;
   int64_t                                    _err_last_access_index = 0;
@@ -952,7 +960,7 @@ class ThreadedFileJobs : public FileJobs {
   }
 };
 
-std::unique_ptr<FileJobs> make_file_jobs(JobRetention limits) { return std::make_unique<ThreadedFileJobs>(limits); }
+std::unique_ptr<FileJobs> make_file_jobs(JobRetention limits,FileJobServices services) { return std::make_unique<ThreadedFileJobs>(limits,std::move(services)); }
 
 FileJobs& file_operations() {
   static ThreadedFileJobs jobs;

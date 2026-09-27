@@ -5,7 +5,7 @@
 #include "archive.hpp"
 #include "fifo_queue.hpp"
 
-#include <ftxui/component/component_options.hpp>
+#include "operation.hpp"
 
 #include <atomic>
 #include <condition_variable>
@@ -16,12 +16,6 @@
 #include <vector>
 
 namespace Perun {
-
-enum class CopyConflictMode {
-  Replace,
-  Update,
-  Skip,
-};
 
 enum class JobState {
   QUEUED,
@@ -46,7 +40,8 @@ struct ProgressInfo {
 };
 
 struct JobInstructions {
-  enum class Type { COPY, MOVE, DELETE, ARCHIVE_CREATE };
+  using Type = OperationType;
+  std::shared_ptr<const OperationPlan> _plan;
 
   Type                 _type;
   std::vector<DirItem> _items;
@@ -82,6 +77,7 @@ struct JobStats {
 struct JobSnapshot : JobInstructions, JobStats {
   uint64_t _job_id = 0;
   int64_t _item_count = 0, _error_count = 0;
+  std::vector<std::string> _step_errors;
   bool _details_expired = false;
   std::optional<DirItem> _focused_item;
   int64_t item_count() const { return _items_pending > 0 ? _items_pending : _item_count; }
@@ -107,13 +103,16 @@ struct JobSpec : JobInstructions, JobStats, JobInterface {
   std::atomic<bool>  _pause_requested{false};
   std::condition_variable _pause_cv;
 
+  explicit JobSpec(std::shared_ptr<const OperationPlan> plan);
   JobSpec(Type t, std::vector<DirItem> items, CopyConflictMode copy_conflict = CopyConflictMode::Replace);
 
   int64_t item_count() const { return _items_pending > 0 ? _items_pending : _items.size(); }
   // Not in FileJobs books
   bool    is_stopped() const { return _stopped.load(std::memory_order_acquire); };
   std::shared_ptr<const JobSnapshot> snapshot(bool details = true);
+  std::function<void(std::shared_ptr<const JobSnapshot>)> completed;
   std::shared_ptr<const JobSnapshot> _completed_summary;
+  std::vector<std::string> _step_errors;
   int64_t _retained_item_count = -1;
   bool _details_expired = false;
 
@@ -154,6 +153,11 @@ struct JobRetention {
   size_t event_count = 4096, error_count = 1024, pending_count = 256;
 };
 
+struct FileJobServices {
+  ArchiveService* archives = nullptr;
+  std::function<Err(const std::string&)> clipboard = push_to_clipboard;
+};
+
 // Manages a queue of file operation jobs to be performed in separate thread.
 // Jobs are executed in order and can be cancelled.
 // When a job is cancelled or completed reference to it is removed.
@@ -166,6 +170,8 @@ class FileJobs {
 
   // Add a new job to the queue. Returns assigned job ID.
   virtual uint64_t add_job(std::shared_ptr<JobSpec> job) = 0;
+  virtual JobError cancel(uint64_t id) = 0;
+  virtual JobError pause(uint64_t id) = 0;
   virtual JobError cancel_job(JobSpec* job)              = 0;
   virtual JobError pause_job(JobSpec* job)               = 0;
 
@@ -184,9 +190,7 @@ class FileJobs {
   virtual std::deque<JobErrorInfo> get_errors(int count) = 0;
 
   virtual JobErrorInfo get_error(int64_t i) = 0;
-  virtual ftxui::DataSize dataset_size() = 0;
-  virtual int64_t count_items_before(int64_t i) = 0;
-  virtual bool move_id_by(int64_t& i, int64_t delta) = 0;
+  virtual int64_t error_count() = 0;
 
   virtual void report_error(std::string message) = 0;
   virtual void clear_errors()                    = 0;
@@ -196,7 +200,7 @@ class FileJobs {
 // Cancellation before commit preserves both source and previous destination.
 bool move_by_copy(const Filepath& source, const Filepath& destination,
                   const boost::filesystem::copy_file_options& options, boost::system::error_code& ec);
-std::unique_ptr<FileJobs> make_file_jobs(JobRetention limits = {});
+std::unique_ptr<FileJobs> make_file_jobs(JobRetention limits = {}, FileJobServices services = {});
 FileJobs& file_operations();
 
 }  // namespace Perun

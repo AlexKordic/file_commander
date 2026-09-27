@@ -12,7 +12,7 @@ Each improvement records its plan before implementation, applied changes, valida
 | 4 | [AR07](architecture_progress/AR07.md) | Persist logical archive locations | Implemented |
 | 5 | [AR04](architecture_progress/AR04.md) | Bound UI publication and observation costs | Implemented |
 | 6 | [AR05](architecture_progress/AR05.md) | Bound retained resources | Implemented |
-| 7 | [AR06](architecture_progress/AR06.md) | Separate operation services from UI | Planned |
+| 7 | [AR06](architecture_progress/AR06.md) | Separate operation services from UI | Implemented |
 | 8 | [AR08](architecture_progress/AR08.md) | Unify commands and application events | Planned |
 | 9 | [AR09](architecture_progress/AR09.md) | Enforce module, build and test boundaries | Planned |
 

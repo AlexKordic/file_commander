@@ -3,6 +3,7 @@
 
 #include "commander.hpp"
 #include "archive.hpp"
+#include "copy_planner.hpp"
 #include "file_io_jobs.hpp"
 #include "shared_state.hpp"
 
@@ -73,6 +74,12 @@ struct Dialog {
 
   // Dialog(Component c, Component r) : navigation(std::move(c)), renderer(std::move(r)) {}
   explicit Dialog(PanelSharedState::P app);
+  virtual ~Dialog() { _alive->store(false); }
+  std::shared_ptr<std::atomic<bool>> _alive=std::make_shared<std::atomic<bool>>(true);
+  uint64_t _submission_generation=0;
+  std::shared_ptr<Perun::JobSpec> _pending;
+  bool submit(Perun::OperationPlan,std::function<void(const Perun::JobSnapshot&)>);
+  void cancel_submission();
 
   virtual void OnShow() = 0;
 };
@@ -161,53 +168,15 @@ enum class CopyConflict {
 
 struct CopyDialog;
 
-struct CopyDiscoveryProgress {
-  int64_t byte_count  = 0;
-  int64_t file_count  = 0;
-  int64_t dir_count   = 0;
-  int64_t link_count  = 0;
-  int64_t error_count = 0;
-  std::string current_file;
-  std::string current_dir;
-};
-
-struct CopyDiscoveryProcess {
+struct CopyDiscoveryProcess : CopyPlanner {
   using P = std::shared_ptr<CopyDiscoveryProcess>;
-
-  CopyDiscoveryProgress get_progress();
-  void publish_preview(); // UI thread only
-  std::vector<DirItem> take_items();
-
-  std::atomic<bool> _running{true};
-  bool         _follow_links            = false;
-  bool         _preserve_relative_links = true;
-  CopyConflict _conflict                = CopyConflict::Replace;
-  uint64_t     _sequence_id             = 0;
-  DataSource   _data_source;
-  int64_t      _bytes_total = 0;
-  bool         _completed   = false;
-  Component    _files;
-
-  PanelSharedState::P  _state;
+  DataSource _data_source;
+  Component _files;
+  PanelSharedState::P _state;
   std::unique_ptr<Dir> _dir;
-  std::vector<ArchiveLease> _archive_leases;
-  std::shared_ptr<CommandArgs> _input_paths;
-  Filepath                     _target;
-  std::thread                  _thread;
-  std::mutex                   _m;
-  CopyDiscoveryProgress        _progress;
-  std::vector<DirItem>          _items; // worker plan, guarded by _m
-  std::function<void()> _notify = [] {};
-
-  CopyDiscoveryProcess(CopyDialog* parent, Filepath target);
-  ~CopyDiscoveryProcess();
-
-  void _discover(const std::vector<DirItem>& files, Filepath destination);
-  void _queue_link(Filepath const& location, Filepath const& destination, boost::filesystem::perms p, std::time_t source_time);
-  void _queue_error(const DirItem& item, Filepath const& new_record_path, std::string error_message);
-  void _stat_file(Filepath const& item_path);
-  void _queue_file(const DirItem& item, Filepath const& new_record_path);
-  void _run();
+  bool _completed=false;
+  CopyDiscoveryProcess(CopyDialog* parent,Filepath target);
+  void publish_preview();
 };
 
 struct CopyDialog : Dialog {

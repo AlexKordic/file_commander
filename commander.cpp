@@ -1,6 +1,5 @@
 
 #include "commander.hpp"
-#include "file_io_jobs.hpp"
 #include "log.hpp"
 
 #include <boost/filesystem/file_status.hpp>
@@ -158,7 +157,7 @@ DirItem::DirItem(Filepath p, DirItem::Type type, DirItem::Perms perms) : _path(s
   update(type, perms);
 }
 
-DirItem::DirItem(Filepath p, std::string name, Type type, Perms perms, std::time_t t, int64_t size) : _path(std::move(p)), _filename(std::move(name)), _w_time(t), _size(size) {}
+DirItem::DirItem(Filepath p, std::string name, Type type, Perms perms, std::time_t t, int64_t size) : _path(std::move(p)), _filename(std::move(name)), _type(type), _perms(perms), _w_time(t), _size(size) {}
 
 void Dir::publish(DirectorySnapshot snapshot) {
   path = std::move(snapshot.path); path_txt = path.native(); items = std::move(snapshot.items);
@@ -201,7 +200,7 @@ Err Dir::move_to(const Filepath p, const std::atomic<bool>* cancelled) {
     const auto entry = it->path();
     const auto status = boost::filesystem::symlink_status(entry, ec);
     if (!ec) loaded.emplace_back(entry);
-    else Perun::file_operations().report_error(ec.message() + " : stat() error on " + entry.native());
+    else return Err(ec.message() + " : stat() error on " + entry.native());
     it.increment(ec);
     if (ec) return Err("dir iterate: " + p.native() + "; " + ec.message());
   }

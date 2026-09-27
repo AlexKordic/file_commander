@@ -169,6 +169,8 @@ add_executable(fc
   scripting.cpp
   log.cpp
   err.cpp
+  operation.cpp
+  copy_planner.cpp
   location.cpp
   traversal.cpp
   settings.cpp
@@ -310,3 +312,12 @@ add_custom_target(smoke_lua_suite
 # TODO: conditional parts for mac and linux
 # add_executable(dirnotify dir_notify/fsevents.cpp dir_notify/test.cpp)
 # target_link_libraries(dirnotify Boost::filesystem "-framework CoreServices")
+
+# A headless contract target: no terminal, scripting or editor linkage.
+add_library(fc_operation_core STATIC EXCLUDE_FROM_ALL
+  commander.cpp operation.cpp copy_planner.cpp file_io_jobs.cpp archive.cpp location.cpp
+  traversal.cpp runtime_paths.cpp log.cpp err.cpp)
+target_include_directories(fc_operation_core PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
+target_link_libraries(fc_operation_core PUBLIC Boost::filesystem)
+add_executable(fc_core_tests EXCLUDE_FROM_ALL test/core_operations.cpp)
+target_link_libraries(fc_core_tests PRIVATE fc_operation_core)

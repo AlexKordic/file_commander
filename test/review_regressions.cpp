@@ -59,6 +59,12 @@ struct UiQueue {
   }
 };
 
+static void wait_dialog(Dialog& dialog,UiQueue& ui) {
+  auto deadline=std::chrono::steady_clock::now()+std::chrono::seconds(5);
+  while(dialog._pending && std::chrono::steady_clock::now()<deadline) {ui.drain();std::this_thread::sleep_for(std::chrono::milliseconds(1));}
+  require(!dialog._pending,"dialog operation did not complete");
+}
+
 static void wait_job(uint64_t id) {
   auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
   while (std::chrono::steady_clock::now() < deadline) {
@@ -198,16 +204,17 @@ static void R06() {
   Dir dir; dir.move_to(f.root);
   auto state = copy_state(dir, first, f.root);
   state->action.arguments->selected.push_back(second);
+  UiQueue ui;state->post=[&](auto fn){ui.post(std::move(fn));};
   RenameDialog dialog(state); dialog.OnShow();
   dialog.rows[0]->content = "renamed_a";
   dialog.rows[1]->content = "missing/b";
   auto* stable = dialog.rows[1].get();
-  dialog.ok();
+  dialog.ok(); wait_dialog(dialog,ui);
   require(dialog.rows.size() == 1 && dialog.rows[0].get() == stable, "failed rename row lost stable address");
   dialog.menu->ChildAt(0)->OnEvent(Event::Character('X'));
   require(dialog.rows[0]->content == "Xmissing/b", "surviving input no longer edits its row");
   dialog.rows[0]->content = "renamed_b";
-  dialog.ok();
+  dialog.ok(); wait_dialog(dialog,ui);
   require(fs::exists(f.root / "renamed_a") && fs::exists(f.root / "renamed_b"), "rename retry failed");
 }
 
@@ -555,19 +562,20 @@ static void R24() {
   auto state = copy_state(dir, origin / "unused", f.root);
   state->action.arguments->origin = origin;
   int closed = 0; state->action.close_dialog = [&] { ++closed; };
+  UiQueue ui;state->post=[&](auto fn){ui.post(std::move(fn));};
   MkdirDialog dialog(state);
   for (const auto& name : {"", "missing/child"}) {
-    dialog.new_dir_name = name; dialog.ok();
+    dialog.new_dir_name = name; dialog.ok(); wait_dialog(dialog,ui);
     require(!dialog.error.empty() && closed == 0, "invalid mkdir closed without an error");
   }
-  f.file("origin/existing"); dialog.new_dir_name = "existing"; dialog.ok();
+  f.file("origin/existing"); dialog.new_dir_name = "existing"; dialog.ok(); wait_dialog(dialog,ui);
   require(!dialog.error.empty() && closed == 0, "existing file was not reported");
-  fs::permissions(origin, fs::owner_read | fs::owner_exe); dialog.new_dir_name = "denied"; dialog.ok();
+  fs::permissions(origin, fs::owner_read | fs::owner_exe); dialog.new_dir_name = "denied"; dialog.ok(); wait_dialog(dialog,ui);
   fs::permissions(origin, fs::owner_all);
   require(!dialog.error.empty() && closed == 0, "permission failure was not reported");
-  dialog.new_dir_name = "created"; dialog.ok();
+  dialog.new_dir_name = "created"; dialog.ok(); wait_dialog(dialog,ui);
   require(dialog.error.empty() && closed == 1 && fs::is_directory(origin / "created"), "valid mkdir failed");
-  fs::remove_all(origin); dialog.new_dir_name = "vanished"; dialog.ok();
+  fs::remove_all(origin); dialog.new_dir_name = "vanished"; dialog.ok(); wait_dialog(dialog,ui);
   require(!dialog.error.empty() && closed == 1, "vanished origin was not reported");
 }
 
@@ -1008,8 +1016,24 @@ static void AR05() {
   second.reset(); service.trim_cache(); require(service.cached_roots()==0 && !fs::exists(root2),"cache budget leaked unpinned root");
 }
 
+static void AR06() {
+  Fixture f; UiQueue ui; std::atomic<bool> entered=false,release=false;
+  FileJobServices services; services.clipboard=[&](const auto&) {entered=true;while(!release)std::this_thread::sleep_for(std::chrono::milliseconds(1));return Err();};
+  auto manager=make_file_jobs({},services);
+  Dir dir;dir.move_to(f.root);auto state=copy_state(dir,f.root/"name",f.root);state->jobs=manager.get();state->post=[&](auto fn){ui.post(std::move(fn));};
+  state->action.dialog="NameToClipboard";
+  auto dialog=std::make_unique<ToClipboardDialog>(state);dialog->OnShow();
+  auto deadline=std::chrono::steady_clock::now()+std::chrono::seconds(2);
+  while(!entered && std::chrono::steady_clock::now()<deadline)std::this_thread::sleep_for(std::chrono::milliseconds(1));
+  require(entered && dialog->_pending,"clipboard did not run asynchronously");
+  auto queued=std::make_shared<JobSpec>(std::make_shared<const OperationPlan>(selection_plan(OperationType::DELETE,{f.root/"missing"})));
+  auto id=manager->add_job(queued);require(manager->cancel(id)==JobError::OK,"ID control cannot cancel queued job");
+  dialog.reset();release=true;manager->shutdown();ui.drain();
+  require(queued->_state==JobState::CANCELLED,"queued cancellation ignored");
+}
+
 int main(int argc, char** argv) {
-  const std::vector<std::pair<std::string, void (*)()>> tests = {{"AR05", AR05}, {"AR04", AR04}, {"AR07", AR07}, {"AR03", AR03}, {"AR02", AR02}, {"AR01", AR01}, {"R01", R01}, {"R02", R02}, {"R03", R03}, {"R04", R04}, {"R05", R05}, {"R06", R06}, {"R07", R07}, {"R08", R08}, {"R09", R09}, {"R10", R10}, {"R11", R11}, {"R12", R12}, {"R13", R13}, {"R14", R14}, {"R15", R15}, {"R16", R16}, {"R17", R17}, {"R18", R18}, {"R19", R19}, {"R20", R20}, {"R21", R21}, {"R22", R22}, {"R23", R23}, {"R24", R24}, {"R25", R25}, {"R26", R26}, {"R27", R27}, {"R28", R28}, {"R29", R29}, {"R31", R31}, {"R35", R35}, {"R37", R37}};
+  const std::vector<std::pair<std::string, void (*)()>> tests = {{"AR06", AR06}, {"AR05", AR05}, {"AR04", AR04}, {"AR07", AR07}, {"AR03", AR03}, {"AR02", AR02}, {"AR01", AR01}, {"R01", R01}, {"R02", R02}, {"R03", R03}, {"R04", R04}, {"R05", R05}, {"R06", R06}, {"R07", R07}, {"R08", R08}, {"R09", R09}, {"R10", R10}, {"R11", R11}, {"R12", R12}, {"R13", R13}, {"R14", R14}, {"R15", R15}, {"R16", R16}, {"R17", R17}, {"R18", R18}, {"R19", R19}, {"R20", R20}, {"R21", R21}, {"R22", R22}, {"R23", R23}, {"R24", R24}, {"R25", R25}, {"R26", R26}, {"R27", R27}, {"R28", R28}, {"R29", R29}, {"R31", R31}, {"R35", R35}, {"R37", R37}};
   try {
     bool matched = false;
     for (const auto& [id, run] : tests) {

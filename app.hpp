@@ -155,6 +155,7 @@ class Panel : public DialogOverlay {
     dir.path_txt = location.native();
     _state                      = std::make_shared<PanelSharedState>(&dir);
     _state->notify = [post = e] { post([] {}); };
+    _state->post = e; _state->jobs = &file_operations();
     navigation                  = Container::Tab({}, &_active_dialog);
     _state->move_to             = [this](Filepath where, Filepath focus) { this->move_to(where, focus); };
     _state->enter_archive       = [this](const Filepath& where) { return this->enter_archive(where); };
@@ -585,6 +586,9 @@ inline std::string job_type_to_string(JobInstructions::Type type) {
   case JobInstructions::Type::MOVE: return "MOVE";
   case JobInstructions::Type::DELETE: return "DELETE";
   case JobInstructions::Type::ARCHIVE_CREATE: return "ARCHIVE";
+  case JobInstructions::Type::MKDIR: return "MKDIR";
+  case JobInstructions::Type::RENAME: return "RENAME";
+  case JobInstructions::Type::CLIPBOARD: return "CLIPBOARD";
   default: return "?";
   }
 }
@@ -598,13 +602,13 @@ struct JobProgressBar {
     cancel_button = Button(" Cancel ", [] {
       auto jobinfo = file_operations().get_running_job();
       if (jobinfo.job && !jobinfo.job->is_stopped()) {
-        file_operations().cancel_job(jobinfo.job.get());
+        file_operations().cancel(jobinfo.job->_job_id);
       }
     });
     pause_button = Button(" Pause/Resume ", [] {
       auto jobinfo = file_operations().get_running_job();
       if (jobinfo.job && !jobinfo.job->is_stopped()) {
-        file_operations().pause_job(jobinfo.job.get());
+        file_operations().pause(jobinfo.job->_job_id);
       }
     });
   }
@@ -624,7 +628,6 @@ struct JobProgressBar {
 
     switch (job->_type) {
     case JobInstructions::Type::COPY: {
-      if (!item.symlink_ref()) return text(task_info + " [item target missing]") | theme().progress_operation;
       std::string total_info = std::format(" [{:3}] {:5}[{:5}] Mbps {}/{} items ", std::lround(job->_total.percentage), std::lround(job->_total.Mbps), std::lround(job->_total.average_Mbps), job->_items_done, items_total);
       std::string curr_info  = std::format(" [{:3}] {:5}Mbps {} ", std::lround(job->_current_item.percentage), std::lround(job->_current_item.Mbps), item.path_ref().native());
       return hbox({
@@ -638,6 +641,9 @@ struct JobProgressBar {
         cancel_el,
       });
     } break;
+    case JobInstructions::Type::MKDIR:
+    case JobInstructions::Type::RENAME:
+    case JobInstructions::Type::CLIPBOARD:
     case JobInstructions::Type::MOVE: {
       // just _current_item_index is being updated
       float       item_percentage = std::max(0.0, std::min(100.0, job->_items_done * 100.0 / items_total));
