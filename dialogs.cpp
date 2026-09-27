@@ -1644,7 +1644,7 @@ void JobListDialog::rebuild_list() {
 
   auto jobinfo = file_operations().get_running_job();
   if (jobinfo.job && !jobinfo.job->is_stopped()) {
-    jobs.push_back(jobinfo.job->snapshot());
+    jobs.push_back(jobinfo.job->snapshot(false));
   }
 
   auto history = file_operations().get_job_history();
@@ -1652,11 +1652,19 @@ void JobListDialog::rebuild_list() {
   for (auto it = history.rbegin(); it != history.rend(); ++it) {
     const auto id = (*it)->_job_id;
     if (std::none_of(jobs.begin(), jobs.end(), [id](const auto& j) { return j->_job_id == id; }))
-      jobs.push_back((*it)->snapshot());
+      jobs.push_back((*it)->snapshot(false));
   }
 
   if (detail_job) {
-    for (auto& view : jobs) if (view->_job_id == detail_job->_job_id) { detail_job = view; break; }
+    auto id=detail_job->_job_id;
+    auto refresh=[&](const auto& job) {
+      if(job && job->_job_id==id) {
+        auto summary=job->snapshot(false);
+        if(summary->_items_done!=detail_job->_items_done || summary->_state!=detail_job->_state || summary->_error_count!=detail_job->_error_count)
+          detail_job=job->snapshot();
+      }
+    };
+    refresh(jobinfo.job); for(auto& job:history) refresh(job);
   }
   // Clamp focused_id to valid range
   if (!jobs.empty()) {
@@ -1669,7 +1677,10 @@ void JobListDialog::rebuild_list() {
 void JobListDialog::open_detail() {
   auto focused = _job_data_source.focused_id;
   if (jobs.empty() || focused < 0 || focused >= (int64_t)jobs.size()) return;
-  detail_job = jobs[focused];
+  auto id=jobs[focused]->_job_id;
+  auto current=file_operations().get_running_job().job;
+  if(current && current->_job_id==id) detail_job=current->snapshot();
+  else for(auto& job:file_operations().get_job_history()) if(job->_job_id==id) {detail_job=job->snapshot();break;}
   in_detail  = true;
   view_mode  = 1;
 
@@ -1753,7 +1764,7 @@ JobListDialog::JobListDialog(std::function<void()> close_dialog) : Dialog(nullpt
     std::string icon    = state_icon(state);
     int items_done      = static_cast<int>(job->_items_done);
     int items_total     = static_cast<int>(job->item_count());
-    int errors          = static_cast<int>(job->_errors.size());
+    int errors          = static_cast<int>(job->_error_count);
 
     std::string duration = "-";
     if (job->_started_time > 0) {

@@ -13,6 +13,7 @@
 #include <optional>
 #include <sstream>
 #include <vector>
+#include <unordered_map>
 #if defined(__unix__) || defined(__APPLE__)
 #include <grp.h>
 #include <pwd.h>
@@ -162,6 +163,23 @@ DirItem::DirItem(Filepath p, std::string name, Type type, Perms perms, std::time
 void Dir::publish(DirectorySnapshot snapshot) {
   path = std::move(snapshot.path); path_txt = path.native(); items = std::move(snapshot.items);
   _sort(); apply_filter(filter.phrase, true); _calculate();
+}
+
+void Dir::restore_selection(const std::unordered_set<std::string>& selected) {
+  for (auto& item:items) item._selected = selected.contains(item.path_ref().native());
+  _calculate();
+}
+void Dir::publish_delta(std::vector<DirectoryDelta> delta) {
+  std::unordered_map<std::string,DirectoryDelta*> changes;
+  for (auto& change:delta) changes[change.path.native()]=&change;
+  items.erase(std::remove_if(items.begin(),items.end(),[&](DirItem& item) {
+    auto found=changes.find(item.path_ref().native()); if(found==changes.end()) return false;
+    auto& replacement=found->second->item;
+    if(!replacement) {changes.erase(found); return true;}
+    replacement->_selected=item._selected; item=std::move(*replacement); changes.erase(found); return false;
+  }),items.end());
+  for(auto& [key,change]:changes) if(change->item) items.push_back(std::move(*change->item));
+  _sort(); apply_filter(filter.phrase,true); _calculate();
 }
 
 Err Dir::leave_dir() {

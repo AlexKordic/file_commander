@@ -950,8 +950,35 @@ static void AR07() {
   require(!archive_service().resolve(missing,result).ok(),"missing archive restored successfully");
 }
 
+static void AR04() {
+  std::vector<double> times;
+  for(int count:{10000,20000}) {
+    Dir dir; std::unordered_set<std::string> selected;
+    for(int i=0;i<count;++i) { auto path="/synthetic/"+std::to_string(i); dir.items.emplace_back(path,std::to_string(i),fs::regular_file,fs::owner_all,0,10); selected.insert(path); }
+    auto start=std::chrono::steady_clock::now();
+    for(int i=0;i<5;++i) dir.restore_selection(selected);
+    double ms=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-start).count()/5;
+    times.push_back(ms); std::cout << "Selection " << count << ": " << ms << " ms\n";
+    require(dir.stats().items_selected==count,"selection reconciliation lost entries");
+    require(ms<250,"selection exceeded 250 ms debug regression budget");
+  }
+  require(times[1]<times[0]*3.5+2,"selection reconciliation scales quadratically");
+  std::vector<DirItem> plan; for(int i=0;i<100000;++i) plan.emplace_back("/synthetic/item","item",fs::regular_file,fs::owner_all,0,10);
+  auto job=std::make_shared<JobSpec>(JobSpec::Type::COPY,std::move(plan));
+  auto start=std::chrono::steady_clock::now();
+  for(int i=0;i<100;++i) { auto summary=job->snapshot(false); require(summary->_items.empty() && summary->item_count()==100000,"summary copied plan or lost count"); }
+  double ms=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-start).count();
+  std::cout << "100 summaries for 100,000-item plan: " << ms << " ms\n"; require(ms<100,"summaries depend on plan size");
+  Fixture f; UiQueue ui; int scans=0;
+  Panel panel(f.root,[&](auto*){return f.root;},[&](auto fn){ui.post(std::move(fn));},[&](Dir& d,const Filepath& p,const std::atomic<bool>* c){++scans;return d.move_to(p,c);});
+  ui.wait(panel); panel.update_funnel.reset(); auto file=f.file("added");
+  auto changes=std::make_unique<std::vector<DirItemUpdated>>(); changes->emplace_back(file.c_str(),DirItemUpdated::Event::Created);
+  panel.apply_changes(std::move(changes)); ui.wait(panel);
+  require(scans==1 && panel.dir.items.size()==1,"ordinary watcher change forced full scan");
+}
+
 int main(int argc, char** argv) {
-  const std::vector<std::pair<std::string, void (*)()>> tests = {{"AR07", AR07}, {"AR03", AR03}, {"AR02", AR02}, {"AR01", AR01}, {"R01", R01}, {"R02", R02}, {"R03", R03}, {"R04", R04}, {"R05", R05}, {"R06", R06}, {"R07", R07}, {"R08", R08}, {"R09", R09}, {"R10", R10}, {"R11", R11}, {"R12", R12}, {"R13", R13}, {"R14", R14}, {"R15", R15}, {"R16", R16}, {"R17", R17}, {"R18", R18}, {"R19", R19}, {"R20", R20}, {"R21", R21}, {"R22", R22}, {"R23", R23}, {"R24", R24}, {"R25", R25}, {"R26", R26}, {"R27", R27}, {"R28", R28}, {"R29", R29}, {"R31", R31}, {"R35", R35}, {"R37", R37}};
+  const std::vector<std::pair<std::string, void (*)()>> tests = {{"AR04", AR04}, {"AR07", AR07}, {"AR03", AR03}, {"AR02", AR02}, {"AR01", AR01}, {"R01", R01}, {"R02", R02}, {"R03", R03}, {"R04", R04}, {"R05", R05}, {"R06", R06}, {"R07", R07}, {"R08", R08}, {"R09", R09}, {"R10", R10}, {"R11", R11}, {"R12", R12}, {"R13", R13}, {"R14", R14}, {"R15", R15}, {"R16", R16}, {"R17", R17}, {"R18", R18}, {"R19", R19}, {"R20", R20}, {"R21", R21}, {"R22", R22}, {"R23", R23}, {"R24", R24}, {"R25", R25}, {"R26", R26}, {"R27", R27}, {"R28", R28}, {"R29", R29}, {"R31", R31}, {"R35", R35}, {"R37", R37}};
   try {
     bool matched = false;
     for (const auto& [id, run] : tests) {

@@ -42,10 +42,14 @@ bool ProgressInfo::update(int64_t new_size, int64_t source_size) {
   return true;
 }
 
-std::shared_ptr<const JobSnapshot> JobSpec::snapshot() {
+std::shared_ptr<const JobSnapshot> JobSpec::snapshot(bool details) {
   std::lock_guard lock(_m);
+  if (!details && _completed_summary) return _completed_summary;
   auto view = std::make_shared<JobSnapshot>();
-  static_cast<JobInstructions&>(*view) = static_cast<const JobInstructions&>(*this);
+  if (details) static_cast<JobInstructions&>(*view) = static_cast<const JobInstructions&>(*this);
+  view->_type = _type; view->_copy_conflict = _copy_conflict;
+  view->_item_count = _items.size(); view->_error_count = _errors.size();
+  if (_current_item_index >= 0 && _current_item_index < _items.size()) view->_focused_item = _items[_current_item_index];
   view->_job_id = _job_id;
   view->_state = _state.load();
   view->_current_item_index = _current_item_index;
@@ -60,6 +64,7 @@ std::shared_ptr<const JobSnapshot> JobSpec::snapshot() {
   view->_finished_time = _finished_time;
   view->_bytes_processed = _bytes_processed;
   view->_bytes_total = _bytes_total;
+  if (!details && is_stopped()) _completed_summary = view;
   return view;
 }
 

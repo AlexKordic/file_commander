@@ -10,7 +10,7 @@ Each improvement records its plan before implementation, applied changes, valida
 | 2 | [AR02](architecture_progress/AR02.md) | Separate view state and settings publication | Implemented |
 | 3 | [AR03](architecture_progress/AR03.md) | Share explicit traversal policies | Implemented |
 | 4 | [AR07](architecture_progress/AR07.md) | Persist logical archive locations | Implemented |
-| 5 | [AR04](architecture_progress/AR04.md) | Bound UI publication and observation costs | Planned |
+| 5 | [AR04](architecture_progress/AR04.md) | Bound UI publication and observation costs | Implemented |
 | 6 | [AR05](architecture_progress/AR05.md) | Bound retained resources | Planned |
 | 7 | [AR06](architecture_progress/AR06.md) | Separate operation services from UI | Planned |
 | 8 | [AR08](architecture_progress/AR08.md) | Unify commands and application events | Planned |

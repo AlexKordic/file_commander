@@ -9,6 +9,7 @@
 #include <ctime>
 #include <memory>
 #include <optional>
+#include <unordered_set>
 
 std::string time_to_string(double time);
 
@@ -113,6 +114,8 @@ struct CommandArgs {
   bool selected_share_same_dir();
 };
 
+struct DirectoryDelta { Filepath path; std::optional<DirItem> item; };
+
 struct DirectorySnapshot {
   Filepath path;
   std::vector<DirItem> items;
@@ -145,6 +148,8 @@ class Dir : public PanelViewState {
   };
 
   void publish(DirectorySnapshot snapshot);
+  void publish_delta(std::vector<DirectoryDelta> delta);
+  void restore_selection(const std::unordered_set<std::string>& selected);
   Err   move_to(const Filepath path, const std::atomic<bool>* cancelled = nullptr);
   void  partial_refresh(UpdatedFiles changes);
   Err   refresh();  // TODO: add system notifications for current dir

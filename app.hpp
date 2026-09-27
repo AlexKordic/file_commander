@@ -209,6 +209,7 @@ class Panel : public DialogOverlay {
   void new_tab() {
     sync_active_tab_state();
     TabState clone = _tabs.at(_active_tab);
+    clone.dir = dir; // Explicit new-tab cloning is the only full directory copy.
     _tabs.insert(_tabs.begin() + _active_tab + 1, std::move(clone));
     switch_to_tab(_active_tab + 1);
     if (on_event) on_event("tab_created", std::to_string(_active_tab));
@@ -250,6 +251,7 @@ class Panel : public DialogOverlay {
     if (index < 0 || index >= static_cast<int>(_tabs.size())) return;
     if (index == _active_tab) return;
     sync_active_tab_state();
+    _tabs[_active_tab].dir = std::move(dir);
     _active_tab = index;
     load_active_tab();
     if (on_event) on_event("tab_switched", std::to_string(_active_tab));
@@ -314,9 +316,9 @@ class Panel : public DialogOverlay {
         if (recover && !same) file_operations().report_error("Watched directory is unavailable; moved to " + where.native());
         int old_index = same && _state->get_focused_index ? _state->get_focused_index() : 0;
         Filepath old_focus = focus;
-        std::vector<Filepath> selected;
+        std::unordered_set<std::string> selected;
         if (same) {
-          selected = dir.take_selected()->selected;
+          for (const auto& item:dir.items) if(item.selected()) selected.insert(item.path_ref().native());
           if (old_focus.empty() && _state->get_focused_item) {
             if (auto item = _state->get_focused_item()) old_focus = *item;
           }
@@ -324,9 +326,7 @@ class Panel : public DialogOverlay {
         dir.publish(DirectorySnapshot{std::move(result->path), std::move(result->items)});
         ++items_revision;
         dir.apply_filter(_state->filter_txt, true);
-        for (int i = 0; i < dir.items.size(); ++i) {
-          if (std::find(selected.begin(), selected.end(), dir.items[i].path_ref()) != selected.end()) dir.item_toggle_select(i);
-        }
+        dir.restore_selection(selected);
         _archive_stack = stack;
         _prune_archive_stack(where);
         dir.path_txt = location().display();
@@ -428,7 +428,8 @@ class Panel : public DialogOverlay {
   void sync_active_tab_state() {
     if (_tabs.empty() || _active_tab < 0 || _active_tab >= static_cast<int>(_tabs.size())) return;
     TabState& tab = _tabs[_active_tab];
-    tab.dir = dir;
+    tab.dir.path = dir.path; tab.dir.path_txt = dir.path_txt;
+    static_cast<PanelViewState&>(tab.dir) = static_cast<const PanelViewState&>(dir);
     if (_state) {
       tab.filter_txt = _state->filter_txt;
       if (_state->get_focused_index) tab.focused_index = _state->get_focused_index();
@@ -449,12 +450,12 @@ class Panel : public DialogOverlay {
       pending_changes.push(std::move(changes));
       this->run_on_ui([this, alive, generation]() {
         if (!alive->load() || generation != _watch_generation) return;
-        while (true) {
-          UpdatedFiles batch;
-          FifoError    err = this->pending_changes.try_pop(batch);
-          if (FifoError::OK != err) return;
-          apply_changes(std::move(batch));
+        auto merged=std::make_unique<std::vector<DirItemUpdated>>();
+        UpdatedFiles batch;
+        while (pending_changes.try_pop(batch)==FifoError::OK) {
+          merged->insert(merged->end(),std::make_move_iterator(batch->begin()),std::make_move_iterator(batch->end()));
         }
+        apply_changes(std::move(merged));
       });
     });
     } catch (const std::exception& error) {
@@ -477,15 +478,42 @@ class Panel : public DialogOverlay {
     }
     if (relevant) {
       if (_loading) _refresh_after_load = true;
-      else load_directory(dir.path, false, recover, {}, true);
+      else if (recover || batch->size()>512) load_directory(dir.path, false, recover, {}, true);
+      else load_delta(std::move(batch));
     }
+  }
+
+  void load_delta(UpdatedFiles batch) {
+    std::unordered_set<std::string> paths;
+    for(const auto& change:*batch) if(change.path.parent_path().lexically_normal()==dir.path.lexically_normal()) paths.insert(change.path.native());
+    const auto generation=++_load_generation; _loading=true; _loading_path=dir.path;
+    _loader.submit([this,alive=_callback_alive,post=run_on_ui,generation,paths=std::move(paths)](const LatestWork::Token& cancelled) {
+      auto delta=std::make_shared<std::vector<DirectoryDelta>>();
+      for(const auto& path:paths) {
+        if(cancelled->load()) return;
+        boost::system::error_code ec; auto status=boost::filesystem::symlink_status(path,ec);
+        if(!ec && boost::filesystem::exists(status)) delta->push_back({path,DirItem(path)});
+        else if(!ec || ec==boost::system::errc::no_such_file_or_directory) delta->push_back({path,{}});
+        else { // A failed observation must not erase an existing entry.
+          post([alive,message=ec.message()] { if(alive->load()) file_operations().report_error("[Panel update] "+message); });
+        }
+      }
+      post([this,alive,cancelled,generation,delta] {
+        if(!alive->load() || cancelled->load() || generation!=_load_generation) return;
+        Filepath focus; int index=_state->get_focused_index?_state->get_focused_index():0;
+        if(_state->get_focused_item) if(auto item=_state->get_focused_item()) focus=*item;
+        dir.publish_delta(std::move(*delta)); ++items_revision; _loading=false;
+        _restore_focus_after_update(focus,index);
+        if(std::exchange(_refresh_after_load,false)) load_directory(dir.path,false,true,{},true);
+      });
+    });
   }
 
  private:
   void load_active_tab() {
     if (_tabs.empty() || _active_tab < 0 || _active_tab >= static_cast<int>(_tabs.size())) return;
-    const TabState& tab = _tabs[_active_tab];
-    dir = tab.dir;
+    TabState& tab = _tabs[_active_tab];
+    dir = std::move(tab.dir);
     _archive_stack = tab.archive_stack;
     _prune_archive_stack(dir.path);
     if (_state) {
@@ -583,14 +611,12 @@ struct JobProgressBar {
 
   Element render() {
     auto  jobinfo = file_operations().get_running_job();
-    auto& job     = jobinfo.job;
+    auto job = jobinfo.job ? jobinfo.job->snapshot(false) : nullptr;
     if (!job) return text("[Empty]") | theme().progress_operation;
     std::string task_info = std::format(" [{}] [{}] ", jobinfo.queued_jobs, job_type_to_string(job->_type));
     if (job->is_stopped()) return text(task_info + " [Stopped]") | theme().progress_operation;
-    std::lock_guard lock(job->_m);
-    const bool      current_index_valid = job->_current_item_index >= 0 && job->_current_item_index < job->_items.size();
-    if (!current_index_valid) return text(task_info + " [task index invalid]") | theme().progress_operation;
-    const DirItem& item        = job->_items.at(job->_current_item_index);
+    if (!job->_focused_item) return text(task_info + " [task index invalid]") | theme().progress_operation;
+    const DirItem& item        = *job->_focused_item;
     const int64_t  items_total = job->item_count();
 
     auto cancel_el = cancel_button->Render();
