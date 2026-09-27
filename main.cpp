@@ -81,6 +81,7 @@ int main(int argc, char** argv) {
 
   // screen.TrackMouse(false);
 
+  int exit_code = 0;
   if (lua_mode) {
     LuaScripting scripting(app, app.renderer);
 
@@ -98,15 +99,8 @@ int main(int argc, char** argv) {
     while (!loop.HasQuitted()) {
       loop.RunOnceBlocking();
       scripting.tick();   // first call starts coroutine; thereafter checks waits
-      // // // if (scripting.finished()) {
-      // // //   // Lua script completed (success or error) — exit loop
-      // // //   // Give one more frame for error display, then quit
-      // // //   screen.Post(ftxui::Event::Custom);
-      // // //   screen.Exit();
-      // // // }
-      // Note: fc.quit() calls screen.Exit() directly.
-      // When script finishes without fc.quit(), app stays open for manual use.
     }
+    exit_code = scripting.exit_code();
     scripting.cleanup();
   } else {
     // Normal mode — no Lua
@@ -115,5 +109,5 @@ int main(int argc, char** argv) {
   }
 
   file_operations().shutdown();
-  return 0;
+  return exit_code;
 }

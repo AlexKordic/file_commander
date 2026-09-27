@@ -180,6 +180,9 @@ bool LuaScripting::setup(const std::string& script_path) {
 
   // 5. Create coroutine and load the test script
   _lua_co = lua_newthread(_lua);
+  // Count hooks must also cover loops that LuaJIT would otherwise compile.
+  luaJIT_setmode(_lua_co, 0, LUAJIT_MODE_ENGINE | LUAJIT_MODE_OFF);
+  lua_sethook(_lua_co, execution_hook, LUA_MASKCOUNT, 10000);
   log(("setup: loading script " + script_path).c_str());
   if (luaL_loadfile(_lua_co, script_path.c_str()) != 0) {
     const char* err = lua_tostring(_lua_co, -1);
@@ -227,18 +230,13 @@ void LuaScripting::heartbeat_test_timeout() {
 bool LuaScripting::check_test_timeout_and_abort() {
   if (_finished) return true;
   if (_test_deadline <= 0.0) return false;
-  if (now() <= _test_deadline) return false;
+  const double deadline = _pending_wait ? std::max(_test_deadline, _pending_wait->deadline + 1.0) : _test_deadline;
+  if (now() <= deadline) return false;
 
   std::string msg = "[Lua] FAIL: hard timeout exceeded 6s";
   log("ERROR: " + msg);
   file_operations().report_error(msg);
-  _pending_wait.reset();
-  _finished = true;
-  auto* screen = ScreenInteractive::Active();
-  if (screen) {
-    screen->Post(Event::Custom);
-    screen->Exit();
-  }
+  finish_script(1);
   return true;
 }
 
@@ -256,6 +254,9 @@ bool LuaScripting::finished() const { return _finished; }
 
 void LuaScripting::cleanup() {
   _scheduler.stop();
+  _app.on_event = {};
+  _app.get_left().on_event = {};
+  _app.get_right().on_event = {};
   if (_lua) { lua_close(_lua); _lua = nullptr; _lua_co = nullptr; }
   if (_log_file) { fclose(_log_file); _log_file = nullptr; }
 }
@@ -448,22 +449,28 @@ void LuaScripting::poll_async_events() {
 
 // --- handle_resume_status ---
 
+void LuaScripting::finish_script(int exit_code) {
+  _exit_code = exit_code;
+  _finished = true;
+  _pending_wait.reset();
+  if (auto* screen = ScreenInteractive::Active()) screen->Exit();
+}
+
+void LuaScripting::execution_hook(lua_State* L, lua_Debug*) {
+  auto* self = from_lua(L);
+  if (self->_test_deadline > 0 && now() > self->_test_deadline)
+    luaL_error(L, "hard timeout exceeded 6s");
+}
+
 void LuaScripting::handle_resume_status(int status) {
   if (status == 0) {
-    // Coroutine finished normally
-    _finished = true;
-  } else if (status == LUA_YIELD) {
-    // Coroutine yielded (waiting for event or sleeping)
-  } else {
-    // Error
+    finish_script(0);
+  } else if (status != LUA_YIELD) {
     const char* err = lua_tostring(_lua_co, -1);
     std::string errmsg = std::string("[Lua] ") + (err ? err : "unknown error");
     log("ERROR: " + errmsg);
     file_operations().report_error(errmsg);
-    _finished = true;
-    // Post Custom to refresh error display
-    auto* screen = ScreenInteractive::Active();
-    if (screen) screen->Post(Event::Custom);
+    finish_script(1);
   }
 }
 
@@ -487,6 +494,7 @@ void LuaScripting::check_waits() {
           // that may have been produced in the same poll cycle for subsequent waits.
           _event_cursor = i + 1;
           lua_pushboolean(_lua_co, 1);
+          heartbeat_test_timeout();
           int status = lua_resume(_lua_co, 1);
           handle_resume_status(status);
           return;
@@ -502,11 +510,13 @@ void LuaScripting::check_waits() {
     _pending_wait.reset();
     if (was_sleep) {
       // Sleep completed — resume with no return value
+      heartbeat_test_timeout();
       int status = lua_resume(_lua_co, 0);
       handle_resume_status(status);
     } else {
       // Timeout — resume with nil
       lua_pushnil(_lua_co);
+      heartbeat_test_timeout();
       int status = lua_resume(_lua_co, 1);
       handle_resume_status(status);
     }
@@ -839,9 +849,6 @@ int LuaScripting::l_wait_event(lua_State* L) {
 
   // Not yet — set up wait and yield
   double deadline = now() + timeout_ms / 1000.0;
-  if (self->_test_deadline > 0.0 && deadline > self->_test_deadline) {
-    deadline = self->_test_deadline;
-  }
   self->_pending_wait = PendingWait{std::move(names), deadline, false};
   self->_event_cursor = self->_event_log.size();
   self->_scheduler.schedule_at(deadline);
@@ -853,9 +860,6 @@ int LuaScripting::l_sleep(lua_State* L) {
   auto* self = from_lua(L);
   int ms = (int)luaL_checknumber(L, 1);
   double deadline = now() + ms / 1000.0;
-  if (self->_test_deadline > 0.0 && deadline > self->_test_deadline) {
-    deadline = self->_test_deadline;
-  }
   self->_pending_wait = PendingWait{{}, deadline, true};
   self->_scheduler.schedule_at(deadline);
   return lua_yield(L, 0);

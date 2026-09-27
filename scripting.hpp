@@ -16,6 +16,7 @@
 
 extern "C" {
 #include <lua.h>
+#include <luajit.h>
 #include <lualib.h>
 #include <lauxlib.h>
 }
@@ -82,6 +83,7 @@ public:
 
   /// Has the Lua script finished (completed or errored)?
   bool finished() const;
+  int exit_code() const { return _exit_code; }
 
   /// Close Lua state and stop scheduler.
   void cleanup();
@@ -95,6 +97,7 @@ private:
   lua_State* _lua    = nullptr;
   lua_State* _lua_co = nullptr;
   bool       _finished = false;
+  int        _exit_code = 0;
   bool       _started  = false;   // has initial resume happened?
 
   // --- Event log (replaces g_event_log, g_event_cursor) ---
@@ -148,6 +151,8 @@ private:
 
   // --- Internal methods (replaces free functions) ---
   void poll_async_events();     // detect job_started/completed, discovery_completed
+  void finish_script(int exit_code);
+  static void execution_hook(lua_State* L, lua_Debug*);
   void handle_resume_status(int status);  // handle lua_resume return code
   void check_waits();           // called from tick(): check event log + timeout, resume if met
   void heartbeat_test_timeout();

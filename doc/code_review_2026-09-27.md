@@ -572,15 +572,15 @@ A Lua exception sets `_finished` and posts a redraw, but does not exit the loop.
 
 **Fix direction:** carry a script result to `main`, exit non-interactive test runs on errors, return nonzero for failure/timeout, and make timeout policy consistent with explicit waits. **Regression:** syntax error, runtime assertion, watchdog timeout, long permitted wait, and successful completion with expected exit codes.
 
-**Implementation status:** Planned.
+**Implementation status:** Applied.
 
 **Planned solution:** carry a script result to `main`, exit non-interactive test runs on errors, return nonzero for failure/timeout, and make timeout policy consistent with explicit waits.
 
-**Applied solution:** Pending.
+**Applied solution:** Script completion, runtime errors and watchdog failures now terminate the event loop and propagate a process exit code. Explicit sleep/event deadlines are honored, with a fresh execution window after resumption. An instruction-count hook also stops CPU-bound Lua loops; the test runner captures PTY output and shell status.
 
-**Plan deviations:** Pending.
+**Plan deviations:** Successful scripts now exit when they return, without requiring fc.quit. LuaJIT compilation is disabled in script mode so watchdog instruction hooks cover loops reliably. Blocking native Lua calls remain subject to their own OS behavior.
 
-**Validation:** Pending.
+**Validation:** Native build and seven PTY process regressions passed: syntax/runtime errors and yielded/CPU-loop watchdogs exited nonzero, normal return exited zero, and both seven-second sleep and event wait completed without premature watchdog failure.
 
 ### R31 — Lua wait/event semantics are lossy and do not mean “all jobs finished”
 
