@@ -470,8 +470,23 @@ static void R21() {
   require(dir.items.front().size() == 4, "old-directory metadata applied to current entry");
 }
 
+static void R22() {
+  Fixture f; auto root = f.dir("watched");
+  Panel panel(root, [&](Panel*) { return f.root; }, [](std::function<void()>) {});
+  f.file("watched/new");
+  auto changes = std::make_unique<std::vector<DirItemUpdated>>();
+  changes->emplace_back(root.c_str(), DirItemUpdated::Event::Rescan);
+  panel.apply_changes(std::move(changes));
+  require(panel.dir.items.size() == 1, "rescan did not reconcile directory");
+  fs::remove_all(root);
+  changes = std::make_unique<std::vector<DirItemUpdated>>();
+  changes->emplace_back(root.c_str(), DirItemUpdated::Event::WatchInvalidated);
+  panel.apply_changes(std::move(changes));
+  require(panel.dir.path == f.root && panel.update_funnel, "invalidated root did not recover/rearm");
+}
+
 int main(int argc, char** argv) {
-  const std::vector<std::pair<std::string, void (*)()>> tests = {{"R01", R01}, {"R02", R02}, {"R03", R03}, {"R04", R04}, {"R05", R05}, {"R06", R06}, {"R07", R07}, {"R08", R08}, {"R09", R09}, {"R10", R10}, {"R11", R11}, {"R12", R12}, {"R13", R13}, {"R14", R14}, {"R15", R15}, {"R16", R16}, {"R17", R17}, {"R18", R18}, {"R19", R19}, {"R20", R20}, {"R21", R21}};
+  const std::vector<std::pair<std::string, void (*)()>> tests = {{"R01", R01}, {"R02", R02}, {"R03", R03}, {"R04", R04}, {"R05", R05}, {"R06", R06}, {"R07", R07}, {"R08", R08}, {"R09", R09}, {"R10", R10}, {"R11", R11}, {"R12", R12}, {"R13", R13}, {"R14", R14}, {"R15", R15}, {"R16", R16}, {"R17", R17}, {"R18", R18}, {"R19", R19}, {"R20", R20}, {"R21", R21}, {"R22", R22}};
   try {
     bool matched = false;
     for (const auto& [id, run] : tests) {

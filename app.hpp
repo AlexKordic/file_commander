@@ -565,23 +565,46 @@ class Panel : public DialogOverlay {
           UpdatedFiles batch;
           FifoError    err = this->pending_changes.try_pop(batch);
           if (FifoError::OK != err) return;
-          int      focused_index_before = 0;
-          Filepath focused_path_before;
-          if (_state) {
-            if (_state->get_focused_index) { focused_index_before = _state->get_focused_index(); }
-            if (_state->get_focused_item) {
-              const Filepath* focused = _state->get_focused_item();
-              if (focused) focused_path_before = *focused;
-            }
-          }
-          this->dir.partial_refresh(std::move(batch));
-          _restore_focus_after_update(focused_path_before, focused_index_before);
-          sync_active_tab_state();
+          apply_changes(std::move(batch));
         }
       });
     });
   }
 
+ public:
+  // Apply a watcher batch on the UI thread.
+  void apply_changes(UpdatedFiles batch) {
+    const bool rescan = std::any_of(batch->begin(), batch->end(), [](const auto& change) {
+      return change.what == DirItemUpdated::Event::Rescan || change.what == DirItemUpdated::Event::WatchInvalidated;
+    });
+    if (rescan) {
+      auto where = dir.path;
+      for (;;) {
+        boost::system::error_code ec;
+        if (boost::filesystem::is_directory(where, ec) && !ec) break;
+        auto parent = where.parent_path();
+        if (parent == where || parent.empty()) return;
+        where = parent;
+      }
+      if (where != dir.path) file_operations().report_error("Watched directory is unavailable; moved to " + where.native());
+      move_to(where); // Reconcile and rearm the watcher, including overflow.
+      return;
+    }
+    int      focused_index_before = 0;
+    Filepath focused_path_before;
+    if (_state) {
+      if (_state->get_focused_index) { focused_index_before = _state->get_focused_index(); }
+      if (_state->get_focused_item) {
+        const Filepath* focused = _state->get_focused_item();
+        if (focused) focused_path_before = *focused;
+      }
+    }
+    this->dir.partial_refresh(std::move(batch));
+    _restore_focus_after_update(focused_path_before, focused_index_before);
+    sync_active_tab_state();
+  }
+
+ private:
   void load_active_tab() {
     if (_tabs.empty() || _active_tab < 0 || _active_tab >= static_cast<int>(_tabs.size())) return;
     const TabState& tab = _tabs[_active_tab];

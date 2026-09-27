@@ -86,6 +86,8 @@ struct DirItemUpdated {
     Removed,
     Renamed,
     Modified,
+    Rescan,
+    WatchInvalidated,
   } what;
 
   DirItemUpdated(const char* p, Event e) : path(p), what(e) {}

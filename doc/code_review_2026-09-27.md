@@ -428,15 +428,15 @@ The macOS callback filters by a changed path's parent and does not interpret dro
 
 **Fix direction:** represent “rescan required” and “watch invalidated” explicitly and recover the panel/watch as appropriate. **Regression:** inject overflow/root-change signals and verify a full reconciliation instead of relying only on ordinary named-file events.
 
-**Implementation status:** Planned.
+**Implementation status:** Applied.
 
 **Planned solution:** represent “rescan required” and “watch invalidated” explicitly and recover the panel/watch as appropriate.
 
-**Applied solution:** Pending.
+**Applied solution:** Watcher backends now emit explicit rescan and invalidation events. The panel reconciles the directory, rearms observation, and moves to the nearest existing ancestor when its root disappears. Linux processes zero-name lifecycle and overflow events before ordinary entries; macOS interprets root and dropped-event flags.
 
-**Plan deviations:** Pending.
+**Plan deviations:** Root recovery uses the nearest existing ancestor and reports the change. Linux descriptor teardown was also ordered after worker exit to avoid reuse races; Linux behavior was reviewed but not executed on this macOS host.
 
-**Validation:** Pending.
+**Validation:** Native build and R22 passed: injected overflow reconciled a newly created file, and root invalidation recovered to the parent with a live watcher.
 
 ### R23 — Tab changes the layout selector while single-panel mode remains enabled
 

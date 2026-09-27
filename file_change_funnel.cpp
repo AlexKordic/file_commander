@@ -58,7 +58,7 @@ class DirEvents : public FileChangeFunnel {
   DirEvents(Filepath where, FileChangeFunnel::Callback cb) : _callback(std::move(cb)) {
     _root = boost::filesystem::canonical(where);
 
-    FSEventStreamCreateFlags flags = kFSEventStreamCreateFlagFileEvents;
+    FSEventStreamCreateFlags flags = kFSEventStreamCreateFlagFileEvents | kFSEventStreamCreateFlagWatchRoot;
     if (!FileId::from_filename(_root_id, _root.native().c_str())) {
       auto msg = "our dir lstat failed " + std::to_string(errno) + " " + _root.native();
       Perun::file_operations().report_error(msg);
@@ -84,7 +84,21 @@ class DirEvents : public FileChangeFunnel {
     UpdatedFiles filtered_events = std::make_unique<std::vector<DirItemUpdated>>();
     filtered_events->reserve(num_events);
     for (int event_index = 0; event_index < static_cast<int>(num_events); event_index++) {
-      Filepath    signaled_path(event_paths[event_index]);
+      const auto flags = event_flags[event_index];
+      if (flags & kFSEventStreamEventFlagRootChanged) {
+        filtered_events->emplace_back(_root.c_str(), DirItemUpdated::Event::WatchInvalidated);
+        continue;
+      }
+      if (flags & (kFSEventStreamEventFlagMustScanSubDirs | kFSEventStreamEventFlagUserDropped |
+                   kFSEventStreamEventFlagKernelDropped | kFSEventStreamEventFlagEventIdsWrapped)) {
+        filtered_events->emplace_back(_root.c_str(), DirItemUpdated::Event::Rescan);
+        continue;
+      }
+      Filepath signaled_path(event_paths[event_index]);
+      if (signaled_path == _root) {
+        filtered_events->emplace_back(_root.c_str(), DirItemUpdated::Event::Rescan);
+        continue;
+      }
       std::string parent_dir = signaled_path.parent_path().native();
       FileId      parent_dir_id;
       if (!FileId::from_filename(parent_dir_id, parent_dir.c_str())) { continue; }
@@ -92,7 +106,7 @@ class DirEvents : public FileChangeFunnel {
       if (!same_dir) { continue; }
       filtered_events->emplace_back(event_paths[event_index], What(event_flags[event_index]));
     }
-    _callback(std::move(filtered_events));
+    if (!filtered_events->empty()) _callback(std::move(filtered_events));
   }
 
   void stop() {
@@ -176,24 +190,17 @@ class LinuxDirEvents : public FileChangeFunnel {
   ~LinuxDirEvents() override {
     stop();
     if (_thread.joinable()) _thread.join();
+    // Descriptor lifetime belongs to the owner; never close/reuse it while read
+    // is still running on the worker.
+    if (_watch_fd >= 0 && _inotify_fd >= 0) inotify_rm_watch(_inotify_fd, _watch_fd);
+    if (_inotify_fd >= 0) ::close(_inotify_fd);
   }
 
-  void stop() {
-    bool expected = true;
-    if (!_running.compare_exchange_strong(expected, false)) return;
-    if (_watch_fd >= 0 && _inotify_fd >= 0) {
-      inotify_rm_watch(_inotify_fd, _watch_fd);
-      _watch_fd = -1;
-    }
-    if (_inotify_fd >= 0) {
-      ::close(_inotify_fd);
-      _inotify_fd = -1;
-    }
-  }
+  void stop() { _running.store(false); }
 
  private:
   void run() {
-    std::array<char, 16384> buffer{};
+    alignas(struct inotify_event) std::array<char, 16384> buffer{};
     while (_running.load(std::memory_order_relaxed)) {
       const ssize_t length = ::read(_inotify_fd, buffer.data(), buffer.size());
       if (length < 0) {
@@ -214,6 +221,14 @@ class LinuxDirEvents : public FileChangeFunnel {
         auto* event = reinterpret_cast<const struct inotify_event*>(buffer.data() + i);
         i += sizeof(struct inotify_event) + event->len;
 
+        if (event->mask & IN_Q_OVERFLOW) {
+          updates->emplace_back(_root.c_str(), DirItemUpdated::Event::Rescan);
+          continue;
+        }
+        if (event->mask & (IN_DELETE_SELF | IN_MOVE_SELF | IN_IGNORED)) {
+          updates->emplace_back(_root.c_str(), DirItemUpdated::Event::WatchInvalidated);
+          continue;
+        }
         if (event->len == 0) continue;
         std::string name(event->name);
         if (name.empty() || name == "." || name == "..") continue;
