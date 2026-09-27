@@ -861,8 +861,13 @@ void CopyDialog::run_copy() {
   if (target.empty()) target = app->action.arguments->target;
   if (_discovery_process->_target != target ||
       _discovery_process->_follow_links != b_follow_links ||
-      _discovery_process->_preserve_relative_links != b_preserve_relative_links) {
+      _discovery_process->_preserve_relative_links != b_preserve_relative_links ||
+      _discovery_process->_input_paths->selected != app->action.arguments->selected) {
     _start_new_discovery();
+    _confirm_when_ready = true;
+    return;
+  }
+  if (_discovery_process->_running.load()) {
     _confirm_when_ready = true;
     return;
   }
@@ -882,7 +887,7 @@ void CopyDialog::run_copy() {
   }
 
   auto job = std::make_shared<JobSpec>(JobSpec::Type::COPY,
-                                       std::move(_discovery_process->_dir->items),
+                                       _discovery_process->take_items(),
                                        to_job_copy_conflict(_conflict));
   _clear_operation_state();
   file_operations().add_job(job);
@@ -896,6 +901,7 @@ Element CopyDialog::render() {
   Element bytes_filter_row = text("");
 
   if (_discovery_process) {
+    _discovery_process->publish_preview();
     file_list        = _discovery_process->_files->Render();
     auto progress    = _discovery_process->get_progress();
     bytes_filter_row = hbox({
@@ -934,8 +940,8 @@ void CopyDialog::_clear_operation_state() {
   _confirm_when_ready = false;
   // _virtual_dir->items.clear();
   // _visited_dirs.clear();
-  _discovery_process.reset();
   _filelist_wrapper->DetachAllChildren();
+  _discovery_process.reset();
 }
 
 CopyDiscoveryProcess::~CopyDiscoveryProcess() {
@@ -945,7 +951,7 @@ CopyDiscoveryProcess::~CopyDiscoveryProcess() {
 
 CopyDiscoveryProcess::CopyDiscoveryProcess(CopyDialog* parent, Filepath target) {
   _sequence_id             = g_copy_discovery_sequence.fetch_add(1, std::memory_order_relaxed);
-  _input_paths             = parent->app->action.arguments;
+  _input_paths             = std::make_shared<CommandArgs>(*parent->app->action.arguments);
   _target                  = target;
   _follow_links            = parent->b_follow_links;
   _preserve_relative_links = parent->b_preserve_relative_links;
@@ -959,12 +965,6 @@ CopyDiscoveryProcess::CopyDiscoveryProcess(CopyDialog* parent, Filepath target) 
   _state->filter = Input(&_state->filter_txt, &(_dir->path_txt), filelist_filter_opt(parent->filter_cursor_pos));
   _files         = DBMenu(&_data_source);
   setup_filelist_datasource(_state, _data_source);
-  // Override dataset_size: discovery adds items directly to _dir->items without calling
-  // Dir::_calculate(), so stats() would always return 0. Read items.size() directly.
-  _data_source.dataset_size = [dir = _dir.get()]() -> DataSize {
-    auto sz = (int64_t)dir->items.size();
-    return {sz, 0, std::max(int64_t{0}, sz - 1)};
-  };
   _data_source.on_event = [app = _state, data_source = &_data_source](DSEventContext ctx) -> bool {
     // handle filter only
     return filelist_handle_filter(app.get(), data_source, ctx);
@@ -999,10 +999,29 @@ CopyDiscoveryProgress CopyDiscoveryProcess::get_progress() {
   return _progress;
 }
 
+void CopyDiscoveryProcess::publish_preview() {
+  {
+    std::lock_guard lock(_m);
+    if (_dir->items.size() == _items.size()) return;
+    _dir->items.insert(_dir->items.end(), _items.begin() + _dir->items.size(), _items.end());
+  }
+  const auto phrase = _dir->filter.phrase;
+  _dir->filter.phrase.clear();
+  _dir->apply_filter(phrase);
+  _dir->_calculate();
+}
+
+std::vector<DirItem> CopyDiscoveryProcess::take_items() {
+  if (_running.load()) return {};
+  if (_thread.joinable()) _thread.join();
+  std::lock_guard lock(_m);
+  return std::move(_items);
+}
+
 void CopyDiscoveryProcess::_queue_link(Filepath const& location, Filepath const& destination, boost::filesystem::perms p) {
   std::lock_guard<std::mutex> lock(_m);
   _progress.link_count++;
-  auto& link = _dir->items.emplace_back(location, boost::filesystem::symlink_file, p);
+  auto& link = _items.emplace_back(location, boost::filesystem::symlink_file, p);
   link._set_symlink_target(destination);
 }
 
@@ -1010,7 +1029,7 @@ void CopyDiscoveryProcess::_queue_link(Filepath const& location, Filepath const&
 void CopyDiscoveryProcess::_queue_error(const DirItem& item, Filepath const& new_record_path, std::string error_message) {
   std::lock_guard<std::mutex> lock(_m);
   _progress.error_count++;
-  auto& created = _dir->items.emplace_back(DirItem(item.path_ref(), boost::filesystem::status_error, item.perms()));
+  auto& created = _items.emplace_back(DirItem(item.path_ref(), boost::filesystem::status_error, item.perms()));
   created._set_symlink_target(new_record_path);
   created._set_warning(error_message);
 }
@@ -1035,7 +1054,7 @@ bool CopyDiscoveryProcess::_queue_dir(const DirItem& item, Filepath const& new_r
   std::lock_guard<std::mutex> lock(_m);
   _progress.dir_count++;
   _progress.current_dir = item.path_ref().native();
-  _dir->items.push_back(DirItem(new_record_path, boost::filesystem::directory_file, item.perms()));
+  _items.push_back(DirItem(new_record_path, boost::filesystem::directory_file, item.perms()));
   return true;
 }
 
@@ -1046,7 +1065,7 @@ void CopyDiscoveryProcess::_stat_file(Filepath const& item_path) {
 
 void CopyDiscoveryProcess::_queue_file(const DirItem& item, Filepath const& new_record_path) {
   std::lock_guard<std::mutex> lock(_m);
-  auto&                       created = _dir->items.emplace_back(item);
+  auto&                       created = _items.emplace_back(item);
   created._set_symlink_target(new_record_path);
   _progress.file_count++;
   _progress.byte_count += item.size();

@@ -118,15 +118,15 @@ The discovery thread appends to `_dir->items` under its mutex, while the UI's DB
 
 **Fix direction:** publish immutable UI snapshots or transfer batches to the UI thread, use a synchronized lifecycle flag, and take a complete frozen job plan only after discovery has finished. **Regression:** repeatedly render, filter, cancel and confirm during a deliberately slowed large discovery under ThreadSanitizer.
 
-**Implementation status:** Planned.
+**Implementation status:** Applied.
 
 **Planned solution:** publish immutable UI snapshots or transfer batches to the UI thread, use a synchronized lifecycle flag, and take a complete frozen job plan only after discovery has finished.
 
-**Applied solution:** Pending.
+**Applied solution:** Discovery owns a mutex-protected plan vector and a copied CommandArgs snapshot; only the UI thread appends published batches to its preview Dir. The running flag is atomic. Confirmation waits for completion, joins the producer, then transfers the finished plan. Preview components are detached before discovery storage is destroyed.
 
-**Plan deviations:** Pending.
+**Plan deviations:** Used incremental UI-owned preview batches instead of copying the entire vector every frame. Confirmation remains pending until the complete plan is ready.
 
-**Validation:** Pending.
+**Validation:** Native build and R05 passed while rendering a 600-file discovery and immediately confirming; all 600 files arrived. R04 was rerun and passed. ThreadSanitizer has not yet been run.
 
 ### R06 — Partial batch rename leaves input controls bound to invalid row objects
 

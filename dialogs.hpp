@@ -174,8 +174,10 @@ struct CopyDiscoveryProcess {
   using P = std::shared_ptr<CopyDiscoveryProcess>;
 
   CopyDiscoveryProgress get_progress();
+  void publish_preview(); // UI thread only
+  std::vector<DirItem> take_items();
 
-  bool         _running                 = true;
+  std::atomic<bool> _running{true};
   bool         _follow_links            = false;
   bool         _preserve_relative_links = true;
   CopyConflict _conflict                = CopyConflict::Replace;
@@ -197,6 +199,7 @@ struct CopyDiscoveryProcess {
   std::thread                  _thread;
   std::mutex                   _m;
   CopyDiscoveryProgress        _progress;
+  std::vector<DirItem>          _items; // worker plan, guarded by _m
 
   CopyDiscoveryProcess(CopyDialog* parent, Filepath target);
   ~CopyDiscoveryProcess();

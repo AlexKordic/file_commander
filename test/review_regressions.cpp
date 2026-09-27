@@ -135,8 +135,31 @@ static void R04() {
   }
 }
 
+static void R05() {
+  Fixture f;
+  auto source = f.dir("src");
+  auto destination = f.dir("dst");
+  for (int i = 0; i < 600; ++i) f.file("src/entry" + std::to_string(i));
+  Dir dir; dir.move_to(source);
+  auto state = copy_state(dir, source, destination);
+  CopyDialog dialog(state);
+  dialog.OnShow();
+  dialog.run_copy(); // May still be discovering: must never queue a partial plan.
+  while (dialog._discovery_process && dialog._discovery_process->_running.load()) {
+    dialog._discovery_process->publish_preview();
+    dialog.render();
+    std::this_thread::yield();
+  }
+  if (dialog._discovery_process) dialog.navigation->OnEvent(Event::Custom);
+  for (int i = 0; file_operations().get_job_history().empty() && i < 2000; ++i)
+    std::this_thread::sleep_for(std::chrono::milliseconds(2));
+  require(fs::is_directory(destination / "src"), "directory was not copied");
+  require(std::distance(fs::directory_iterator(destination / "src"), fs::directory_iterator()) == 600,
+          "early confirmation lost undiscovered files");
+}
+
 int main(int argc, char** argv) {
-  const std::vector<std::pair<std::string, void (*)()>> tests = {{"R01", R01}, {"R02", R02}, {"R03", R03}, {"R04", R04}};
+  const std::vector<std::pair<std::string, void (*)()>> tests = {{"R01", R01}, {"R02", R02}, {"R03", R03}, {"R04", R04}, {"R05", R05}};
   try {
     bool matched = false;
     for (const auto& [id, run] : tests) {
