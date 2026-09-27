@@ -644,15 +644,15 @@ The staged LuaJIT library depends only on `luajit.h`; Fresh depends only on `Car
 
 **Fix direction:** use a dependency-aware integration or always invoke the incremental underlying build before staging; isolate configuration-specific products. **Regression:** edit a dependency source without changing its manifest/header and verify the staged output rebuilds for the selected target.
 
-**Implementation status:** Planned.
+**Implementation status:** Applied.
 
 **Planned solution:** use a dependency-aware integration or always invoke the incremental underlying build before staging; isolate configuration-specific products.
 
-**Applied solution:** Pending.
+**Applied solution:** LuaJIT and 7zr build outputs now depend on their implementation/header/build inputs. LuaJIT is staged and cleaned only in a private CMake build tree. Fresh always invokes Cargo incremental freshness checks with its lockfile before copy-if-different staging. Compiler commands carry toolchain arguments, targets and SDK/sysroot paths; unsupported Fresh cross configuration fails explicitly rather than packaging a host binary.
 
-**Plan deviations:** Pending.
+**Plan deviations:** LuaJIT and 7zr rebuild their private products when tracked inputs change, favoring complete header correctness over fine-grained incremental compilation. Fresh keeps Cargo-managed native products and locking in its checkout target directory. Fresh cross builds must be configured separately and supplied when packaging.
 
-**Validation:** Pending.
+**Validation:** Native build passed. R34 touched only implementation timestamps (restored afterward), verified LuaJIT lj_api.o, 7zr Alloc.o and Fresh rebuilt, and confirmed the original LuaJIT checkout object was untouched. No source contents or manifests were changed by validation. A separate sanitizer build exposed missing SDK flags for an absolute Xcode compiler; forwarding the SDK/sysroot fixed that configuration, and its full regression target built successfully.
 
 ### R35 — Clipboard support is macOS-only and ignores nonzero command exit codes
 

@@ -88,9 +88,15 @@ else()
   message(FATAL_ERROR "Local FTXUI source not found at ${FC_FTXUI_SOURCE_DIR}. Set FC_FTXUI_SOURCE_DIR to your local alex_ftxui checkout.")
 endif()
 
-set(_luajit_src_lib "${FC_LUAJIT_SOURCE_DIR}/src/libluajit.a")
+set(_luajit_build_dir "${CMAKE_BINARY_DIR}/third_party/luajit/source")
+set(_luajit_src_lib "${_luajit_build_dir}/src/libluajit.a")
+file(GLOB_RECURSE _luajit_inputs CONFIGURE_DEPENDS
+  "${FC_LUAJIT_SOURCE_DIR}/src/*.c" "${FC_LUAJIT_SOURCE_DIR}/src/*.h"
+  "${FC_LUAJIT_SOURCE_DIR}/src/*.lua" "${FC_LUAJIT_SOURCE_DIR}/src/*.dasc"
+  "${FC_LUAJIT_SOURCE_DIR}/src/Makefile*" "${FC_LUAJIT_SOURCE_DIR}/dynasm/*")
 set(_luajit_stage_dir "${CMAKE_BINARY_DIR}/third_party/luajit/lib")
 set(_luajit_stage_lib "${_luajit_stage_dir}/libluajit.a")
+set(_luajit_stamp "${_luajit_stage_dir}/built.stamp")
 if(EXISTS "${FC_LUAJIT_SOURCE_DIR}/src/luajit.h")
   set(_luajit_cc "${CMAKE_C_COMPILER}")
   if(CMAKE_C_COMPILER_ARG1)
@@ -100,7 +106,13 @@ if(EXISTS "${FC_LUAJIT_SOURCE_DIR}/src/luajit.h")
     string(APPEND _luajit_cc " -target ${CMAKE_C_COMPILER_TARGET}")
   endif()
 
-  set(_luajit_host_cc "${CMAKE_C_COMPILER}")
+  if(APPLE AND CMAKE_OSX_SYSROOT)
+    string(APPEND _luajit_cc " -isysroot \"${CMAKE_OSX_SYSROOT}\"")
+  elseif(CMAKE_SYSROOT)
+    string(APPEND _luajit_cc " --sysroot=\"${CMAKE_SYSROOT}\"")
+  endif()
+
+  set(_luajit_host_cc "${_luajit_cc}")
   if(CMAKE_CROSSCOMPILING)
     find_program(FC_HOST_CC NAMES cc clang gcc REQUIRED)
     set(_luajit_host_cc "${FC_HOST_CC}")
@@ -112,28 +124,32 @@ if(EXISTS "${FC_LUAJIT_SOURCE_DIR}/src/luajit.h")
   endif()
 
   add_custom_command(
-    OUTPUT "${_luajit_stage_lib}"
+    OUTPUT "${_luajit_stamp}"
+    BYPRODUCTS "${_luajit_stage_lib}"
     COMMAND ${CMAKE_COMMAND} -E make_directory "${_luajit_stage_dir}"
+    COMMAND ${CMAKE_COMMAND} "-DSOURCE=${FC_LUAJIT_SOURCE_DIR}" "-DDEST=${_luajit_build_dir}"
+      -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/stage_luajit.cmake"
     COMMAND ${CMAKE_COMMAND} -E env
       "MACOSX_DEPLOYMENT_TARGET=${CMAKE_OSX_DEPLOYMENT_TARGET}"
-      make -C "${FC_LUAJIT_SOURCE_DIR}/src"
+      make -C "${_luajit_build_dir}/src"
       "CC=${_luajit_cc}"
       "HOST_CC=${_luajit_host_cc}"
       clean
     COMMAND ${CMAKE_COMMAND} -E env
       "MACOSX_DEPLOYMENT_TARGET=${CMAKE_OSX_DEPLOYMENT_TARGET}"
-      make -C "${FC_LUAJIT_SOURCE_DIR}/src"
+      make -C "${_luajit_build_dir}/src"
       "CC=${_luajit_cc}"
       "HOST_CC=${_luajit_host_cc}"
       ${_luajit_make_args}
       libluajit.a
     COMMAND ${CMAKE_COMMAND} -E copy_if_different "${_luajit_src_lib}" "${_luajit_stage_lib}"
-    DEPENDS "${FC_LUAJIT_SOURCE_DIR}/src/luajit.h"
+    COMMAND ${CMAKE_COMMAND} -E touch "${_luajit_stamp}"
+    DEPENDS ${_luajit_inputs} "${CMAKE_CURRENT_SOURCE_DIR}/cmake/stage_luajit.cmake"
     WORKING_DIRECTORY "${FC_LUAJIT_SOURCE_DIR}"
     COMMENT "Building LuaJIT static library from local source"
     VERBATIM
   )
-  add_custom_target(luajit_lib ALL DEPENDS "${_luajit_stage_lib}")
+  add_custom_target(luajit_lib ALL DEPENDS "${_luajit_stamp}")
   add_library(luajit STATIC IMPORTED GLOBAL)
   set_target_properties(luajit PROPERTIES
     IMPORTED_LOCATION "${_luajit_stage_lib}"
@@ -173,23 +189,27 @@ endif()
 
 set(_fc_fresh_default_bin "fresh")
 if(FC_BUILD_FRESH)
+  if(CMAKE_CROSSCOMPILING)
+    message(FATAL_ERROR "Fresh cross-compilation requires a separately configured Rust target; use FC_BUILD_FRESH=OFF and provide a target-built editor when packaging.")
+  endif()
   set(_fresh_manifest "${FC_FRESH_SOURCE_DIR}/Cargo.toml")
   set(_fresh_built_bin "${FC_FRESH_SOURCE_DIR}/target/release/fresh")
   set(_fresh_stage_dir "${CMAKE_BINARY_DIR}/third_party/fresh/bin")
   set(_fresh_stage_bin "${_fresh_stage_dir}/fresh")
 
   if(EXISTS "${_fresh_manifest}")
-    add_custom_command(
-      OUTPUT "${_fresh_stage_bin}"
+    # Cargo tracks implementation, build-script, workspace and lockfile changes.
+    # Always ask it to check freshness, then stage only changed bytes.
+    add_custom_target(fresh_bin ALL
+      BYPRODUCTS "${_fresh_stage_bin}"
       COMMAND ${CMAKE_COMMAND} -E make_directory "${_fresh_stage_dir}"
-      COMMAND cargo build --release --manifest-path "${_fresh_manifest}"
+      COMMAND cargo build --release --locked --manifest-path "${_fresh_manifest}"
       COMMAND ${CMAKE_COMMAND} -E copy_if_different "${_fresh_built_bin}" "${_fresh_stage_bin}"
       DEPENDS "${_fresh_manifest}"
       WORKING_DIRECTORY "${FC_FRESH_SOURCE_DIR}"
       COMMENT "Building Fresh editor from local source"
       VERBATIM
     )
-    add_custom_target(fresh_bin ALL DEPENDS "${_fresh_stage_bin}")
     add_dependencies(fc fresh_bin)
     set(_fc_fresh_default_bin "${_fresh_stage_bin}")
   else()
@@ -206,11 +226,30 @@ if(FC_BUILD_LZMA_TOOL)
   set(_lzma_obj_dir "${CMAKE_BINARY_DIR}/third_party/lzma/_o")
   set(_lzma_bin "${_lzma_obj_dir}/7zr")
   if(EXISTS "${_lzma_makefile}")
+    file(GLOB_RECURSE _lzma_inputs CONFIGURE_DEPENDS
+      "${FC_LZMA_SOURCE_DIR}/C/*.c" "${FC_LZMA_SOURCE_DIR}/C/*.h"
+      "${FC_LZMA_SOURCE_DIR}/CPP/*.cpp" "${FC_LZMA_SOURCE_DIR}/CPP/*.h"
+      "${FC_LZMA_SOURCE_DIR}/CPP/*.mak" "${FC_LZMA_SOURCE_DIR}/CPP/makefile*")
+    foreach(_lang C CXX)
+      set(_lzma_${_lang} "${CMAKE_${_lang}_COMPILER}")
+      if(CMAKE_${_lang}_COMPILER_ARG1)
+        string(APPEND _lzma_${_lang} " ${CMAKE_${_lang}_COMPILER_ARG1}")
+      endif()
+      if(CMAKE_${_lang}_COMPILER_TARGET)
+        string(APPEND _lzma_${_lang} " -target ${CMAKE_${_lang}_COMPILER_TARGET}")
+      endif()
+      if(APPLE AND CMAKE_OSX_SYSROOT)
+        string(APPEND _lzma_${_lang} " -isysroot \"${CMAKE_OSX_SYSROOT}\"")
+      elseif(CMAKE_SYSROOT)
+        string(APPEND _lzma_${_lang} " --sysroot=\"${CMAKE_SYSROOT}\"")
+      endif()
+    endforeach()
     add_custom_command(
       OUTPUT "${_lzma_bin}"
+      COMMAND ${CMAKE_COMMAND} -E remove_directory "${_lzma_obj_dir}"
       COMMAND ${CMAKE_COMMAND} -E make_directory "${_lzma_obj_dir}"
-      COMMAND ${CMAKE_COMMAND} -E env CXX=${CMAKE_CXX_COMPILER} CC=${CMAKE_C_COMPILER} make -f makefile.gcc O="${_lzma_obj_dir}" -C "${_lzma_makefile_dir}"
-      DEPENDS "${_lzma_makefile}"
+      COMMAND ${CMAKE_COMMAND} -E env "CXX=${_lzma_CXX}" "CC=${_lzma_C}" make -f makefile.gcc O="${_lzma_obj_dir}" -C "${_lzma_makefile_dir}"
+      DEPENDS ${_lzma_inputs}
       WORKING_DIRECTORY "${_lzma_makefile_dir}"
       COMMENT "Building 7zr from local LZMA SDK"
       VERBATIM
