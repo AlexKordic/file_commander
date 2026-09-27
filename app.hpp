@@ -283,9 +283,16 @@ class Panel : public DialogOverlay {
   Dir        dir;
   TargetFunc get_target;
 
+  std::shared_ptr<std::atomic<bool>> _callback_alive = std::make_shared<std::atomic<bool>>(true);
   ExecuteOnUiThread                 run_on_ui;
   std::unique_ptr<FileChangeFunnel> update_funnel;
   Perun::FifoQueue<UpdatedFiles>    pending_changes;
+
+  ~Panel() {
+    _callback_alive->store(false);
+    update_funnel.reset(); // Join callbacks while their queue/state still exist.
+    pending_changes.close();
+  }
 
   Panel(Filepath location, TargetFunc get_target, ExecuteOnUiThread e) : get_target(get_target), run_on_ui(e) {
     this->move_to(location);
@@ -545,9 +552,11 @@ class Panel : public DialogOverlay {
       return;
     }
     pending_changes.erase_if([this](const UpdatedFiles&) -> bool { return true; });
-    update_funnel = FileChangeFunnel::create(where, [this](UpdatedFiles changes) {
+    update_funnel = FileChangeFunnel::create(where, [this, alive = _callback_alive](UpdatedFiles changes) {
+      if (!alive->load()) return;
       pending_changes.push(std::move(changes));
-      this->run_on_ui([this]() {
+      this->run_on_ui([this, alive]() {
+        if (!alive->load()) return;
         while (true) {
           UpdatedFiles batch;
           FifoError    err = this->pending_changes.try_pop(batch);

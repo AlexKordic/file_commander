@@ -185,8 +185,27 @@ static void R07() {
   }
 }
 
+static void R08() {
+  Fixture f;
+  std::mutex mutex;
+  std::vector<std::function<void()>> posted;
+  auto post = [&](std::function<void()> work) { std::lock_guard lock(mutex); posted.push_back(std::move(work)); };
+  auto panel = std::make_unique<Panel>(f.root, [&](Panel*) { return f.root; }, post);
+  f.file("trigger");
+  bool received = false;
+  for (int i = 0; i < 1000; ++i) {
+    { std::lock_guard lock(mutex); received = !posted.empty(); }
+    if (received) break;
+    std::this_thread::sleep_for(std::chrono::milliseconds(5));
+  }
+  require(received, "watcher did not post a test callback");
+  panel.reset();
+  // All queued work must become harmless after destruction.
+  for (auto& callback : posted) callback();
+}
+
 int main(int argc, char** argv) {
-  const std::vector<std::pair<std::string, void (*)()>> tests = {{"R01", R01}, {"R02", R02}, {"R03", R03}, {"R04", R04}, {"R05", R05}, {"R06", R06}, {"R07", R07}};
+  const std::vector<std::pair<std::string, void (*)()>> tests = {{"R01", R01}, {"R02", R02}, {"R03", R03}, {"R04", R04}, {"R05", R05}, {"R06", R06}, {"R07", R07}, {"R08", R08}};
   try {
     bool matched = false;
     for (const auto& [id, run] : tests) {

@@ -172,15 +172,15 @@ The constructor launches a thread that initializes `_runloop_ref`, schedules `_s
 
 **Fix direction:** explicitly stop and join the watcher while all callback state is alive, then invalidate/drain posted work before destroying the panel. **Regression:** close the application while a directory is generating events; verify callback and queued-task lifetimes under a sanitizer.
 
-**Implementation status:** Planned.
+**Implementation status:** Applied.
 
 **Planned solution:** explicitly stop and join the watcher while all callback state is alive, then invalidate/drain posted work before destroying the panel.
 
-**Applied solution:** Pending.
+**Applied solution:** Panel destruction invalidates a shared callback lifetime token, stops/drains the watcher while the queue and panel state still exist, then closes the queue. Posted UI closures check the token before accessing the panel.
 
-**Plan deviations:** Pending.
+**Plan deviations:** Queued closures are invalidated rather than forcibly removed from the shared screen queue; this avoids disturbing work owned by other components.
 
-**Validation:** Pending.
+**Validation:** Native build and R08 passed: a real watcher queued a UI callback, the panel was destroyed, and executing all retained callbacks afterward was harmless.
 
 ### R09 — Job list/details read live job storage without synchronization
 
