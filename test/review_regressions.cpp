@@ -872,6 +872,35 @@ static void AR01() {
   require(delivered == 1, "closed dispatcher delivered callbacks");
 }
 
+static void TS06_archive_contracts() {
+  Fixture f;ArchiveService service;auto input=f.file("input","lease content");
+  for(size_t bytes:{size_t{12},size_t{13},size_t{14}}){
+    service.set_cache_limits(1,bytes);Filepath extracted;ArchiveLease lease;auto archive=f.root/"typed.7z";
+    FileJobServices services;services.archives=&service;auto jobs=make_file_jobs({},services);
+    auto plan=std::make_shared<OperationPlan>(selection_plan(OperationType::ARCHIVE_CREATE,{input},archive));
+    auto job=std::make_shared<JobSpec>(plan);jobs->add_job(job);test::until([&]{return jobs->idle();},"typed archive timeout");
+    require(job->_state==JobState::COMPLETED && job->snapshot()->_items_done==1,"typed archive create failed");
+    require(service.extract_to_cache(archive,extracted,nullptr,&lease).ok(),"typed archive extract failed");
+    require(test::read(extracted/"input")=="lease content","archive round trip changed bytes");
+    service.trim_cache();require(fs::exists(extracted),"byte eviction invalidated held lease");lease.reset();service.trim_cache();
+    require(service.cached_roots()==(bytes>=13?1:0),"archive byte boundary wrong");
+    service.set_cache_limits(0,0);service.trim_cache();require(!fs::exists(extracted),"released lease root leaked");
+  }
+  service.set_tool_path("/nonexistent/fc-test-archiver");auto jobs=make_file_jobs({},FileJobServices{&service});
+  auto plan=std::make_shared<OperationPlan>(selection_plan(OperationType::ARCHIVE_CREATE,{input},f.root/"failed.7z"));
+  auto job=std::make_shared<JobSpec>(plan);jobs->add_job(job);test::until([&]{return jobs->idle();},"failed archive timeout");require(job->_state==JobState::COMPLETED_WITH_ERRORS&&!fs::exists(f.root/"failed.7z"),"archive failure false success");
+  EnvOverride config("XDG_CONFIG_HOME",f.dir("config").native());std::map<std::string,std::string> colors{{"panel","#010203"},{"Ω","quoted value"}};SettingsStore::save_colors(colors);require(SettingsStore::load_colors()==colors,"color round trip");
+}
+
+static void TS06_lua_expiry() {
+  Fixture f;UiQueue ui;FileCommander app(f.root,f.root,[&](auto fn){ui.post(std::move(fn));},[]{return 100;});ui.wait(app.get_left());ui.wait(app.get_right());
+  auto script=f.file("expiry.lua","assert(fc.wait_event('event_history_expired',1000)); local ok,detail=fc.wait_event('fixture',1000,'4097'); assert(ok and detail=='4097')");
+  LuaScripting lua(app,app.renderer);require(lua.setup(script.string()),"expiry Lua setup failed");
+  lua.tick(); // Establish the script wait after startup discards initial view events.
+  for(int i=1;i<=4097;++i)lua.fire_event("fixture",std::to_string(i));
+  test::until([&]{ui.drain();lua.tick();return lua.finished();},"Lua expiry script timeout");require(lua.exit_code()==0,"Lua event expiry/resync contract");
+}
+
 static void TS05_archive_suspend() {
   Fixture f; auto input=f.file("payload","archive delivery");auto archive=f.root/"fixture.7z";
   require(archive_service().create_archive(archive,{input},f.root).ok(),"archive fixture failed");
