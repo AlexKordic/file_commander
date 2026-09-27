@@ -679,8 +679,29 @@ static void R27() {
   require(fs::exists(root1 / "input") && !fs::exists(root2) && !fs::exists(root3), "service cleanup crossed ownership boundary");
 }
 
+static void R28() {
+  Fixture f;
+  int result = 0;
+  EditorManager manager([&](const std::function<int()>&) { return result; }, [](const std::string&) {});
+  std::string error;
+  for (const auto& name : {"a", "b", "c"}) require(manager.open_directory_new_session(f.dir(name), error), "session fixture failed");
+  const auto sessions = manager.sessions();
+  for (int i = 0; i < 6; ++i) {
+    require(manager.switch_next(error), "next failed");
+    require(manager.last_session_id() == sessions[i % 3].id, "next skipped a live session");
+  }
+  for (int i = 0; i < 6; ++i) {
+    require(manager.switch_prev(error), "previous failed");
+    require(manager.last_session_id() == sessions[(4 - i % 3) % 3].id, "previous skipped a live session");
+  }
+  result = 7; require(!manager.switch_next(error), "failed attach was accepted");
+  result = 0; require(manager.switch_next(error), "dead session prevented cycling");
+  require(manager.last_session_id() == sessions[1].id, "known failed session remained in cycle");
+  require(manager.switch_prev(error) && manager.last_session_id() == sessions[2].id, "reverse cycle failed around dead session");
+}
+
 int main(int argc, char** argv) {
-  const std::vector<std::pair<std::string, void (*)()>> tests = {{"R01", R01}, {"R02", R02}, {"R03", R03}, {"R04", R04}, {"R05", R05}, {"R06", R06}, {"R07", R07}, {"R08", R08}, {"R09", R09}, {"R10", R10}, {"R11", R11}, {"R12", R12}, {"R13", R13}, {"R14", R14}, {"R15", R15}, {"R16", R16}, {"R17", R17}, {"R18", R18}, {"R19", R19}, {"R20", R20}, {"R21", R21}, {"R22", R22}, {"R23", R23}, {"R24", R24}, {"R25", R25}, {"R26", R26}, {"R27", R27}};
+  const std::vector<std::pair<std::string, void (*)()>> tests = {{"R01", R01}, {"R02", R02}, {"R03", R03}, {"R04", R04}, {"R05", R05}, {"R06", R06}, {"R07", R07}, {"R08", R08}, {"R09", R09}, {"R10", R10}, {"R11", R11}, {"R12", R12}, {"R13", R13}, {"R14", R14}, {"R15", R15}, {"R16", R16}, {"R17", R17}, {"R18", R18}, {"R19", R19}, {"R20", R20}, {"R21", R21}, {"R22", R22}, {"R23", R23}, {"R24", R24}, {"R25", R25}, {"R26", R26}, {"R27", R27}, {"R28", R28}};
   try {
     bool matched = false;
     for (const auto& [id, run] : tests) {

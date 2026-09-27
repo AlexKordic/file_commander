@@ -536,15 +536,15 @@ The extraction directory is a deterministic hash of archive path, size and mtime
 
 **Fix direction:** use a stable cycle order or freeze an MRU traversal for the duration of switching. **Regression:** traverse three or more sessions in both directions, including failed/dead sessions, and assert every eligible session is reachable.
 
-**Implementation status:** Planned.
+**Implementation status:** Applied.
 
 **Planned solution:** use a stable cycle order or freeze an MRU traversal for the duration of switching.
 
-**Applied solution:** Pending.
+**Applied solution:** Editor next/previous traversal now uses a stable creation-order ring of live sessions. Attaching still updates recency metadata, but cannot reorder the ring; sessions whose attachment failed are skipped by subsequent traversal.
 
-**Plan deviations:** Pending.
+**Plan deviations:** Selected creation order rather than a temporary frozen MRU traversal. A newly failed attachment is reported immediately; later switching bypasses that known failed session.
 
-**Validation:** Pending.
+**Validation:** Native build and R28 passed: six next and six previous operations visited all three sessions in order, and an injected attachment failure was skipped in both directions afterward.
 
 ### R29 — Valid shortcut permutations do not survive saving and loading
 

@@ -172,15 +172,11 @@ bool EditorManager::attach_session(const std::string& id, std::string& error) {
 }
 
 std::vector<std::string> EditorManager::session_order() const {
-  std::vector<EditorSessionInfo> ordered = _sessions;
-  std::sort(ordered.begin(), ordered.end(), [](const EditorSessionInfo& a, const EditorSessionInfo& b) {
-    if (a.last_used_ts != b.last_used_ts) return a.last_used_ts > b.last_used_ts;
-    return a.id < b.id;
-  });
-
+  // Creation order is a stable ring; attaching updates MRU metadata without
+  // moving the session being traversed. Failed sessions leave the ring.
   std::vector<std::string> ids;
-  ids.reserve(ordered.size());
-  for (const auto& s : ordered) ids.push_back(s.id);
+  ids.reserve(_sessions.size());
+  for (const auto& session : _sessions) if (session.alive) ids.push_back(session.id);
   return ids;
 }
 
