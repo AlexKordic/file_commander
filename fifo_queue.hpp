@@ -274,8 +274,12 @@ public:
   }
 
   void erase_if(std::function<bool(const T&)> f) {
-    std::lock_guard guard(_lock);
-    std::erase_if(_storage, f);
+    size_t removed;
+    {
+      std::lock_guard guard(_lock);
+      removed = std::erase_if(_storage, f);
+    }
+    if (removed) _c_push_blockin_on.notify_all();
   }
 
   int64_t size() {
@@ -284,13 +288,15 @@ public:
   }
 
   [[nodiscard]] FifoError get(T& value, std::function<bool(const T&)> f) {
-    std::lock_guard guard(_lock);
+    std::unique_lock guard(_lock);
     if(!_is_valid && _storage.empty()) return FifoError::Destroyed;
     // for (const T& el : _storage) {
     for (auto it = _storage.begin(); it != _storage.end(); ++it) {
       if(f(*it)) {
         value = std::move(*it);
         _storage.erase(it);
+        guard.unlock();
+        _c_push_blockin_on.notify_one();
         return FifoError::OK;
       }
     }

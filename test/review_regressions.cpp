@@ -3,6 +3,7 @@
 #include <ftxui/component/loop.hpp>
 
 #include <fstream>
+#include <future>
 #include <iostream>
 #include <thread>
 
@@ -801,8 +802,27 @@ static void R35() {
   require(!push_to_clipboard(payload).ok(), "missing helper was reported as success");
 }
 
+static void R37() {
+  for (bool selective_get : {false, true}) {
+    FifoQueue<int> queue(1); require(queue.push(1) == FifoError::OK, "queue setup failed");
+    std::promise<FifoError> result;
+    auto done = result.get_future();
+    std::thread producer([&] { result.set_value(queue.push(2)); });
+    const bool blocked = done.wait_for(std::chrono::milliseconds(20)) == std::future_status::timeout;
+    int removed = 0;
+    bool matched = true;
+    if (selective_get) matched = queue.get(removed, [](int value) { return value == 1; }) == FifoError::OK && removed == 1;
+    else queue.erase_if([](int value) { return value == 1; });
+    const bool woke = done.wait_for(std::chrono::seconds(1)) == std::future_status::ready;
+    if (!woke) queue.close();
+    producer.join();
+    require(blocked && matched && woke && done.get() == FifoError::OK, "selective removal did not release blocked producer");
+    int value = 0; require(queue.try_pop(value) == FifoError::OK && value == 2, "producer did not fill freed capacity");
+  }
+}
+
 int main(int argc, char** argv) {
-  const std::vector<std::pair<std::string, void (*)()>> tests = {{"R01", R01}, {"R02", R02}, {"R03", R03}, {"R04", R04}, {"R05", R05}, {"R06", R06}, {"R07", R07}, {"R08", R08}, {"R09", R09}, {"R10", R10}, {"R11", R11}, {"R12", R12}, {"R13", R13}, {"R14", R14}, {"R15", R15}, {"R16", R16}, {"R17", R17}, {"R18", R18}, {"R19", R19}, {"R20", R20}, {"R21", R21}, {"R22", R22}, {"R23", R23}, {"R24", R24}, {"R25", R25}, {"R26", R26}, {"R27", R27}, {"R28", R28}, {"R29", R29}, {"R31", R31}, {"R35", R35}};
+  const std::vector<std::pair<std::string, void (*)()>> tests = {{"R01", R01}, {"R02", R02}, {"R03", R03}, {"R04", R04}, {"R05", R05}, {"R06", R06}, {"R07", R07}, {"R08", R08}, {"R09", R09}, {"R10", R10}, {"R11", R11}, {"R12", R12}, {"R13", R13}, {"R14", R14}, {"R15", R15}, {"R16", R16}, {"R17", R17}, {"R18", R18}, {"R19", R19}, {"R20", R20}, {"R21", R21}, {"R22", R22}, {"R23", R23}, {"R24", R24}, {"R25", R25}, {"R26", R26}, {"R27", R27}, {"R28", R28}, {"R29", R29}, {"R31", R31}, {"R35", R35}, {"R37", R37}};
   try {
     bool matched = false;
     for (const auto& [id, run] : tests) {

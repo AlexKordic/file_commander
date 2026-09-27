@@ -700,15 +700,15 @@ The constructor clamps `progress_` before initializing it. The field is unrelate
 
 **Fix direction:** notify waiting producers when selective removal frees capacity. **Regression:** a capacity-one queue, one blocked producer, and a matching `get()` or `erase_if()` must make progress without an unrelated later pop.
 
-**Implementation status:** Planned.
+**Implementation status:** Applied.
 
 **Planned solution:** notify waiting producers when selective removal frees capacity.
 
-**Applied solution:** Pending.
+**Applied solution:** Selective get now unlocks and wakes one waiting producer after removing an item. erase_if records whether it freed capacity, unlocks, then wakes all producers that may now proceed.
 
-**Plan deviations:** Pending.
+**Plan deviations:** Notifications occur after releasing the queue mutex; no notification is sent when erase_if removed nothing.
 
-**Validation:** Pending.
+**Validation:** Native build and R37 passed with a capacity-one queue: a producer was confirmed blocked, each selective-removal API freed its slot, and the producer completed promptly with its value available to pop.
 
 ## Mechanism coverage
 
