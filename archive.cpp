@@ -240,7 +240,7 @@ void ArchiveService::set_tool_path(std::string tool_path) {
 
 std::string ArchiveService::tool_path() const {
   std::lock_guard lock(_mutex);
-  if (_tool_path.empty()) return normalize_tool_reference(FC_ARCHIVE_TOOL_DEFAULT);
+  if (_tool_path.empty()) return bundled_tool_reference(FC_ARCHIVE_TOOL_DEFAULT);
   return normalize_tool_reference(_tool_path);
 }
 

@@ -76,7 +76,7 @@ std::string EditorManager::resolved_binary() const {
     if (*env_bin) return normalize_tool_reference(env_bin);
   }
 
-  return normalize_tool_reference(FC_FRESH_DEFAULT_BIN);
+  return bundled_tool_reference(FC_FRESH_DEFAULT_BIN);
 }
 
 void EditorManager::set_last_session_id(std::string id) {

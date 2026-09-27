@@ -36,7 +36,7 @@ def process_tree(root, known):
 
 
 def run_script(binary, script, cwd, config, timeout=45, extra_env=None,
-               output_limit=OUTPUT_LIMIT, on_tick=None):
+               output_limit=OUTPUT_LIMIT, on_tick=None, on_output=None, command_prefix=None):
     """Return (status, seconds, timed_out, bounded output tail).
 
     on_tick(master_fd, elapsed) may send real terminal input/resize. Track owned
@@ -51,6 +51,8 @@ def run_script(binary, script, cwd, config, timeout=45, extra_env=None,
     next_scan = 0
 
     def capture(data):
+        if on_output:
+            on_output(data)
         output.extend(data)
         if len(output) > output_limit:
             del output[:-output_limit]
@@ -62,7 +64,7 @@ def run_script(binary, script, cwd, config, timeout=45, extra_env=None,
         env = dict(os.environ, TERM='xterm-256color', XDG_CONFIG_HOME=str(config),
                    FC_LUA_DEBUG_LOG=str(Path(config) / 'lua-debug.log'))
         env.update(extra_env or {})
-        process = subprocess.Popen([str(Path(binary).resolve()), 'run', str(script)],
+        process = subprocess.Popen([*(command_prefix or []), str(Path(binary).resolve()), 'run', str(script)],
                                    stdin=slave, stdout=slave, stderr=slave, cwd=cwd,
                                    env=env, start_new_session=True)
         os.close(slave)

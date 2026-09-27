@@ -27,6 +27,8 @@ Each improvement records its plan before editing, its applied solution and valid
 
 - TS07-B, applied (matches plan): real PTY resize to 12×3 reproduces `std::length_error` from the pinned FTXUI DBMenu using a negative visible height. A repository-owned menu adapter clamps stale clipped height before rendering at all owned DBMenu sites. Repeated rendering at 100×30, 35×8, 12×3 and 1×1 passes; raw Ctrl-A/Tab/F5/Escape PTY input survives resize and dialog close. The pinned dependency remains unchanged.
 
+- TS09-A, applied (matches plan): default helper resolution currently prefers a still-reachable absolute build path over a relocated package neighbor. A default-only bundled resolver now prefers the adjacent helper; explicit overrides retain priority. The relocated package creates/extracts exact archive contents and invokes its actual Fresh binary through a version adapter, with traced helper paths. macOS sandbox denies repository/dependency reads and positive/negative read probes prove the boundary. Separate pinned-Fresh attach/quit and failed-invocation PTY cases both restore input and terminal modes. Linux uses bubblewrap; missing isolation is an explicit skip and a strict-release failure.
+
 ## Evidence and current baseline
 
 Read the registered CMake test entry points, every active first-party C++/Lua/Python test and its helpers, the fake editor, and the corresponding core/UI/scripting/platform mechanisms. Compared these against the specification, testing/build documents and architecture implementation records. Dependency projects' own suites were not audited. No line or branch coverage percentage was measured.

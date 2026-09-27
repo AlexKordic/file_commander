@@ -79,3 +79,9 @@ std::string normalize_tool_reference(std::string value) {
   if (file_exists(local)) return local.native();
   return value;
 }
+
+std::string bundled_tool_reference(const std::string& default_value) {
+  const auto local = executable_dir_path() / Filepath(default_value).filename();
+  if (file_exists(local)) return local.native();
+  return normalize_tool_reference(default_value);
+}
