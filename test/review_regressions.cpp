@@ -1,4 +1,5 @@
 #include "app.hpp"
+#include <ftxui/component/loop.hpp>
 
 #include <fstream>
 #include <iostream>
@@ -485,8 +486,34 @@ static void R22() {
   require(panel.dir.path == f.root && panel.update_funnel, "invalidated root did not recover/rearm");
 }
 
+static void R23() {
+  Fixture f; auto left = f.dir("left"); auto right = f.dir("right");
+  f.file("left/a"); f.file("right/b");
+  FileCommander app(left, right, [](std::function<void()>) {}, [] { return 100; });
+  auto interactive = ScreenInteractive::FixedSize(100, 30);
+  Loop active_screen(&interactive, app.renderer);
+  app.get_left().navigation->TakeFocus();
+  app.set_single_panel_mode(true);
+  auto rendered = [&] {
+    auto screen = Screen::Create(Dimension::Fixed(100), Dimension::Fixed(30));
+    Render(screen, app.renderer->Render());
+    return screen.ToString();
+  };
+  require(rendered().find("Hidden Right:") != std::string::npos, "single view did not render");
+  app.navigation->OnEvent(theme().key_switch_focused_panel);
+  require(app.single_panel_mode() && &app.focused_panel() == &app.get_right(), "Tab did not switch single panel");
+  require(app.get_right().navigation->Focused(), "shown panel lost focus ancestry");
+  require(rendered().find("Hidden Left:") != std::string::npos, "Tab restored split presentation");
+  app.navigation->OnEvent(Event::TabReverse);
+  require(rendered().find("Hidden Left:") != std::string::npos, "reverse Tab restored split presentation");
+  app.execute_palette_command("switch_panel");
+  require(rendered().find("Hidden Right:") != std::string::npos, "palette switch restored split presentation");
+  app.set_single_panel_mode(false);
+  require(rendered().find("Hidden ") == std::string::npos, "split layout was not restored");
+}
+
 int main(int argc, char** argv) {
-  const std::vector<std::pair<std::string, void (*)()>> tests = {{"R01", R01}, {"R02", R02}, {"R03", R03}, {"R04", R04}, {"R05", R05}, {"R06", R06}, {"R07", R07}, {"R08", R08}, {"R09", R09}, {"R10", R10}, {"R11", R11}, {"R12", R12}, {"R13", R13}, {"R14", R14}, {"R15", R15}, {"R16", R16}, {"R17", R17}, {"R18", R18}, {"R19", R19}, {"R20", R20}, {"R21", R21}, {"R22", R22}};
+  const std::vector<std::pair<std::string, void (*)()>> tests = {{"R01", R01}, {"R02", R02}, {"R03", R03}, {"R04", R04}, {"R05", R05}, {"R06", R06}, {"R07", R07}, {"R08", R08}, {"R09", R09}, {"R10", R10}, {"R11", R11}, {"R12", R12}, {"R13", R13}, {"R14", R14}, {"R15", R15}, {"R16", R16}, {"R17", R17}, {"R18", R18}, {"R19", R19}, {"R20", R20}, {"R21", R21}, {"R22", R22}, {"R23", R23}};
   try {
     bool matched = false;
     for (const auto& [id, run] : tests) {

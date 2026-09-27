@@ -790,7 +790,6 @@ class FileCommander : public DialogOverlay {
   std::vector<Filepath> _bookmarks;
   bool _last_main_focus_left = true;
   bool _single_panel_mode = false;
-  int  _main_panels_mode  = 0;  // 0=split, 1=single
   EditorManager _editor_manager;
   RunWithRestoredIO _run_with_restored_io;
 
@@ -1130,11 +1129,8 @@ class FileCommander : public DialogOverlay {
       else if (right.navigation->Focused()) _last_main_focus_left = false;
     }
     _single_panel_mode = enabled;
-    _main_panels_mode  = _single_panel_mode ? 1 : 0;
-    if (!_single_panel_mode) {
-      if (_last_main_focus_left) left.navigation->TakeFocus();
-      else right.navigation->TakeFocus();
-    }
+    if (_last_main_focus_left) left.navigation->TakeFocus();
+    else right.navigation->TakeFocus();
   }
 
   void execute_palette_command(const std::string& id) {
@@ -1264,21 +1260,24 @@ class FileCommander : public DialogOverlay {
     split.direction       = ftxui::Direction::Right;
     split.separator_func  = [this]() -> Element { return ::ftxui::separatorDouble(); };
     Component both_panels = ResizableSplit(split);
-    Component single_panel = CatchEvent(Renderer([this]() -> Element {
+    // Both layouts share one focus tree. TakeFocus must not select a separate
+    // split-view ancestor when the single-panel presentation is active.
+    Component main_panels = CatchEvent(Renderer(both_panels, [this, both_panels]() -> Element {
+      if (!_single_panel_mode) return both_panels->Render();
       Panel& focused = focused_panel();
-      Panel& hidden  = (&focused == &left) ? right : left;
+      Panel& hidden = (&focused == &left) ? right : left;
       const std::string hidden_label = (&focused == &left) ? "Right" : "Left";
       return vbox({
         text(" Hidden " + hidden_label + ": " + hidden.dir.path.native() + " ") | dim,
         separatorDouble(),
         focused.render() | yflex,
       });
-    }),
-                                        [this](Event event) -> bool {
-                                          if (this->handle_global_shortcuts(event)) return true;
-                                          return this->focused_panel().navigation->OnEvent(event);
-                                        });
-    Component main_panels = Container::Tab({both_panels, single_panel}, &_main_panels_mode);
+    }), [this](Event event) -> bool {
+      if (!_single_panel_mode) return false;
+      if (handle_global_shortcuts(event)) return true;
+      focused_panel().navigation->OnEvent(event);
+      return true; // Never route input to the hidden panel through the split.
+    });
 
     // Pause/Cancel buttons are focusable only when a job is running
     auto maybe_pause  = Maybe(progress_bar.pause_button, &progress_bar._has_running_job);

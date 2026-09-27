@@ -446,15 +446,15 @@ Single-panel rendering delegates to a panel whose component remains parented und
 
 **Fix direction:** keep rendering and focus ownership in the same active component tree, or switch the single-view panel without focusing an inactive split branch. **Regression:** actual Tab/Shift-Tab and input navigation after entering single-panel mode, checking the rendered layout as well as the boolean state.
 
-**Implementation status:** Planned.
+**Implementation status:** Applied.
 
 **Planned solution:** keep rendering and focus ownership in the same active component tree, or switch the single-view panel without focusing an inactive split branch.
 
-**Applied solution:** Pending.
+**Applied solution:** Split and single-panel presentations now use one component focus tree. The single view renders the focused panel from that tree and routes input only to it, so TakeFocus cannot activate a competing layout branch.
 
-**Plan deviations:** Pending.
+**Plan deviations:** Removed the redundant layout selector entirely rather than reparenting components on each switch. The mode boolean is now the sole layout authority.
 
-**Validation:** Pending.
+**Validation:** Native build and R23 passed with an active FTXUI screen: rendered hidden-panel labels survived Tab, reverse Tab and palette switching, focused ancestry remained valid, and disabling single mode restored split rendering.
 
 ### R24 — Ordinary mkdir failures escape the dialog as exceptions
 
