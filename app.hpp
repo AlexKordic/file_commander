@@ -322,6 +322,11 @@ class Panel : public DialogOverlay {
     _state->leave_virtual_dir   = [this](int64_t& focused_id) { return this->leave_virtual_dir(focused_id); };
     _state->action.close_dialog = [this]() { close_dialog(); };
     _state->action.show_dialog  = [this]() {
+      const auto& name = _state->action.dialog;
+      if (name == "Mkdir" || name == "Rename" || name == "Move" || name == "Delete") {
+        auto error = archive_mutation_error(dir.path);
+        if (!error.empty()) { file_operations().report_error(error); return; }
+      }
       _state->action.arguments->target = this->get_target(this);
       show_dialog(_state->action.dialog);
     };
@@ -548,7 +553,7 @@ class Panel : public DialogOverlay {
 
     Elements tabs;
     tabs.reserve(_tabs.size() * 2 + 1);
-    tabs.push_back(text(" Tabs "));
+    tabs.push_back(text(in_archive_view(dir.path) ? " Archive [read-only] " : " Tabs "));
     for (int i = 0; i < static_cast<int>(_tabs.size()); ++i) {
       if (i > 0) tabs.push_back(separatorLight());
       Filepath path = (i == _active_tab) ? dir.path : _tabs[i].dir.path;
@@ -852,7 +857,13 @@ class FileCommander : public DialogOverlay {
 
   bool open_in_editor(std::string& error) {
     Panel& panel = focused_panel();
+    error = archive_mutation_error(panel.dir.path);
+    if (!error.empty()) return false;
     auto   selected = focused_selection_for_editor();
+    for (const auto& path : selected) {
+      error = archive_mutation_error(path);
+      if (!error.empty()) return false;
+    }
     if (selected.empty()) {
       error = "No focused item to open in editor";
       return false;

@@ -438,6 +438,8 @@ void MkdirDialog::ok() {
   error.clear();
   if (new_dir_name.empty()) { error = "Enter a directory name"; return; }
   const auto dir_path = app->action.arguments->origin / new_dir_name;
+  error = archive_mutation_error(dir_path);
+  if (!error.empty()) return;
   boost::system::error_code ec;
   // Create one directory only; missing parent paths are reported to the user.
   const bool created = boost::filesystem::create_directory(dir_path, ec);
@@ -668,6 +670,9 @@ void RenameDialog::ok() {
     error_code ec;
     auto       original = app->action.arguments->selected.at(i);
     auto       new_path = original.parent_path() / rows.at(i)->content;
+    auto error = archive_mutation_error(original);
+    if (error.empty()) error = archive_mutation_error(new_path);
+    if (!error.empty()) { file_operations().report_error(error); continue; }
     boost::filesystem::rename(original, new_path, ec);
     if (ec.failed()) {
       Perun::l.e("Rename failed", ec.to_string(), {{"original", original.native()}, {"new", new_path.native()}});
@@ -845,6 +850,11 @@ void CopyDialog::run_copy() {
 
   Filepath target(destination_path);
   if (target.empty()) target = app->action.arguments->target;
+  if (auto error = archive_mutation_error(target); !error.empty()) {
+    _confirm_when_ready = false;
+    file_operations().report_error(error);
+    return;
+  }
   if (_discovery_process->_target != target ||
       _discovery_process->_follow_links != b_follow_links ||
       _discovery_process->_preserve_relative_links != b_preserve_relative_links ||

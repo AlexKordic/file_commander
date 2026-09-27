@@ -615,8 +615,50 @@ static void R25() {
   require(panel.dir.path == fast && !panel.loading(), "cancelled archive changed panel");
 }
 
+static void R26() {
+  Fixture f; auto input = f.file("source/input", "ORIGINAL"); auto archive = f.root / "bundle.7z";
+  auto& service = archive_service();
+  require(service.create_archive(archive, {input}, input.parent_path()).ok(), "archive fixture creation failed");
+  const auto archive_bytes = read_file(archive);
+  Filepath cache;
+  require(service.extract_to_cache(archive, cache).ok(), "archive fixture extraction failed");
+  require(service.is_cached_path(cache / "input"), "cache ownership was not recognized");
+  auto alias = f.root / "alias"; fs::create_directory_symlink(cache, alias);
+  require(service.is_cached_path(alias / "new"), "cache alias bypassed read-only check");
+  UiQueue ui;
+  FileCommander app(cache, f.root, [&](auto work) { ui.post(std::move(work)); }, [] { return 100; });
+  ui.wait(app.get_left()); ui.wait(app.get_right()); app.get_left().navigation->TakeFocus();
+  for (const auto& command : {"Mkdir", "Rename", "Delete", "Move"}) {
+    app.get_left().execute_dialog_command(command);
+    require(app.get_left()._active_dialog_name.empty(), "archive mutation dialog was enabled");
+  }
+  std::string error;
+  require(!app.open_in_editor(error) && !error.empty(), "archive editor was enabled");
+  Dir dir; dir.move_to(cache);
+  auto state = copy_state(dir, cache / "input", f.root);
+  MkdirDialog mkdir(state); mkdir.new_dir_name = "created"; mkdir.ok();
+  require(!mkdir.error.empty() && !fs::exists(cache / "created"), "mkdir modified cache");
+  RenameDialog rename(state); rename.OnShow(); rename.rows[0]->content = "renamed"; rename.ok();
+  require(fs::exists(cache / "input") && !fs::exists(cache / "renamed"), "rename modified cache");
+  for (auto type : {JobSpec::Type::DELETE, JobSpec::Type::MOVE, JobSpec::Type::COPY, JobSpec::Type::ARCHIVE_CREATE}) {
+    DirItem item(type == JobSpec::Type::COPY || type == JobSpec::Type::ARCHIVE_CREATE ? input : cache / "input");
+    item._set_symlink_target(type == JobSpec::Type::MOVE ? f.root / "moved" : cache / "new");
+    auto job = std::make_shared<JobSpec>(type, std::vector<DirItem>{item});
+    wait_job(file_operations().add_job(job));
+    require(job->snapshot()->_state == JobState::COMPLETED_WITH_ERRORS, "job bypassed archive read-only guard");
+  }
+  auto copy_state_in = copy_state(dir, input, cache);
+  CopyDialog copy(copy_state_in); copy.OnShow(); copy._discovery_process->_thread.join();
+  copy.run_copy(); require(copy._discovery_process != nullptr, "copy into cache was submitted"); copy.cancel();
+  DirItem item(cache / "input"); item._set_symlink_target(f.root / "extracted");
+  auto job = std::make_shared<JobSpec>(JobSpec::Type::COPY, std::vector<DirItem>{item});
+  wait_job(file_operations().add_job(job));
+  require(read_file(f.root / "extracted") == "ORIGINAL", "copy-out was blocked");
+  require(read_file(cache / "input") == "ORIGINAL" && read_file(archive) == archive_bytes, "archive or cache changed");
+}
+
 int main(int argc, char** argv) {
-  const std::vector<std::pair<std::string, void (*)()>> tests = {{"R01", R01}, {"R02", R02}, {"R03", R03}, {"R04", R04}, {"R05", R05}, {"R06", R06}, {"R07", R07}, {"R08", R08}, {"R09", R09}, {"R10", R10}, {"R11", R11}, {"R12", R12}, {"R13", R13}, {"R14", R14}, {"R15", R15}, {"R16", R16}, {"R17", R17}, {"R18", R18}, {"R19", R19}, {"R20", R20}, {"R21", R21}, {"R22", R22}, {"R23", R23}, {"R24", R24}, {"R25", R25}};
+  const std::vector<std::pair<std::string, void (*)()>> tests = {{"R01", R01}, {"R02", R02}, {"R03", R03}, {"R04", R04}, {"R05", R05}, {"R06", R06}, {"R07", R07}, {"R08", R08}, {"R09", R09}, {"R10", R10}, {"R11", R11}, {"R12", R12}, {"R13", R13}, {"R14", R14}, {"R15", R15}, {"R16", R16}, {"R17", R17}, {"R18", R18}, {"R19", R19}, {"R20", R20}, {"R21", R21}, {"R22", R22}, {"R23", R23}, {"R24", R24}, {"R25", R25}, {"R26", R26}};
   try {
     bool matched = false;
     for (const auto& [id, run] : tests) {

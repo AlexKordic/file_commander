@@ -192,6 +192,25 @@ std::string ArchiveService::tool_path() const {
   return normalize_tool_reference(_tool_path);
 }
 
+bool ArchiveService::is_cached_path(const Filepath& path) const {
+  boost::system::error_code ec;
+  auto normalized = boost::filesystem::weakly_canonical(path, ec);
+  if (ec) normalized = absolute_path_safe(path);
+  std::lock_guard lock(_mutex);
+  for (const auto& entry : _cache) {
+    auto root = boost::filesystem::weakly_canonical(entry.root, ec);
+    if (ec) root = entry.root.lexically_normal();
+    if (path_is_under(root, normalized)) return true;
+  }
+  return false;
+}
+
+std::string archive_mutation_error(const Filepath& path) {
+  if (archive_service().is_cached_path(path))
+    return "Archive contents are read-only; copy files out before editing: " + path.native();
+  return {};
+}
+
 Err ArchiveService::extract_to_cache(const Filepath& archive_path, Filepath& extracted_root, std::atomic<bool>* cancelled) {
   if (!is_archive_file_path(archive_path)) return Err("unsupported archive type: " + archive_path.native());
 

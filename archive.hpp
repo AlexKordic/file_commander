@@ -19,6 +19,7 @@ class ArchiveService {
  public:
   void        set_tool_path(std::string tool_path);
   std::string tool_path() const;
+  bool is_cached_path(const Filepath& path) const;
 
   Err extract_to_cache(const Filepath& archive_path, Filepath& extracted_root, std::atomic<bool>* cancelled = nullptr);
   Err create_archive(const Filepath& archive_path, const std::vector<Filepath>& sources, const Filepath& preferred_cwd = Filepath(), ArchiveConflict conflict = ArchiveConflict::Replace, std::atomic<bool>* cancelled = nullptr, bool* skipped = nullptr);
@@ -37,5 +38,7 @@ class ArchiveService {
 };
 
 ArchiveService& archive_service();
+// Empty for writable paths; archive cache entries are copy-out only.
+std::string archive_mutation_error(const Filepath& path);
 
 #endif  // FC_ARCHIVE_HPP_

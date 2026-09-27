@@ -416,6 +416,38 @@ class ThreadedFileJobs : public FileJobs {
   }
 
  private:
+  bool validate_mutation_paths(JobSpec* job) {
+    for (const auto& item : job->_items) {
+      std::vector<Filepath> paths;
+      switch (job->_type) {
+      case JobSpec::Type::DELETE: paths.push_back(item.path_ref()); break;
+      case JobSpec::Type::MOVE:
+        paths.push_back(item.path_ref());
+        if (item.symlink_ref()) paths.push_back(*item.symlink_ref());
+        break;
+      case JobSpec::Type::COPY:
+        if (item.type() == boost::filesystem::directory_file || item.type() == boost::filesystem::symlink_file)
+          paths.push_back(item.path_ref());
+        else if (item.symlink_ref()) paths.push_back(*item.symlink_ref());
+        break;
+      case JobSpec::Type::ARCHIVE_CREATE:
+        if (item.symlink_ref()) paths.push_back(*item.symlink_ref());
+        break;
+      }
+      for (const auto& path : paths) {
+        auto error = archive_mutation_error(path);
+        if (error.empty()) continue;
+        report_error(error);
+        std::lock_guard lock(job->_m);
+        job->report_error(item, error);
+        job->_items_done = job->_items.size();
+        job->_items_failed = job->_items_done;
+        return false;
+      }
+    }
+    return true;
+  }
+
   void run() {
     while (true) {
       std::shared_ptr<JobSpec> job;
@@ -435,7 +467,7 @@ class ThreadedFileJobs : public FileJobs {
       _progress_monitor.add_job(_active_job);
       if (_active_job->_cancel_requested.load()) {
         _active_job->_state = JobState::CANCELLED;
-      } else switch (_active_job->_type) {
+      } else if (validate_mutation_paths(_active_job.get())) switch (_active_job->_type) {
       case JobSpec::Type::COPY: run_copy(_active_job.get()); break;
       case JobSpec::Type::MOVE: run_move(_active_job.get()); break;
       case JobSpec::Type::DELETE: run_delete(_active_job.get()); break;

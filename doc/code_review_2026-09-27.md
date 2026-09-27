@@ -500,15 +500,15 @@ Archive browsing changes the ordinary panel directory to the extraction cache, b
 
 **Fix direction:** make archive browsing explicitly read-only except for extraction/copy-out, or implement an explicit commit/writeback workflow. **Regression:** attempt every mutating command in an archive and verify either clear rejection or an actual archive update with truthful UI state.
 
-**Implementation status:** Planned.
+**Implementation status:** Applied.
 
 **Planned solution:** make archive browsing explicitly read-only except for extraction/copy-out, or implement an explicit commit/writeback workflow.
 
-**Applied solution:** Pending.
+**Applied solution:** Archive views identify themselves as read-only and reject mkdir, rename, move, delete and editor actions. A shared cache-path check resolves directory aliases and validates typed copy targets. Job execution independently rejects cache mutations, while copy-out remains available.
 
-**Plan deviations:** Pending.
+**Plan deviations:** Chose read-only browsing rather than archive writeback. Validation also covers direct job submission and destinations reached through symlink aliases, beyond the visible command guard.
 
-**Validation:** Pending.
+**Validation:** Native build and R26 passed with a real 7zr archive: all mutating commands and job types were rejected, alias paths were recognized, copy-out succeeded, and both cached content and archive bytes remained unchanged.
 
 ### R27 — Separate application instances share and delete the same archive extraction directory
 
