@@ -439,8 +439,24 @@ static void R19() {
   for (auto& item : dir.items) require(item.visible() == (item.filename_ref().find("keep") != std::string::npos), "visibility disagrees with phrase");
 }
 
+static void R20() {
+  Fixture f; auto first = f.dir("first"); auto second = f.dir("second");
+  f.file("first/keep"); f.file("first/remove");
+  Panel panel(first, [&](Panel*) { return second; }, [](std::function<void()>) {});
+  auto state = panel.get_shared_state(); state->filter_txt = "keep"; panel.dir.apply_filter("keep");
+  for (int i = 0; i < panel.dir.items.size(); ++i) if (panel.dir.items[i].filename_ref() == "keep") {
+    panel.dir.item_toggle_select(i); state->set_focused_index(i);
+  }
+  panel.new_tab(); panel.move_to(second);
+  f.file("first/keep-new"); fs::remove(first / "remove");
+  panel.switch_to_tab(0);
+  require(panel.dir.items.size() == 2 && panel.dir.stats().items_visible == 2, "inactive tab did not reconcile changes/filter");
+  require(panel.dir.take_selected()->selected == std::vector<Filepath>{first / "keep"}, "surviving selection lost");
+  require(*state->get_focused_item() == first / "keep", "surviving focus lost");
+}
+
 int main(int argc, char** argv) {
-  const std::vector<std::pair<std::string, void (*)()>> tests = {{"R01", R01}, {"R02", R02}, {"R03", R03}, {"R04", R04}, {"R05", R05}, {"R06", R06}, {"R07", R07}, {"R08", R08}, {"R09", R09}, {"R10", R10}, {"R11", R11}, {"R12", R12}, {"R13", R13}, {"R14", R14}, {"R15", R15}, {"R16", R16}, {"R17", R17}, {"R18", R18}, {"R19", R19}};
+  const std::vector<std::pair<std::string, void (*)()>> tests = {{"R01", R01}, {"R02", R02}, {"R03", R03}, {"R04", R04}, {"R05", R05}, {"R06", R06}, {"R07", R07}, {"R08", R08}, {"R09", R09}, {"R10", R10}, {"R11", R11}, {"R12", R12}, {"R13", R13}, {"R14", R14}, {"R15", R15}, {"R16", R16}, {"R17", R17}, {"R18", R18}, {"R19", R19}, {"R20", R20}};
   try {
     bool matched = false;
     for (const auto& [id, run] : tests) {

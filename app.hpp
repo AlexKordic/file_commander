@@ -391,8 +391,10 @@ class Panel : public DialogOverlay {
   void move_to(Filepath& where) {
     int      focused_index_before = 0;
     Filepath focused_path_before;
+    std::vector<Filepath> selected_before;
     const bool same_directory_refresh = _state && (where == dir.path);
     if (same_directory_refresh) {
+      selected_before = dir.take_selected()->selected;
       if (_state->get_focused_index) { focused_index_before = _state->get_focused_index(); }
       if (_state->get_focused_item) {
         const Filepath* focused = _state->get_focused_item();
@@ -406,6 +408,9 @@ class Panel : public DialogOverlay {
     }
     _prune_archive_stack(where);
     if (same_directory_refresh) {
+      for (int i = 0; i < dir.items.size(); ++i) {
+        if (std::find(selected_before.begin(), selected_before.end(), dir.items[i].path_ref()) != selected_before.end()) dir.item_toggle_select(i);
+      }
       _restore_focus_after_update(focused_path_before, focused_index_before);
     }
     start_watcher(where);
@@ -592,7 +597,8 @@ class Panel : public DialogOverlay {
       _state->show_owner_group_column = tab.show_owner_group_column;
     }
     if (!dir.path.empty()) {
-      start_watcher(dir.path);
+      auto where = dir.path;
+      move_to(where); // Reconcile changes made while this tab had no watcher.
     } else {
       update_funnel.reset();
     }

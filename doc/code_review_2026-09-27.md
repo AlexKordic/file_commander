@@ -392,15 +392,15 @@ Only the active tab has a watcher. Switching back copies the saved `Dir` and sta
 
 **Fix direction:** refresh an inactive tab on activation, preserving filter/selection/focus where possible, or maintain an explicit dirty state backed by continuous observation. **Regression:** create, remove, and rename entries while their tab is inactive, then switch back.
 
-**Implementation status:** Planned.
+**Implementation status:** Applied.
 
 **Planned solution:** refresh an inactive tab on activation, preserving filter/selection/focus where possible, or maintain an explicit dirty state backed by continuous observation.
 
-**Applied solution:** Pending.
+**Applied solution:** Activating a saved tab now reconciles its directory from disk before installing a new watcher. Same-directory refresh restores selections by path and reuses focused-path restoration, while the stored filter and column choices remain active.
 
-**Plan deviations:** Pending.
+**Plan deviations:** Refresh happens on activation instead of retaining background watchers for every tab. Moving this enumeration off the UI thread is handled separately by R25.
 
-**Validation:** Pending.
+**Validation:** Native build and R20 passed: an inactive tab observed created/deleted files after activation, retained its filter, and preserved a surviving selection and focused path.
 
 ### R21 — Events from the old directory can be applied to the new directory
 
