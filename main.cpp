@@ -110,5 +110,6 @@ int main(int argc, char** argv) {
     app.save_settings();
   }
 
+  file_operations().shutdown();
   return 0;
 }

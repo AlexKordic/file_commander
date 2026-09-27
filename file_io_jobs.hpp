@@ -138,6 +138,7 @@ struct JobErrorInfo {
 class FileJobs {
  public:
   virtual ~FileJobs() = default;
+  virtual void shutdown() = 0;
 
   // Add a new job to the queue. Returns assigned job ID.
   virtual uint64_t add_job(std::shared_ptr<JobSpec> job) = 0;
@@ -165,6 +166,7 @@ class FileJobs {
   virtual void clear_errors()                    = 0;
 };
 
+std::unique_ptr<FileJobs> make_file_jobs();
 FileJobs& file_operations();
 
 }  // namespace Perun

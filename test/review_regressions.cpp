@@ -224,8 +224,31 @@ static void R09() {
   require(job->snapshot()->is_stopped(), "completion not published in snapshot");
 }
 
+static void R10() {
+  Fixture f;
+  auto source = f.file("source");
+  for (auto type : {JobSpec::Type::COPY, JobSpec::Type::MOVE, JobSpec::Type::DELETE}) {
+    auto manager = make_file_jobs();
+    DirItem item(source); item._set_symlink_target(f.root / "destination");
+    auto paused = std::make_shared<JobSpec>(type, std::vector<DirItem>{item});
+    paused->_pause_requested = true;
+    manager->add_job(paused);
+    auto queued = std::make_shared<JobSpec>(JobSpec::Type::COPY, std::vector<DirItem>{item});
+    manager->add_job(queued);
+    for (int i = 0; paused->_state != JobState::PAUSED && i < 1000; ++i)
+      std::this_thread::sleep_for(std::chrono::milliseconds(2));
+    require(paused->_state == JobState::PAUSED, "job never reached pause checkpoint");
+    auto start = std::chrono::steady_clock::now();
+    manager->shutdown();
+    require(std::chrono::steady_clock::now() - start < std::chrono::seconds(2), "paused shutdown too slow");
+    require(paused->is_stopped() && queued->is_stopped(), "shutdown did not finalize jobs");
+    require(paused->_state == JobState::CANCELLED && queued->_state == JobState::CANCELLED, "shutdown left nonterminal jobs");
+    require(fs::exists(source) && !fs::exists(f.root / "destination"), "shutdown executed queued work");
+  }
+}
+
 int main(int argc, char** argv) {
-  const std::vector<std::pair<std::string, void (*)()>> tests = {{"R01", R01}, {"R02", R02}, {"R03", R03}, {"R04", R04}, {"R05", R05}, {"R06", R06}, {"R07", R07}, {"R08", R08}, {"R09", R09}};
+  const std::vector<std::pair<std::string, void (*)()>> tests = {{"R01", R01}, {"R02", R02}, {"R03", R03}, {"R04", R04}, {"R05", R05}, {"R06", R06}, {"R07", R07}, {"R08", R08}, {"R09", R09}, {"R10", R10}};
   try {
     bool matched = false;
     for (const auto& [id, run] : tests) {

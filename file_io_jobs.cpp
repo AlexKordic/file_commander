@@ -246,9 +246,18 @@ class ThreadedFileJobs : public FileJobs {
   ThreadedFileJobs() {
     _thread = std::thread([this]() { this->run(); });
   }
-  virtual ~ThreadedFileJobs() {
-    _queue.close();
-    _thread.join();
+  ~ThreadedFileJobs() override { shutdown(); }
+  void shutdown() override {
+    std::call_once(_shutdown_once, [this] {
+      _shutdown = true;
+      _queue.close();
+      {
+        std::lock_guard lock(_m);
+        if (_active_job) cancel_job(_active_job.get());
+      }
+      if (_thread.joinable()) _thread.join();
+      _progress_monitor.stop();
+    });
   }
   uint64_t add_job(std::shared_ptr<JobSpec> job) override {
     uint64_t id    = _next_job_id.fetch_add(1);
@@ -374,9 +383,12 @@ class ThreadedFileJobs : public FileJobs {
       {
         std::lock_guard lock(_m);
         _active_job = std::move(job);
+        if (_shutdown.load()) _active_job->_cancel_requested = true;
       }
       _progress_monitor.add_job(_active_job);
-      switch (_active_job->_type) {
+      if (_active_job->_cancel_requested.load()) {
+        _active_job->_state = JobState::CANCELLED;
+      } else switch (_active_job->_type) {
       case JobSpec::Type::COPY: run_copy(_active_job.get()); break;
       case JobSpec::Type::MOVE: run_move(_active_job.get()); break;
       case JobSpec::Type::DELETE: run_delete(_active_job.get()); break;
@@ -711,6 +723,8 @@ class ThreadedFileJobs : public FileJobs {
   std::mutex  _m;
 
   std::atomic<uint64_t> _transfer_rate{0};
+  std::atomic<bool> _shutdown{false};
+  std::once_flag _shutdown_once;
 
   static bool wait_for_resume(JobSpec* job) {
     if (!job->_pause_requested.load(std::memory_order_relaxed)) return true;
@@ -755,6 +769,8 @@ class ThreadedFileJobs : public FileJobs {
     return true;
   }
 };
+
+std::unique_ptr<FileJobs> make_file_jobs() { return std::make_unique<ThreadedFileJobs>(); }
 
 FileJobs& file_operations() {
   static ThreadedFileJobs jobs;

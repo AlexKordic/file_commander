@@ -208,15 +208,15 @@ The job UI includes the active job and reads its counters, `_items`, and `_error
 
 **Fix direction:** define an explicit shutdown policy, signal active/queued jobs, wake pause waiters, and only then join. **Regression:** exit with paused copy/delete/move jobs and queued work; the process must terminate within a bounded interval.
 
-**Implementation status:** Planned.
+**Implementation status:** Applied.
 
 **Planned solution:** define an explicit shutdown policy, signal active/queued jobs, wake pause waiters, and only then join.
 
-**Applied solution:** Pending.
+**Applied solution:** FileJobs now has idempotent explicit shutdown: close the queue, cancel/wake the active job, finalize queued jobs as cancelled without executing them, join the worker, and stop progress monitoring. main calls shutdown while terminal/UI state is still alive; destruction uses the same path.
 
-**Plan deviations:** Pending.
+**Plan deviations:** Added a factory for independent job managers so lifecycle regression tests can exercise shutdown without killing the test process.
 
-**Validation:** Pending.
+**Validation:** Native build, R10 and git diff --check passed. Paused copy/move/delete plus queued work each terminated within two seconds, with all jobs cancelled and original data untouched.
 
 ### R11 — Incomplete discovery can be reported as a clean completed copy
 
