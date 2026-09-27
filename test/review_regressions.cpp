@@ -657,8 +657,30 @@ static void R26() {
   require(read_file(cache / "input") == "ORIGINAL" && read_file(archive) == archive_bytes, "archive or cache changed");
 }
 
+static void R27() {
+  Fixture f; auto input = f.file("input", "first version"); auto archive = f.root / "bundle.7z";
+  ArchiveService first;
+  require(first.create_archive(archive, {input}, f.root).ok(), "archive fixture failed");
+  Filepath root1, root2, root3;
+  {
+    ArchiveService second;
+    Err error1, error2;
+    std::thread a([&] { error1 = first.extract_to_cache(archive, root1); });
+    std::thread b([&] { error2 = second.extract_to_cache(archive, root2); });
+    a.join(); b.join();
+    require(error1.ok() && error2.ok() && root1 != root2, "service instances shared an extraction root");
+    require(read_file(root1 / "input") == "first version" && read_file(root2 / "input") == "first version", "concurrent extraction damaged cache");
+    f.file("input", "a longer second version");
+    require(second.create_archive(archive, {input}, f.root).ok(), "archive replacement failed");
+    require(second.extract_to_cache(archive, root3).ok() && root3 != root2, "changed archive reused active root");
+    require(read_file(root1 / "input") == "first version" && read_file(root2 / "input") == "first version", "re-extraction removed a live source");
+    require(read_file(root3 / "input") == "a longer second version", "new extraction was stale");
+  }
+  require(fs::exists(root1 / "input") && !fs::exists(root2) && !fs::exists(root3), "service cleanup crossed ownership boundary");
+}
+
 int main(int argc, char** argv) {
-  const std::vector<std::pair<std::string, void (*)()>> tests = {{"R01", R01}, {"R02", R02}, {"R03", R03}, {"R04", R04}, {"R05", R05}, {"R06", R06}, {"R07", R07}, {"R08", R08}, {"R09", R09}, {"R10", R10}, {"R11", R11}, {"R12", R12}, {"R13", R13}, {"R14", R14}, {"R15", R15}, {"R16", R16}, {"R17", R17}, {"R18", R18}, {"R19", R19}, {"R20", R20}, {"R21", R21}, {"R22", R22}, {"R23", R23}, {"R24", R24}, {"R25", R25}, {"R26", R26}};
+  const std::vector<std::pair<std::string, void (*)()>> tests = {{"R01", R01}, {"R02", R02}, {"R03", R03}, {"R04", R04}, {"R05", R05}, {"R06", R06}, {"R07", R07}, {"R08", R08}, {"R09", R09}, {"R10", R10}, {"R11", R11}, {"R12", R12}, {"R13", R13}, {"R14", R14}, {"R15", R15}, {"R16", R16}, {"R17", R17}, {"R18", R18}, {"R19", R19}, {"R20", R20}, {"R21", R21}, {"R22", R22}, {"R23", R23}, {"R24", R24}, {"R25", R25}, {"R26", R26}, {"R27", R27}};
   try {
     bool matched = false;
     for (const auto& [id, run] : tests) {

@@ -181,6 +181,15 @@ bool path_is_under(const Filepath& parent, const Filepath& child) {
   return child_text.rfind(prefix, 0) == 0;
 }
 
+ArchiveService::~ArchiveService() {
+  // Roots are uniquely created and owned by this service. Keep old versions
+  // alive until shutdown so panels and copy-out jobs can retain their paths.
+  for (const auto& entry : _cache) {
+    boost::system::error_code ec;
+    boost::filesystem::remove_all(entry.root, ec);
+  }
+}
+
 void ArchiveService::set_tool_path(std::string tool_path) {
   std::lock_guard lock(_mutex);
   _tool_path = std::move(tool_path);
@@ -248,15 +257,18 @@ Err ArchiveService::extract_to_cache(const Filepath& archive_path, Filepath& ext
   boost::filesystem::create_directories(cache_base, tmp_ec);
   if (tmp_ec.failed()) return Err("cannot create archive cache dir: " + cache_base.native());
 
-  std::string key = canonical_archive.native() + "|" + std::to_string(size) + "|" + std::to_string(static_cast<long long>(mtime));
-  const size_t key_hash = std::hash<std::string>{}(key);
-  const std::string leaf = sanitize_token(canonical_archive.filename().native()) + "-" + std::to_string(static_cast<unsigned long long>(key_hash));
-  const Filepath extract_root = cache_base / leaf;
-
-  boost::filesystem::remove_all(extract_root, ec);
-  ec.clear();
-  boost::filesystem::create_directories(extract_root, ec);
-  if (ec.failed()) return Err("cannot create archive extract dir: " + extract_root.native());
+  const Filepath extract_root = cache_base / boost::filesystem::unique_path("extract-%%%%-%%%%-%%%%-%%%%-%%%%-%%%%");
+  // Exclusive creation: a collision is an error, never permission to remove or
+  // reuse a directory belonging to another service/application instance.
+  if (!boost::filesystem::create_directory(extract_root, ec) || ec)
+    return Err("cannot create private archive extract dir: " + extract_root.native());
+  boost::filesystem::permissions(extract_root, boost::filesystem::owner_all, ec);
+  struct Cleanup {
+    Filepath root;
+    bool committed = false;
+    ~Cleanup() { if (!committed) { boost::system::error_code ignored; boost::filesystem::remove_all(root, ignored); } }
+  } cleanup{extract_root};
+  if (ec) return Err("cannot protect archive extract dir: " + ec.message());
 
   const std::vector<std::string> args = {
     tool_path(),
@@ -267,8 +279,7 @@ Err ArchiveService::extract_to_cache(const Filepath& archive_path, Filepath& ext
     canonical_archive.native(),
   };
   const int rc = run_command(canonical_archive.parent_path(), args, cancelled);
-  if (rc != 0) {
-    boost::filesystem::remove_all(extract_root, ec);
+  if (rc != 0 || (cancelled && cancelled->load())) {
     return Err("archive extract failed (exit " + std::to_string(rc) + "): " + canonical_archive.native());
   }
 
@@ -281,6 +292,7 @@ Err ArchiveService::extract_to_cache(const Filepath& archive_path, Filepath& ext
       .mtime = mtime,
     });
   }
+  cleanup.committed = true;
   extracted_root = extract_root;
   return Err();
 }

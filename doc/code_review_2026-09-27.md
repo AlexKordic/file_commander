@@ -518,15 +518,15 @@ The extraction directory is a deterministic hash of archive path, size and mtime
 
 **Fix direction:** use per-instance extraction roots or interprocess ownership/locking, and never delete another live user's cache reference. **Regression:** browse/copy from the same archive in two concurrent application instances while one starts extraction.
 
-**Implementation status:** Planned.
+**Implementation status:** Applied.
 
 **Planned solution:** use per-instance extraction roots or interprocess ownership/locking, and never delete another live user's cache reference.
 
-**Applied solution:** Pending.
+**Applied solution:** Every extraction receives an exclusively created, private random directory owned by its ArchiveService. Cache replacement retains older roots for active panels/copy jobs, and service shutdown removes only its own completed roots. Failed or cancelled extractions clean up their own staging directory.
 
-**Plan deviations:** Pending.
+**Plan deviations:** Used a unique root per extraction version rather than one directory per process; this also isolates concurrent cache misses in the same process and preserves active references to older archive versions.
 
-**Validation:** Pending.
+**Validation:** Native build and R27 passed using two concurrent service instances and real 7zr: roots differed, replacement preserved both old views, and destroying one service removed only its own roots.
 
 ### R28 — Next editor session alternates between two sessions instead of cycling through all
 

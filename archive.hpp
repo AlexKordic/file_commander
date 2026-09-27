@@ -17,6 +17,7 @@ enum class ArchiveConflict { Replace, Update, Skip };
 
 class ArchiveService {
  public:
+  ~ArchiveService();
   void        set_tool_path(std::string tool_path);
   std::string tool_path() const;
   bool is_cached_path(const Filepath& path) const;
