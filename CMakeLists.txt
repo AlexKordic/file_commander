@@ -169,6 +169,7 @@ add_executable(fc
   scripting.cpp
   log.cpp
   err.cpp
+  traversal.cpp
   settings.cpp
   commander.cpp
   theme.cpp

@@ -1,6 +1,7 @@
 #include "app.hpp"
 #include "scripting.hpp"
 #include "ui_dispatcher.hpp"
+#include "traversal.hpp"
 #include <ftxui/component/loop.hpp>
 
 #include <fstream>
@@ -888,8 +889,32 @@ static void AR02() {
   require(failed,"unknown settings version accepted");
 }
 
+static void AR03() {
+  Fixture f; auto root=f.dir("source"), dst=f.dir("target"); f.file("source/match.txt");
+  fs::create_directory_symlink(root,root/"self1"); fs::create_directory_symlink(root,root/"self2");
+  fs::create_symlink("absent",root/"dangling"); fs::create_symlink("match.txt",root/"chain");
+  Dir dir; dir.move_to(root); auto state=copy_state(dir,root,dst);
+  FindDialog find(state); find.OnShow(); find.pattern="match.txt"; find.start_search(); find._worker.join();
+  require(find._dirs_scanned==1 && find._results.size()==1,"Find followed directory link cycle");
+  for (bool follow:{false,true}) {
+    CopyDialog copy(state); copy.b_follow_links=follow; copy.OnShow(); copy._discovery_process->_thread.join();
+    auto progress=copy._discovery_process->get_progress();
+    require(progress.dir_count==1 && progress.file_count==(follow?2:1),"copy link policy changed");
+    require(progress.link_count==(follow?2:4),"copy did not preserve links / cycle aliases");
+    require(progress.error_count==(follow?1:0),"dangling-link policy changed");
+  }
+  auto deep=f.dir("deep"); for (int i=0;i<120;++i) { deep/="d"; fs::create_directory(deep); }
+  size_t seen=0; TraversalCallbacks cb; cb.enter=[&](auto&){++seen;return true;};
+  auto result=traverse({f.root/"deep"},{},cb); require(seen==121 && !result.truncated,"iterative deep walk incomplete");
+  seen=0; result=traverse({f.root/"deep"},{false,20,1024},cb); require(result.truncated && seen==20,"entry limit ignored");
+  seen=0; cb.cancelled=[&]{return seen>=10;}; result=traverse({root},{},cb); // Small tree completes below the cancellation threshold.
+  result=traverse({f.root/"deep"},{},cb); require(result.cancelled && seen==10,"walk cancellation ignored");
+  auto job=std::make_shared<JobSpec>(JobSpec::Type::DELETE,std::vector<DirItem>{DirItem(root)});
+  wait_job(file_operations().add_job(job)); require(!fs::exists(root) && fs::exists(dst),"delete followed links or failed postorder");
+}
+
 int main(int argc, char** argv) {
-  const std::vector<std::pair<std::string, void (*)()>> tests = {{"AR02", AR02}, {"AR01", AR01}, {"R01", R01}, {"R02", R02}, {"R03", R03}, {"R04", R04}, {"R05", R05}, {"R06", R06}, {"R07", R07}, {"R08", R08}, {"R09", R09}, {"R10", R10}, {"R11", R11}, {"R12", R12}, {"R13", R13}, {"R14", R14}, {"R15", R15}, {"R16", R16}, {"R17", R17}, {"R18", R18}, {"R19", R19}, {"R20", R20}, {"R21", R21}, {"R22", R22}, {"R23", R23}, {"R24", R24}, {"R25", R25}, {"R26", R26}, {"R27", R27}, {"R28", R28}, {"R29", R29}, {"R31", R31}, {"R35", R35}, {"R37", R37}};
+  const std::vector<std::pair<std::string, void (*)()>> tests = {{"AR03", AR03}, {"AR02", AR02}, {"AR01", AR01}, {"R01", R01}, {"R02", R02}, {"R03", R03}, {"R04", R04}, {"R05", R05}, {"R06", R06}, {"R07", R07}, {"R08", R08}, {"R09", R09}, {"R10", R10}, {"R11", R11}, {"R12", R12}, {"R13", R13}, {"R14", R14}, {"R15", R15}, {"R16", R16}, {"R17", R17}, {"R18", R18}, {"R19", R19}, {"R20", R20}, {"R21", R21}, {"R22", R22}, {"R23", R23}, {"R24", R24}, {"R25", R25}, {"R26", R26}, {"R27", R27}, {"R28", R28}, {"R29", R29}, {"R31", R31}, {"R35", R35}, {"R37", R37}};
   try {
     bool matched = false;
     for (const auto& [id, run] : tests) {

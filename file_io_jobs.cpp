@@ -1,3 +1,4 @@
+#include "traversal.hpp"
 
 #include "file_io_jobs.hpp"
 #include "archive.hpp"
@@ -252,25 +253,22 @@ bool transfer_checkpoint(const boost::filesystem::copy_file_options& options, er
 
 bool copy_move_tree(const Filepath& source, const Filepath& destination,
                     const boost::filesystem::copy_file_options& options, error_code& ec) {
-  if (!transfer_checkpoint(options, ec)) return false;
-  const auto status = boost::filesystem::symlink_status(source, ec);
-  if (ec) return false;
-  if (boost::filesystem::is_symlink(status)) {
-    auto target = boost::filesystem::read_symlink(source, ec);
-    if (!ec) boost::filesystem::create_symlink(target, destination, ec);
-  } else if (boost::filesystem::is_directory(status)) {
-    boost::filesystem::create_directory(destination, ec);
-    if (ec) return false;
-    boost::filesystem::directory_iterator it(source, ec), end;
-    while (!ec && it != end) {
-      if (!copy_move_tree(it->path(), destination / it->path().filename(), options, ec)) return false;
-      it.increment(ec);
-    }
-    if (!ec) boost::filesystem::permissions(destination, status.permissions(), ec);
-  } else {
-    boost::filesystem::copy_file(source, destination, options, ec);
-  }
-  return !ec;
+  TraversalCallbacks cb;
+  cb.cancelled = [&] { return ec || !transfer_checkpoint(options,ec); };
+  auto target = [&](const TraversalEntry& e) { return e.path == source ? destination : destination/e.relative.lexically_relative(source.filename()); };
+  cb.error = [&](const Filepath&,const std::string&) { if (!ec) ec=make_error_code(boost::system::errc::io_error); };
+  cb.enter = [&](const TraversalEntry& e) {
+    auto output=target(e);
+    if (e.link_text) boost::filesystem::create_symlink(*e.link_text,output,ec);
+    else if (boost::filesystem::is_directory(e.status)) boost::filesystem::create_directory(output,ec);
+    else boost::filesystem::copy_file(e.path,output,options,ec);
+    return !ec;
+  };
+  cb.leave = [&](const TraversalEntry& e) {
+    if (!ec && boost::filesystem::is_directory(e.status)) boost::filesystem::permissions(target(e),e.status.permissions(),ec);
+  };
+  auto result=traverse({source},{},cb);
+  return !ec && !result.cancelled && !result.truncated;
 }
 }
 
@@ -515,31 +513,17 @@ class ThreadedFileJobs : public FileJobs {
   }
 
   void _discover_files(JobSpec* job, std::vector<DirItem>& items, FifoQueue<DirItem>& files, DelayedUpdateDiscovery& update) {
-    error_code ec;
-    for (DirItem const& item : items) {
-      if (job->_cancel_requested.load() || !files.running()) return;
-      // Inspect the entry itself: a directory symlink must be unlinked, never
-      // traversed. Recheck here instead of trusting an earlier followed stat.
-      const auto entry_status = boost::filesystem::symlink_status(item.path_ref(), ec);
-      if (ec.failed()) {
-        std::lock_guard lock(job->_m);
-        job->report_error(item, "Failed to inspect deletion target: " + ec.message());
-        continue;
-      }
-      if (boost::filesystem::is_directory(entry_status)) {
-        std::vector<DirItem> subdir_items;
-        boost::filesystem::directory_iterator it(item.path_ref(), ec), end;
-        while (!ec && it != end && !job->_cancel_requested.load() && files.running()) {
-          subdir_items.emplace_back(it->path());
-          it.increment(ec);
-        }
-        if (ec) { std::lock_guard lock(job->_m); job->report_error(item, "Delete discovery failed: " + ec.message()); }
-        _discover_files(job, subdir_items, files, update);
-        // push parent dir item last
-      }
-      update.file_found(std::max(int64_t{0}, item.size()), job);
-      if (files.push(item) != FifoError::OK) return;
-    }
+    std::vector<Filepath> roots; for (const auto& item:items) roots.push_back(item.path_ref());
+    TraversalCallbacks cb;
+    cb.cancelled = [&] { return job->_cancel_requested.load() || !files.running(); };
+    cb.error = [&](const Filepath& path,const std::string& message) {
+      std::lock_guard lock(job->_m); job->report_error(DirItem(path),"Delete discovery failed: " + message);
+    };
+    cb.leave = [&](const TraversalEntry& e) {
+      if (cb.cancelled()) return;
+      DirItem item(e.path); update.file_found(std::max(int64_t{0},item.size()),job); files.push(std::move(item));
+    };
+    traverse(roots,{},cb);
   }
 
   void run_delete(JobSpec* job) {

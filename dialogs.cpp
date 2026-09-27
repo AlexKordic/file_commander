@@ -1,3 +1,4 @@
+#include "traversal.hpp"
 
 #include "dialogs.hpp"
 #include "archive.hpp"
@@ -936,7 +937,6 @@ Element CopyDialog::render() {
 void CopyDialog::_clear_operation_state() {
   _confirm_when_ready = false;
   // _virtual_dir->items.clear();
-  // _visited_dirs.clear();
   _filelist_wrapper->DetachAllChildren();
   _discovery_process.reset();
 }
@@ -1030,43 +1030,6 @@ void CopyDiscoveryProcess::_queue_error(const DirItem& item, Filepath const& new
   created._set_warning(error_message);
 }
 
-bool CopyDiscoveryProcess::_queue_dir(const DirItem& item, Filepath const& new_record_path) {
-  // detect cyclic dir
-  for (auto& visited : _visited_dirs) {
-    error_code ec;
-    const bool same = boost::filesystem::equivalent(visited.source.path_ref(), item.path_ref(), ec);
-    if (ec.failed()) {
-      _queue_error(item, new_record_path, "visited syscall failed " + ec.what());
-      return false;
-    }
-    if (same) {
-      // dir already copied, create link to it instead
-      _queue_link(new_record_path, visited.destination, item.perms(), item.write_time());
-      return false;
-    }
-  }
-  _visited_dirs.push_back({.source = DirItem(item), .destination = new_record_path});
-  // queue create dir command
-  std::lock_guard<std::mutex> lock(_m);
-  _progress.dir_count++;
-  _progress.current_dir = item.path_ref().native();
-  _items.push_back(DirItem(new_record_path, boost::filesystem::directory_file, item.perms()));
-  return true;
-}
-
-std::vector<DirItem> CopyDiscoveryProcess::read_children(const DirItem& parent, const Filepath& destination) {
-  std::vector<DirItem> children;
-  error_code ec;
-  directory_iterator it(parent.path_ref(), ec), end;
-  while (!ec.failed() && it != end && _running.load()) {
-    _stat_file(it->path());
-    children.emplace_back(it->path());
-    it.increment(ec);
-  }
-  if (ec.failed()) _queue_error(parent, destination, "Cannot enumerate directory: " + ec.message());
-  return children;
-}
-
 void CopyDiscoveryProcess::_stat_file(Filepath const& item_path) {
   std::lock_guard<std::mutex> lock(_m);
   _progress.current_file = item_path.native();
@@ -1082,93 +1045,37 @@ void CopyDiscoveryProcess::_queue_file(const DirItem& item, Filepath const& new_
 
 // This traversal should be depth first because we want to create tree like depiction in our list
 void CopyDiscoveryProcess::_discover(const std::vector<DirItem>& files, Filepath destination) {
-  if (!_running) return;
-  // if type is dir path is to be mkdired
-  // if type is link path is where to place link and target is link target
-  // else path is source file and target is destination file for copy operation
-  auto                  place_on_queue = [this, &destination](const DirItem& item) -> void {
-    if (!_running) return;
+  std::vector<Filepath> roots; for (const auto& item:files) roots.push_back(item.path_ref());
+  TraversalCallbacks cb;
+  cb.cancelled = [this] { return !_running.load(); };
+  cb.error = [&](const Filepath& path,const std::string& message) { _queue_error(DirItem(path),destination/path.filename(),message); };
+  cb.enter = [&](const TraversalEntry& e) {
+    auto target=destination/e.relative;
+    DirItem item(e.path);
     error_code ec;
-    const auto new_record_path = destination / item.path_ref().filename();
-    const bool copy_to_self    = boost::filesystem::equivalent(item.path_ref(), new_record_path, ec);
-    if (!ec.failed() && copy_to_self) {
-      _queue_error(item, new_record_path, "Copy to self");
-      return;
+    if (boost::filesystem::equivalent(e.path,target,ec) && !ec) { _queue_error(item,target,"Copy to self"); return false; }
+    if (e.duplicate_of) { _queue_link(target,destination / *e.duplicate_of,item.perms(),item.write_time()); return false; }
+    if (e.link_text && !_follow_links) {
+      auto text=*e.link_text;
+      if (!(_preserve_relative_links && text.is_relative())) {
+        text=resolve_symlink(e.path);
+        if (text.empty()) { _queue_error(item,target,"Cyclic symlink"); return false; }
+        auto canonical=boost::filesystem::canonical(text,e.path.parent_path(),ec);
+        if (!ec) text=canonical;
+      }
+      _queue_link(target,text,item.perms(),item.write_time()); return false;
     }
-    // Act on symlink
-    if (item.symlink_ref()) {
-      // handle link
-      const bool relative = item.symlink_ref()->is_relative();
-      if (!_follow_links && _preserve_relative_links && relative) {
-        // create relative symlink
-        _queue_link(new_record_path, *item.symlink_ref(), item.perms(), item.write_time());
-        return;
-      }
-      Filepath symlink_target = resolve_symlink(item.path_ref());
-      if (symlink_target.empty()) {
-        _queue_error(item, new_record_path, "Cyclic symlink");
-        return;
-      }
-      if (_follow_links) {
-        error_code  target_ec;
-        file_status target_status = boost::filesystem::status(symlink_target, target_ec);
-        if (target_ec.failed()) {
-          _queue_error(item, new_record_path, "Invalid symlink target");
-          return;
-        }
-        DirItem target_item(symlink_target, target_status.type(), target_status.permissions());
-        if (target_item.type() == boost::filesystem::directory_file) {
-          const bool valid = _queue_dir(target_item, new_record_path);
-          if (!valid) return;
-          _discover(read_children(target_item, new_record_path), new_record_path);
-          return;
-        }
-        _queue_file(target_item, new_record_path);
-        return;
-      }
-      // create absolute symlink
-      Filepath absolute_symlink_target = boost::filesystem::canonical(symlink_target, item.path_ref().parent_path(), ec);
-      if (!ec.failed()) { symlink_target = absolute_symlink_target; }
-      _queue_link(new_record_path, symlink_target, item.perms(), item.write_time());
-      return;
-    }
-    // Act on directory
-    if (item.type() == boost::filesystem::directory_file) {
-      error_code src_ec;
-      Filepath   source_dir = boost::filesystem::canonical(item.path_ref(), src_ec);
-      if (!src_ec.failed()) {
-        error_code dst_ec;
-        Filepath   destination_dir;
-        Filepath   parent_path = new_record_path.parent_path();
-        Filepath   resolved_parent = boost::filesystem::canonical(parent_path, dst_ec);
-        if (!dst_ec.failed()) {
-          destination_dir = resolved_parent / new_record_path.filename();
-        } else {
-          destination_dir = boost::filesystem::absolute(new_record_path, dst_ec);
-        }
-        if (!dst_ec.failed() && is_subpath(source_dir, destination_dir)) {
-          _queue_error(item, new_record_path, "Copy dir into itself");
-          return;
-        }
-      }
-      const bool valid = _queue_dir(item, new_record_path);
-      if (!valid) return;
-      // Recurse into subdir
-      _discover(read_children(item, new_record_path), new_record_path);
-      return;
-    }
-    // Act on file
-    _queue_file(item, new_record_path);
+    if (boost::filesystem::is_directory(e.status)) {
+      auto source=boost::filesystem::canonical(e.path,ec);
+      auto resolved=boost::filesystem::weakly_canonical(target,ec);
+      if (!ec && is_subpath(source,resolved)) { _queue_error(item,target,"Copy dir into itself"); return false; }
+      std::lock_guard lock(_m); ++_progress.dir_count; _progress.current_dir=e.path.native();
+      _items.emplace_back(target,boost::filesystem::directory_file,item.perms());
+    } else { _stat_file(e.path); _queue_file(item,target); }
+    return true;
   };
-  for (const auto& item : files) {
-    if (!_running) return;
-    if (item.type() == boost::filesystem::status_error) {
-      _queue_error(item, destination / item.path_ref().filename(), "stat failed");
-      continue;
-    }
-    place_on_queue(item);
-  }
-};
+  traverse(roots,TraversalPolicy{_follow_links},cb);
+}
 
 void CopyDialog::_start_new_discovery() {
   Filepath target(destination_path);
@@ -1489,6 +1396,7 @@ FindDialog::FindDialog(PanelSharedState::P s) : Dialog(std::move(s)) {
       _files_scanned.load(std::memory_order_relaxed),
       matches,
       _errors.load(std::memory_order_relaxed));
+    if (_truncated.load()) info += " | Search limit reached (100,000 entries / 1,024 levels)";
     if (!status.empty()) info += " | " + status;
     auto content = vbox({
       hbox({
@@ -1561,49 +1469,26 @@ void FindDialog::start_search() {
   _files_scanned.store(0, std::memory_order_relaxed);
   _errors.store(0, std::memory_order_relaxed);
   status.clear();
+  _truncated = false;
   _sequence_id = g_find_sequence.fetch_add(1);
   _completed.store(false, std::memory_order_relaxed);
   _running.store(true, std::memory_order_relaxed);
 
   _worker = std::thread([this, root, local_pattern]() {
-    std::deque<Filepath> queue;
-    queue.push_back(root);
-
-    while (_running.load(std::memory_order_relaxed) && !queue.empty()) {
-      Filepath current = queue.front();
-      queue.pop_front();
-      _dirs_scanned.fetch_add(1, std::memory_order_relaxed);
-
-      boost::system::error_code it_ec;
-      boost::filesystem::directory_iterator end;
-      for (boost::filesystem::directory_iterator it(current, it_ec); it != end && !it_ec; it.increment(it_ec)) {
-        if (!_running.load(std::memory_order_relaxed)) break;
-        const auto entry = *it;
-        const auto p = entry.path();
-
-        boost::system::error_code status_ec;
-        const auto fs = entry.status(status_ec);
-        if (status_ec.failed()) {
-          _errors.fetch_add(1, std::memory_order_relaxed);
-          continue;
-        }
-
-        if (fs.type() == boost::filesystem::file_type::directory_file) {
-          queue.push_back(p);
-        } else {
-          _files_scanned.fetch_add(1, std::memory_order_relaxed);
-        }
-
-        const std::string name = p.filename().native();
-        if (wildcard_match_casefold(local_pattern, name)) {
-          std::lock_guard lock(_results_mutex);
-          _results.push_back(p);
-        }
+    TraversalCallbacks cb;
+    cb.cancelled = [this] { return !_running.load(); };
+    cb.enter = [&](const TraversalEntry& e) {
+      if (boost::filesystem::is_directory(e.status)) ++_dirs_scanned;
+      else ++_files_scanned;
+      if (e.path != root && wildcard_match_casefold(local_pattern,e.path.filename().native())) {
+        std::lock_guard lock(_results_mutex); _results.push_back(e.path);
       }
-
-      if (it_ec.failed()) _errors.fetch_add(1, std::memory_order_relaxed);
-      app->notify();
-    }
+      return true;
+    };
+    cb.leave = [this](const auto&) { app->notify(); };
+    cb.error = [this](const auto&,const auto&) { ++_errors; };
+    auto result = traverse({root}, TraversalPolicy{false,100000,1024}, cb);
+    _truncated.store(result.truncated);
 
     _running.store(false, std::memory_order_relaxed);
     _completed.store(true, std::memory_order_relaxed);

@@ -8,7 +8,7 @@ Each improvement records its plan before implementation, applied changes, valida
 | --- | --- | --- | --- |
 | 1 | [AR01](architecture_progress/AR01.md) | Retain UI messages across terminal suspension | Implemented |
 | 2 | [AR02](architecture_progress/AR02.md) | Separate view state and settings publication | Implemented |
-| 3 | [AR03](architecture_progress/AR03.md) | Share explicit traversal policies | Planned |
+| 3 | [AR03](architecture_progress/AR03.md) | Share explicit traversal policies | Implemented |
 | 4 | [AR07](architecture_progress/AR07.md) | Persist logical archive locations | Planned |
 | 5 | [AR04](architecture_progress/AR04.md) | Bound UI publication and observation costs | Planned |
 | 6 | [AR05](architecture_progress/AR05.md) | Bound retained resources | Planned |
