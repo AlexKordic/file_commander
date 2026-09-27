@@ -1145,40 +1145,50 @@ end
 -- Run all tests
 -- =========================================================================
 
-test_basic_single_file()
-test_basic_multiple_files()
-test_nested_directories()
-test_empty_directory()
-test_deep_nesting()
-test_hidden_files()
-test_special_characters()
-test_absolute_symlink()
-test_relative_symlink()
-test_symlink_chain()
-test_circular_symlinks()
-test_self_referencing_symlink()
-test_dangling_symlink()
-test_symlink_to_directory()
-test_follow_links_file()
-test_follow_links_directory()
-test_overwrite_smaller()
-test_overwrite_larger()
-test_overwrite_extras_remain()
-test_mixed_content()
-test_symlink_chain_through_dirs()
-test_many_files()
-test_nested_symlink_to_dir()
-test_unicode_filenames()
-test_dir_of_symlinks()
-test_dangling_relative_symlink()
-test_three_way_circular()
-test_symlink_outside_tree()
-test_cancel_copy()
-test_pause_copy()
-test_conflict_skip()
-test_conflict_update()
-test_copy_dir_into_subdir_guard()
-test_job_history()
-
-test_pass("ALL COPY TESTS PASSED")
+local cases = {
+  {"1_basic_single_file", test_basic_single_file},
+  {"2_basic_multiple_files", test_basic_multiple_files},
+  {"3_nested_directories", test_nested_directories},
+  {"4_empty_directory", test_empty_directory},
+  {"5_deep_nesting", test_deep_nesting},
+  {"6_hidden_files", test_hidden_files},
+  {"7_special_characters", test_special_characters},
+  {"8_absolute_symlink", test_absolute_symlink},
+  {"9_relative_symlink", test_relative_symlink},
+  {"10_symlink_chain", test_symlink_chain},
+  {"11_circular_symlinks", test_circular_symlinks},
+  {"12_self_referencing_symlink", test_self_referencing_symlink},
+  {"13_dangling_symlink", test_dangling_symlink},
+  {"14_symlink_to_directory", test_symlink_to_directory},
+  {"15_follow_links_file", test_follow_links_file},
+  {"16_follow_links_directory", test_follow_links_directory},
+  {"17_overwrite_smaller", test_overwrite_smaller},
+  {"18_overwrite_larger", test_overwrite_larger},
+  {"19_overwrite_extras_remain", test_overwrite_extras_remain},
+  {"20_mixed_content", test_mixed_content},
+  {"21_symlink_chain_through_dirs", test_symlink_chain_through_dirs},
+  {"22_many_files", test_many_files},
+  {"23_nested_symlink_to_dir", test_nested_symlink_to_dir},
+  {"24_unicode_filenames", test_unicode_filenames},
+  {"25_dir_of_symlinks", test_dir_of_symlinks},
+  {"26_dangling_relative_symlink", test_dangling_relative_symlink},
+  {"27_three_way_circular", test_three_way_circular},
+  {"28_symlink_outside_tree", test_symlink_outside_tree},
+  {"29_cancel_copy", test_cancel_copy},
+  {"30_pause_copy", test_pause_copy},
+  {"32_conflict_skip", test_conflict_skip},
+  {"33_conflict_update", test_conflict_update},
+  {"34_copy_dir_into_subdir_guard", test_copy_dir_into_subdir_guard},
+  {"31_job_history", test_job_history},
+}
+local requested = os.getenv("FC_LUA_CASE") or ""
+local matched = false
+for _, case in ipairs(cases) do
+  if requested == "" or requested == case[1] then
+    case[2]()
+    matched = true
+  end
+end
+check(matched, "unknown copy case: %s", requested)
+if requested == "" then test_pass("ALL COPY TESTS PASSED") end
 fc.quit()

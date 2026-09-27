@@ -1110,7 +1110,13 @@ static void AR08() {
 }
 
 int main(int argc, char** argv) {
-  const std::vector<std::pair<std::string, void (*)()>> tests = {{"AR07_cache_identity", AR07_cache_identity}, {"AR08", AR08}, {"AR06", AR06}, {"AR05", AR05}, {"AR04", AR04}, {"AR07", AR07}, {"AR03", AR03}, {"AR02", AR02}, {"AR01", AR01}, {"R01", R01}, {"R02", R02}, {"R03", R03}, {"R04", R04}, {"R05", R05}, {"R06", R06}, {"R07", R07}, {"R08", R08}, {"R09", R09}, {"R10", R10}, {"R11", R11}, {"R12", R12}, {"R13", R13}, {"R14", R14}, {"R15", R15}, {"R16", R16}, {"R17", R17}, {"R18", R18}, {"R19", R19}, {"R20", R20}, {"R21", R21}, {"R22", R22}, {"R23", R23}, {"R24", R24}, {"R25", R25}, {"R26", R26}, {"R27", R27}, {"R28", R28}, {"R29", R29}, {"R31", R31}, {"R35", R35}, {"R37", R37}};
+  Fixture environment;
+  EnvOverride config("XDG_CONFIG_HOME", environment.root.native());
+  const std::vector<std::pair<std::string, void (*)()>> tests = {
+#define FC_REVIEW_CASE(id, name) {#id, id},
+#include "review_cases.inc"
+#undef FC_REVIEW_CASE
+  };
   try {
     bool matched = false;
     for (const auto& [id, run] : tests) {

@@ -1,0 +1,37 @@
+{
+  "archive_payload_corrupted": {
+    "script": "test/test_archive.lua",
+    "prefix": "local raw=fc.wait_for_jobs; fc.wait_for_jobs=function(t) local ok=raw(t); local f=io.open(fc.left_path()..\"/alpha.txt\",\"w\"); if f then f:write(\"CORRUPT\"); f:close() end; return ok end\n",
+    "error": "archive output manifest differs"
+  },
+  "external_link_missing": {
+    "script": "test/test_copy.lua",
+    "prefix": "local raw=fc.wait_for_jobs; fc.wait_for_jobs=function(t) local ok=raw(t); os.remove(fc.right_path()..\"/sub/ext_link.txt\"); return ok end\n",
+    "error": "28: external symlink is missing"
+  },
+  "rebind_disabled": {
+    "script": "test/test_rebind.lua",
+    "prefix": "local raw=fc.key; fc.key=function(k) if k==\"cD\" then return raw(\"f9\") else return raw(k) end end\n",
+    "error": "copy binding did not change"
+  },
+  "editor_disabled": {
+    "script": "test/test_editor_integration.lua",
+    "prefix": "local raw=fc.key; fc.key=function(k) if k~=\"f4\" then return raw(k) end end\n",
+    "error": "timeout waiting for log entry containing"
+  },
+  "absolute_link_missing": {
+    "script": "test/test_copy.lua",
+    "prefix": "local raw=fc.wait_for_jobs; fc.wait_for_jobs=function(t) local ok=raw(t); os.remove(fc.right_path()..\"/dangling_link\"); return ok end\n",
+    "error": "13: destination dangling link is missing"
+  },
+  "relative_link_missing": {
+    "script": "test/test_copy.lua",
+    "prefix": "local raw=fc.wait_for_jobs; fc.wait_for_jobs=function(t) local ok=raw(t); os.remove(fc.right_path()..\"/dangling_rel\"); return ok end\n",
+    "error": "26: destination dangling link is missing"
+  },
+  "cycle_errors_missing": {
+    "script": "test/test_copy.lua",
+    "prefix": "local raw=fc.errors; fc.errors=function() local out={}; for _,e in ipairs(raw()) do if not e:find(\"Cyclic symlink\",1,true) then table.insert(out,e) end end; return out end\n",
+    "error": "11: cycles must report discovery errors"
+  }
+}

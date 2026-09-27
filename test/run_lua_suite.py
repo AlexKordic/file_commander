@@ -21,14 +21,16 @@ parser.add_argument('--binary', type=Path, default=Path(os.environ.get('FC_TEST_
 parser.add_argument('--logs', type=Path, default=repo / 'build/review-lua')
 parser.add_argument('--negative-only', action='store_true')
 parser.add_argument('--negative-controls', action='store_true')
+parser.add_argument('--case', help='Run one declared copy case')
+parser.add_argument('--negative-case', help='Run one negative control')
 parser.add_argument('--suite', help='Manifest suite ID for one replacement/negative-control script')
 parser.add_argument('scripts', nargs='*')
 args = parser.parse_args()
 manifest = json.loads((repo / 'test/lua_suites.json').read_text())
 require(not args.suite or len(args.scripts) == 1, '--suite requires one script')
-negative = args.negative_controls or args.negative_only
+negative = args.negative_controls or args.negative_only or bool(args.negative_case)
 scripts = [repo / arg for arg in args.scripts] if args.scripts else [repo / entry['script'] for entry in manifest.values()]
-if args.negative_only:
+if args.negative_only or args.negative_case:
     scripts = []
 logs = args.logs / ('run-' + uuid.uuid4().hex[:10])
 logs.mkdir(parents=True, exist_ok=True)
@@ -39,6 +41,9 @@ def run(script, name, expect_success=True, expected_error=None, suite=None):
     suite = suite or script.stem
     require(suite in manifest, f"Unknown test suite {suite}; use --suite for replacement scripts or fc run for arbitrary scripts")
     specification = manifest[suite]
+    if args.case:
+        require(args.case in specification['cases'], f'Unknown case {args.case}')
+        specification = dict(specification, cases=[], completion=args.case)
     with tempfile.TemporaryDirectory(prefix='fc-lua-config-') as config:
         fixtures = Path(config) / 'fixtures'
         fixtures.mkdir()
@@ -49,6 +54,7 @@ def run(script, name, expect_success=True, expected_error=None, suite=None):
             'FC_TEST_PYTHON': sys.executable,
             'FC_TEST_FIXTURE_TOOL': str(repo / 'test/fixture_tool.py'),
             'FC_TEST_COMPLETION': specification['completion'],
+            'FC_LUA_CASE': args.case or '',
             'FC_TEST_TMPDIR': str(fixtures),
             'FC_FRESH_FAKE_LOG': str(Path(config) / 'fresh.log'),
         })
@@ -70,17 +76,13 @@ for script in scripts:
     run(script, script.stem, suite=args.suite)
 
 if negative:
-    controls = [
-        ('archive_payload_corrupted', 'test_archive.lua', 'local raw=fc.wait_for_jobs; fc.wait_for_jobs=function(t) local ok=raw(t); local f=io.open(fc.left_path().."/alpha.txt","w"); if f then f:write("CORRUPT"); f:close() end; return ok end\n', "archive output manifest differs"),
-        ('external_link_missing', 'test_copy.lua', 'local raw=fc.wait_for_jobs; fc.wait_for_jobs=function(t) local ok=raw(t); os.remove(fc.right_path().."/sub/ext_link.txt"); return ok end\n', "28: external symlink is missing"),
-        ('rebind_disabled', 'test_rebind.lua', 'local raw=fc.key; fc.key=function(k) if k=="cD" then return raw("f9") else return raw(k) end end\n', "copy binding did not change"),
-        ('editor_disabled', 'test_editor_integration.lua', 'local raw=fc.key; fc.key=function(k) if k~="f4" then return raw(k) end end\n', "timeout waiting for log entry containing"),
-        ('absolute_link_missing', 'test_copy.lua', 'local raw=fc.wait_for_jobs; fc.wait_for_jobs=function(t) local ok=raw(t); os.remove(fc.right_path().."/dangling_link"); return ok end\n', "13: destination dangling link is missing"),
-        ('relative_link_missing', 'test_copy.lua', 'local raw=fc.wait_for_jobs; fc.wait_for_jobs=function(t) local ok=raw(t); os.remove(fc.right_path().."/dangling_rel"); return ok end\n', "26: destination dangling link is missing"),
-        ('cycle_errors_missing', 'test_copy.lua', 'local raw=fc.errors; fc.errors=function() local out={}; for _,e in ipairs(raw()) do if not e:find("Cyclic symlink",1,true) then table.insert(out,e) end end; return out end\n', "11: cycles must report discovery errors"),
-    ]
+    controls = json.loads((repo / 'test/negative_controls.json').read_text())
     with tempfile.TemporaryDirectory(prefix='fc-negative-') as directory:
-        for name, source, prefix, expected_error in controls:
+        require(not args.negative_case or args.negative_case in controls, 'Unknown negative control')
+        for name, control in controls.items():
+            if args.negative_case and name != args.negative_case:
+                continue
+            source, prefix, expected_error = control['script'], control['prefix'], control['error']
             script = Path(directory) / (name + '.lua')
-            script.write_text(prefix + (repo / 'test' / source).read_text())
+            script.write_text(prefix + (repo / source).read_text())
             run(script, name, False, expected_error, Path(source).stem)
