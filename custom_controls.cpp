@@ -262,11 +262,7 @@ std::string box_to_string(const Box& box) { return std::format("x:{} y:{} w:{} h
 
 class ColoredInt : public Node {
  public:
-  explicit ColoredInt(int64_t n, std::vector<Color> colors = {Color::White, Color::White, Color::Yellow, Color::Red, Color::Plum3}) : text_(std::to_string(n)), colors_(std::move(colors)) {
-    // This handle NAN correctly:
-    if (!(progress_ > 0.F)) { progress_ = 0.F; }
-    if (!(progress_ < 1.F)) { progress_ = 1.F; }
-  }
+  explicit ColoredInt(int64_t n, std::vector<Color> colors = {Color::White, Color::White, Color::Yellow, Color::Red, Color::Plum3}) : colors_(std::move(colors)), text_(std::to_string(n)) {}
 
   void ComputeRequirement() override {
     requirement_.min_x = string_width(text_);
@@ -301,7 +297,6 @@ class ColoredInt : public Node {
   int const          group_size = 3;
   std::vector<Color> colors_;
   std::string        text_;
-  float              progress_;
 };
 
 Element coloredInt(int64_t n) { return ftxui::make_shared<ColoredInt>(n, theme().filesize_colors); }

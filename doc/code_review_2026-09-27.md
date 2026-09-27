@@ -682,15 +682,15 @@ The constructor clamps `progress_` before initializing it. The field is unrelate
 
 **Fix direction:** remove the unused member/clamp or initialize the member before reading it. **Verification:** compiler/static analysis or a suitable uninitialized-memory check; no new broad UI test suite is needed for this local correction.
 
-**Implementation status:** Planned.
+**Implementation status:** Applied.
 
 **Planned solution:** remove the unused member/clamp or initialize the member before reading it.
 
-**Applied solution:** Pending.
+**Applied solution:** Removed the unused progress member and its constructor clamp from ColoredInt. The remaining color/text members are initialized in declaration order.
 
-**Plan deviations:** Pending.
+**Plan deviations:** No behavioral change or new broad UI test was needed for this local undefined-read correction.
 
-**Validation:** Pending.
+**Validation:** Native fc and regression targets built successfully; source inspection confirms ColoredInt has no progress member or read remaining. git diff --check passed.
 
 ### R37 — Selective queue removal does not wake blocked producers
 
