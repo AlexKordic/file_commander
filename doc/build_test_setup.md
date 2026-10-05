@@ -50,7 +50,7 @@ cmake --build --preset tsan
 ctest --preset tsan
 ```
 
-ASan+UBSan and TSan are separate configurations. `ubsan` is also available. On the current macOS host, minimal programs reproduce an ASan pre-main hang and a TSan pre-main segmentation fault; these remain failed infrastructure qualification, not exemptions. See [test progress](test_suite_progress_2026-09-27.md).
+ASan+UBSan and TSan are separate configurations. `ubsan` is also available. At revision `fa65328` on macOS 26.7.1 arm64, ASan+UBSan passes all 21 selected tests and TSan passes all five lifetime tests. These results supersede the sanitizer startup failures recorded on September 27. See [test progress](test_suite_progress_2026-09-27.md#current-qualification--2026-10-05).
 
 ## Lua cases and replay
 
@@ -66,6 +66,13 @@ Every invocation owns a config/fixture directory and unique logs. Committed test
 Failure evidence includes bounded terminal/debug tails, protocol records, revision/replay metadata and a fixture manifest before cleanup. Optional fixture retention is capped at 16 MiB. The supervisor tracks descendant ancestry, including separate process groups; immediate double-fork daemonization before observation needs OS isolation. Lua fixtures use quoted native helper operations and binary-safe manifests, including filenames containing quotes/newlines.
 
 ## Packages and release qualification
+
+The native macOS arm64 Release lane passed **178/178 tests with zero skips** at
+revision `fa65328` on October 5, 2026. The user ran it from a normal Terminal with
+a disposable APFS volume for EXDEV; saved JUnit, lane status and package hashes
+were verified afterward. [Qualification record](qualification/macos-arm64-2026-10-05.json).
+Linux and earlier macOS versions remain unqualified; this build's deployment
+target is macOS 26.7.1.
 
 ```sh
 cmake --build build --target package_static_dist

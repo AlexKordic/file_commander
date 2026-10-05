@@ -2,6 +2,34 @@
 
 Accepted plan: [test suite review](test_suite_review_2026-09-27.md). Each row was planned before implementation in that document's ledger, then updated with applied behavior, evidence and differences. Earlier review evidence remains historical.
 
+## Current qualification — 2026-10-05
+
+Implementation revision `fa65328836906cee1c74a908afc4a91e52862973` passes the full
+native macOS 26.7.1 arm64 Release lane: **178/178 tests, no failures or skips**, in
+77.65 seconds of CTest execution. The run includes real APFS EXDEV, FSEvents
+lifecycle/recovery, real Fresh handoff, package relocation, dependency rebuilds,
+and the new archive-name, rename, directory-access, long-name and move-metadata
+regressions. The user launched the run from a normal Terminal; its saved JUnit,
+status 0 metadata and packaged executable hashes were independently checked.
+
+ASan+UBSan passes **21/21** selected tests and TSan passes **5/5** lifetime tests
+at the same revision. The earlier sanitizer startup failures below are historical.
+
+The assistant execution environment failed to start FSEvents even in a standalone
+probe and could not provision the EXDEV volume. The same probe and all affected
+tests pass in the user's normal Terminal. Those environment failures no longer
+block native macOS qualification; the underlying environment restriction was
+not diagnosed.
+
+[Machine-readable qualification record](qualification/macos-arm64-2026-10-05.json)
+records the tested revision, platform, local evidence paths and hashes, sanitizer
+results, package checksum and executable checksums. Full release evidence is in
+`build-release/test-logs/lane-release-74167aa617/`.
+
+Remaining platform qualification: native Linux x86-64/arm64 and earlier macOS
+versions. The current build targets macOS 26.7.1. Passing this suite does not
+establish release signing, distribution or license-material readiness.
+
 ## Completed improvements
 
 | Commit | Improvement | Evidence |
@@ -19,7 +47,7 @@ Accepted plan: [test suite review](test_suite_review_2026-09-27.md). Each row wa
 | `f56fd59` | Isolated relocation and real Fresh terminal handoff | Source/dependency reads denied, exact real archive output and helper provenance; Fresh attach/quit and failure restore input/modes |
 | `08623af` | Native CI/presets, strict lanes, bootstrap controls and resource/performance evidence | 23/23 fast; 17/17 headless and UBSan; real APFS EXDEV; stable resources; real render/allocation measurements; visible sanitizer infrastructure failures |
 
-## Validation and remaining qualification
+## Historical validation — 2026-09-27
 
 Native macOS arm64 is the available execution host. Final CTest discovery contains **173 cases**. At implementation revision `08623af`, the regular integration lane passes **166/166 with no skips** in 35.26 seconds. The extended lane passes its five runnable cases; its unconfigured EXDEV entry skips, and the same real EXDEV case passes separately on a disposable APFS volume. The slow dependency rebuild case also passes separately for LuaJIT, 7zr and Fresh. Thus every registered native case has passing execution evidence across these runs; instrumented/platform qualification has the limits below.
 
@@ -50,4 +78,4 @@ Final integration JUnit and metadata: `build/test-logs/lane-integration-a539ecf9
 | Dependency identity/build propagation and relocation | `fc.harness.dependencies`, `fc.dependency_rebuild`, `fc.package` | Integration/release |
 | Resource bounds and performance evidence | `fc.extended.resources`, `fc.benchmark.publication`, `fc.benchmark.render` | Extended, measurement only |
 
-This index describes owned code contracts. It does not claim exhaustive vendored-library coverage or a measured line/branch percentage. Named failures/commit boundaries are checked independently of aggregate coverage. Remaining qualification is external: native Linux execution and working ASan/TSan runtimes. Strict release runners must provision their second filesystem. Performance percentage gates require a named Release-runner baseline.
+This index describes owned code contracts. It does not claim exhaustive vendored-library coverage or a measured line/branch percentage. Named failures/commit boundaries are checked independently of aggregate coverage. Current platform limits are recorded above. Strict release runners must provision their second filesystem. Performance percentage gates require a named Release-runner baseline.
