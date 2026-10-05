@@ -271,7 +271,10 @@ if(FC_BUILD_FRESH)
       BYPRODUCTS "${_fresh_stage_bin}"
       COMMAND ${CMAKE_COMMAND} -E make_directory "${_fresh_stage_dir}"
       COMMAND cargo build --release --locked -p fresh-editor --bin fresh --manifest-path "${_fresh_manifest}"
-      COMMAND ${CMAKE_COMMAND} -E copy_if_different "${_fresh_built_bin}" "${_fresh_stage_bin}"
+      # Replace the executable atomically: a detached editor may still have
+      # the previous binary mapped while a new build is being staged.
+      COMMAND ${CMAKE_COMMAND} -E copy_if_different "${_fresh_built_bin}" "${_fresh_stage_bin}.new"
+      COMMAND ${CMAKE_COMMAND} -E rename "${_fresh_stage_bin}.new" "${_fresh_stage_bin}"
       DEPENDS "${_fresh_manifest}"
       WORKING_DIRECTORY "${FC_FRESH_SOURCE_DIR}"
       COMMENT "Building Fresh editor from local source"
