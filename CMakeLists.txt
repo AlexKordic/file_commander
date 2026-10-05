@@ -270,7 +270,7 @@ if(FC_BUILD_FRESH)
     add_custom_target(fresh_bin ALL
       BYPRODUCTS "${_fresh_stage_bin}"
       COMMAND ${CMAKE_COMMAND} -E make_directory "${_fresh_stage_dir}"
-      COMMAND cargo build --release --locked --manifest-path "${_fresh_manifest}"
+      COMMAND cargo build --release --locked -p fresh-editor --bin fresh --manifest-path "${_fresh_manifest}"
       COMMAND ${CMAKE_COMMAND} -E copy_if_different "${_fresh_built_bin}" "${_fresh_stage_bin}"
       DEPENDS "${_fresh_manifest}"
       WORKING_DIRECTORY "${FC_FRESH_SOURCE_DIR}"

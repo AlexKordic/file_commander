@@ -14,6 +14,13 @@ file(COPY "${FC_BIN}" DESTINATION "${_stage}/bin")
 
 if(DEFINED FC_DIST_FRESH AND EXISTS "${FC_DIST_FRESH}")
   file(COPY "${FC_DIST_FRESH}" DESTINATION "${_stage}/bin")
+  file(MAKE_DIRECTORY "${_stage}/share/licenses/fresh")
+  file(COPY "@FC_FRESH_SOURCE_DIR@/LICENSE" DESTINATION "${_stage}/share/licenses/fresh")
+  file(MAKE_DIRECTORY "${_stage}/share/file-commander")
+  file(COPY "@CMAKE_CURRENT_SOURCE_DIR@/dependencies.json"
+            "@CMAKE_CURRENT_SOURCE_DIR@/dependencies/fresh-fc.bundle"
+            "@CMAKE_CURRENT_SOURCE_DIR@/dependencies/README.md"
+       DESTINATION "${_stage}/share/file-commander")
 endif()
 
 if(DEFINED FC_DIST_ARCHIVE AND EXISTS "${FC_DIST_ARCHIVE}")
