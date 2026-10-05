@@ -142,6 +142,27 @@ static void R03() {
   require(std::distance(fs::directory_iterator(f.root), fs::directory_iterator()) == 2, "archive staging leaked");
 }
 
+static void RELEASE_archive_names() {
+  for (const auto& name : {"-mx=0", "@list.txt", "*.txt", "question?.txt", "quote'\nΩ.txt"}) {
+    Fixture f;
+    const auto input = f.dir("input");
+    const auto selected = f.file(std::string("input/") + name, "unselected.txt\n");
+    f.file("input/unselected.txt", "PRIVATE UNSELECTED BYTES");
+    f.file("input/question1.txt", "WILDCARD NEIGHBOR");
+    ArchiveService archives;
+    const auto archive = f.root / "selected.7z";
+    auto created = archives.create_archive(archive, {selected}, input);
+    require(created.ok(), std::string("literal archive creation failed: ") + name);
+    Filepath output;
+    ArchiveLease lease;
+    auto extracted = archives.extract_to_cache(archive, output, nullptr, &lease);
+    require(extracted.ok(), "literal archive extraction failed");
+    require(std::distance(fs::directory_iterator(output), fs::directory_iterator()) == 1,
+            std::string("archive included unselected entries for: ") + name);
+    require(read_file(output / name) == "unselected.txt\n", "selected literal filename/bytes were not preserved");
+  }
+}
+
 static PanelSharedState::P copy_state(Dir& dir, Filepath source, Filepath target) {
   auto state = std::make_shared<PanelSharedState>(&dir);
   state->action.arguments = std::make_shared<CommandArgs>();

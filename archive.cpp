@@ -468,13 +468,16 @@ Err ArchiveService::create_archive(const Filepath& archive_path, const std::vect
   args.push_back(tool_path());
   args.push_back("a");
   args.push_back("-y");
+  args.push_back("-spd"); // Selected names are literal, including '*' and '?'.
   args.push_back(staged_archive.native());
+  args.push_back("--");
 
   for (const auto& src : source_abs) {
     boost::system::error_code rel_ec;
     Filepath rel = boost::filesystem::relative(src, working_dir, rel_ec);
     if (rel_ec.failed() || rel.empty()) rel = src;
-    args.push_back(rel.native());
+    // Prefix relative names so '@name' cannot become a 7-Zip list file.
+    args.push_back((rel.is_relative() ? Filepath(".") / rel : rel).native());
   }
 
   const int rc = run_command(working_dir, args, cancelled);
