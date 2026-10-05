@@ -89,6 +89,10 @@ struct copy_file_options
     std::atomic<uint64_t>* bytes_copied = nullptr; // progress of the private output
     bool (*checkpoint)(void*) = nullptr; // false aborts; may wait for resume
     void* checkpoint_context = nullptr;
+    // Durable transfer observers run synchronously before/after destination commit.
+    int (*transaction)(void*, const char*, const path&, const path&) = nullptr;
+    int (*remove_source)(void*, const path&, const path&) = nullptr;
+    void* transaction_context = nullptr;
 };
 
 //--------------------------------------------------------------------------------------//

@@ -170,7 +170,7 @@ void JobListDialog::rebuild_list() {
     auto refresh=[&](const auto& job) {
       if(job && job->_job_id==id) {
         auto summary=job->snapshot(false);
-        if(summary->_items_done!=detail_job->_items_done || summary->_state!=detail_job->_state || summary->_error_count!=detail_job->_error_count)
+        if(summary->_items_done!=detail_job->_items_done || summary->_state!=detail_job->_state || summary->_error_count!=detail_job->_error_count || summary->_recovery_note!=detail_job->_recovery_note)
           detail_job=job->snapshot();
       }
     };
@@ -289,7 +289,7 @@ JobListDialog::JobListDialog(std::function<void()> close_dialog) : Dialog(nullpt
     std::string detail;
     if (state == JobState::COMPLETED)            detail = std::format("{} files  {}  {}", items_total, size_str, duration);
     else if (state == JobState::COMPLETED_WITH_ERRORS) detail = std::format("{}/{} files  {} errors", items_done, items_total, errors);
-    else if (state == JobState::PAUSED)          detail = std::format("{}/{} files  paused", items_done, items_total);
+    else if (state == JobState::PAUSED)          detail = std::format("{}/{} files  paused — r: Resume", items_done, items_total);
     else if (state == JobState::CANCELLED)       detail = std::format("{}/{} files  cancelled", items_done, items_total);
     else if (state == JobState::RUNNING)         detail = std::format("{}/{} files  running", items_done, items_total);
     else                                         detail = "queued";
@@ -405,6 +405,17 @@ JobListDialog::JobListDialog(std::function<void()> close_dialog) : Dialog(nullpt
       }
       return true;
     }
+    // Recovery is never scheduled by startup or by opening this dialog.
+    if (e == Event::Character('r') || e == Event::Character('p') || e == Event::Character('c')) {
+      auto selected = in_detail ? detail_job :
+        (_job_data_source.focused_id >= 0 && size_t(_job_data_source.focused_id) < jobs.size() ? jobs[size_t(_job_data_source.focused_id)] : nullptr);
+      if (selected && !selected->is_stopped()) {
+        if (e == Event::Character('r')) file_operations().resume(selected->_job_id);
+        else if (e == Event::Character('p') && selected->_state != JobState::PAUSED) file_operations().pause(selected->_job_id);
+        else if (e == Event::Character('c')) file_operations().cancel(selected->_job_id);
+      }
+      return true;
+    }
     // 'd' to dismiss selected job in list view
     if (!in_detail && e == Event::Character('d')) {
       dismiss_selected();
@@ -441,6 +452,7 @@ Element JobListDialog::render_list() {
       button_close->Render() | hcenter | xflex_grow,
     }),
     separator(),
+    text(" r: Resume selected  p: Pause  c: Cancel  d: Dismiss finished ") | dim,
     jobs.empty() ? (text("  No jobs.") | dim) : _job_list->Render(),
   });
 
@@ -507,6 +519,8 @@ Element JobListDialog::render_detail() {
     }),
     separator(),
     vbox(std::move(info)),
+    paragraph(detail_job->_recovery_note) | color(Color::Yellow),
+    text(" r: Resume  p: Pause  c: Cancel ") | dim,
     vbox(std::move(items_section)) | yflex,
     vbox(std::move(error_section)) | yflex,
   });

@@ -16,6 +16,7 @@
 #include <vector>
 
 namespace Perun {
+class TransferJournal;
 
 enum class JobState {
   QUEUED,
@@ -47,6 +48,7 @@ struct JobInstructions {
   std::vector<DirItem> _items;
   std::vector<DirItem> _errors;
   CopyConflictMode     _copy_conflict = CopyConflictMode::Replace;
+  std::string _recovery_note;
 
   size_t _error_count_total = 0;
   void report_error(DirItem item, std::string message);
@@ -97,7 +99,13 @@ struct JobInterface {
 struct JobSpec : JobInstructions, JobStats, JobInterface {
   std::vector<ArchiveLease> _archive_leases;
   uint64_t           _job_id = 0;
+  std::shared_ptr<TransferJournal> _journal;
+  std::atomic<bool> _recovery_waiting{false};
+  size_t _resume_index = 0;
+  const boost::filesystem::copy_file_io_hooks* _journal_io = nullptr;
   std::atomic<bool>  _cancel_requested{false};
+  std::atomic<bool> _user_cancel_requested{false};
+  std::atomic<bool> _shutdown_requested{false};
   std::atomic<uint64_t> _copy_bytes{0};
   std::atomic<bool> _stopped{false};
   std::atomic<JobState> _last_notified_state{JobState::QUEUED};
@@ -129,6 +137,7 @@ enum class JobError {
   OK,
   NOT_FOUND,
   CANCELLED,
+  RECOVERY_BLOCKED,
 };
 
 struct RunningJobsInfo {
@@ -168,6 +177,7 @@ class FileJobs {
  public:
   virtual ~FileJobs() = default;
   virtual void shutdown() = 0;
+  virtual void enable_recovery(const Filepath& directory) = 0;
   virtual void set_update_sink(std::function<void()> sink) = 0;
   using EventSink=std::function<void(std::string,std::string,uint64_t)>;
   virtual void set_event_sink(EventSink sink) = 0;
@@ -176,6 +186,7 @@ class FileJobs {
   virtual uint64_t add_job(std::shared_ptr<JobSpec> job) = 0;
   virtual JobError cancel(uint64_t id) = 0;
   virtual JobError pause(uint64_t id) = 0;
+  virtual JobError resume(uint64_t id) = 0;
   virtual JobError cancel_job(JobSpec* job)              = 0;
   virtual JobError pause_job(JobSpec* job)               = 0;
 

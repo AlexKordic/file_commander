@@ -14,6 +14,21 @@
     "fc.terminal.input_resize"
   ],
   "groups": {
+    "recovery": [
+      "states",
+      "copy_before_commit",
+      "copy_after_commit",
+      "copy_progress",
+      "move_rename",
+      "move_commit",
+      "move_cleanup",
+      "move_conflict",
+      "shutdown",
+      "directory",
+      "cancel",
+      "invalid",
+      "blocked"
+    ],
     "contract": [
       "locations",
       "settings",
@@ -37,7 +52,6 @@
       "rename",
       "directory_access",
       "settings",
-      "workspace",
       "move",
       "move_metadata",
       "partial",

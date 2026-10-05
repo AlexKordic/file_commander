@@ -76,6 +76,10 @@ int main(int argc, char** argv) {
   UiDispatcher dispatcher;
   auto exec = dispatcher.poster();
   file_operations().set_update_sink(dispatcher.notifier());
+  if (!lua_mode) {
+    try { file_operations().enable_recovery(SettingsStore::path("transfers")); }
+    catch (const std::exception& e) { std::cerr << "Transfer recovery unavailable: " << e.what() << "\n"; return 1; }
+  }
   // auto          redraw = [&screen]() -> void { screen.Post(Event::Custom); };
   auto          dimx = [&screen]() -> int { return screen.dimx(); };
   auto run_with_restored_io = [&screen, &dispatcher](std::function<int()> fn) -> int {

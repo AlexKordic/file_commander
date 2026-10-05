@@ -3479,7 +3479,7 @@ BOOST_FILESYSTEM_DECL
 bool copy_file(path const& from, path const& to, copy_file_options const& opts, error_code* ec)
 {
     // Fast path: no throttle/cancel, delegate directly to the standard implementation
-    if (opts.bytes_per_second == 0 && opts.cancel_requested == nullptr && opts.bytes_copied == nullptr && opts.checkpoint == nullptr && opts.io == nullptr)
+    if (opts.bytes_per_second == 0 && opts.cancel_requested == nullptr && opts.bytes_copied == nullptr && opts.checkpoint == nullptr && opts.io == nullptr && opts.transaction == nullptr)
         return copy_file(from, to, opts.options, ec);
 
 #if defined(BOOST_POSIX_API)
@@ -3522,6 +3522,9 @@ bool copy_file(path const& from, path const& to, copy_file_options const& opts, 
         std::string directory;
         ~cleanup_output() { ::unlink(file.c_str()); ::rmdir(directory.c_str()); }
     } cleanup{staged, directory};
+    if (opts.transaction) {
+        if (int err = opts.transaction(opts.transaction_context, "staging", staged, to)) return fail(err);
+    }
 
     copy_file_context ctx;
     ctx.io = opts.io;
@@ -3540,6 +3543,9 @@ bool copy_file(path const& from, path const& to, copy_file_options const& opts, 
     if (local_ec) return fail(local_ec.value());
     if (!copied) return false;
     if (opts.cancel_requested && opts.cancel_requested->load(std::memory_order_relaxed)) return fail(ECANCELED);
+    if (opts.transaction) {
+        if (int err = opts.transaction(opts.transaction_context, "commit_ready", staged, to)) return fail(err);
+    }
     if (int err = copy_fault("commit")) return fail(err);
     if (overwrite || update) {
         if (::rename(staged.c_str(), to.c_str()) != 0) return fail(errno);
@@ -3550,6 +3556,10 @@ bool copy_file(path const& from, path const& to, copy_file_options const& opts, 
             if (errno == EEXIST && skip) return false;
             return fail(errno);
         }
+    }
+    if (int err = copy_fault("committed")) return fail(err);
+    if (opts.transaction) {
+        if (int err = opts.transaction(opts.transaction_context, "committed", staged, to)) return fail(err);
     }
     return true;
 

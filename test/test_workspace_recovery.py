@@ -75,6 +75,34 @@ with tempfile.TemporaryDirectory(prefix="fc-wr-", dir="/tmp") as directory:
                 current = None
                 assert json.loads(checkpoint.read_text())["left"] == expected["left"]
                 print("PASS workspace recovery", sig.name, "editor" if in_editor else "FC", flush=True)
+        transfer = root / "transfer"
+        transfer.mkdir()
+        (transfer / "source").write_text("RECOVERED_BYTES")
+        crashed = subprocess.run([str(binary.parent / "fc_transfer_recovery_tests"), "--child",
+                                  str(transfer), "copy", "commit"], capture_output=True, timeout=10)
+        assert crashed.returncode == 91, crashed.stderr
+        (transfer / "journal").rename(config / "transfers")
+        current = FC(binary, root, env)
+        current.wait_text(b"target-b")
+        time.sleep(0.3)
+        assert not (transfer / "destination").exists()
+        os.write(current.master, b"\x1b[21~")  # F10: attach and detach without resuming work.
+        current.wait_text(b"Ln 1, Col 1")
+        assert not (transfer / "destination").exists()
+        current.output.clear()
+        os.write(current.master, b"\x1b[21~")
+        current.wait_text(b"target-b")
+        os.write(current.master, b"\x1b[20~")  # F9: job history.
+        current.wait_text(b"Resume")
+        assert not (transfer / "destination").exists()
+        os.write(current.master, b"r")  # Explicitly resume the selected recovered job.
+        eventually(lambda: (current.pump() is not None) and (transfer / "destination").exists())
+        assert (transfer / "destination").read_text() == "RECOVERED_BYTES"
+        os.kill(current.process.pid, signal.SIGTERM)
+        eventually(lambda: (current.pump() is not None) and current.process.poll() is not None)
+        current.stop()
+        current = None
+        print("PASS recovered transfer stays paused through editor handoff; UI Resume completes it", flush=True)
     finally:
         if current:
             current.stop()

@@ -73,6 +73,7 @@ bool LuaScripting::setup(const std::string& script_path) {
   reg("set_transfer_rate", l_set_transfer_rate);
   reg("cancel_job",        l_cancel_job);
   reg("pause_job",         l_pause_job);
+  reg("resume_job",        l_resume_job);
   reg("job_history",       l_job_history);
   reg("test_heartbeat",    l_test_heartbeat);
   // clang-format on
@@ -675,6 +676,10 @@ int LuaScripting::l_set_transfer_rate(lua_State* L) {
 // fc.cancel_job() — cancel the currently running job
 int LuaScripting::l_cancel_job(lua_State* L) {
   from_lua(L)->begin_action();
+  if (!lua_isnoneornil(L, 1)) {
+    lua_pushboolean(L, file_operations().cancel(luaL_checkinteger(L, 1)) == Perun::JobError::OK);
+    return 1;
+  }
   auto jobinfo = file_operations().get_running_job();
   if (jobinfo.job && !jobinfo.job->is_stopped()) {
     file_operations().cancel_job(jobinfo.job.get());
@@ -688,6 +693,10 @@ int LuaScripting::l_cancel_job(lua_State* L) {
 // fc.pause_job() — toggle pause/resume for the currently running job
 int LuaScripting::l_pause_job(lua_State* L) {
   from_lua(L)->begin_action();
+  if (!lua_isnoneornil(L, 1)) {
+    lua_pushboolean(L, file_operations().pause(luaL_checkinteger(L, 1)) == Perun::JobError::OK);
+    return 1;
+  }
   auto jobinfo = file_operations().get_running_job();
   if (jobinfo.job && !jobinfo.job->is_stopped()) {
     file_operations().pause_job(jobinfo.job.get());
@@ -698,7 +707,14 @@ int LuaScripting::l_pause_job(lua_State* L) {
   return 1;
 }
 
-// fc.job_history() — return array of {id, type, state, items_done, items_total, errors, bytes_done, bytes_total}
+// Explicitly resume only the requested job, including a recovered paused job.
+int LuaScripting::l_resume_job(lua_State* L) {
+  from_lua(L)->begin_action();
+  lua_pushboolean(L, file_operations().resume(luaL_checkinteger(L, 1)) == Perun::JobError::OK);
+  return 1;
+}
+
+// fc.job_history() — return array of job summaries including recovery explanations.
 int LuaScripting::l_job_history(lua_State* L) {
   auto history = file_operations().get_job_history();
   lua_newtable(L);
@@ -734,6 +750,9 @@ int LuaScripting::l_job_history(lua_State* L) {
     }
     lua_pushstring(L, state_str);
     lua_setfield(L, -2, "state");
+
+    lua_pushlstring(L, job->_recovery_note.data(), job->_recovery_note.size());
+    lua_setfield(L, -2, "recovery_note");
 
     lua_pushinteger(L, job->_items_done);
     lua_setfield(L, -2, "items_done");

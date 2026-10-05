@@ -1,7 +1,8 @@
 # Editor workflow and interruption recovery
 
-Review date: 2026-10-05. Status: findings and implementation plan; fixes below
-are not yet implemented.
+Review date: 2026-10-05. Status: EW-01 through EW-06 implemented. The findings
+below describe the reviewed baseline; the implementation notes describe current
+behavior and its recovery limits.
 
 Reviewed File Commander revision: `213196066011ebc6ede102dc6034791a6da9d589`.
 Reviewed Fresh revision: `21610e4530a5dbd56027dcae81f3b05fccc2c465`, pinned in
@@ -9,8 +10,8 @@ Reviewed Fresh revision: `21610e4530a5dbd56027dcae81f3b05fccc2c465`, pinned in
 
 This document replaces the multiple-editor-session design in
 [fresh_editor_integration_plan.md](fresh_editor_integration_plan.md).
-[fresh_cli_contract.md](fresh_cli_contract.md) describes the existing CLI
-integration and must be updated when these changes are implemented.
+[fresh_cli_contract.md](fresh_cli_contract.md) describes the implemented CLI
+integration.
 
 ## Required user experience
 
@@ -49,22 +50,79 @@ Resume action.** This is a decided requirement, not an optional recovery mode.
 This decision applies to recovery after interruption. Merely switching to the
 editor during the same FC process does not itself pause healthy live transfers.
 
-### Proposed interaction details
+### Implemented interaction details
 
-These are implementation proposals; the requirements above are fixed.
+The implementation uses the following choices:
 
 - Keep `F4` as open-selected-files in the editor.
-- Provide one configurable switch key in both applications. `F10` is a candidate,
-  but Fresh currently uses it for its menu; replacing that binding must preserve
-  another discoverable way to open the menu.
-- Use one stable FC-owned session per workspace/profile. Define the ownership
-  boundary for simultaneous FC launches before implementation; do not silently
-  create a different editor on each launch or share unrelated profiles.
+- `F10` switches in both directions by default; the FC palette can rebind it.
+  Each Fresh attachment receives the current binding. `Alt+F` opens the File menu.
+- Use one stable FC-owned session per configuration profile. A lifetime profile
+  lock rejects a second interactive FC for that profile; a different
+  `XDG_CONFIG_HOME` selects an independent profile. Session creation also has
+  a backend startup lock.
 - Opening a directory reuses the editor. On first use it can establish project
   context; later opens must preserve tabs and not silently replace project
-  context. An explicit change-project action can handle that separately.
+  context. Changing project context is outside the attach/open operation.
 - An editor backend and its terminal attachment are one logical editor instance.
   Returning to FC detaches the terminal client; it does not quit the backend.
+
+## Implementation and recovery guarantees
+
+| Finding | Implementation | Regression coverage |
+| --- | --- | --- |
+| EW-01 | Fresh creates its backend in a separate Unix session, serializes startup, and bounds readiness waits. | Real PTY/client disconnect, process-group hangup, concurrent backend startup. |
+| EW-02 | Fresh checkpoints named sessions every two seconds and on detach/shutdown; restores tabs, view state, dirty file and untitled text; dirty buffers prevent idle exit. | Backend kill/restart twice, closed-tab persistence, dirty/untitled text, short idle timeout, unchanged source files. |
+| EW-03 | FC checkpoints `editor_session.json` before launching, reconstructs the session registry, and retries the same identity after failure. | Manager regression and FC restart/reattachment tests. |
+| EW-04 | Files and directories reuse one session; previous/next-session commands are compatibility aliases. Fresh owns tab closure. | Single-session manager contract and real multi-file Fresh tests. |
+| EW-05 | `F10` attaches/detaches; binding overrides travel with each attachment; the terminal returns to FC. | Real FC/Fresh round trip with dirty text, selection/input restoration, failed launch, F8 override. |
+| EW-06 workspace | FC checkpoints both panels every 500 ms, before editor handoff and on graceful exit. Restores tabs, focus, selections, filters, layout and view options. | Workspace schema/failure tests; real PTY HUP, TERM and KILL with either FC or Fresh foreground; duplicate-profile rejection. |
+| EW-06 transfers | Journal before queueing, durable commit boundaries, all interrupted records restored paused, explicit selected-job Resume, conservative reconciliation. | Process exits before/after copy commit, same-filesystem rename, repeated move cleanup interruption, changed files/parents, corrupt records, cancellation, directory access, shutdown and real job-dialog Resume. |
+
+Recovery files live in the FC configuration profile: `workspace.json`,
+`editor_session.json`, and `transfers/<id>.{plan,state}.json`. Preferences remain
+separate. An explicit command-line panel path takes precedence over saved panel
+paths; it does not resume transfers or create a different editor identity.
+Missing locations use an existing ancestor while retaining the intended tab
+state. Invalid checkpoints remain on disk and are reported rather than silently
+replaced. Writes use private temporary files, atomic rename and directory fsync.
+
+Fresh's named-session checkpoint lives under its own data directory. Dirty text
+is recovery data, not an implicit Save to the source file. Abrupt loss can discard
+edits since the last successful two-second checkpoint. FC's corresponding panel
+state window is 500 ms. Undo history remains live across detach/reattach; it is
+not serialized as part of backend crash recovery.
+
+### Transfer controls and limits
+
+Open **Job List (`F9`)**, select a transfer, then press **`r` to Resume**, **`p` to
+Pause**, or **`c` to Cancel**. Details show the reason a transfer remains paused.
+Dismiss applies only to finished history. Lua exposes `fc.resume_job(id)`, optional
+IDs for `fc.cancel_job(id)` / `fc.pause_job(id)`, and `recovery_note` in job history.
+
+Resume is **file-level**, not byte-level. Completed journaled items are retained;
+an incomplete private staging item can be removed and recopied only after an
+explicit Resume and validation. Copy/move identity checks include filesystem and
+inode identity, sizes, modification/change timestamps, modes and symlink targets.
+A proven copy commit advances without replaying it. A proven cross-volume move
+commit resumes source cleanup only while the destination and remaining source
+entries still match. An interrupted same-volume rename is reconciled by identity.
+Staged data and destination directories are flushed before recording commit and
+starting source cleanup. The immutable discovered plan and mutable progress are
+stored separately, with a 64 MiB per-record limit; oversized journals reject job
+submission before execution.
+
+Changed files, destination conflicts, changed parent/volume identity, inaccessible
+paths, or uncertain completion leave recovery paused with an explanation. The
+user can resolve the issue and retry Resume, or explicitly Cancel the recovery
+and start a new operation through the usual dialog after reviewing the files.
+Recovered delete, archive, rename and other non-copy/move operations require that
+explicit cancel/new-operation route. No destructive job is replayed automatically.
+Cancellation retains committed files; recovery never interprets Cancel as Undo.
+Unexpected private staging data is retained when ownership cannot be proven.
+
+The guarantees cover interruption and subsequent restart. Validation cannot lock
+out unrelated applications changing the same filesystem during execution.
 
 ## Findings and fix plans
 
@@ -303,7 +361,7 @@ one selected job and verify others remain paused. Inject repeated crashes around
 destination commit/source cleanup; completed work must not be replayed and
 changed files must not be silently overwritten or removed.
 
-## Evidence and current test coverage
+## Original review evidence
 
 Local review artifacts are in the ignored directory
 `build-review-evidence/editor-ergonomics/`; they are not distributed with the
@@ -317,7 +375,8 @@ do not have those files.
 | `fresh-results.json` | Client-only disconnect preserved dirty text and tabs; group SIGHUP killed the backend; a new backend restored neither; source file unchanged. |
 | `fresh-results.json` and source inspection | No recovery/workspace files after four seconds; session loop omits standalone persistence calls. |
 
-Existing tests do not establish the requested workflow:
+At the reviewed baseline, the existing tests did not establish the requested workflow
+(the tests have since been replaced or extended):
 
 - [test/test_fresh_terminal.py](../test/test_fresh_terminal.py) sends Ctrl+Q
   after detecting Fresh. It tests quit and terminal return, not detach with dirty
@@ -328,7 +387,8 @@ Existing tests do not establish the requested workflow:
   intentionally checks a three-session ring, reflecting the old design.
 
 The previously reported native release result (178/178 passing) remains valid
-for its tested scope. It does not close these newly reviewed workflow gaps.
+for that earlier revision only. New qualification must include the recovery tests
+listed above; it cannot inherit the earlier release result.
 
 ## Implementation sequence and commit boundaries
 

@@ -1,6 +1,7 @@
 #include "traversal.hpp"
 
 #include "file_io_jobs.hpp"
+#include "transfer_journal.hpp"
 #include "file_metadata.hpp"
 #include "archive.hpp"
 #include "fifo_queue.hpp"
@@ -57,6 +58,7 @@ std::shared_ptr<const JobSnapshot> JobSpec::snapshot(bool details) {
   if (!details && _completed_summary) return _completed_summary;
   auto view = std::make_shared<JobSnapshot>();
   if (details) static_cast<JobInstructions&>(*view) = static_cast<const JobInstructions&>(*this);
+  view->_recovery_note = _recovery_note;
   view->_type = _type; view->_copy_conflict = _copy_conflict; view->_plan = details ? _plan : nullptr;
   view->_item_count = _retained_item_count >= 0 ? _retained_item_count : _items.size(); view->_error_count = _error_count_total;
   view->_details_expired = _details_expired; if(details) view->_step_errors = _step_errors;
@@ -153,7 +155,7 @@ class ProgressMonitor {
       for (auto it = _jobs.begin(); it != _jobs.end();) {
         auto&           job = *it;
         std::lock_guard lock(job->_m);
-        if (job->is_stopped()) {
+        if (job->is_stopped() || job->_recovery_waiting) {
           it = _jobs.erase(it);
           continue;
         }
@@ -319,7 +321,11 @@ bool copy_move_tree(const Filepath& source, const Filepath& destination,
     auto output=target(e);
     if (e.link_text) boost::filesystem::create_symlink(*e.link_text,output,ec);
     else if (boost::filesystem::is_directory(e.status)) create_private_directory(output,ec);
-    else boost::filesystem::copy_file(e.path,output,options,ec);
+    else {
+      auto nested = options;
+      nested.transaction = nullptr; nested.remove_source = nullptr;
+      boost::filesystem::copy_file(e.path,output,nested,ec);
+    }
     return !ec;
   };
   cb.leave = [&](const TraversalEntry& e) {
@@ -351,19 +357,34 @@ bool move_by_copy(const Filepath& source, const Filepath& destination,
     ~Cleanup() { error_code ignored; remove_owned_staging(root, ignored); }
   } cleanup{staging};
   const auto output = staging / "entry";
+  if (options.transaction) {
+    int error = options.transaction(options.transaction_context, "staging", output, destination);
+    if (error) { ec.assign(error,boost::system::system_category()); return false; }
+  }
   if (!copy_move_tree(source, output, options, ec) || !transfer_checkpoint(options, ec)) return false;
   auto fault = [&](const char* phase) {
     int error = options.io && options.io->fault ? options.io->fault(options.io->context,phase) : 0;
     if (error) ec.assign(error,boost::system::system_category());
     return error != 0;
   };
+  if (options.transaction) {
+    int error = options.transaction(options.transaction_context, "commit_ready", output, destination);
+    if (error) { ec.assign(error,boost::system::system_category()); return false; }
+  }
   if (fault("move_commit")) return false;
   boost::filesystem::rename(output, destination, ec);
   if (ec) return false;
+  if (options.transaction) {
+    int error = options.transaction(options.transaction_context, "committed", output, destination);
+    if (error) { ec.assign(error,boost::system::system_category()); return false; }
+  }
   // Commit boundary: the complete destination now exists. Finish source cleanup
   // even if cancellation arrives here, rather than leaving a half-deleted source.
   if (fault("source_remove")) return false;
-  boost::filesystem::remove_all(source, ec);
+  if (options.remove_source) {
+    int error = options.remove_source(options.transaction_context, source, destination);
+    if (error) ec.assign(error,boost::system::system_category());
+  } else boost::filesystem::remove_all(source, ec);
   return !ec;
 }
 
@@ -394,7 +415,11 @@ class ThreadedFileJobs : public FileJobs {
       _queue.close();
       {
         std::lock_guard lock(_m);
-        if (_active_job) cancel_job(_active_job.get());
+        if (_active_job && !_active_job->is_stopped()) {
+          _active_job->_shutdown_requested = true;
+          _active_job->_cancel_requested = true;
+          _active_job->_pause_cv.notify_all();
+        }
       }
       if (_thread.joinable()) _thread.join();
       _progress_monitor.stop();
@@ -402,29 +427,38 @@ class ThreadedFileJobs : public FileJobs {
   }
   uint64_t add_job(std::shared_ptr<JobSpec> job) override {
     for(const auto& op:job->_plan->steps) if(auto lease=_archives.lease_for_path(op.source)) job->_archive_leases.push_back(std::move(lease));
-    job->updated = [updates = _updates, weak=std::weak_ptr<JobSpec>(job)] {
-      updates->notify();if(auto job=weak.lock()) {
-        auto snapshot=job->snapshot(false);auto state=snapshot->_state.load();
-        if(job->_last_notified_state.exchange(state)!=state) {
-          const char* names[]={"queued","running","paused","cancelled","completed","completed_with_errors"};
-          updates->emit("job_state_changed",names[static_cast<int>(state)],job->_job_id);
-        }
-        updates->emit("job_progress",std::to_string(snapshot->_items_done),job->_job_id);
-      }
-    };
     uint64_t id    = _next_job_id.fetch_add(1);
     job->_job_id   = id;
     job->_queued_time = now();
+    try { if (!_journal_directory.empty()) job->_journal = TransferJournal::create(_journal_directory, *job); }
+    catch (const std::exception& e) { report_error("[Transfer journal] " + std::string(e.what())); return 0; }
+    bind_updates(job);
     { std::lock_guard lock(_m); _jobs_by_id[id]=job; }
     ++_outstanding;
     if (_queue.try_push(job) != FifoError::OK) {
       --_outstanding;
       { std::lock_guard lock(_m); _jobs_by_id.erase(id); }
+      try { if (job->_journal) job->_journal->dismiss(); } catch (...) {}
       report_error("Job queue is full or closed; submission rejected");
       return 0;
     }
     return id;
   }
+  void enable_recovery(const Filepath& directory) override {
+    if (!idle() || !_journal_directory.empty()) throw std::runtime_error("Transfer recovery must be initialized before submission");
+    _journal_directory = directory;
+    uint64_t next = _next_job_id;
+    auto restored = TransferJournal::restore(directory, next, [this](auto error) { report_error(std::move(error)); });
+    std::lock_guard lock(_m);
+    _next_job_id = next;
+    for (auto& job : restored) {
+      bind_updates(job);
+      _jobs_by_id[job->_job_id] = job;
+      _job_history.push_back(std::move(job));
+    }
+    retain_history();
+  }
+
   bool idle() const override { return _outstanding.load() == 0; }
   std::vector<JobEvent> events_since(uint64_t& sequence) override {
     std::lock_guard lock(_m);
@@ -436,13 +470,32 @@ class ThreadedFileJobs : public FileJobs {
     return result;
   }
   JobError cancel_job(JobSpec* job) override {
-    if (!job) return JobError::NOT_FOUND;
+    if (!job || job->is_stopped()) return JobError::NOT_FOUND;
+    job->_user_cancel_requested = true;
+    if (job->_recovery_waiting) {
+      { std::lock_guard lock(job->_m);
+        job->_state = JobState::CANCELLED; job->_recovery_waiting = false;
+        job->_finished_time = now(); job->_stopped = true;
+        job->_recovery_note = "Recovery cancelled; committed files were retained";
+      }
+      if (job->_journal) {
+        try { job->_journal->checkpoint(*job->snapshot(), JobState::CANCELLED); }
+        catch (const std::exception& e) { report_error(e.what()); return JobError::RECOVERY_BLOCKED; }
+      }
+      job->updated();
+      return JobError::OK;
+    }
     job->_cancel_requested = true;
     job->_pause_cv.notify_all();
+    if (job->_journal) {
+      try { job->_journal->checkpoint(*job->snapshot(), JobState::CANCELLED); }
+      catch (const std::exception& e) { report_error(e.what()); return JobError::RECOVERY_BLOCKED; }
+    }
     return JobError::OK;
   }
   JobError pause_job(JobSpec* job) override {
     if (!job) return JobError::NOT_FOUND;
+    if (job->_recovery_waiting) return resume(job->_job_id);
     {
       std::lock_guard lock(job->_m);
       if (job->is_stopped()) return JobError::NOT_FOUND;
@@ -469,6 +522,11 @@ class ThreadedFileJobs : public FileJobs {
 
   void dismiss_job(uint64_t job_id) override {
     std::lock_guard lock(_m);
+    auto found = _jobs_by_id.find(job_id);
+    if (found != _jobs_by_id.end()) if (auto job = found->second.lock()) {
+      if (!job->is_stopped()) return;
+      try { if (job->_journal) job->_journal->dismiss(); } catch (...) { return; }
+    }
     _jobs_by_id.erase(job_id);
     _job_history.erase(
       std::remove_if(_job_history.begin(), _job_history.end(),
@@ -496,6 +554,32 @@ class ThreadedFileJobs : public FileJobs {
   int64_t error_count() override { std::lock_guard lock(_m);return _errors.size(); }
   JobError cancel(uint64_t id) override { return control(id,true); }
   JobError pause(uint64_t id) override { return control(id,false); }
+  JobError resume(uint64_t id) override {
+    std::shared_ptr<JobSpec> job;
+    { std::lock_guard lock(_m); auto found = _jobs_by_id.find(id); if (found != _jobs_by_id.end()) job = found->second.lock(); }
+    if (!job || job->is_stopped()) return JobError::NOT_FOUND;
+    if (!job->_recovery_waiting) {
+      if (job->_pause_requested) return pause_job(job.get());
+      return JobError::OK;
+    }
+    try {
+      std::lock_guard lock(job->_m);
+      job->_journal->prepare_resume(*job);
+      job->_recovery_note.clear(); job->_cancel_requested = false; job->_pause_requested = false;
+      job->_user_cancel_requested = false; job->_shutdown_requested = false;
+      job->_recovery_waiting = false; job->_state = JobState::QUEUED;
+      ++_outstanding;
+      if (_queue.try_push(job) != FifoError::OK) {
+        --_outstanding; job->_recovery_waiting = true; job->_state = JobState::PAUSED;
+        throw std::runtime_error("Queue is full or closed; recovered transfer remains paused");
+      }
+    } catch (const std::exception& e) {
+      { std::lock_guard lock(job->_m); job->_recovery_note = e.what(); }
+      report_error("[Resume] " + std::string(e.what())); job->updated();
+      return JobError::RECOVERY_BLOCKED;
+    }
+    job->updated(); return JobError::OK;
+  }
   JobError control(uint64_t id,bool cancelling) {
     std::shared_ptr<JobSpec> job;
     {std::lock_guard lock(_m);auto found=_jobs_by_id.find(id);if(found!=_jobs_by_id.end()) job=found->second.lock();}
@@ -515,15 +599,53 @@ class ThreadedFileJobs : public FileJobs {
   }
 
  private:
+  Filepath _journal_directory;
+  void bind_updates(const std::shared_ptr<JobSpec>& job) {
+    job->updated = [updates = _updates, weak=std::weak_ptr<JobSpec>(job)] {
+      updates->notify();if(auto job=weak.lock()) {
+        auto snapshot=job->snapshot(job->_journal != nullptr);auto state=snapshot->_state.load();
+        if (job->_journal) {
+          auto persisted = job->_user_cancel_requested ? JobState::CANCELLED
+            : job->_shutdown_requested && !job->is_stopped() ? JobState::PAUSED : state;
+          try { job->_journal->checkpoint(*snapshot, persisted, false); }
+          catch (const std::exception& e) { std::lock_guard lock(job->_m); job->_recovery_note = "Transfer checkpoint failed: " + std::string(e.what()); }
+        }
+        if(job->_last_notified_state.exchange(state)!=state) {
+          const char* names[]={"queued","running","paused","cancelled","completed","completed_with_errors"};
+          updates->emit("job_state_changed",names[static_cast<int>(state)],job->_job_id);
+        }
+        updates->emit("job_progress",std::to_string(snapshot->_items_done),job->_job_id);
+      }
+    };
+  }
+  void configure_transaction(boost::filesystem::copy_file_options& options, JobSpec* job) {
+    if (!job->_journal) return;
+    options.options |= copy_options::synchronize;
+    job->_journal_io = _services.file_io.get();
+    options.transaction_context = job;
+    options.transaction = [](void* context, const char* phase, const Filepath& stage, const Filepath& destination) {
+      return static_cast<JobSpec*>(context)->_journal->transaction(phase, stage, destination);
+    };
+    options.remove_source = [](void* context, const Filepath& source, const Filepath& destination) {
+      auto* job = static_cast<JobSpec*>(context);
+      return job->_journal->remove_source(source, destination, job->_journal_io);
+    };
+  }
   void record_event(uint64_t id,bool completed) {
     _events.push_back({++_event_sequence,id,completed});
     while(_events.size()>std::max(size_t{1},_limits.event_count)) _events.pop_front();
   }
   void retain_history() { // manager mutex held; stopped jobs only
-    while(_job_history.size()>_limits.history_count) { _jobs_by_id.erase(_job_history.front()->_job_id);_job_history.erase(_job_history.begin()); }
+    size_t stopped = std::count_if(_job_history.begin(), _job_history.end(), [](const auto& job) { return job->is_stopped(); });
+    for (auto it = _job_history.begin(); it != _job_history.end() && stopped > _limits.history_count;) {
+      if (!(*it)->is_stopped()) { ++it; continue; }
+      try { if ((*it)->_journal) (*it)->_journal->dismiss(); } catch (...) { ++it; continue; }
+      _jobs_by_id.erase((*it)->_job_id); it = _job_history.erase(it); --stopped;
+    }
     size_t bytes=0,count=0;
     for(auto it=_job_history.rbegin();it!=_job_history.rend();++it) {
       auto& job=**it; std::lock_guard lock(job._m);
+      if (!job.is_stopped()) continue;
       job._archive_leases.clear(); // Execution is complete; details only contain display paths.
       if(job._details_expired) continue;
       size_t cost=(job._items.capacity()+job._errors.capacity())*sizeof(DirItem);
@@ -565,11 +687,15 @@ class ThreadedFileJobs : public FileJobs {
         std::lock_guard lock(_m);
         _active_job = std::move(job);
         record_event(_active_job->_job_id,false);
-        if (_shutdown.load()) _active_job->_cancel_requested = true;
+        if (_shutdown.load()) {
+          _active_job->_shutdown_requested = true;
+          _active_job->_cancel_requested = true;
+        }
       }
       _updates->emit("job_started",std::to_string(_active_job->_job_id),_active_job->_job_id);
       _active_job->updated();
       _progress_monitor.add_job(_active_job);
+      try {
       if (_active_job->_cancel_requested.load()) {
         _active_job->_state = JobState::CANCELLED;
       } else if (validate_mutation_paths(_active_job.get())) switch (_active_job->_type) {
@@ -579,9 +705,37 @@ class ThreadedFileJobs : public FileJobs {
       case JobSpec::Type::ARCHIVE_CREATE: run_archive_create(_active_job.get()); break;
       case JobSpec::Type::MKDIR: case JobSpec::Type::RENAME: case JobSpec::Type::CLIPBOARD: run_small(_active_job.get()); break;
       }
+      } catch (const std::exception& e) {
+        { std::lock_guard lock(_active_job->_m);
+          _active_job->_recovery_note = e.what();
+          if (_active_job->_journal) {
+            _active_job->_state = JobState::PAUSED;
+            _active_job->_recovery_waiting = true;
+          } else {
+            _active_job->_state = JobState::COMPLETED_WITH_ERRORS;
+            _active_job->report_error(DirItem(Filepath()), e.what());
+          }
+        }
+        report_error("[Transfer paused] " + std::string(e.what()));
+      }
+      if (_active_job->_journal && !_active_job->_user_cancel_requested && (_shutdown || _active_job->_recovery_waiting)) {
+        { std::lock_guard lock(_active_job->_m);
+          _active_job->_state = JobState::PAUSED; _active_job->_recovery_waiting = true;
+          if (_active_job->_recovery_note.empty()) _active_job->_recovery_note = "Interrupted transfer — Resume required";
+        }
+        try { _active_job->_journal->checkpoint(*_active_job->snapshot(), JobState::PAUSED); }
+        catch (const std::exception& e) { report_error(e.what()); }
+        { std::lock_guard lock(_m);
+          if (std::find(_job_history.begin(), _job_history.end(), _active_job) == _job_history.end()) _job_history.push_back(_active_job);
+          --_outstanding;
+        }
+        _active_job->updated();
+        continue;
+      }
       {
         std::lock_guard lock(_active_job->_m);
         _active_job->_finished_time = now();
+        if (_active_job->_user_cancel_requested) _active_job->_state = JobState::CANCELLED;
         // Determine final state (if not already set by pause/cancel in future steps)
         if (_active_job->_state != JobState::CANCELLED && _active_job->_state != JobState::COMPLETED_WITH_ERRORS) {
           _active_job->_state = _active_job->_errors.empty()
@@ -591,13 +745,17 @@ class ThreadedFileJobs : public FileJobs {
         _active_job->_pause_requested = false;
         _active_job->_stopped.store(true, std::memory_order_release);
       }
+      if (_active_job->_journal) {
+        try { _active_job->_journal->checkpoint(*_active_job->snapshot(), _active_job->_state); }
+        catch (const std::exception& e) { report_error("[Transfer journal] " + std::string(e.what())); }
+      }
       if (auto completed=std::move(_active_job->completed)) {
         try { completed(_active_job->snapshot()); } catch (const std::exception& e) { report_error(e.what()); }
       }
       // Store in job history directly (under _m, which we already use for _active_job)
       {
         std::lock_guard lock(_m);
-        _job_history.push_back(_active_job);
+        if (std::find(_job_history.begin(), _job_history.end(), _active_job) == _job_history.end()) _job_history.push_back(_active_job);
         record_event(_active_job->_job_id,true);
         retain_history();
         --_outstanding;
@@ -697,7 +855,7 @@ class ThreadedFileJobs : public FileJobs {
 
   void run_move(JobSpec* job) {
     DelayedUpdate update;
-    for (int i = 0; i < job->_items.size(); i++) {
+    for (int i = int(job->_resume_index); i < job->_items.size(); i++) {
       if (job->_cancel_requested.load(std::memory_order_relaxed)) {
         job->_state = JobState::CANCELLED;
         return;
@@ -710,9 +868,19 @@ class ThreadedFileJobs : public FileJobs {
       const auto& op=job->_plan->steps.at(i);
       error_code ec;
       const auto* io = _services.file_io.get();
+      const bool cleanup = job->_journal && job->_journal->cleanup_pending();
+      if (job->_journal && !cleanup) job->_journal->begin_step(size_t(i));
       int injected = io && io->fault ? io->fault(io->context,"move_rename") : 0;
+      if (cleanup) {
+        int result = job->_journal->remove_source(op.source, op.destination, io);
+        if (result) ec.assign(result, boost::system::system_category());
+      } else
       if (injected) ec.assign(injected,boost::system::system_category());
       else boost::filesystem::rename(op.source, op.destination, ec);
+      if (!ec && !cleanup && io && io->fault) {
+        int fault = io->fault(io->context, "move_renamed");
+        if (fault) ec.assign(fault, boost::system::system_category());
+      }
       if (ec.value() == boost::system::errc::cross_device_link) {
         boost::filesystem::copy_file_options options;
         options.io = _services.file_io.get();
@@ -721,6 +889,7 @@ class ThreadedFileJobs : public FileJobs {
         options.bytes_copied = &job->_copy_bytes;
         options.checkpoint = [](void* context) { return wait_for_resume(static_cast<JobSpec*>(context)); };
         options.checkpoint_context = job;
+        configure_transaction(options, job);
         move_by_copy(op.source, op.destination, options, ec);
         if (job->_cancel_requested.load() && ec) {
           job->_state = JobState::CANCELLED;
@@ -741,6 +910,7 @@ class ThreadedFileJobs : public FileJobs {
         if (ec) ++job->_items_failed;
         else job->_bytes_processed += std::max(int64_t{0}, item.size());
         job->_current_item_index = i + 1;
+        if (job->_journal) job->_journal->finish_step(*job);
       }
       if (update.is_time_to_update()) job->updated();
     }
@@ -826,7 +996,9 @@ class ThreadedFileJobs : public FileJobs {
       if (locked) lock.lock();
     });
     // _job->_items is not to be modified by other threads
-    for (const auto& op : job->_plan->steps) {
+    if (job->_journal && job->_resume_index) job->_journal->prepare_copy_directories(created_directories);
+    for (size_t index = job->_resume_index; index < job->_plan->steps.size(); ++index) {
+      const auto& op = job->_plan->steps[index];
       auto item=operation_display(op);
       if (job->_cancel_requested.load(std::memory_order_relaxed)) {
         job->_state = JobState::CANCELLED;
@@ -838,16 +1010,11 @@ class ThreadedFileJobs : public FileJobs {
       const auto errors_before = job->_error_count_total;
       bool item_finished = true;
       bool item_skipped = false;
-      Defer update_progress([&]() {
-        if (!item_finished) return;
-        ++job->_items_done;
-        if (job->_error_count_total > errors_before) ++job->_items_failed;
-        if (item_skipped) ++job->_items_skipped;
-        ++job->_current_item_index;
-      });
+      if (job->_journal) job->_journal->begin_step(index);
+      auto execute_item = [&]() {
       if (std::any_of(failed_directories.begin(), failed_directories.end(), [&](const auto& root) { return path_is_under(root, op.destination); })) {
         job->report_error(item, "Copy destination directory could not be secured");
-        continue;
+        return;
       }
       if (op.kind == Operation::Kind::DiscoveryFailure) {
         const auto message = op.message;
@@ -855,7 +1022,7 @@ class ThreadedFileJobs : public FileJobs {
         lock.unlock();
         report_error("[Discovery] " + item.path_ref().native() + ": " + message);
         lock.lock();
-        continue;
+        return;
       }
       if (op.kind == Operation::Kind::CreateDirectory) {
         ec.clear();
@@ -877,13 +1044,13 @@ class ThreadedFileJobs : public FileJobs {
           job->report_error(item, "Failed to create directory: " + ec.message());
           // also all items going into this dir may fail now, but we will let them error out individually
         }
-        continue;
+        return;
       }
       if (op.kind == Operation::Kind::CreateSymlink) {
         if (op.link_text.empty()) {
           job->report_error(item, "Symlink target not set");
           report_error("[Symlink target not set] " + item.path_ref().native());
-          continue;
+          return;
         }
         ec.clear();
         lock.unlock();
@@ -897,7 +1064,7 @@ class ThreadedFileJobs : public FileJobs {
         if (skip_link) {
           lock.lock();
           item_skipped = true;
-          continue;
+          return;
         }
         auto parent = destination.parent_path();
         if (parent.empty()) parent = ".";
@@ -921,11 +1088,11 @@ class ThreadedFileJobs : public FileJobs {
           // report error
           job->report_error(item, "Failed to create symlink: " + ec.message());
         }
-        continue;
+        return;
       }
       if (op.destination.empty()) {
         job->report_error(item, "Copy destination not set");
-        continue;
+        return;
       }
       auto skip_current_file = [&]() {
         item_skipped = true;
@@ -938,7 +1105,7 @@ class ThreadedFileJobs : public FileJobs {
         const bool destination_exists = boost::filesystem::exists(destination_path, exists_ec);
         if (exists_ec.failed()) {
           job->report_error(item, "Failed to check destination: " + exists_ec.message());
-          continue;
+          return;
         }
         bool skip_file = false;
         if (destination_exists && job->_copy_conflict == CopyConflictMode::Skip) {
@@ -950,13 +1117,13 @@ class ThreadedFileJobs : public FileJobs {
           auto       dst_time = boost::filesystem::last_write_time(destination_path, dst_time_ec);
           if (src_time_ec.failed() || dst_time_ec.failed()) {
             job->report_error(item, "Failed to compare file times");
-            continue;
+            return;
           }
           skip_file = src_time <= dst_time;
         }
         if (skip_file) {
           skip_current_file();
-          continue;
+          return;
         }
       }
       // else path is source file and target is destination file for copy operation
@@ -975,6 +1142,7 @@ class ThreadedFileJobs : public FileJobs {
       cfo.bytes_copied = &job->_copy_bytes;
       cfo.checkpoint = [](void* context) { return wait_for_resume(static_cast<JobSpec*>(context)); };
       cfo.checkpoint_context = job;
+      configure_transaction(cfo, job);
       boost::filesystem::copy_file(op.source, destination_path, cfo, ec);
       if (ec.failed() && job->_cancel_requested.load(std::memory_order_relaxed)) {
         item_finished = false;
@@ -1004,6 +1172,14 @@ class ThreadedFileJobs : public FileJobs {
         job->updated();
         lock.lock();
       }
+      };
+      execute_item();
+      if (!item_finished) return;
+      ++job->_items_done;
+      if (job->_error_count_total > errors_before) ++job->_items_failed;
+      if (item_skipped) ++job->_items_skipped;
+      job->_current_item_index = int(index + 1);
+      if (job->_journal) job->_journal->finish_step(*job);
     }
   }
 
