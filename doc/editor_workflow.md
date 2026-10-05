@@ -72,7 +72,7 @@ The implementation uses the following choices:
 | Finding | Implementation | Regression coverage |
 | --- | --- | --- |
 | EW-01 | Fresh creates its backend in a separate Unix session, serializes startup, and bounds readiness waits. | Real PTY/client disconnect, process-group hangup, concurrent backend startup. |
-| EW-02 | Fresh checkpoints named sessions every two seconds and on detach/shutdown; restores tabs, view state, dirty file and untitled text; dirty buffers prevent idle exit. | Backend kill/restart twice, closed-tab persistence, dirty/untitled text, short idle timeout, unchanged source files. |
+| EW-02 | Fresh checkpoints named sessions every two seconds and on detach/shutdown; restores tabs, view state, dirty file and untitled text; dirty buffers prevent idle exit. | Backend kill/restart twice, tab order/active tab/cursor, closed-tab persistence, dirty/untitled text, dirty idle survival and clean idle restart, unchanged source files. |
 | EW-03 | FC checkpoints `editor_session.json` before launching, reconstructs the session registry, and retries the same identity after failure. | Manager regression and FC restart/reattachment tests. |
 | EW-04 | Files and directories reuse one session; previous/next-session commands are compatibility aliases. Fresh owns tab closure. | Single-session manager contract and real multi-file Fresh tests. |
 | EW-05 | `F10` attaches/detaches; binding overrides travel with each attachment; the terminal returns to FC. | Real FC/Fresh round trip with dirty text, selection/input restoration, failed launch, F8 override. |
@@ -360,6 +360,54 @@ paused with no transfer writes, overwrites, or deletions before Resume. Resume
 one selected job and verify others remain paused. Inject repeated crashes around
 destination commit/source cleanup; completed work must not be replayed and
 changed files must not be silently overwritten or removed.
+
+## Qualification of the implementation
+
+Tested FC revision: `d9302fcf4d701914d5cc39cf5387e2fa5b2bc5fd`. The subsequent
+documentation commit does not change executable sources. Full evidence summary:
+[macOS arm64 editor workflow qualification](qualification/macos-arm64-editor-workflow-2026-10-05.json).
+
+- Release build and dependency reconstruction/rebuild passed; the distribution
+  tarball was produced with the pinned Fresh binary.
+- All new editor/workspace/transfer recovery checks passed, including the real
+  FC Job List Resume action and both applications' foreground interruption cases.
+- ASan/UBSan: **36/36** core checks passed.
+- ThreadSanitizer: **19/19** lifetime and transfer recovery checks passed.
+- Strict release lane: **189/196** passed, with no skipped checks. Seven required
+  checks still fail in this tool session: the EXDEV fixture is unavailable;
+  FSEvents cannot start, affecting three watcher tests, two Lua tests and the
+  relocated package smoke test. The native release gate therefore remains open.
+
+Run the existing native helper from a normal macOS Terminal:
+
+```sh
+python3 build-review-evidence/qualify-native.py
+```
+
+It supplies a disposable APFS volume and runs every required release test.
+The earlier user-reported 178/178 result applies to the earlier revision only.
+Fresh's release build and real PTY tests passed; its Rust unit-test target was
+not runnable with the uncached development dependencies available here.
+
+## Fix commits
+
+Fresh fixes are committed in its repository and included in the pinned dependency
+bundle, so a clean bootstrap can reproduce them:
+
+- `1f7d5e68b`: EW-01 backend isolation and bounded startup.
+- `12a246546`: EW-02 named-session workspace and unsaved-buffer recovery.
+- `356a98808`: EW-05 attachment-specific switch key and bounded handshake.
+
+FC fixes are separate commits:
+
+- `15c5985`: reproducible Fresh bundle, bootstrap support and exact revision pin.
+- `8d98949`: EW-03 editor identity persistence and reconnection.
+- `445fa07`: EW-04 one editor for files and directories.
+- `66703ed`: EW-05 configurable editor round trip and real PTY coverage.
+- `f69ec5a`: EW-06 workspace checkpoints and interruption handling.
+- `3b46c89`: EW-06 transfer journaling, paused startup and validated Resume.
+- `0b02641`: preserve discovered delete progress without replaying deletion.
+- `d9302fc`: strengthen editor tab/cursor and clean-idle recovery tests.
 
 ## Original review evidence
 
