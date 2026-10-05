@@ -6,6 +6,8 @@
     "fc.benchmark.render",
     "fc.extended.fresh_success",
     "fc.extended.fresh_failure",
+    "fc.extended.editor_recovery",
+    "fc.harness.fresh_bundle",
     "fc.package",
     "fc.dependency_rebuild",
     "fc.terminal.input_resize"

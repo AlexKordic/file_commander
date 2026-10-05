@@ -19,6 +19,10 @@ failures = []
 for name, spec in manifest['git'].items():
     if name == 'fresh' and args.skip_fresh:
         continue
+    if 'bundle' in spec:
+        bundle = repo / spec['bundle']
+        if not bundle.is_file() or hashlib.sha256(bundle.read_bytes()).hexdigest() != spec['bundle_sha256']:
+            failures.append(f'{name}: dependency bundle fingerprint mismatch')
     path = getattr(args, name)
     try:
         revision = subprocess.check_output(['git', '-C', str(path), 'rev-parse', 'HEAD'], text=True, stderr=subprocess.PIPE).strip()
