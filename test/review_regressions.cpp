@@ -743,6 +743,18 @@ static void R28() {
   result = 0; require(manager.switch_next(error), "dead session prevented cycling");
   require(manager.last_session_id() == sessions[1].id, "known failed session remained in cycle");
   require(manager.switch_prev(error) && manager.last_session_id() == sessions[2].id, "reverse cycle failed around dead session");
+  auto store = f.root / "editor-session.json";
+  manager.set_session_store(store);
+  require(manager.switch_next(error), "session checkpoint failed");
+  const auto saved_id = manager.last_session_id();
+  EditorManager restored([&](const std::function<int()>&) { return result; }, [](const std::string&) {});
+  restored.set_session_store(store);
+  require(restored.switch_next(error), "restored editor could not attach: " + error);
+  require(restored.last_session_id() == saved_id, "restored editor changed identity");
+  restored.set_binary_override("/usr/bin/true");
+  require(restored.open_files_in_last_session({f.file("reopened", "text")}, error), "restored file open failed");
+  require(restored.last_session_id() == saved_id && restored.sessions().size() == 1, "file open abandoned restored session");
+
 }
 
 static void R29() {

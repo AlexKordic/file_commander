@@ -30,6 +30,7 @@ class EditorManager {
   const std::string& binary_override() const;
   std::string        resolved_binary() const;
 
+  void               set_session_store(Filepath path);
   void               set_last_session_id(std::string id);
   const std::string& last_session_id() const;
   std::vector<EditorSessionInfo> sessions() const;
@@ -45,6 +46,9 @@ class EditorManager {
 
   std::string _binary_override;
   std::string _last_session_id;
+  Filepath _session_store;
+  std::string _session_store_error;
+  bool persist_session(std::string& error) const;
 
   std::vector<EditorSessionInfo> _sessions;
   uint64_t                       _session_counter = 0;

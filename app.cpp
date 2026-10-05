@@ -731,7 +731,7 @@ void FileCommander::load_settings(bool restore_paths) {
       if (!p.empty()) add_bookmark(p);
     for (const auto& [id, count] : s.command_use_count) commands().set_use_count(id, count);
     _editor_manager.set_binary_override(s.fresh_binary_path);
-    _editor_manager.set_last_session_id(s.last_editor_session_id);
+    if (_editor_manager.last_session_id().empty()) _editor_manager.set_last_session_id(s.last_editor_session_id);
     theme().import_color_tokens(colors);
     if (restore_paths) {
       auto navigate = [](Panel& panel, const std::string& path) {
@@ -925,6 +925,8 @@ FileCommander::FileCommander(Filepath l, Filepath r, ExecuteOnUiThread exec, std
   _editor_manager.set_status_sink([this](const std::string& text) {
     if (!text.empty()) file_operations().report_error(text);
   });
+  try { _editor_manager.set_session_store(SettingsStore::path("editor_session.json")); }
+  catch (const std::exception& e) { file_operations().report_error(e.what()); }
   auto global_shortcuts = [this](Event event) -> bool { return this->handle_global_shortcuts(event); };
   // Overlay dialogs on top of main document:
   // + errors - fullscreen

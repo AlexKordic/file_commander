@@ -1,5 +1,8 @@
 #include "editor_manager.hpp"
 #include "runtime_paths.hpp"
+#include "settings.hpp"
+#include <boost/json.hpp>
+#include <fstream>
 
 #include <boost/filesystem.hpp>
 
@@ -12,6 +15,11 @@
 
 #if defined(__unix__) || defined(__APPLE__)
 #include <sys/wait.h>
+#include <spawn.h>
+#include <signal.h>
+#include <unistd.h>
+#include <thread>
+extern char** environ;
 #endif
 
 #ifndef FC_FRESH_DEFAULT_BIN
@@ -81,6 +89,43 @@ std::string EditorManager::resolved_binary() const {
 
 void EditorManager::set_last_session_id(std::string id) {
   _last_session_id = std::move(id);
+  if (!_last_session_id.empty() && !find_session(_last_session_id)) {
+    _sessions.push_back({_last_session_id, "Editor", boost::filesystem::current_path(), now_seconds(), true});
+  }
+}
+
+void EditorManager::set_session_store(Filepath path) {
+  _session_store = std::move(path);
+  _session_store_error.clear();
+  try {
+    if (!boost::filesystem::exists(_session_store)) return;
+    std::ifstream in(_session_store.string());
+    if (!in || boost::filesystem::file_size(_session_store) > 65536) throw std::runtime_error("Cannot read editor session record");
+    auto record = boost::json::parse(std::string(std::istreambuf_iterator<char>(in), {})).as_object();
+    if (record.at("version").as_int64() != 1) throw std::runtime_error("Unsupported editor session record");
+    auto id = std::string(record.at("id").as_string());
+    if (id.empty() || id.find_first_not_of("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_") != std::string::npos)
+      throw std::runtime_error("Invalid editor session identity");
+    set_last_session_id(id);
+    auto cwd = Filepath(std::string(record.at("cwd").as_string()));
+    if (!cwd.is_absolute()) throw std::runtime_error("Invalid editor working directory");
+    find_session(id)->cwd = cwd;
+  } catch (const std::exception& e) {
+    _session_store_error = e.what();
+    report_status(_session_store_error + "; editor session record retained");
+  }
+}
+
+bool EditorManager::persist_session(std::string& error) const {
+  if (!_session_store_error.empty()) { error = _session_store_error; return false; }
+  if (_session_store.empty()) return true;
+  const auto* session = find_session(_last_session_id);
+  if (!session) { error = "No editor session to checkpoint"; return false; }
+  try {
+    SettingsStore::atomic_write(_session_store, boost::json::serialize(boost::json::object{
+      {"version",1}, {"id",session->id}, {"cwd",boost::filesystem::absolute(session->cwd).native()}}) + "\n");
+    return true;
+  } catch (const std::exception& e) { error = "Editor checkpoint failed: " + std::string(e.what()); return false; }
 }
 
 const std::string& EditorManager::last_session_id() const {
@@ -129,15 +174,46 @@ int EditorManager::run_command(const Filepath& cwd, const std::vector<std::strin
   if (args.empty()) return -1;
 
   std::ostringstream cmd;
-  if (!cwd.empty()) {
-    cmd << "cd " << shell_escape(cwd.native()) << " && ";
-  }
+  boost::system::error_code ec;
+  const auto working = boost::filesystem::is_directory(cwd, ec) && !ec ? cwd : boost::filesystem::current_path();
+  cmd << "cd " << shell_escape(working.native()) << " && ";
+  cmd << "exec ";
   for (size_t i = 0; i < args.size(); ++i) {
     if (i > 0) cmd << " ";
     cmd << shell_escape(args[i]);
   }
 
-  const auto runner = [&]() -> int { return decode_exit_code(std::system(cmd.str().c_str())); };
+  const auto runner = [&]() -> int {
+#if defined(__unix__) || defined(__APPLE__)
+    auto command = cmd.str();
+    char* argv[] = {const_cast<char*>("/bin/sh"), const_cast<char*>("-c"), command.data(), nullptr};
+    posix_spawnattr_t attrs;
+    posix_spawnattr_init(&attrs);
+    if (!interactive) {
+      posix_spawnattr_setpgroup(&attrs, 0);
+      posix_spawnattr_setflags(&attrs, POSIX_SPAWN_SETPGROUP);
+    }
+    pid_t child;
+    int rc = posix_spawn(&child, "/bin/sh", nullptr, &attrs, argv, environ);
+    posix_spawnattr_destroy(&attrs);
+    if (rc) return rc;
+    auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(25);
+    int status = 0;
+    for (;;) {
+      auto done = waitpid(child, &status, WNOHANG);
+      if (done == child) return decode_exit_code(status);
+      if (done < 0 && errno != EINTR) return -1;
+      if (!interactive && std::chrono::steady_clock::now() >= deadline) {
+        kill(-child, SIGKILL);
+        while (waitpid(child, &status, 0) < 0 && errno == EINTR) {}
+        return 124;
+      }
+      std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+#else
+    return decode_exit_code(std::system(cmd.str().c_str()));
+#endif
+  };
   if (interactive && _run_foreground) {
     return _run_foreground(runner);
   }
@@ -159,6 +235,8 @@ bool EditorManager::attach_session(const std::string& id, std::string& error) {
     return false;
   }
 
+  _last_session_id = id;
+  if (!persist_session(error)) return false;
   const int rc = run_command(session->cwd, {resolved_binary(), "-a", session->id}, true);
   if (rc != 0) {
     session->alive = false;
@@ -258,6 +336,7 @@ bool EditorManager::open_files_in_last_session(const std::vector<Filepath>& file
   args.push_back(session->id);
   for (const auto& f : normalized) args.push_back(f.native());
 
+  if (!persist_session(error)) return false;
   const int open_rc = run_command(session->cwd, args, false);
   // Fresh uses exit code 2 for "open-file started a new session".
   if (open_rc != 0 && open_rc != 2) {
