@@ -1,6 +1,7 @@
 #include "traversal.hpp"
 
 #include "file_io_jobs.hpp"
+#include "file_metadata.hpp"
 #include "archive.hpp"
 #include "fifo_queue.hpp"
 #include "log.hpp"
@@ -796,6 +797,26 @@ class ThreadedFileJobs : public FileJobs {
   void run_copy(JobSpec* job) {
     error_code       ec;
     std::unique_lock lock(job->_m);
+    std::vector<Operation> created_directories;
+    std::vector<Filepath> failed_directories;
+    Defer restore_access([&] {
+      const bool locked = lock.owns_lock();
+      if (locked) lock.unlock();
+      // Children first: restoring a read-only parent's mode must not prevent
+      // populating or finalizing its descendants. Also runs on cancellation.
+      for (auto it = created_directories.rbegin(); it != created_directories.rend(); ++it) {
+        error_code metadata_error;
+        copy_directory_access(it->source, it->destination, metadata_error);
+        if (metadata_error) {
+          const auto message = "Failed to preserve directory access: " + metadata_error.message();
+          report_error(message);
+          std::lock_guard guard(job->_m);
+          job->report_error(operation_display(*it), message);
+          ++job->_items_failed;
+        }
+      }
+      if (locked) lock.lock();
+    });
     // _job->_items is not to be modified by other threads
     for (const auto& op : job->_plan->steps) {
       auto item=operation_display(op);
@@ -816,6 +837,10 @@ class ThreadedFileJobs : public FileJobs {
         if (item_skipped) ++job->_items_skipped;
         ++job->_current_item_index;
       });
+      if (std::any_of(failed_directories.begin(), failed_directories.end(), [&](const auto& root) { return path_is_under(root, op.destination); })) {
+        job->report_error(item, "Copy destination directory could not be secured");
+        continue;
+      }
       if (op.kind == Operation::Kind::DiscoveryFailure) {
         const auto message = op.message;
         job->report_error(item, message);
@@ -827,15 +852,19 @@ class ThreadedFileJobs : public FileJobs {
       if (op.kind == Operation::Kind::CreateDirectory) {
         ec.clear();
         lock.unlock();
-        boost::filesystem::create_directory(op.destination, ec);
+        const bool preserve_access = !op.source.empty();
+        const bool created = preserve_access ? create_private_directory(op.destination, ec)
+                                            : boost::filesystem::create_directory(op.destination, ec);
+        if (created && preserve_access) created_directories.push_back(op);
         if (ec.failed()) {
           error_code check_ec;
           const bool already_directory = boost::filesystem::is_directory(op.destination, check_ec);
-          if (!check_ec.failed() && already_directory) { ec.clear(); }
+          if (!preserve_access && !check_ec.failed() && already_directory) { ec.clear(); }
         }
         if (ec.failed()) report_error("[mkdir] " + item.path_ref().native());
         lock.lock();
         if (ec.failed()) {
+          failed_directories.push_back(op.destination);
           // report error
           job->report_error(item, "Failed to create directory: " + ec.message());
           // also all items going into this dir may fail now, but we will let them error out individually

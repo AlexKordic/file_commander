@@ -103,7 +103,6 @@ void CopyPlanner::run() {
         return false;
       }
       op.kind = Operation::Kind::CreateDirectory;
-      op.source.clear();
     }
     append(std::move(op));
     return true;

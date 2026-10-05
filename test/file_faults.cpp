@@ -2,8 +2,13 @@
 #include <unistd.h>
 #include <iostream>
 #include "file_io_jobs.hpp"
+#include "copy_planner.hpp"
+#include "log.hpp"
 #include "settings.hpp"
 #include "support/contracts.hpp"
+#if defined(__APPLE__)
+#include <sys/acl.h>
+#endif
 using namespace test;
 using namespace Perun;
 struct Fault {
@@ -131,6 +136,82 @@ void rename_conflicts() {
   run({{Operation::Kind::RenameEntry, f / "A", f / "renamed"}}, 0);
   require(!fs::exists(f / "A") && read(f / "renamed") == "original A", "ordinary rename failed");
 }
+#if defined(__APPLE__)
+void fixture_acl(const Filepath& path, acl_tag_t tag) {
+  acl_t acl = ::acl_init(1);
+  require(acl != nullptr, "ACL fixture allocation");
+  Defer free_acl([&] { ::acl_free(acl); });
+  acl_entry_t entry;
+  const unsigned char qualifier[16] = {0x42, 0x11, 0x77, 0x22, 0x35, 0x65, 0x11, 0x45, 0x83, 0x55, 0x77, 0x55, 0x15, 0x25, 0x99, 0x81};
+  require(::acl_create_entry(&acl, &entry) == 0 && ::acl_set_tag_type(entry, tag) == 0 && ::acl_set_qualifier(entry, qualifier) == 0, "ACL fixture entry");
+  acl_permset_t permissions;
+  acl_flagset_t flags;
+  require(::acl_get_permset(entry, &permissions) == 0 && ::acl_add_perm(permissions, ACL_READ_DATA) == 0, "ACL fixture permissions");
+  require(::acl_get_flagset_np(entry, &flags) == 0 && ::acl_add_flag_np(flags, ACL_ENTRY_DIRECTORY_INHERIT) == 0, "ACL fixture inheritance");
+  require(::acl_set_file(path.c_str(), ACL_TYPE_EXTENDED, acl) == 0, "ACL fixture publication");
+}
+std::vector<char> access_acl(const Filepath& path) {
+  auto acl = ::acl_get_file(path.c_str(), ACL_TYPE_EXTENDED);
+  require(acl != nullptr, "ACL fixture read");
+  Defer free_acl([&] { ::acl_free(acl); });
+  std::vector<char> bytes(static_cast<size_t>(::acl_size(acl)));
+  require(::acl_copy_ext(bytes.data(), acl, bytes.size()) >= 0, "ACL fixture serialization");
+  return bytes;
+}
+bool empty_acl(const Filepath& path) {
+  auto acl = ::acl_get_file(path.c_str(), ACL_TYPE_EXTENDED);
+  if (!acl) return errno == ENOENT;
+  Defer free_acl([&] { ::acl_free(acl); });
+  acl_entry_t entry;
+  return ::acl_get_entry(acl, ACL_FIRST_ENTRY, &entry) != 0;
+}
+#endif
+void directory_access() {
+  Fixture f;
+  fs::create_directories(f / "source/readonly");
+  fs::create_directory(f / "out");
+  write(f / "source/readonly/secret", "private bytes");
+  fs::permissions(f / "source", static_cast<fs::perms>(0700));
+  fs::permissions(f / "source/readonly", static_cast<fs::perms>(0550));
+  Defer cleanup([&] {
+    for (const auto& name : {"source", "source/readonly", "out/source", "out/source/readonly"}) {
+      boost::system::error_code ec; fs::permissions(f / name, fs::owner_all, ec);
+    }
+  });
+#if defined(__APPLE__)
+  fixture_acl(f / "source", ACL_EXTENDED_DENY);
+  fixture_acl(f / "out", ACL_EXTENDED_ALLOW);
+#endif
+  struct Observation { Filepath root; bool secure = false; } observation{f / "out/source"};
+  auto hooks = std::make_shared<fs::copy_file_io_hooks>();
+  hooks->context = &observation;
+  hooks->fault = [](void* opaque, const char* phase) {
+    if (std::string(phase) != "open") return 0;
+    auto& observed = *static_cast<Observation*>(opaque);
+    observed.secure = (fs::status(observed.root).permissions() & 0777) == 0700 &&
+                      (fs::status(observed.root / "readonly").permissions() & 0777) == 0700;
+#if defined(__APPLE__)
+    observed.secure = observed.secure && empty_acl(observed.root) && empty_acl(observed.root / "readonly");
+#endif
+    return 0;
+  };
+  FileJobServices services; services.file_io = hooks;
+  auto jobs = make_file_jobs({}, services);
+  CopyPlanner planner({{f / "source"}, f / "out"}); planner._thread.join();
+  auto plan = planner.take_plan();
+  // Legacy discovery consumers must preserve source/destination identity too.
+  auto roundtrip = legacy_plan(OperationType::COPY, legacy_plan_items(*plan), CopyConflictMode::Replace);
+  require(roundtrip.steps.front().source == f / "source" && roundtrip.steps.front().destination == f / "out/source", "legacy directory identity lost");
+  auto job = std::make_shared<JobSpec>(plan);
+  jobs->add_job(job); until([&] { return jobs->idle(); }, "directory access copy timeout");
+  require(job->_state == JobState::COMPLETED && observation.secure, "payload copied before securing new directories");
+  require((fs::status(f / "out/source").permissions() & 0777) == 0700 &&
+          (fs::status(f / "out/source/readonly").permissions() & 0777) == 0550, "directory mode was not preserved");
+  require(read(f / "out/source/readonly/secret") == "private bytes", "read-only source directory prevented population");
+#if defined(__APPLE__)
+  require(access_acl(f / "source") == access_acl(f / "out/source"), "directory ACL was not preserved");
+#endif
+}
 void settings_faults() {
   Fixture f;
   for (auto phase : {"open", "write", "flush", "close", "commit", "zero", "retry", "short"}) {
@@ -226,10 +307,11 @@ int main(int argc, char** argv) {
   try {
     std::string name = argc > 1 ? argv[1] : "all";
     if (name == "exdev") return exdev();
-    require(name == "all" || name == "copy" || name == "long_names" || name == "rename" || name == "settings" || name == "move" || name == "partial", "unknown file fault case");
+    require(name == "all" || name == "copy" || name == "long_names" || name == "rename" || name == "directory_access" || name == "settings" || name == "move" || name == "partial", "unknown file fault case");
     if (name == "copy" || name == "all") copy_faults();
     if (name == "long_names" || name == "all") long_names();
     if (name == "rename" || name == "all") rename_conflicts();
+    if (name == "directory_access" || name == "all") directory_access();
     if (name == "settings" || name == "all") settings_faults();
     if (name == "move" || name == "all") move_faults();
     if (name == "partial" || name == "all") partial_copy();

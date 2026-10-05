@@ -36,8 +36,10 @@ OperationPlan legacy_plan(OperationType type, const std::vector<DirItem>& items,
     if (type == OperationType::COPY) {
       if (item.type() == boost::filesystem::directory_file) {
         op.kind        = Operation::Kind::CreateDirectory;
-        op.destination = op.source;
-        op.source.clear();
+        if (op.destination.empty() || op.destination == op.source) {
+          op.destination = op.source;
+          op.source.clear();
+        }
       }
       if (item.type() == boost::filesystem::symlink_file) {
         op.kind        = Operation::Kind::CreateSymlink;
