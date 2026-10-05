@@ -64,7 +64,9 @@ print('[PASS] fresh_handoff')
     def tick(master,elapsed):
         if (root/'starting').exists() and 'before' not in modes:
             modes['before']=termios.tcgetattr(master)[3];(root/'ack').write_text('ready')
-        if b'Ln 1, Col 1' in seen and 'detach' not in sent:
+        # The daemon can render an empty workspace before queued file opens.
+        # Type only after the target file is visible, or input races its opening.
+        if b'FC_FRESH_SMOKE_READY' in seen and 'detach' not in sent:
             os.write(master,b'DIRTY_ROUND_TRIP\x1b[21~');sent.add('detach')
         if (root/'switching_back').exists() and 'second_start' not in sent:
             seen.clear();sent.add('second_start');(root/'ack2').write_text('ready')
