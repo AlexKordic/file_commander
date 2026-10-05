@@ -759,7 +759,7 @@ static void R29() {
   FileCommander app(f.root, f.root, [&](auto work) { ui.post(std::move(work)); }, [] { return 100; });
   ui.wait(app.get_left()); ui.wait(app.get_right());
   std::map<std::string, std::string> original;
-  for (const auto& command : commands().list_all()) original[command.id] = event_to_token(command.key);
+  for (const auto& command : commands().list_all()) if (command.key != Event::Custom) original[command.id] = event_to_token(command.key);
   std::string error;
   for (const auto& permutation : std::vector<std::map<std::string, std::string>>{
       {{"copy", "f6"}, {"move", "f5"}},
@@ -1201,7 +1201,8 @@ static void AR08() {
     previous[command.id]=command.use_count;commands().set_use_count(command.id,0);
     app.handlers[command.id]={[&,id=command.id]{++hits[id];return true;},[]{return true;}};
     app.execute_palette_command(command.id);
-    require(app.handle_global_shortcuts(command.key),"shortcut bypassed command registry: "+command.id);
+    if (command.key != Event::Custom) require(app.handle_global_shortcuts(command.key),"shortcut bypassed command registry: "+command.id);
+    else require(!app.handle_global_shortcuts(Event::Custom), "unbound command consumed wakeup");
     script+="assert(fc.command('"+command.id+"'))\n";
   }
   auto path=f.file("commands.lua",script);
@@ -1211,11 +1212,12 @@ static void AR08() {
   while(!lua.finished() && std::chrono::steady_clock::now()<deadline){ui.drain();loop.RunOnce();lua.tick();}
   require(lua.finished() && lua.exit_code()==0,"semantic command execution failed");lua.cleanup();
   for(const auto& command:commands().list_all()) {
-    require(hits[command.id]==3 && command.use_count==3,"routes have inconsistent accounting: "+command.id);
+    const int routes = command.key == Event::Custom ? 2 : 3;
+    require(hits[command.id]==routes && command.use_count==routes,"routes have inconsistent accounting: "+command.id);
     app.handlers[command.id].available=[]{return false;};
     app.execute_palette_command(command.id);require(!app.execute_command(command.id),"disabled semantic command ran");
     require(!app.handle_global_shortcuts(command.key),"disabled shortcut ran");
-    require(hits[command.id]==3 && commands().find_by_id(command.id)->use_count==3,"disabled command changed usage");
+    require(hits[command.id]==routes && commands().find_by_id(command.id)->use_count==routes,"disabled command changed usage");
     commands().set_use_count(command.id,previous[command.id]);
   }
   auto bus=std::make_shared<ApplicationEvents>();uint64_t cursor=0;

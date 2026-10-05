@@ -229,6 +229,7 @@ KeyBindings::KeyBindings() {
   key_switch_to_file_commander = Event::F10;
   key_switch_editor_prev   = Event::CtrlY;
   key_switch_editor_next   = Event::CtrlU;
+  key_restart_editor_backend = Event::Custom; // Palette only until rebound.
   key_copy               = Event::F5;
   key_move               = Event::F6;
   key_mkdir              = Event::F7;

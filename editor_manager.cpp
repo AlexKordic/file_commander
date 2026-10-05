@@ -10,6 +10,8 @@
 #include <algorithm>
 #include <chrono>
 #include <cstdlib>
+#include <cstdio>
+#include <memory>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -172,8 +174,13 @@ std::string EditorManager::create_session_id(const Filepath& directory) {
   return out;
 }
 
-int EditorManager::run_command(const Filepath& cwd, const std::vector<std::string>& args, bool interactive) const {
+int EditorManager::run_command(const Filepath& cwd, const std::vector<std::string>& args, bool interactive, std::string* diagnostic) const {
   if (args.empty()) return -1;
+  std::unique_ptr<FILE, decltype(&std::fclose)> capture(diagnostic ? std::tmpfile() : nullptr, &std::fclose);
+  if (diagnostic) {
+    diagnostic->clear();
+    if (!capture) { *diagnostic = "Cannot capture the editor restart result"; return -1; }
+  }
 
   std::ostringstream cmd;
   boost::system::error_code ec;
@@ -203,6 +210,11 @@ int EditorManager::run_command(const Filepath& cwd, const std::vector<std::strin
       setup_error = posix_spawn_file_actions_addopen(&actions, STDIN_FILENO, "/dev/null", O_RDONLY, 0);
       if (!setup_error) setup_error = posix_spawnattr_setpgroup(&attrs, 0);
       if (!setup_error) setup_error = posix_spawnattr_setflags(&attrs, POSIX_SPAWN_SETPGROUP);
+    }
+    if (capture && !setup_error) {
+      fcntl(fileno(capture.get()), F_SETFD, FD_CLOEXEC);
+      setup_error = posix_spawn_file_actions_adddup2(&actions, fileno(capture.get()), STDOUT_FILENO);
+      if (!setup_error) setup_error = posix_spawn_file_actions_adddup2(&actions, fileno(capture.get()), STDERR_FILENO);
     }
     pid_t child;
     std::vector<std::string> environment;
@@ -245,7 +257,15 @@ int EditorManager::run_command(const Filepath& cwd, const std::vector<std::strin
   if (interactive && _run_foreground) {
     return _run_foreground(runner);
   }
-  return runner();
+  const int rc = runner();
+  if (capture) {
+    std::rewind(capture.get());
+    char buffer[8192];
+    const auto size = std::fread(buffer, 1, sizeof(buffer), capture.get());
+    diagnostic->assign(buffer, size);
+    while (!diagnostic->empty() && (diagnostic->back() == '\n' || diagnostic->back() == '\r')) diagnostic->pop_back();
+  }
+  return rc;
 }
 
 void EditorManager::touch_session(const std::string& id, bool alive) {
@@ -321,6 +341,23 @@ bool EditorManager::open_directory(const Filepath& directory, std::string& error
 bool EditorManager::switch_to_editor(const Filepath& initial_directory, std::string& error) {
   if (!ensure_session(initial_directory, error)) return false;
   return attach_session(_last_session_id, error);
+}
+
+EditorManager::RestartResult EditorManager::prepare_restart(const Filepath& initial_directory, bool allow_legacy_checkpoint, std::string& error) {
+  error.clear();
+  if (!ensure_session(initial_directory, error)) return RestartResult::Failed;
+  auto* session = find_session(_last_session_id);
+  if (!session) { error = "No editor session to restart"; return RestartResult::Failed; }
+  std::vector<std::string> args{resolved_binary(), "--cmd", "session", "prepare-restart", session->id};
+  if (allow_legacy_checkpoint) args.push_back("--allow-legacy-checkpoint");
+  const int rc = run_command(session->cwd, args, false, &error);
+  if (rc == 20 && !allow_legacy_checkpoint) return RestartResult::NeedsLegacyConfirmation;
+  if (rc != 0) {
+    if (error.empty()) error = "Editor restart failed (exit " + std::to_string(rc) + ")";
+    return RestartResult::Failed;
+  }
+  session->alive = false;
+  return RestartResult::Ready;
 }
 
 bool EditorManager::open_files_in_last_session(const std::vector<Filepath>& files, std::string& error) {

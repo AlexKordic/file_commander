@@ -59,6 +59,11 @@ static void command(const std::string& id, int route) {
   }
   const auto* definition = commands().find_by_id(id);
   require(definition, "missing command definition");
+  if (definition->key == Event::Custom && route == 0) {
+    require(!app.handle_global_shortcuts(Event::Custom), "palette-only command consumed a wakeup event");
+    std::string error;
+    require(app.rebind_palette_command(id, Event::CtrlD, error), "palette-only command could not be rebound: " + error);
+  }
   auto     count  = definition->use_count;
   uint64_t cursor = 0;
   app.events->since(cursor);
@@ -103,7 +108,8 @@ static void command(const std::string& id, int route) {
                                                              {"toggle_errors", "ErrorList"},
                                                              {"toggle_job_list", "JobList"},
                                                              {"open_bookmarks", "Bookmarks"},
-                                                             {"edit_theme_colors", "ThemeColors"}};
+                                                             {"edit_theme_colors", "ThemeColors"},
+                                                             {"restart_editor_backend", "RestartEditor"}};
   if (dialogs.contains(id)) {
     auto name = dialogs.at(id);
     require(left._active_dialog_name == name || app._active_dialog_name == name, "wrong real dialog: " + id);
@@ -125,6 +131,35 @@ static void command(const std::string& id, int route) {
       },
       "copy operation timeout");
     require(read(f / "right/a") == "payload" && read(f / "left/a") == "payload" && !fs::exists(f / "right/b"), "copy fallback chose wrong source");
+  } else if (id == "restart_editor_backend") {
+    auto dialog = std::dynamic_pointer_cast<RestartEditorDialog>(app.get_overlay_dialog("RestartEditor"));
+    require(!fs::exists(f / "fresh.log"), "opening restart dialog stopped the editor");
+    app.navigation->OnEvent(Event::Escape);
+    require(!fs::exists(f / "fresh.log"), "canceling restart invoked the editor");
+    require(app.execute_command("restart_editor_backend"), "restart command unavailable");
+    dialog->restart();
+    require(fs::exists(f / "fresh.log"), "restart did not invoke editor");
+    auto log = read(f / "fresh.log");
+    require(log.find("[-a]") != std::string::npos && log.find("[prepare-restart]") < log.find("[-a]"), "restart did not stop before attaching");
+    require(app._active_dialog == 0 && &app.focused_panel() == &left, "restart did not restore FC focus");
+    setenv("FC_FRESH_FAKE_RESTART_RC", "20", 1);
+    require(app.execute_command("restart_editor_backend"), "restart command unavailable");
+    dialog->restart();
+    require(dialog->legacy_confirmation && app._active_dialog != 0, "legacy restart did not require consent");
+    require(read(f / "fresh.log").find("[--allow-legacy-checkpoint]") == std::string::npos, "legacy consent inferred");
+    app.navigation->OnEvent(Event::Escape);
+    require(app.execute_command("restart_editor_backend"), "restart command unavailable");
+    require(!dialog->legacy_confirmation, "legacy consent survived cancel");
+    dialog->restart();
+    dialog->restart();
+    require(app._active_dialog == 0, "confirmed legacy restart did not attach");
+    require(read(f / "fresh.log").find("[--allow-legacy-checkpoint]") != std::string::npos, "confirmed legacy restart flag missing");
+    setenv("FC_FRESH_FAKE_RESTART_RC", "1", 1);
+    require(app.execute_command("restart_editor_backend"), "restart command unavailable");
+    dialog->restart();
+    require(app._active_dialog != 0 && dialog->error == "Restart checkpoint unavailable", "restart error not retained in dialog");
+    unsetenv("FC_FRESH_FAKE_RESTART_RC");
+    commands().set_key(id, Event::Custom);
   } else if (id == "move") {
     std::dynamic_pointer_cast<MoveDialog>(left.get_overlay_dialog("Move"))->ok();
     until(

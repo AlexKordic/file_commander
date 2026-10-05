@@ -17,4 +17,10 @@ if [[ "${1-}" == "--cmd" && "${2-}" == "session" && "${3-}" == "open-file" ]]; t
   exit "${FC_FRESH_FAKE_OPEN_RC:-0}"
 fi
 
+if [[ "${1-}" == "--cmd" && "${2-}" == "session" && "${3-}" == "prepare-restart" ]]; then
+  if [[ "${FC_FRESH_FAKE_RESTART_RC:-0}" == "20" && "${5-}" == "--allow-legacy-checkpoint" ]]; then exit 0; fi
+  if [[ "${FC_FRESH_FAKE_RESTART_RC:-0}" != "0" ]]; then printf '%s\n' 'Restart checkpoint unavailable' >&2; fi
+  exit "${FC_FRESH_FAKE_RESTART_RC:-0}"
+fi
+
 exit 0

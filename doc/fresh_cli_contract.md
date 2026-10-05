@@ -16,6 +16,33 @@ Fresh owns tab closure, dirty prompts, saving, and unsaved-buffer recovery.
 - `Ctrl+Y` / `Ctrl+U` remain compatibility shortcuts to the same editor.
   The saved command ID `switch_to_file_commander` now performs the editor toggle.
 - Fresh Quit is an explicit editor operation, separate from detach.
+- In FC, `F1` opens the palette. **Restart editor backend** checkpoints and
+  restarts the same editor identity using the installed Fresh binary, then
+  switches to it. It has no default shortcut; it can be rebound in the palette.
+
+### Explicit backend restart
+
+The restart dialog defaults to Cancel. A supporting backend confirms that it
+wrote dirty/untitled recovery and workspace state before stopping. A failed
+checkpoint or disabled recovery/restore setting leaves it running. Other
+attached clients must detach first. Restart does not save unsaved text over
+source files; undo history and running embedded shell processes do not survive
+the process restart.
+
+Older FC-integrated backends (including the previous 0.2.3 pin) require a second
+confirmation: **restart using the available checkpoint, accepting that recent
+edits may be lost**. Cancel allows the user to save and quit first. Consent is
+specific to that invocation and is not remembered after closing the dialog.
+The command requests ordinary shutdown over the matching protocol; it never
+force-kills a backend or removes live sockets. Failure to stop is shown in FC.
+
+FC invokes `fresh --cmd session prepare-restart <id>` with noninteractive stdin
+and captured diagnostics. Exit 0 means the old backend has stopped (or was
+already absent); FC then attaches with the installed binary. Exit 20 requests
+legacy confirmation without stopping the editor. Only explicit confirmation
+adds `--allow-legacy-checkpoint`. All other failures retain the dialog and show
+the diagnostic. The new handshake's `fc_restart` capability is independent of
+IPC protocol 4 and the existing FC integration capability.
 
 ## Invocation and identity
 

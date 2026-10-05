@@ -47,7 +47,8 @@ struct KeyBindings {
     key_open_in_editor,
     key_switch_to_file_commander,
     key_switch_editor_prev,
-    key_switch_editor_next;
+    key_switch_editor_next,
+    key_restart_editor_backend;
 
   ftxui::Event key_mkdir, key_copy, key_move, key_delete, key_rename, key_names_to_clipboard, key_paths_to_clipboard, key_find;
 

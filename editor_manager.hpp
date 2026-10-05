@@ -43,6 +43,8 @@ class EditorManager {
   bool open_files_in_last_session(const std::vector<Filepath>& files, std::string& error);
   bool switch_next(std::string& error);
   bool switch_prev(std::string& error);
+  enum class RestartResult { Ready, NeedsLegacyConfirmation, Failed };
+  RestartResult prepare_restart(const Filepath& initial_directory, bool allow_legacy_checkpoint, std::string& error);
 
  private:
   RunForeground _run_foreground;
@@ -66,7 +68,7 @@ class EditorManager {
   std::string create_session_id(const Filepath& directory);
   std::string pretty_name_for_dir(const Filepath& directory) const;
 
-  int run_command(const Filepath& cwd, const std::vector<std::string>& args, bool interactive) const;
+  int run_command(const Filepath& cwd, const std::vector<std::string>& args, bool interactive, std::string* diagnostic = nullptr) const;
 
   bool attach_session(const std::string& id, std::string& error);
 

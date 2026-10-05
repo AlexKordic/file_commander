@@ -27,8 +27,9 @@ The current baseline is upstream Fresh 0.5.2 plus the fixes through
 `b10f9084f5eae571e9b8dac1a0f3694384bcb53d`. Build with Rust 1.95 and
 `cargo build --release --locked -p fresh-editor --bin fresh`. The FC commits
 preserve attachment bindings and bounded startup, isolate daemon data, import
-legacy checkpoints, and fix recovered cursor positions and duplicate untitled
-tabs. See `doc/fresh_cli_contract.md` in the FC source tree for upgrade behavior.
+legacy checkpoints, fix recovered cursor positions and duplicate untitled
+tabs, and support checkpoint-confirmed backend restart. See
+`doc/fresh_cli_contract.md` in the FC source tree for upgrade and restart behavior.
 
 Fresh's license is GPL-3.0-or-later. The packaged license is in
 `share/licenses/fresh/LICENSE`; the manifest and this bundle identify the exact

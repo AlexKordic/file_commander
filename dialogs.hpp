@@ -7,6 +7,7 @@
 #include "copy_planner.hpp"
 #include "file_io_jobs.hpp"
 #include "shared_state.hpp"
+#include "editor_manager.hpp"
 
 #include <cstdint>
 #include <ftxui/component/component.hpp>
@@ -340,6 +341,19 @@ struct BookmarksDialog : Dialog {
   void run_open();
   void run_add();
   void run_remove();
+};
+
+struct RestartEditorDialog : Dialog {
+  RestartEditorDialog(std::function<void()> close_dialog,
+    std::function<EditorManager::RestartResult(bool, std::string&)> prepare,
+    std::function<void()> attach);
+  void OnShow() override;
+  void restart();
+  std::function<void()> close_dialog, attach;
+  std::function<EditorManager::RestartResult(bool, std::string&)> prepare;
+  Component button_restart, button_cancel;
+  bool legacy_confirmation = false;
+  std::string error;
 };
 
 struct CommandPaletteDialog : Dialog {

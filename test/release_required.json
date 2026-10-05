@@ -12,7 +12,8 @@
     "fc.package_build",
     "fc.package",
     "fc.dependency_rebuild",
-    "fc.terminal.input_resize"
+    "fc.terminal.input_resize",
+    "fc.extended.editor_restart"
   ],
   "groups": {
     "recovery": [

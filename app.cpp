@@ -745,7 +745,7 @@ bool FileCommander::apply_key_bindings(const std::map<std::string, std::string>&
   }
   for (size_t i = 0; i < proposed.size(); ++i) {
     for (size_t j = 0; j < i; ++j) {
-      if (proposed[i].key == proposed[j].key) {
+      if (proposed[i].key != Event::Custom && proposed[i].key == proposed[j].key) {
         error = "Key conflict between " + proposed[i].id + " and " + proposed[j].id;
         return false;
       }
@@ -819,7 +819,7 @@ void FileCommander::save_settings() const {
     for (const auto& p : _bookmarks) s.bookmarks.push_back(p.encode());
     for (const auto& command : commands().list_all()) {
       s.command_use_count[command.id] = std::max(0, command.use_count);
-      s.key_bindings[command.id]      = event_to_token(command.key);
+      if (command.key != Event::Custom) s.key_bindings[command.id] = event_to_token(command.key);
     }
     s.fresh_binary_path      = _editor_manager.binary_override();
     s.last_editor_session_id = _editor_manager.last_session_id();
@@ -1079,6 +1079,12 @@ FileCommander::FileCommander(Filepath l, Filepath r, ExecuteOnUiThread exec, std
   _overlay_dialogs["Bookmarks"]      = std::make_shared<BookmarksDialog>(_close_dialog, [this]() { return this->list_bookmarks(); }, [this]() { this->add_current_focused_dir_bookmark(); }, [this](const Filepath& path) { this->remove_bookmark(path); }, [this](const Filepath& path) { this->open_bookmark(path); });
   _overlay_dialogs["ThemeColors"]    = std::make_shared<ThemeColorsDialog>(_close_dialog, [this]() { return this->list_theme_colors(); }, []() { return theme().available_color_tokens(); }, [this](const std::string& id, const std::string& token, std::string& error) { return this->set_theme_color(id, token, error); }, [this]() { this->reset_theme_colors(); }, [this]() { this->save_theme_colors(); });
   _overlay_dialogs["CommandPalette"] = std::make_shared<CommandPaletteDialog>(_close_dialog, [this]() { return this->list_palette_commands(); }, [this](const std::string& id) { this->execute_palette_command(id); }, [this](const std::string& id, const Event& key, std::string& error) { return this->rebind_palette_command(id, key, error); });
+  _overlay_dialogs["RestartEditor"] = std::make_shared<RestartEditorDialog>(_close_dialog,
+    [this](bool legacy, std::string& error) { return _editor_manager.prepare_restart(focused_panel().dir.path, legacy, error); },
+    [this] {
+      std::string error;
+      if (!_editor_manager.switch_to_editor(focused_panel().dir.path, error) && !error.empty()) file_operations().report_error(error);
+    });
   renderer                           = Renderer(navigation, [=, this]() -> Element {
     // check for resize:
     int screen_w = _get_dimx();
@@ -1170,7 +1176,7 @@ bool FileCommander::handle_global_shortcuts(Event event) {
   }
 
   for (const auto& command : commands().list_all())
-    if (command.key == event) return execute_command(command.id);
+    if (command.key != Event::Custom && command.key == event) return execute_command(command.id);
 
   return false;
 }

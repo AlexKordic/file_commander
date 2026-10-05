@@ -59,6 +59,16 @@ local after_is_left = after[1]:sub(1, #src) == src
 check(before_is_left ~= after_is_left, "expected switch panel command to change focus")
 fc.key("cA")
 
+-- The backend restart is discoverable through the palette and Cancel has no
+-- effect on the editor or on the panel selection.
+fc.key("f1")
+check(fc.wait_event("dialog_opened", 2000), "expected restart palette to open")
+for character in ("restart"):gmatch(".") do fc.key(character) end
+fc.key("ret")
+check(fc.wait_event("dialog_opened", 2000), "expected editor restart dialog")
+fc.key("esc")
+check(fc.wait_event("dialog_closed", 2000), "expected restart cancellation")
+
 h.cleanup(src, dst)
 test_pass("command_palette_basic")
 fc.quit()

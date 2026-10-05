@@ -66,6 +66,12 @@ The implementation uses the following choices:
   context. Changing project context is outside the attach/open operation.
 - An editor backend and its terminal attachment are one logical editor instance.
   Returning to FC detaches the terminal client; it does not quit the backend.
+- **Restart editor backend** in the FC palette checkpoints and restarts that
+  identity with the installed Fresh version. On 2026-10-06 the user chose to
+  offer a separate confirmed restart from available recovery data for older
+  backends that cannot acknowledge a checkpoint, with a warning that recent
+  edits may be lost. Cancel is the default; the command never force-kills an
+  unresponsive backend. See the [restart contract](fresh_cli_contract.md#explicit-backend-restart).
 
 ## Implementation and recovery guarantees
 

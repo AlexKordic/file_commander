@@ -51,6 +51,53 @@ using Perun::selection_plan;
 std::string time_to_string(double time);
 
 namespace ftxui {
+RestartEditorDialog::RestartEditorDialog(std::function<void()> close,
+  std::function<EditorManager::RestartResult(bool, std::string&)> prepare_restart,
+  std::function<void()> attach_editor)
+    : Dialog(nullptr), close_dialog(std::move(close)), attach(std::move(attach_editor)), prepare(std::move(prepare_restart)) {
+  ButtonOption option;
+  option.transform = ascii_button_transform();
+  button_restart = Button(" Restart ", [this] { restart(); }, option);
+  button_cancel = Button(" Cancel ", [this] { close_dialog(); }, option);
+  navigation = CatchEvent(Container::Horizontal({button_restart, button_cancel}), [this](Event e) {
+    if (e == keys().key_cancel_dialog) { close_dialog(); return true; }
+    return false;
+  });
+  renderer = Renderer(navigation, [this] {
+    Elements content;
+    if (legacy_confirmation) {
+      content.push_back(paragraph("This older editor cannot confirm that all unsaved edits were checkpointed."));
+      content.push_back(paragraph("Restart will ask it to stop and restore the available recovery data. Recent edits may be lost."));
+      content.push_back(paragraph("Cancel to save and quit the old editor first, or choose Restart to continue."));
+    } else {
+      content.push_back(paragraph("Checkpoint editor tabs and unsaved text, then reopen with the installed editor version."));
+      content.push_back(paragraph("File contents are not saved to their original paths. Restart is canceled if checkpointing fails."));
+    }
+    if (!error.empty()) content.push_back(paragraph(error) | color(Color::Red));
+    content.push_back(separator());
+    content.push_back(hbox({button_restart->Render(), filler(), button_cancel->Render()}));
+    return window(text(" Restart editor backend ") | bold, vbox(std::move(content))) | size(WIDTH, LESS_THAN, 72);
+  });
+}
+
+void RestartEditorDialog::OnShow() {
+  legacy_confirmation = false;
+  error.clear();
+  button_cancel->TakeFocus();
+}
+
+void RestartEditorDialog::restart() {
+  const auto result = prepare(legacy_confirmation, error);
+  if (result == EditorManager::RestartResult::NeedsLegacyConfirmation) {
+    legacy_confirmation = true;
+    error.clear();
+    button_cancel->TakeFocus();
+  } else if (result == EditorManager::RestartResult::Ready) {
+    close_dialog();
+    attach();
+  }
+}
+
 BookmarksDialog::BookmarksDialog(
   std::function<void()> close_dialog,
   std::function<std::vector<Filepath>()> list_bookmarks,
@@ -269,7 +316,7 @@ CommandPaletteDialog::CommandPaletteDialog(
     const Command& cmd = commands_all.at(visible_ids.at(c.id));
     auto row = hbox({
       text(" " + cmd.description) | xflex_grow,
-      text(" " + event_to_string(cmd.key) + " ") | dim,
+      text(cmd.key == Event::Custom ? "" : " " + event_to_string(cmd.key) + " ") | dim,
     });
     if (c.focused) {
       row |= c.component_focused ? bgcolor(Color::DarkBlue) : bgcolor(Color::GrayDark);
