@@ -42,6 +42,15 @@ def architecture(value):
     return {'aarch64': 'arm64', 'AMD64': 'x86_64'}.get(value, value)
 
 
+def built_executables(build):
+    binaries = {'fc': build / 'fc', 'fresh': build / 'third_party/fresh/bin/fresh',
+                '7zr': build / 'third_party/lzma/_o/7zr'}
+    for path in binaries.values():
+        if not path.is_file() or not os.access(path, os.X_OK) or not path.stat().st_size:
+            raise ValueError(f'missing release executable: {path}')
+    return binaries
+
+
 def check_build(build, repo, system, arch):
     cache = dict(re.findall(r'^([^#/:\n][^:\n]*):[^=\n]+=(.*)$', (build / 'CMakeCache.txt').read_text(), re.M))
     if Path(cache.get('CMAKE_HOME_DIRECTORY', '')).resolve() != repo.resolve():
@@ -60,11 +69,7 @@ def check_build(build, repo, system, arch):
     if (target.get('CMAKE_SYSTEM_NAME') != system or architecture(target.get('CMAKE_SYSTEM_PROCESSOR')) != arch or
             target.get('CMAKE_CROSSCOMPILING') != 'FALSE'):
         raise ValueError('release requires a native target matching the current OS and architecture')
-    binaries = {'fc': build / 'fc', 'fresh': build / 'third_party/fresh/bin/fresh',
-                '7zr': build / 'third_party/lzma/_o/7zr'}
-    for path in binaries.values():
-        if not path.is_file() or not os.access(path, os.X_OK) or not path.stat().st_size:
-            raise ValueError(f'missing release executable: {path}')
+    binaries = built_executables(build)
     package_name = f"fc-{system}-{target['CMAKE_SYSTEM_PROCESSOR']}"
     return binaries, build / 'dist' / (package_name + '.tar.gz')
 

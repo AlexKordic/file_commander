@@ -57,7 +57,10 @@ filesystem. They have the `manual` CTest label, driven by the `manual` list in
 | `fc.package` | Relocated package workflow with native watchers and source-read isolation. |
 | `fc.fault.exdev` | Writable destination on a different filesystem (`st_dev`). |
 
-Run them from a normal Terminal with the second filesystem supplied:
+Build the distribution with `fc.package_build` in the configured build environment
+first (see below). Manual tests consume that archive and do not require Cargo or
+other compilers on the Terminal's PATH. Run them from a normal Terminal with the
+second filesystem supplied:
 
 ```sh
 FC_TEST_EXDEV_ROOT=/path/on/second/filesystem \
@@ -127,6 +130,15 @@ ctest --test-dir build -R '^fc.package$' --output-on-failure
 ```
 
 The relocated package runs from an unrelated directory with isolated HOME/XDG settings. A sandbox denies source/dependency reads: `sandbox-exec` on macOS, `bwrap` on Linux. Read probes prove the restriction. The test verifies archive contents and actual bundled helper paths, plus the real Fresh version command. Separate automatic Fresh PTY tests cover attach/detach, recovery and failed invocation with restored input/modes. Missing optional helper/isolation capabilities are explicit skips.
+
+`fc.package` first compares the archive's fc, Fresh and 7zr executable hashes with
+the build outputs, then runs relocation without rebuilding. Missing, corrupt or
+stale packages fail before relocation; rerun `fc.package_build` in the configured
+build environment to refresh them. To retry only relocation from a normal Terminal:
+
+```sh
+ctest --test-dir build-release -R '^fc.package$' --output-on-failure
+```
 
 ```sh
 cmake --preset release

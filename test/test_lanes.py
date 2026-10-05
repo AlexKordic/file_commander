@@ -4,6 +4,7 @@ import json
 import os
 from pathlib import Path
 import platform
+import shutil
 import subprocess
 import sys
 import tarfile
@@ -131,6 +132,58 @@ else:
     make_package(stale=True); run()
     make_package(missing=True); run()
     archive.unlink(); run(); make_package()
+    # Exercise the real package entry point with no compiler toolchain. Replace
+    # only native relocation with a sentinel so this check needs no OS services.
+    runner = root / 'package runner'
+    (runner / 'test').mkdir(parents=True)
+    (runner / 'tools').mkdir()
+    for relative in ('test/test_package.py', 'tools/release_gate.py'):
+        shutil.copy2(repo / relative, runner / relative)
+    (runner / 'test/test_packaged_script.py').write_text('''
+import os, sys
+from pathlib import Path
+Path(os.environ['FC_PACKAGE_SMOKE_MARKER']).write_text(sys.argv[1])
+raise SystemExit(int(os.environ.get('FC_PACKAGE_SMOKE_STATUS', '0')))
+''')
+    smoke_marker, build_marker = root / 'smoke-called', root / 'build-called'
+    tool_path = root / 'no-toolchain'
+    tool_path.mkdir()
+    cmake = tool_path / 'cmake'
+    cmake.write_text('#!' + sys.executable + '''
+import os
+from pathlib import Path
+Path(os.environ['FC_PACKAGE_BUILD_MARKER']).touch()
+raise SystemExit(97)
+''')
+    cmake.chmod(0o700)
+    package_env = dict(os.environ, PATH=str(tool_path),
+                       FC_PACKAGE_SMOKE_MARKER=str(smoke_marker), FC_PACKAGE_BUILD_MARKER=str(build_marker))
+    package_command = [sys.executable, str(runner / 'test/test_package.py'), str(build), str(archive)]
+    def run_package(valid=True, smoke_status=0):
+        smoke_marker.unlink(missing_ok=True)
+        result = subprocess.run(package_command, env=dict(package_env, FC_PACKAGE_SMOKE_STATUS=str(smoke_status)),
+                                capture_output=True, text=True, timeout=5)
+        require(not build_marker.exists(), 'manual package test invoked the build toolchain')
+        require(smoke_marker.exists() == valid, f'package validation did not guard relocation: {result.stdout} {result.stderr}')
+        if valid:
+            require(result.returncode == smoke_status, 'relocation result was not propagated')
+            require(smoke_marker.read_text() == str(archive), 'relocation used a different archive')
+        else:
+            require(result.returncode != 0 and 'Package validation failed:' in result.stderr,
+                    f'invalid manual package was accepted: {result.stdout} {result.stderr}')
+        return result
+    run_package()
+    run_package(smoke_status=23)
+    make_package(stale=True); run_package(valid=False)
+    make_package(missing=True); run_package(valid=False)
+    archive.write_bytes(b'invalid archive'); run_package(valid=False)
+    archive.unlink(); run_package(valid=False); make_package()
+    binaries['fresh'].chmod(0o600); run_package(valid=False); binaries['fresh'].chmod(0o700)
+    smoke_marker.unlink(missing_ok=True)
+    result = subprocess.run([*package_command, '--build-only'], env=package_env,
+                            capture_output=True, text=True, timeout=5)
+    require(result.returncode != 0 and build_marker.exists() and not smoke_marker.exists(),
+            'automatic packaging did not build or ignored the build failure')
     # Reproduce the original bug with a real one-test CTest project.
     (build / 'CTestTestfile.cmake').write_text('add_test(fixture "/usr/bin/true")\n')
     result = run(fake_ctest=False)
@@ -138,4 +191,4 @@ else:
     wrong = 'Linux' if platform.system() == 'Darwin' else 'Darwin'
     result = subprocess.run([*base, 'fast', '--expect-os', wrong], capture_output=True, text=True, timeout=5)
     require(result.returncode != 0 and 'native OS mismatch' in result.stderr, 'cross-host qualification accepted')
-print('PASS complete release registry, configuration, results, artifacts and native host identity')
+print('PASS complete release registry, configuration, results, artifacts, manual package isolation and native host identity')
