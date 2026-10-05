@@ -190,10 +190,19 @@ int EditorManager::run_command(const Filepath& cwd, const std::vector<std::strin
     auto command = cmd.str();
     char* argv[] = {const_cast<char*>("/bin/sh"), const_cast<char*>("-c"), command.data(), nullptr};
     posix_spawnattr_t attrs;
-    posix_spawnattr_init(&attrs);
+    if (posix_spawnattr_init(&attrs)) return -1;
+    posix_spawn_file_actions_t actions;
+    if (posix_spawn_file_actions_init(&actions)) {
+      posix_spawnattr_destroy(&attrs);
+      return -1;
+    }
+    int setup_error = 0;
     if (!interactive) {
-      posix_spawnattr_setpgroup(&attrs, 0);
-      posix_spawnattr_setflags(&attrs, POSIX_SPAWN_SETPGROUP);
+      // Fresh may attach automatically after starting a daemon when stdin is
+      // a terminal. Only the explicit foreground attachment may own FC's tty.
+      setup_error = posix_spawn_file_actions_addopen(&actions, STDIN_FILENO, "/dev/null", O_RDONLY, 0);
+      if (!setup_error) setup_error = posix_spawnattr_setpgroup(&attrs, 0);
+      if (!setup_error) setup_error = posix_spawnattr_setflags(&attrs, POSIX_SPAWN_SETPGROUP);
     }
     pid_t child;
     std::vector<std::string> environment;
@@ -203,7 +212,8 @@ int EditorManager::run_command(const Filepath& cwd, const std::vector<std::strin
     std::vector<char*> envp;
     for (auto& e : environment) envp.push_back(e.data());
     envp.push_back(nullptr);
-    int rc = posix_spawn(&child, "/bin/sh", nullptr, &attrs, argv, envp.data());
+    int rc = setup_error ? setup_error : posix_spawn(&child, "/bin/sh", &actions, &attrs, argv, envp.data());
+    posix_spawn_file_actions_destroy(&actions);
     posix_spawnattr_destroy(&attrs);
     if (rc) return rc;
     auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(25);
