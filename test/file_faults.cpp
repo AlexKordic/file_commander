@@ -1,4 +1,6 @@
 #include <sys/stat.h>
+#include <sys/xattr.h>
+#include <fcntl.h>
 #include <unistd.h>
 #include <iostream>
 #include "file_io_jobs.hpp"
@@ -233,7 +235,7 @@ void settings_faults() {
   }
 }
 void move_faults() {
-  for (auto phase : {"read", "write", "move_commit", "source_remove", "success"}) {
+  for (auto phase : {"read", "write", "move_metadata", "move_commit", "source_remove", "success"}) {
     Fixture f;
     write(f / "source", "complete payload");
     write(f / "destination", "old");
@@ -258,6 +260,92 @@ void move_faults() {
     require(read(f / "destination") == (committed ? "complete payload" : "old"), "move commit boundary violated");
     no_staging(f);
   }
+}
+void set_attribute(const Filepath& path, const char* name, const std::string& value) {
+#if defined(__APPLE__)
+  const auto result = ::setxattr(path.c_str(), name, value.data(), value.size(), 0, XATTR_NOFOLLOW);
+#else
+  const auto result = ::lsetxattr(path.c_str(), name, value.data(), value.size(), 0);
+#endif
+  require(result == 0, "set metadata fixture xattr");
+}
+std::string attribute(const Filepath& path, const char* name) {
+  char bytes[128];
+#if defined(__APPLE__)
+  auto size = ::getxattr(path.c_str(), name, bytes, sizeof(bytes), 0, XATTR_NOFOLLOW);
+#else
+  auto size = ::lgetxattr(path.c_str(), name, bytes, sizeof(bytes));
+#endif
+  require(size >= 0, "read moved xattr");
+  return {bytes, static_cast<size_t>(size)};
+}
+struct stat entry_stat(const Filepath& path) {
+  struct stat info {};
+  require(::lstat(path.c_str(), &info) == 0, "metadata stat");
+  return info;
+}
+void same_metadata(const struct stat& before, const Filepath& after) {
+  auto info = entry_stat(after);
+  require((before.st_mode & 07777) == (info.st_mode & 07777) && before.st_uid == info.st_uid && before.st_gid == info.st_gid, "move access metadata lost");
+#if defined(__APPLE__)
+  auto a = before.st_mtimespec, b = info.st_mtimespec;
+#else
+  auto a = before.st_mtim, b = info.st_mtim;
+#endif
+  require(a.tv_sec == b.tv_sec && a.tv_nsec == b.tv_nsec, "move modification time lost");
+}
+void move_metadata() {
+  Fixture f;
+  fs::create_directories(f / "source/child");
+  write(f / "source/child/file", "metadata payload");
+  write(f / "outside", "do not follow");
+  fs::create_symlink("../../outside", f / "source/child/link");
+  fs::permissions(f / "source", static_cast<fs::perms>(0750));
+  fs::permissions(f / "source/child/file", static_cast<fs::perms>(0640));
+  set_attribute(f / "source/child/file", "user.fc-test", "file attribute");
+  set_attribute(f / "source", "user.fc-test", "directory attribute");
+#if defined(__APPLE__)
+  set_attribute(f / "source/child/file", "com.apple.ResourceFork", "resource fork payload");
+  fixture_acl(f / "source", ACL_EXTENDED_DENY);
+  fixture_acl(f / "source/child/file", ACL_EXTENDED_DENY);
+  const auto directory_acl = access_acl(f / "source"), file_acl = access_acl(f / "source/child/file");
+#endif
+  const timespec times[] = {{946684800, 123456789}, {946684801, 987654321}};
+  for (auto name : {"source/child/file", "source/child/link", "source/child", "source", "outside"})
+    require(::utimensat(AT_FDCWD, (f / name).c_str(), times, AT_SYMLINK_NOFOLLOW) == 0, "timestamp fixture");
+  auto root_info = entry_stat(f / "source"), child_info = entry_stat(f / "source/child"), file_info = entry_stat(f / "source/child/file"),
+       link_info = entry_stat(f / "source/child/link"), outside_info = entry_stat(f / "outside");
+  Fault fault; fault.exdev = true;
+  FileJobServices services; services.file_io = std::make_shared<fs::copy_file_io_hooks>(fault.hooks());
+  auto jobs = make_file_jobs({}, services);
+  auto run = [&] {
+    auto plan = std::make_shared<OperationPlan>(); plan->type = OperationType::MOVE;
+    plan->steps.push_back({Operation::Kind::MoveEntry, f / "source", f / "destination"});
+    auto job = std::make_shared<JobSpec>(plan); jobs->add_job(job);
+    until([&] { return jobs->idle(); }, "move metadata timeout");
+    return job;
+  };
+  // Failure after restoring a read-only child's metadata must clean staging.
+  fs::permissions(f / "source/child", static_cast<fs::perms>(0550));
+  fault.phase = "move_commit";
+  require(run()->_state == JobState::COMPLETED_WITH_ERRORS, "metadata rollback state");
+  require(read(f / "source/child/file") == "metadata payload" && !fs::exists(f / "destination"), "metadata rollback damaged originals");
+  no_staging(f);
+  fs::permissions(f / "source/child", static_cast<fs::perms>(child_info.st_mode & 07777));
+  fault.phase.clear();
+  require(run()->_state == JobState::COMPLETED && !fs::exists(f / "source"), "metadata move failed");
+  require(read(f / "destination/child/file") == "metadata payload", "metadata move payload");
+  same_metadata(root_info, f / "destination"); same_metadata(child_info, f / "destination/child");
+  same_metadata(file_info, f / "destination/child/file"); same_metadata(link_info, f / "destination/child/link");
+  same_metadata(outside_info, f / "outside");
+  require(fs::read_symlink(f / "destination/child/link") == Filepath("../../outside"), "move followed symlink");
+  require(attribute(f / "destination/child/file", "user.fc-test") == "file attribute" &&
+          attribute(f / "destination", "user.fc-test") == "directory attribute", "move xattrs lost");
+#if defined(__APPLE__)
+  require(attribute(f / "destination/child/file", "com.apple.ResourceFork") == "resource fork payload", "resource fork lost");
+  require(access_acl(f / "destination") == directory_acl && access_acl(f / "destination/child/file") == file_acl, "move ACL lost");
+#endif
+  no_staging(f);
 }
 void partial_copy() {
   Fixture f;
@@ -307,13 +395,14 @@ int main(int argc, char** argv) {
   try {
     std::string name = argc > 1 ? argv[1] : "all";
     if (name == "exdev") return exdev();
-    require(name == "all" || name == "copy" || name == "long_names" || name == "rename" || name == "directory_access" || name == "settings" || name == "move" || name == "partial", "unknown file fault case");
+    require(name == "all" || name == "copy" || name == "long_names" || name == "rename" || name == "directory_access" || name == "settings" || name == "move" || name == "move_metadata" || name == "partial", "unknown file fault case");
     if (name == "copy" || name == "all") copy_faults();
     if (name == "long_names" || name == "all") long_names();
     if (name == "rename" || name == "all") rename_conflicts();
     if (name == "directory_access" || name == "all") directory_access();
     if (name == "settings" || name == "all") settings_faults();
     if (name == "move" || name == "all") move_faults();
+    if (name == "move_metadata" || name == "all") move_metadata();
     if (name == "partial" || name == "all") partial_copy();
     std::cout << "PASS file faults " << name << "\n";
   } catch (const std::exception& error) {

@@ -318,12 +318,15 @@ bool copy_move_tree(const Filepath& source, const Filepath& destination,
   cb.enter = [&](const TraversalEntry& e) {
     auto output=target(e);
     if (e.link_text) boost::filesystem::create_symlink(*e.link_text,output,ec);
-    else if (boost::filesystem::is_directory(e.status)) boost::filesystem::create_directory(output,ec);
+    else if (boost::filesystem::is_directory(e.status)) create_private_directory(output,ec);
     else boost::filesystem::copy_file(e.path,output,options,ec);
     return !ec;
   };
   cb.leave = [&](const TraversalEntry& e) {
-    if (!ec && boost::filesystem::is_directory(e.status)) boost::filesystem::permissions(target(e),e.status.permissions(),ec);
+    if (ec) return;
+    int injected = options.io && options.io->fault ? options.io->fault(options.io->context, "move_metadata") : 0;
+    if (injected) ec.assign(injected, boost::system::system_category());
+    else copy_entry_metadata(e.path, target(e), ec);
   };
   auto result=traverse({source},{},cb);
   return !ec && !result.cancelled && !result.truncated;
@@ -337,10 +340,10 @@ bool move_by_copy(const Filepath& source, const Filepath& destination,
   auto parent = destination.parent_path();
   if (parent.empty()) parent = ".";
   const auto staging = parent / boost::filesystem::unique_path(".fc-move-%%%%-%%%%-%%%%");
-  if (!boost::filesystem::create_directory(staging, ec) || ec) return false;
+  if (!create_private_directory(staging, ec) || ec) return false;
   struct Cleanup {
     Filepath root;
-    ~Cleanup() { error_code ignored; boost::filesystem::remove_all(root, ignored); }
+    ~Cleanup() { error_code ignored; remove_owned_staging(root, ignored); }
   } cleanup{staging};
   const auto output = staging / "entry";
   if (!copy_move_tree(source, output, options, ec) || !transfer_checkpoint(options, ec)) return false;

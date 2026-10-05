@@ -125,10 +125,17 @@ the directory cycle detection).
 ## 3. Move Operation
 
 Move tries `boost::filesystem::rename()` first (instant for same-filesystem).
-If it fails with `cross_device_link`, falls back to copy + delete with flags:
-`copy_options::overwrite_existing | recursive | copy_symlinks`.
+If it fails with `cross_device_link`, the entry is copied into a private staging
+folder beside the destination. Each entry's ownership, permissions, timestamps,
+extended attributes and ACLs are copied before commit, including resource forks
+on macOS. Symlinks are handled without following their targets; directory
+metadata is restored after children are populated. Metadata errors abort the
+move, retaining the source and previous destination. The source is removed only
+after the complete destination has been committed.
 
-**Gaps**: Same as copy regarding conflict resolution, attribute preservation, etc.
+Unsupported metadata on a destination filesystem is an error, not permission to
+silently discard it. If source cleanup fails after commit, both copies can remain
+and the job reports the cleanup error.
 
 ---
 
@@ -161,13 +168,15 @@ or `boost::filesystem::remove()` for files. Errors are collected per-item.
 
 ### 6.1 Attribute Preservation
 
-| Attribute              | Status              | Notes                                             |
-|------------------------|---------------------|---------------------------------------------------|
-| File permissions       | **Not preserved**   | Destination gets default permissions (umask)      |
-| Timestamps (mtime)     | **Not preserved**   | Destination gets current time                     |
-| Ownership (uid/gid)    | **Not preserved**   | Destination gets current user                     |
-| Extended attrs (xattr) | **Not preserved**   | macOS resource forks, Linux security labels lost  |
-| ACLs                   | **Not preserved**   | Access control lists not copied                   |
+| Attribute | Ordinary copy | Cross-device move |
+|-----------|---------------|-------------------|
+| File permissions | Preserved | Preserved or move fails |
+| New directory permissions / ACLs | Private during population, source access restored afterward | Preserved before commit |
+| Existing destination directory access | Unchanged when merging | No directory merge |
+| Timestamps (mtime) | Not preserved | Preserved or move fails |
+| Ownership (uid/gid) | Current user | Preserved or move fails |
+| Extended attributes / resource forks | Not preserved | Preserved or move fails |
+| File ACLs | Not preserved | Preserved or move fails |
 
 ### 6.2 Special File Types
 
