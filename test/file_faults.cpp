@@ -70,6 +70,29 @@ void copy_faults() {
     if (fault.short_write) require(fault.writes > 100, "short writes not exercised");
   }
 }
+void long_names() {
+  Fixture f;
+  const long limit = ::pathconf(f.root.c_str(), _PC_NAME_MAX);
+  require(limit > 0 && limit <= 4096, "cannot determine fixture filename limit");
+  write(f / "source", "complete payload");
+  std::string name(static_cast<size_t>(limit), 'n');
+  auto destination = f / name;
+  for (auto phase : {"success", "commit"}) {
+    write(destination, "old");
+    Fault fault;
+    fault.phase = phase;
+    auto hooks = fault.hooks();
+    fs::copy_file_options options;
+    options.io = &hooks;
+    options.options = fs::copy_options::overwrite_existing;
+    boost::system::error_code ec;
+    const bool copied = fs::copy_file(f / "source", destination, options, ec);
+    const bool success = fault.phase == "success";
+    require(copied == success && bool(ec) != success, "NAME_MAX copy outcome");
+    require(read(destination) == (success ? "complete payload" : "old"), "NAME_MAX commit preservation");
+    no_staging(f);
+  }
+}
 void settings_faults() {
   Fixture f;
   for (auto phase : {"open", "write", "flush", "close", "commit", "zero", "retry", "short"}) {
@@ -165,8 +188,9 @@ int main(int argc, char** argv) {
   try {
     std::string name = argc > 1 ? argv[1] : "all";
     if (name == "exdev") return exdev();
-    require(name == "all" || name == "copy" || name == "settings" || name == "move" || name == "partial", "unknown file fault case");
+    require(name == "all" || name == "copy" || name == "long_names" || name == "settings" || name == "move" || name == "partial", "unknown file fault case");
     if (name == "copy" || name == "all") copy_faults();
+    if (name == "long_names" || name == "all") long_names();
     if (name == "settings" || name == "all") settings_faults();
     if (name == "move" || name == "all") move_faults();
     if (name == "partial" || name == "all") partial_copy();

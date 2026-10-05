@@ -3509,7 +3509,12 @@ bool copy_file(path const& from, path const& to, copy_file_options const& opts, 
     if (destination_exists && update && source_stat.st_mtime <= dest_stat.st_mtime) return false;
     if (opts.cancel_requested && opts.cancel_requested->load(std::memory_order_relaxed)) return fail(ECANCELED);
 
-    std::string directory = to.native() + ".fc-copy-XXXXXX";
+    // Keep the temporary component independent of the destination basename:
+    // a valid NAME_MAX-length filename must still be copyable.
+    path parent = to.parent_path();
+    if (parent.empty()) parent = ".";
+    path_algorithms::append_v4(parent, path(".fc-copy-XXXXXX"));
+    std::string directory = parent.native();
     if (!::mkdtemp(&directory[0])) return fail(errno);
     const path staged(directory + "/data");
     struct cleanup_output {
