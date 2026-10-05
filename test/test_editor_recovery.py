@@ -73,7 +73,7 @@ class Client:
 def main():
     binary = Path(sys.argv[1]).resolve()
     with tempfile.TemporaryDirectory(prefix="fc-er-", dir="/tmp") as directory:
-        root = Path(directory)
+        root = Path(directory).resolve()
         for name in ("home", "config", "data", "cache", "runtime"):
             (root / name).mkdir(mode=0o700)
         env = dict(os.environ, HOME=str(root / "home"),
@@ -129,6 +129,15 @@ def main():
                 return any(text in (b["text"] or "") for b in checkpoint().get("buffers", []))
 
             eventually(lambda: has_text("UNSAVED_SENTINEL"))
+            def view_state():
+                saved = checkpoint()
+                names = {json.dumps(b["id"]): b["path"] or b["name"] for b in saved["buffers"]}
+                return [(tuple(names.get(json.dumps(i)) for i in view["tabs"]),
+                         names.get(json.dumps(view["active"])), view["cursor"])
+                        for view in saved["views"]]
+            saved_view = view_state()
+            assert saved_view[0][0] == tuple(map(str, files)), ("Opened file order not retained", saved_view, files)
+            assert saved_view[0][1] == str(files[1]) and saved_view[0][2] == len("UNSAVED_SENTINEL")
             second.detach()
             clients.remove(second)
             os.kill(pid, signal.SIGKILL)
@@ -136,6 +145,8 @@ def main():
             third = Client(binary, root, env, session)
             clients.append(third)
             third.wait_text(b"alpha.txt", b"beta.txt", b"UNSAVED_SENTINEL")
+            third.wait_text(("Ln 1, Col " + str(len("UNSAVED_SENTINEL") + 1)).encode())
+            assert view_state() == saved_view, "Recovered tabs, active file or cursor changed"
             pid = int(pidfile.read_text())
             owned.add(pid)
             # A clean tab closed by Fresh must stay closed after backend loss.
@@ -174,6 +185,25 @@ def main():
             print("PASS dirty and untitled buffers survive backend loss; closed tabs stay closed")
             print("PASS idle timeout retains detached dirty buffers")
             print("PASS F10 and per-attachment key override detach without closing buffers")
+            clean_session = "clean-idle-test"
+            opened = subprocess.run([str(binary), "--cmd", "session", "open-file", clean_session, *map(str, files)],
+                                    cwd=root, env=env, capture_output=True, timeout=15)
+            assert opened.returncode == 2, opened.stderr
+            clean_pidfile = pidfile.with_name(clean_session + ".pid")
+            owned.add(int(clean_pidfile.read_text()))
+            clean = Client(binary, root, env, clean_session)
+            clients.append(clean)
+            clean.wait_text(b"alpha.txt", b"beta.txt")
+            clean.detach(b"\x1b[19~")
+            clients.remove(clean)
+            eventually(lambda: not clean_pidfile.exists(), 8)
+            restored = Client(binary, root, env, clean_session)
+            clients.append(restored)
+            restored.wait_text(b"alpha.txt", b"beta.txt", b"ORIGINAL")
+            owned.add(int(clean_pidfile.read_text()))
+            restored.detach(b"\x1b[19~")
+            clients.remove(restored)
+            print("PASS clean idle exit checkpoints tabs and restores them on the next attachment")
         finally:
             for client in clients:
                 client.stop()
