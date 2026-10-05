@@ -174,6 +174,7 @@ def main():
             clients.remove(third)
             os.kill(pid, signal.SIGKILL)
             time.sleep(0.2)
+            files[1].write_text("EXTERNAL_NEW_VERSION\n")
             fourth = Client(binary, root, env, session)
             clients.append(fourth)
             fourth.wait_text(b"beta.txt", b"UNTITLED_SENTINEL")
@@ -182,7 +183,13 @@ def main():
             assert has_text("UNSAVED_SENTINEL"), "Inactive dirty buffer lost on second restart"
             eventually(lambda: view_state() and len(view_state()[0][0]) == 2)
             assert len(view_state()[0][0]) == 2, "Recovery duplicated the untitled tab"
-            assert all(path.read_text() == "ORIGINAL\n" for path in files)
+            subprocess.run([str(binary), "--cmd", "session", "open-file", session, str(files[1])],
+                           cwd=root, env=env, capture_output=True, check=True, timeout=12)
+            fourth.wait_text(b"UNSAVED_SENTINEL")
+            assert files[0].read_text() == "ORIGINAL\n" and files[1].read_text() == "EXTERNAL_NEW_VERSION\n"
+            os.write(fourth.master, b"\x1b[6;5~")  # Ctrl+PageDown: back to untitled
+            fourth.output.clear()
+            fourth.wait_text(b"UNTITLED_SENTINEL")
             fourth.detach()
             clients.remove(fourth)
             env["FC_EDITOR_SWITCH_KEY"] = "f8"
@@ -194,6 +201,7 @@ def main():
             time.sleep(3.5)
             os.kill(int(pidfile.read_text()), 0)
             print("PASS dirty and untitled buffers survive backend loss; closed tabs stay closed")
+            print("PASS changed source files do not discard unsaved recovery or overwrite disk")
             print("PASS idle timeout retains detached dirty buffers")
             print("PASS F10 and per-attachment key override detach without closing buffers")
             clean_session = "clean-idle-test"
@@ -211,7 +219,7 @@ def main():
             eventually(lambda: not clean_pidfile.exists(), 8)
             restored = Client(binary, root, env, clean_session)
             clients.append(restored)
-            restored.wait_text(b"alpha.txt", b"beta.txt", b"ORIGINAL")
+            restored.wait_text(b"alpha.txt", b"beta.txt", b"EXTERNAL_NEW_VERSION")
             owned.add(int(clean_pidfile.read_text()))
             restored.detach(b"\x1b[19~")
             clients.remove(restored)
@@ -290,7 +298,7 @@ def handshake_failures(binary):
         sockets = root / "runtime/fresh"; sockets.mkdir(parents=True)
         env = dict(os.environ, XDG_RUNTIME_DIR=str(root / "runtime"), FC_EDITOR_SWITCH_KEY="f10")
         source = root / "file.txt"; source.write_text("original")
-        for version in (2, 4, None):
+        for version, attach in ((2, False), (4, False), (4, True), (None, False)):
             listeners = []
             for suffix in ("data.sock", "ctrl.sock"):
                 listener = socket.socket(socket.AF_UNIX)
@@ -304,15 +312,26 @@ def handshake_failures(binary):
                 with listeners[0].accept()[0] as data, listeners[1].accept()[0] as control:
                     control.recv(65536)
                     if version is not None:
-                        control.sendall((json.dumps({"type": "hello", "protocol_version": version,
-                                                    "server_version": "old", "session_id": "incompatible"}) + "\n").encode())
+                        reply = ({"type": "version_mismatch", "server_version": "old", "client_version": "0.5.2",
+                                  "action": "restart_server", "message": "Protocol mismatch"} if version == 2 else
+                                 {"type": "hello", "protocol_version": version, "server_version": "upstream", "session_id": "incompatible"})
+                        control.sendall((json.dumps(reply) + "\n").encode())
                     done.wait(15)
             worker = threading.Thread(target=server); worker.start()
             try:
                 start = time.monotonic()
-                result = subprocess.run([str(binary), "--cmd", "session", "open-file", "incompatible", str(source)],
-                                        env=env, cwd=root, stdin=subprocess.DEVNULL, capture_output=True, timeout=13)
-                assert result.returncode != 0, "Incompatible or silent server was accepted"
+                if attach:
+                    client = Client(binary, root, env, "incompatible")
+                    try:
+                        eventually(lambda: client.pump() is not None and client.process.poll() is not None)
+                        code = client.process.returncode
+                    finally:
+                        client.stop()
+                else:
+                    result = subprocess.run([str(binary), "--cmd", "session", "open-file", "incompatible", str(source)],
+                                            env=env, cwd=root, stdin=subprocess.DEVNULL, capture_output=True, timeout=13)
+                    code = result.returncode
+                assert code != 0, "Incompatible or silent server was accepted"
                 assert time.monotonic() - start < 12, "Handshake exceeded its deadline"
                 assert source.read_text() == "original"
                 assert (sockets / "incompatible.pid").read_text() == str(os.getpid())

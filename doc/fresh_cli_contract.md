@@ -53,6 +53,10 @@ The backend runs in its own Unix process session. It checkpoints native Fresh
 recovery data and workspace state every two seconds and on detach; native exit
 persistence handles shutdown. Recovery stores dirty and untitled text separately
 from source files. A crash can lose edits since the last successful checkpoint.
+FC keeps self-contained snapshots of dirty buffers, including large files, so
+external replacement or deletion of a source does not discard unsaved text.
+Recovery leaves the disk version untouched and warns when it changed; review
+before saving. This retains the old integration's full-snapshot memory/I/O cost.
 Dirty buffers prevent idle shutdown. Clean sessions default to one hour;
 `FRESH_SESSION_IDLE_TIMEOUT_SECS` accepts a positive override.
 
