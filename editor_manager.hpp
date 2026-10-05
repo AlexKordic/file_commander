@@ -35,7 +35,10 @@ class EditorManager {
   const std::string& last_session_id() const;
   std::vector<EditorSessionInfo> sessions() const;
 
-  bool open_directory_new_session(const Filepath& directory, std::string& error);
+  bool open_directory(const Filepath& directory, std::string& error);
+  // Compatibility with the former multi-session API: this now reuses one session.
+  bool open_directory_new_session(const Filepath& directory, std::string& error) { return open_directory(directory, error); }
+  bool switch_to_editor(const Filepath& initial_directory, std::string& error);
   bool open_files_in_last_session(const std::vector<Filepath>& files, std::string& error);
   bool switch_next(std::string& error);
   bool switch_prev(std::string& error);
@@ -51,7 +54,7 @@ class EditorManager {
   bool persist_session(std::string& error) const;
 
   std::vector<EditorSessionInfo> _sessions;
-  uint64_t                       _session_counter = 0;
+  bool ensure_session(const Filepath& initial_directory, std::string& error);
 
   void report_status(const std::string& text) const;
 
@@ -65,8 +68,6 @@ class EditorManager {
 
   bool attach_session(const std::string& id, std::string& error);
 
-  std::vector<std::string> session_order() const;
-  std::string              first_existing_session_id() const;
   void                     touch_session(const std::string& id, bool alive);
 };
 

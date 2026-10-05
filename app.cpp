@@ -637,7 +637,7 @@ bool FileCommander::open_in_editor(std::string& error) {
     return !ec.failed() && isdir;
   };
 
-  if (selected.size() == 1 && is_directory(selected.front())) { return _editor_manager.open_directory_new_session(selected.front(), error); }
+  if (selected.size() == 1 && is_directory(selected.front())) { return _editor_manager.open_directory(selected.front(), error); }
 
   std::vector<Filepath> files;
   files.reserve(selected.size());
@@ -646,7 +646,7 @@ bool FileCommander::open_in_editor(std::string& error) {
   }
   if (!files.empty()) return _editor_manager.open_files_in_last_session(files, error);
 
-  return _editor_manager.open_directory_new_session(panel.focused_dir(), error);
+  return _editor_manager.open_directory(panel.focused_dir(), error);
 }
 
 std::vector<Command> FileCommander::list_palette_commands() { return commands().list_all(); }

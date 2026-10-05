@@ -15,6 +15,8 @@
 
 #if defined(__unix__) || defined(__APPLE__)
 #include <sys/wait.h>
+#include <sys/file.h>
+#include <fcntl.h>
 #include <spawn.h>
 #include <signal.h>
 #include <unistd.h>
@@ -158,10 +160,8 @@ std::string EditorManager::pretty_name_for_dir(const Filepath& directory) const 
 }
 
 std::string EditorManager::create_session_id(const Filepath& directory) {
-  ++_session_counter;
-  const auto now_ms = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
   std::ostringstream ss;
-  ss << "fc-" << pretty_name_for_dir(directory) << "-" << now_ms << "-" << _session_counter;
+  ss << "fc-" << boost::filesystem::unique_path("%%%%%%%%-%%%%%%%%-%%%%%%%%").native();
   std::string out = ss.str();
   for (char& c : out) {
     const bool ok = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '-' || c == '_';
@@ -249,40 +249,50 @@ bool EditorManager::attach_session(const std::string& id, std::string& error) {
   return true;
 }
 
-std::vector<std::string> EditorManager::session_order() const {
-  // Creation order is a stable ring; attaching updates MRU metadata without
-  // moving the session being traversed. Failed sessions leave the ring.
-  std::vector<std::string> ids;
-  ids.reserve(_sessions.size());
-  for (const auto& session : _sessions) if (session.alive) ids.push_back(session.id);
-  return ids;
+bool EditorManager::ensure_session(const Filepath& initial_directory, std::string& error) {
+  struct Lock { int fd = -1; ~Lock() { if (fd >= 0) ::close(fd); } } lock;
+  try {
+    if (!_session_store_error.empty()) { error = _session_store_error; return false; }
+    if (!_session_store.empty()) {
+      boost::filesystem::create_directories(_session_store.parent_path());
+      auto path = _session_store.native() + ".lock";
+      lock.fd = ::open(path.c_str(), O_RDWR | O_CREAT | O_CLOEXEC, 0600);
+      if (lock.fd < 0) throw std::runtime_error("Cannot lock editor identity");
+      auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+      while (::flock(lock.fd, LOCK_EX | LOCK_NB) != 0) {
+        if ((errno != EWOULDBLOCK && errno != EINTR) || std::chrono::steady_clock::now() >= deadline)
+          throw std::runtime_error("Editor identity is busy; try again");
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+      }
+      // Another FC launch may have established the shared identity since startup.
+      set_session_store(_session_store);
+      if (!_session_store_error.empty()) { error = _session_store_error; return false; }
+    }
+    if (_last_session_id.empty()) {
+      boost::system::error_code ec;
+      auto cwd = boost::filesystem::is_directory(initial_directory, ec) && !ec
+        ? boost::filesystem::absolute(initial_directory) : boost::filesystem::current_path();
+      auto id = create_session_id(cwd);
+      _sessions.clear();
+      _sessions.push_back({id, pretty_name_for_dir(cwd), cwd, now_seconds(), true});
+      _last_session_id = id;
+    }
+    return persist_session(error);
+  } catch (const std::exception& e) { error = e.what(); return false; }
 }
 
-std::string EditorManager::first_existing_session_id() const {
-  if (_sessions.empty()) return "";
-  const auto ordered = session_order();
-  if (ordered.empty()) return "";
-  return ordered.front();
-}
-
-bool EditorManager::open_directory_new_session(const Filepath& directory, std::string& error) {
+bool EditorManager::open_directory(const Filepath& directory, std::string& error) {
   boost::system::error_code ec;
-  const bool is_dir = boost::filesystem::is_directory(directory, ec);
-  if (ec.failed() || !is_dir) {
+  if (!boost::filesystem::is_directory(directory, ec) || ec) {
     error = "Not a directory: " + directory.native();
     return false;
   }
+  return switch_to_editor(directory, error);
+}
 
-  EditorSessionInfo session;
-  session.id          = create_session_id(directory);
-  session.display_name = pretty_name_for_dir(directory);
-  session.cwd         = directory;
-  session.last_used_ts = now_seconds();
-  session.alive       = true;
-  _sessions.push_back(session);
-  _last_session_id = session.id;
-
-  return attach_session(session.id, error);
+bool EditorManager::switch_to_editor(const Filepath& initial_directory, std::string& error) {
+  if (!ensure_session(initial_directory, error)) return false;
+  return attach_session(_last_session_id, error);
 }
 
 bool EditorManager::open_files_in_last_session(const std::vector<Filepath>& files, std::string& error) {
@@ -307,19 +317,8 @@ bool EditorManager::open_files_in_last_session(const std::vector<Filepath>& file
     return false;
   }
 
-  std::string session_id = _last_session_id;
-  if (session_id.empty() || !find_session(session_id)) {
-    const Filepath first_parent = normalized.front().parent_path();
-    EditorSessionInfo session;
-    session.id           = create_session_id(first_parent);
-    session.display_name = pretty_name_for_dir(first_parent);
-    session.cwd          = first_parent.empty() ? Filepath(".") : first_parent;
-    session.last_used_ts = now_seconds();
-    session.alive        = true;
-    _sessions.push_back(session);
-    session_id = session.id;
-    _last_session_id = session_id;
-  }
+  if (!ensure_session(normalized.front().parent_path(), error)) return false;
+  const auto session_id = _last_session_id;
 
   EditorSessionInfo* session = find_session(session_id);
   if (!session) {
@@ -350,48 +349,8 @@ bool EditorManager::open_files_in_last_session(const std::vector<Filepath>& file
 }
 
 bool EditorManager::switch_next(std::string& error) {
-  if (_sessions.empty()) {
-    error = "No editor sessions available";
-    return false;
-  }
-  auto ordered = session_order();
-  if (ordered.empty()) {
-    error = "No editor sessions available";
-    return false;
-  }
-
-  if (_last_session_id.empty()) _last_session_id = ordered.front();
-  auto it = std::find(ordered.begin(), ordered.end(), _last_session_id);
-  if (it == ordered.end()) {
-    _last_session_id = ordered.front();
-    return attach_session(_last_session_id, error);
-  }
-
-  size_t index = static_cast<size_t>(std::distance(ordered.begin(), it));
-  index        = (index + 1) % ordered.size();
-  return attach_session(ordered[index], error);
+  if (_last_session_id.empty()) { error = "No editor session available"; return false; }
+  return switch_to_editor({}, error);
 }
 
-bool EditorManager::switch_prev(std::string& error) {
-  if (_sessions.empty()) {
-    error = "No editor sessions available";
-    return false;
-  }
-  auto ordered = session_order();
-  if (ordered.empty()) {
-    error = "No editor sessions available";
-    return false;
-  }
-
-  if (_last_session_id.empty()) _last_session_id = ordered.front();
-  auto it = std::find(ordered.begin(), ordered.end(), _last_session_id);
-  if (it == ordered.end()) {
-    _last_session_id = ordered.front();
-    return attach_session(_last_session_id, error);
-  }
-
-  int index = static_cast<int>(std::distance(ordered.begin(), it));
-  index--;
-  if (index < 0) index = static_cast<int>(ordered.size()) - 1;
-  return attach_session(ordered[static_cast<size_t>(index)], error);
-}
+bool EditorManager::switch_prev(std::string& error) { return switch_next(error); }

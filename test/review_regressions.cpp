@@ -730,19 +730,15 @@ static void R28() {
   EditorManager manager([&](const std::function<int()>&) { return result; }, [](const std::string&) {});
   std::string error;
   for (const auto& name : {"a", "b", "c"}) require(manager.open_directory_new_session(f.dir(name), error), "session fixture failed");
-  const auto sessions = manager.sessions();
+  require(manager.sessions().size() == 1, "directory opens created multiple editors");
+  const auto id = manager.last_session_id();
   for (int i = 0; i < 6; ++i) {
-    require(manager.switch_next(error), "next failed");
-    require(manager.last_session_id() == sessions[i % 3].id, "next skipped a live session");
-  }
-  for (int i = 0; i < 6; ++i) {
-    require(manager.switch_prev(error), "previous failed");
-    require(manager.last_session_id() == sessions[(4 - i % 3) % 3].id, "previous skipped a live session");
+    require(manager.switch_next(error) && manager.switch_prev(error), "editor switching failed");
+    require(manager.last_session_id() == id, "switching changed editor identity");
   }
   result = 7; require(!manager.switch_next(error), "failed attach was accepted");
-  result = 0; require(manager.switch_next(error), "dead session prevented cycling");
-  require(manager.last_session_id() == sessions[1].id, "known failed session remained in cycle");
-  require(manager.switch_prev(error) && manager.last_session_id() == sessions[2].id, "reverse cycle failed around dead session");
+  result = 0; require(manager.switch_next(error), "failed attach prevented retry");
+  require(manager.last_session_id() == id, "retry abandoned existing editor");
   auto store = f.root / "editor-session.json";
   manager.set_session_store(store);
   require(manager.switch_next(error), "session checkpoint failed");
