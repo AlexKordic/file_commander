@@ -106,6 +106,12 @@ Failure evidence includes bounded terminal/debug tails, protocol records, revisi
 
 ## Packages and release qualification
 
+After the manual-category split, the automatic macOS arm64 Release lane passed
+**190/190 tests with zero skips** at revision `ed62486`. Package creation and
+executable integrity checks passed. The seven manual tests were not run in that
+lane and remain a separate qualification step.
+[Automatic qualification record](qualification/macos-arm64-automatic-2026-10-05.json).
+
 The native macOS arm64 Release lane passed **178/178 tests with zero skips** at
 revision `fa65328` on October 5, 2026. The user ran it from a normal Terminal with
 a disposable APFS volume for EXDEV; saved JUnit, lane status and package hashes
@@ -120,7 +126,7 @@ ctest --test-dir build -R '^fc.package_build$' --output-on-failure
 ctest --test-dir build -R '^fc.package$' --output-on-failure
 ```
 
-The relocated package runs from an unrelated directory with isolated HOME/XDG settings. A sandbox denies source/dependency reads: `sandbox-exec` on macOS, `bwrap` on Linux. Read probes prove the restriction. The test verifies archive contents and actual bundled helper paths, plus the real Fresh version command. Separate Fresh PTY tests cover actual attach/quit and failed invocation with restored input/modes. Missing optional helper/isolation capabilities are explicit skips.
+The relocated package runs from an unrelated directory with isolated HOME/XDG settings. A sandbox denies source/dependency reads: `sandbox-exec` on macOS, `bwrap` on Linux. Read probes prove the restriction. The test verifies archive contents and actual bundled helper paths, plus the real Fresh version command. Separate automatic Fresh PTY tests cover attach/detach, recovery and failed invocation with restored input/modes. Missing optional helper/isolation capabilities are explicit skips.
 
 ```sh
 cmake --preset release

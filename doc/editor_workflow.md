@@ -381,7 +381,10 @@ documentation commit does not change executable sources. Full evidence summary:
 The user subsequently chose to put those seven checks in the `manual` category.
 Automatic lanes now exclude them and retain package creation/integrity checks;
 manual results are reported separately. See [build and test setup](build_test_setup.md#manual-environment-checks).
-This reclassification does not change the historical results above.
+This reclassification does not change the historical results above. The new
+**automatic lane passes 190/190** at `ed62486`, with package creation/integrity
+passing and the seven manual tests listed separately as not run.
+[Automatic qualification record](qualification/macos-arm64-automatic-2026-10-05.json).
 
 Run the manual category from a normal macOS Terminal:
 
