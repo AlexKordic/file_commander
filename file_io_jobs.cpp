@@ -12,6 +12,15 @@
 #include <mutex>
 #include <thread>
 #include <unordered_map>
+#include <cerrno>
+#include <fcntl.h>
+#include <unistd.h>
+#if defined(__APPLE__)
+#include <sys/stdio.h>
+#elif defined(__linux__)
+#include <sys/syscall.h>
+#include <linux/fs.h>
+#endif
 
 using boost::filesystem::copy_options;
 using boost::system::error_code;
@@ -252,6 +261,44 @@ struct DelayedUpdateDelete {
 };
 
 namespace {
+// Never emulate this with exists()+rename(): another creator can win between
+// those calls. Unsupported filesystems must fail without replacing anything.
+void rename_no_replace(const Filepath& source, const Filepath& destination, error_code& ec) {
+  ec.clear();
+#if defined(__APPLE__)
+  if (::renamex_np(source.c_str(), destination.c_str(), RENAME_EXCL) != 0)
+    ec.assign(errno, boost::system::system_category());
+#elif defined(__linux__) && defined(SYS_renameat2)
+  if (::syscall(SYS_renameat2, AT_FDCWD, source.c_str(), AT_FDCWD, destination.c_str(), RENAME_NOREPLACE) != 0)
+    ec.assign(errno, boost::system::system_category());
+#else
+  ec = make_error_code(boost::system::errc::operation_not_supported);
+#endif
+}
+
+std::vector<std::string> check_rename_destinations(const OperationPlan& plan) {
+  std::vector<std::string> errors(plan.steps.size());
+  std::unordered_map<std::string, size_t> destinations;
+  for (size_t i = 0; i < plan.steps.size(); ++i) {
+    const auto& op = plan.steps[i];
+    if (op.kind != Operation::Kind::RenameEntry) continue;
+    error_code ec;
+    auto parent = boost::filesystem::weakly_canonical(op.destination.parent_path(), ec);
+    if (ec) { errors[i] = ec.message(); continue; }
+    const auto target = parent / op.destination.filename();
+    auto [previous, inserted] = destinations.emplace(target.native(), i);
+    if (!inserted) errors[i] = errors[previous->second] = "Multiple entries have the same rename destination";
+    const auto status = boost::filesystem::symlink_status(target, ec);
+    if (ec && ec != boost::system::errc::no_such_file_or_directory) errors[i] = ec.message();
+    else if (op.source.lexically_normal() == op.destination.lexically_normal()) {
+      if (!boost::filesystem::exists(status)) errors[i] = "Rename source does not exist";
+    }
+    else if (boost::filesystem::exists(status))
+      errors[i] = "Rename destination already exists; use an unused intermediate name for swaps or cycles";
+  }
+  return errors;
+}
+
 bool transfer_checkpoint(const boost::filesystem::copy_file_options& options, error_code& ec) {
   if ((options.cancel_requested && options.cancel_requested->load()) ||
       (options.checkpoint && !options.checkpoint(options.checkpoint_context))) {
@@ -611,6 +658,7 @@ class ThreadedFileJobs : public FileJobs {
   }
 
   void run_small(JobSpec* job) {
+    const auto rename_errors = check_rename_destinations(*job->_plan);
     {std::lock_guard lock(job->_m);job->_step_errors.assign(job->_plan->steps.size(),"not executed");}
     for(size_t i=0;i<job->_plan->steps.size();++i) {
       if(job->_cancel_requested || !wait_for_resume(job)) {job->_state=JobState::CANCELLED;return;}
@@ -618,7 +666,15 @@ class ThreadedFileJobs : public FileJobs {
       switch(op.kind) {
         case Operation::Kind::CreateDirectory:
           if(!boost::filesystem::create_directory(op.destination,ec) && !ec) message="already exists";break;
-        case Operation::Kind::RenameEntry: boost::filesystem::rename(op.source,op.destination,ec);break;
+        case Operation::Kind::RenameEntry:
+          message = rename_errors[i];
+          if (message.empty() && op.source.lexically_normal() != op.destination.lexically_normal()) {
+            const auto* io = _services.file_io.get();
+            const int fault = io && io->fault ? io->fault(io->context, "rename_commit") : 0;
+            if (fault) ec.assign(fault, boost::system::system_category());
+            else rename_no_replace(op.source, op.destination, ec);
+          }
+          break;
         case Operation::Kind::ClipboardText: {auto error=_services.clipboard(op.message);if(!error.ok()) message=error.steps.front();break;}
         default:message="Invalid small operation";break;
       }

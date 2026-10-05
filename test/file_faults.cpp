@@ -93,6 +93,44 @@ void long_names() {
     no_staging(f);
   }
 }
+void rename_conflicts() {
+  Fixture f;
+  auto jobs = make_file_jobs();
+  auto run = [&](std::vector<Operation> steps, size_t failures, FileJobs* manager = nullptr) {
+    auto plan = std::make_shared<OperationPlan>();
+    plan->type = OperationType::RENAME;
+    plan->steps = std::move(steps);
+    auto job = std::make_shared<JobSpec>(plan);
+    auto& executor = manager ? *manager : *jobs;
+    executor.add_job(job);
+    until([&] { return executor.idle(); }, "rename conflict timeout");
+    require(job->snapshot()->_items_failed == failures, "rename failure accounting");
+    require(job->_state == (failures ? JobState::COMPLETED_WITH_ERRORS : JobState::COMPLETED), "rename outcome");
+  };
+  write(f / "A", "original A"); write(f / "B", "original B");
+  run({{Operation::Kind::RenameEntry, f / "A", f / "B"}, {Operation::Kind::RenameEntry, f / "B", f / "A"}}, 2);
+  require(read(f / "A") == "original A" && read(f / "B") == "original B", "rename swap lost original bytes");
+  run({{Operation::Kind::RenameEntry, f / "A", f / "new"}, {Operation::Kind::RenameEntry, f / "B", f / "new"}}, 2);
+  require(read(f / "A") == "original A" && read(f / "B") == "original B" && !fs::exists(f / "new"), "duplicate targets mutated originals");
+  fs::create_symlink("missing", f / "dangling");
+  run({{Operation::Kind::RenameEntry, f / "A", f / "dangling"}}, 1);
+  require(fs::read_symlink(f / "dangling") == Filepath("missing") && read(f / "A") == "original A", "rename replaced dangling destination");
+  const auto late = f / "late";
+  auto hooks = std::make_shared<fs::copy_file_io_hooks>();
+  hooks->context = const_cast<Filepath*>(&late);
+  hooks->fault = [](void* context, const char* phase) {
+    if (std::string(phase) == "rename_commit") write(*static_cast<Filepath*>(context), "competing creator");
+    return 0;
+  };
+  FileJobServices services; services.file_io = hooks;
+  auto racing = make_file_jobs({}, services);
+  run({{Operation::Kind::RenameEntry, f / "A", late}}, 1, racing.get());
+  require(read(late) == "competing creator" && read(f / "A") == "original A", "rename clobbered late destination");
+  run({{Operation::Kind::RenameEntry, f / "A", f / "A"}}, 0);
+  run({{Operation::Kind::RenameEntry, f / "absent", f / "absent"}}, 1);
+  run({{Operation::Kind::RenameEntry, f / "A", f / "renamed"}}, 0);
+  require(!fs::exists(f / "A") && read(f / "renamed") == "original A", "ordinary rename failed");
+}
 void settings_faults() {
   Fixture f;
   for (auto phase : {"open", "write", "flush", "close", "commit", "zero", "retry", "short"}) {
@@ -188,9 +226,10 @@ int main(int argc, char** argv) {
   try {
     std::string name = argc > 1 ? argv[1] : "all";
     if (name == "exdev") return exdev();
-    require(name == "all" || name == "copy" || name == "long_names" || name == "settings" || name == "move" || name == "partial", "unknown file fault case");
+    require(name == "all" || name == "copy" || name == "long_names" || name == "rename" || name == "settings" || name == "move" || name == "partial", "unknown file fault case");
     if (name == "copy" || name == "all") copy_faults();
     if (name == "long_names" || name == "all") long_names();
+    if (name == "rename" || name == "all") rename_conflicts();
     if (name == "settings" || name == "all") settings_faults();
     if (name == "move" || name == "all") move_faults();
     if (name == "partial" || name == "all") partial_copy();
