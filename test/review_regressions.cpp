@@ -902,13 +902,37 @@ static void AR01() {
 }
 
 static void TS07_render_sizes() {
-  Fixture f;f.file("Ω界 combining-é");f.file("control\nname");UiQueue ui;
+  Fixture f;f.file("Ω界 combining-é");f.file("control\nname");f.file("alpha.txt");f.file("beta.txt");UiQueue ui;
   int width=100;FileCommander app(f.root,f.root,[&](auto fn){ui.post(std::move(fn));},[&]{return width;});ui.wait(app.get_left());ui.wait(app.get_right());
-  auto interactive=ScreenInteractive::FixedSize(100,30);Loop loop(&interactive,app.renderer);app.get_left().navigation->TakeFocus();
+  // Match main's startup container: rendering app.renderer directly bypassed
+  // the parent allocation and hid the one-row file-list regression.
+  auto root=Container::Vertical({app.renderer});
+  auto interactive=ScreenInteractive::FixedSize(100,30);Loop loop(&interactive,root);app.get_left().navigation->TakeFocus();
+  file_operations().clear_errors();
+  for(bool single:{false,true}) {
+    app.set_single_panel_mode(single);
+    for(auto [w,h]:std::vector<std::pair<int,int>>{{100,30},{140,40},{35,8},{12,3},{1,1},{100,30}}) {
+      width=w;
+      for(int frame=0;frame<3;++frame) {
+        auto screen=Screen::Create(Dimension::Fixed(w),Dimension::Fixed(h));
+        Render(screen,root->Render());
+        if(w>=100) {
+          require(screen.PixelAt(0,h-1).character=="╰", "file panel did not fill terminal height");
+          require(screen.PixelAt(w-1,h-1).character=="╯", "right edge of file panel did not fill terminal height");
+          if(frame==2) {
+            const auto text=screen.ToString();
+            require(text.find("alpha.txt")!=std::string::npos && text.find("beta.txt")!=std::string::npos,
+                    "file panel hid entries despite available screen space");
+          }
+        }
+      }
+    }
+  }
+  app.set_single_panel_mode(false);
   for(auto command:{"", "copy", "find", "toggle_job_list", "open_bookmarks", "edit_theme_colors"}) {
     if(*command)require(app.execute_command(command),"render dialog setup failed");
     for(auto [w,h]:std::vector<std::pair<int,int>>{{100,30},{35,8},{12,3},{1,1},{100,30}}) {
-      width=w;for(int frame=0;frame<3;++frame){auto screen=Screen::Create(Dimension::Fixed(w),Dimension::Fixed(h));Render(screen,app.renderer->Render());require(!screen.ToString().empty(),"render produced empty screen");}
+      width=w;for(int frame=0;frame<3;++frame){auto screen=Screen::Create(Dimension::Fixed(w),Dimension::Fixed(h));Render(screen,root->Render());require(!screen.ToString().empty(),"render produced empty screen");}
     }
     app.navigation->OnEvent(Event::Escape);
   }

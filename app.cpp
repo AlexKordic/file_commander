@@ -1098,7 +1098,7 @@ FileCommander::FileCommander(Filepath l, Filepath r, ExecuteOnUiThread exec, std
     Element document = vbox(std::move(el));
     if (!_overlay_renderer) return document;
     return dbox({document, _overlay_renderer->Render() | yflex | clear_under_colors | hcenter});
-  });
+  }) | yflex;  // Fill the startup container for both panels and global overlays.
 }
 
 TargetFunc FileCommander::get_target() {
