@@ -1,0 +1,59 @@
+{
+  "standalone": [
+    "fc.core",
+    "fc.extended.resources",
+    "fc.benchmark.publication",
+    "fc.benchmark.render",
+    "fc.extended.fresh_success",
+    "fc.extended.fresh_failure",
+    "fc.package",
+    "fc.dependency_rebuild",
+    "fc.terminal.input_resize"
+  ],
+  "groups": {
+    "contract": [
+      "locations",
+      "settings",
+      "directory",
+      "traversal",
+      "events",
+      "retention",
+      "typed"
+    ],
+    "lifetime": [
+      "latest",
+      "mailbox",
+      "queue",
+      "jobs",
+      "scheduler"
+    ],
+    "fault": [
+      "copy",
+      "long_names",
+      "rename",
+      "directory_access",
+      "settings",
+      "move",
+      "move_metadata",
+      "partial",
+      "exdev"
+    ],
+    "harness": [
+      "dependencies",
+      "result_checks",
+      "protocol",
+      "manifests",
+      "supervisor",
+      "lanes"
+    ],
+    "process_exit": [
+      "syntax",
+      "runtime",
+      "returned",
+      "yield_watchdog",
+      "loop_watchdog",
+      "long_sleep",
+      "long_wait"
+    ]
+  }
+}

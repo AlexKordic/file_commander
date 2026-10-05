@@ -8,8 +8,10 @@ import platform
 import signal
 import subprocess
 import time
+import tarfile
 import uuid
 import xml.etree.ElementTree as ET
+from release_gate import required_tests, check_build, check_discovery, check_names, check_package
 
 parser=argparse.ArgumentParser(description=__doc__)
 parser.add_argument('lane',choices=['fast','integration','sanitizer','thread','extended','release'])
@@ -35,6 +37,20 @@ metadata={'lane':args.lane,'os':platform.system(),'architecture':actual_arch,'pl
           'revision':subprocess.check_output(['git','rev-parse','HEAD'],cwd=root,text=True).strip(),
           'command':command,'started':time.time()}
 print('Artifacts:',artifacts,flush=True)
+if args.lane=='release':
+    try:
+        expected=required_tests(root)
+        binaries,package=check_build(args.build.resolve(),root,platform.system(),actual_arch)
+        discovery=subprocess.run(['ctest','--test-dir',str(args.build.resolve()),'--show-only=json-v1'],
+                                 cwd=root,env=env,text=True,capture_output=True,check=True,timeout=30)
+        (artifacts/'discovery.json').write_text(discovery.stdout)
+        check_discovery(json.loads(discovery.stdout),expected)
+        metadata['required_tests']=sorted(expected)
+    except (OSError,ValueError,KeyError,subprocess.SubprocessError) as error:
+        metadata.update(status=1,error=str(error))
+        (artifacts/'metadata.json').write_text(json.dumps(metadata,indent=2)+'\n')
+        (artifacts/'ctest.log').write_text('Release preflight failed: '+str(error)+'\n')
+        raise SystemExit('Release preflight failed: '+str(error))
 with (artifacts/'ctest.log').open('w') as log:
     try:
         result=subprocess.Popen(command,cwd=root,env=env,stdout=log,stderr=subprocess.STDOUT,start_new_session=True)
@@ -46,11 +62,17 @@ with (artifacts/'ctest.log').open('w') as log:
 metadata['seconds']=time.time()-metadata['started']
 metadata['status']=status
 xml=artifacts/'results.xml'
-if xml.exists():
+try:
     cases=ET.parse(xml).getroot().findall('.//testcase')
-    metadata['tests']=len(cases);metadata['skipped']=[case.get('name') for case in cases if case.find('skipped') is not None or case.get('status')=='notrun']
-    if not cases or (args.lane=='release' and metadata['skipped']):status=1
-else:status=1
+    metadata['tests']=len(cases);metadata['skipped']=[case.get('name') for case in cases if case.find('skipped') is not None or case.get('status') in ('notrun','disabled')]
+    metadata['failed']=[case.get('name') for case in cases if case.find('failure') is not None or case.find('error') is not None or case.get('status')=='fail']
+    if not cases or metadata['failed']:status=1
+    if args.lane=='release':
+        check_names([case.get('name') for case in cases],expected)
+        if metadata['skipped']:status=1
+        metadata['artifact_sha256']=check_package(package,binaries)
+except (OSError,ValueError,KeyError,ET.ParseError, tarfile.TarError) as error:
+    metadata['error']=str(error);status=1
 metadata['status']=status
 (artifacts/'metadata.json').write_text(json.dumps(metadata,indent=2)+'\n')
 print((artifacts/'ctest.log').read_text()[-8000:])

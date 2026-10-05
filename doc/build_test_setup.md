@@ -81,7 +81,19 @@ FC_TEST_EXDEV_ROOT=/path/on/second/filesystem \
   python3 tools/run_test_lane.py release --build build-release --expect-os Darwin --expect-arch arm64
 ```
 
-Release enables source-timestamp rebuild checks and rejects every skip, missing result or absent required capability. A macOS release runner must provision a writable second volume; a Linux runner normally uses `/dev/shm`. The slow rebuild check only touches timestamps and restores them; it runs serially with packaging. The dependency self-test mutates disposable copies, never developer checkouts.
+Release requires a native `Release` build of this checkout with tests, pinned
+dependencies, Fresh, 7zr and source-timestamp rebuild checks enabled. Before
+running tests it compares CTest discovery against the independent qualification
+contract in `test/release_required.json` and the command, regression, Lua and
+negative-control registries. Missing, extra, duplicate, disabled or unbuilt tests
+fail qualification. Add new standalone tests to the qualification contract when
+registering them in CMake.
+
+The final JUnit report must contain the entire expected suite without failures
+or skips. The package must contain executable fc, Fresh and 7zr files whose
+SHA-256 hashes match the build outputs; those hashes are recorded in the lane
+metadata. A core-only build, an unrelated CTest project or a stale package cannot
+qualify. Release rejects every absent required capability. A macOS release runner must provision a writable second volume; a Linux runner normally uses `/dev/shm`. The slow rebuild check only touches timestamps and restores them; it runs serially with packaging. The dependency self-test mutates disposable copies, never developer checkouts.
 
 ## Repository CI
 
