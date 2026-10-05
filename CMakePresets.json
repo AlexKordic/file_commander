@@ -18,10 +18,12 @@
     {"name": "release", "configurePreset": "release", "jobs": 6}
   ],
   "testPresets": [
-    {"name": "native", "configurePreset": "native", "output": {"outputOnFailure": true}, "execution": {"jobs": 6}, "filter": {"exclude": {"label": "slow|extended|benchmark"}}},
-    {"name": "core", "configurePreset": "core", "output": {"outputOnFailure": true}, "execution": {"jobs": 6}, "filter": {"exclude": {"label": "extended|benchmark"}}},
-    {"name": "asan-ubsan", "configurePreset": "asan-ubsan", "output": {"outputOnFailure": true}, "environment": {"ASAN_OPTIONS": "halt_on_error=1", "UBSAN_OPTIONS": "halt_on_error=1:print_stacktrace=1"}, "filter": {"exclude": {"label": "extended|benchmark"}}},
-    {"name": "ubsan", "configurePreset": "ubsan", "output": {"outputOnFailure": true}, "environment": {"UBSAN_OPTIONS": "halt_on_error=1:print_stacktrace=1"}, "filter": {"exclude": {"label": "extended|benchmark"}}},
-    {"name": "tsan", "configurePreset": "tsan", "output": {"outputOnFailure": true}, "environment": {"TSAN_OPTIONS": "halt_on_error=1"}, "filter": {"include": {"label": "lifetime"}}}
+    {"name": "native", "configurePreset": "native", "output": {"outputOnFailure": true}, "execution": {"jobs": 6}, "filter": {"exclude": {"label": "slow|extended|benchmark|manual"}}},
+    {"name": "core", "configurePreset": "core", "output": {"outputOnFailure": true}, "execution": {"jobs": 6}, "filter": {"exclude": {"label": "extended|benchmark|manual"}}},
+    {"name": "asan-ubsan", "configurePreset": "asan-ubsan", "output": {"outputOnFailure": true}, "environment": {"ASAN_OPTIONS": "halt_on_error=1", "UBSAN_OPTIONS": "halt_on_error=1:print_stacktrace=1"}, "filter": {"exclude": {"label": "extended|benchmark|manual"}}},
+    {"name": "ubsan", "configurePreset": "ubsan", "output": {"outputOnFailure": true}, "environment": {"UBSAN_OPTIONS": "halt_on_error=1:print_stacktrace=1"}, "filter": {"exclude": {"label": "extended|benchmark|manual"}}},
+    {"name": "tsan", "configurePreset": "tsan", "output": {"outputOnFailure": true}, "environment": {"TSAN_OPTIONS": "halt_on_error=1"}, "filter": {"include": {"label": "lifetime"}, "exclude": {"label": "manual"}}},
+    {"name": "release", "configurePreset": "release", "output": {"outputOnFailure": true}, "execution": {"jobs": 6}, "filter": {"exclude": {"label": "manual"}}},
+    {"name": "manual", "configurePreset": "release", "output": {"outputOnFailure": true}, "execution": {"jobs": 6, "noTestsAction": "error"}, "environment": {"FC_REQUIRE_CAPABILITIES": "1", "FC_REQUIRE_EXDEV": "1"}, "filter": {"include": {"label": "manual"}}}
   ]
 }

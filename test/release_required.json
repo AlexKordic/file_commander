@@ -9,6 +9,7 @@
     "fc.extended.editor_recovery",
     "fc.extended.workspace_recovery",
     "fc.harness.fresh_bundle",
+    "fc.package_build",
     "fc.package",
     "fc.dependency_rebuild",
     "fc.terminal.input_resize"
@@ -75,5 +76,14 @@
       "long_sleep",
       "long_wait"
     ]
-  }
+  },
+  "manual": [
+    "fc.fault.exdev",
+    "fc.regression.watcher_lifetime",
+    "fc.regression.late_panel_delivery",
+    "fc.regression.watcher_recovery",
+    "fc.lua.test_archive",
+    "fc.lua.test_pause_resume",
+    "fc.package"
+  ]
 }

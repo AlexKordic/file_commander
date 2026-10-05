@@ -363,7 +363,7 @@ changed files must not be silently overwritten or removed.
 
 ## Qualification of the implementation
 
-Tested FC revision: `d9302fcf4d701914d5cc39cf5387e2fa5b2bc5fd`. The subsequent
+Tested FC revision before the manual-category split: `d9302fcf4d701914d5cc39cf5387e2fa5b2bc5fd`. The subsequent
 documentation commit does not change executable sources. Full evidence summary:
 [macOS arm64 editor workflow qualification](qualification/macos-arm64-editor-workflow-2026-10-05.json).
 
@@ -378,13 +378,18 @@ documentation commit does not change executable sources. Full evidence summary:
   FSEvents cannot start, affecting three watcher tests, two Lua tests and the
   relocated package smoke test. The native release gate therefore remains open.
 
-Run the existing native helper from a normal macOS Terminal:
+The user subsequently chose to put those seven checks in the `manual` category.
+Automatic lanes now exclude them and retain package creation/integrity checks;
+manual results are reported separately. See [build and test setup](build_test_setup.md#manual-environment-checks).
+This reclassification does not change the historical results above.
+
+Run the manual category from a normal macOS Terminal:
 
 ```sh
-python3 build-review-evidence/qualify-native.py
+python3 tools/test_exdev_volume.py --manual-build build-release
 ```
 
-It supplies a disposable APFS volume and runs every required release test.
+It supplies a disposable APFS volume and runs every manual-category test.
 The earlier user-reported 178/178 result applies to the earlier revision only.
 Fresh's release build and real PTY tests passed; its Rust unit-test target was
 not runnable with the uncached development dependencies available here.

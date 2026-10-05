@@ -11,31 +11,52 @@ import tempfile
 from test_results import require
 repo = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(repo / 'tools'))
-from release_gate import required_tests
+from release_gate import required_tests, manual_tests
+
+presets = json.loads((repo / 'CMakePresets.json').read_text())['testPresets']
+for preset in presets:
+    if preset['name'] == 'manual':
+        require(preset['filter']['include']['label'] == 'manual', 'manual preset selection')
+    else:
+        require('manual' in preset['filter']['exclude']['label'].split('|'), 'automatic preset includes manual checks')
 
 with tempfile.TemporaryDirectory(prefix='fc-lane-check-') as directory:
     root = Path(directory)
     build = root / 'build'
     build.mkdir()
     expected = sorted(required_tests(repo))
-    require({'fc.package', 'fc.dependency_rebuild', 'fc.fault.exdev', 'fc.regression.archive_literal_names',
+    manual = sorted(manual_tests(repo))
+    require(set(manual) == {'fc.package', 'fc.fault.exdev', 'fc.regression.watcher_lifetime',
+            'fc.regression.late_panel_delivery', 'fc.regression.watcher_recovery',
+            'fc.lua.test_archive', 'fc.lua.test_pause_resume'}, 'manual category changed unexpectedly')
+    require({'fc.package_build', 'fc.package', 'fc.dependency_rebuild', 'fc.fault.exdev', 'fc.regression.archive_literal_names',
              'fc.fault.move_metadata', 'fc.lua.test_archive', 'fc.command.copy'} <= set(expected), 'release coverage contract')
     (root / 'names.json').write_text(json.dumps(expected))
+    (root / 'manual.json').write_text(json.dumps(manual))
     fake = root / 'ctest'
     fake.write_text('#!' + sys.executable + '''
 import json, os, sys
 from pathlib import Path
 mode = os.environ['FC_LANE_CONTROL']
 names = json.loads(Path(__file__).with_name('names.json').read_text())
+manual = json.loads(Path(__file__).with_name('manual.json').read_text())
 if '--show-only=json-v1' in sys.argv:
  if mode == 'one_test': names = ['fixture']
  if mode == 'missing_test': names = names[1:]
  if mode == 'duplicate_test': names.append(names[0])
- tests = [{'name': n, 'command': [sys.executable], 'properties': []} for n in names]
- if mode == 'disabled': tests[0]['properties'] = [{'name': 'DISABLED', 'value': True}]
- if mode == 'unbuilt': tests[0].pop('command')
+ if mode == 'missing_manual': names.remove(manual[0])
+ tests = [{'name': n, 'command': [sys.executable], 'properties': [{'name': 'LABELS', 'value': ['manual'] if n in manual else []}]} for n in names]
+ target = next((t for t in tests if t['name'] in manual), tests[0])
+ if mode == 'disabled': target['properties'].append({'name': 'DISABLED', 'value': True})
+ if mode == 'unbuilt': target.pop('command')
+ if mode == 'wrong_manual_label': target['properties'] = []
+ if mode == 'extra_manual_label': next(t for t in tests if t['name'] not in manual)['properties'][0]['value'] = ['manual']
  print(json.dumps({'tests': tests}))
 else:
+ if '-L' in sys.argv and sys.argv[sys.argv.index('-L')+1] == 'manual':
+  names = manual + ([next(n for n in names if n not in manual)] if mode == 'leak_automatic' else [])
+ elif '-LE' in sys.argv and 'manual' in sys.argv[sys.argv.index('-LE')+1] and mode != 'leak_manual':
+  names = [n for n in names if n not in manual]
  p = Path(sys.argv[sys.argv.index('--output-junit') + 1])
  if mode == 'one_result': names = ['fixture']
  if mode == 'duplicate_result': names.append(names[0])
@@ -84,6 +105,17 @@ else:
     for mode in ('one_test', 'missing_test', 'duplicate_test', 'disabled', 'unbuilt', 'one_result',
                  'duplicate_result', 'skip', 'failure', 'error', 'empty', 'missing', 'malformed'):
         run(control=mode)
+    for mode in ('missing_manual', 'wrong_manual_label', 'extra_manual_label', 'leak_manual'):
+        run(control=mode)
+    run('manual', valid=True)
+    for mode in ('missing_manual', 'wrong_manual_label', 'extra_manual_label', 'disabled', 'unbuilt',
+                 'leak_automatic', 'skip', 'failure', 'error', 'empty', 'missing', 'malformed'):
+        run('manual', control=mode)
+    metadata_paths = list((build / 'test-logs').glob('lane-release-*/metadata.json'))
+    metadata = [json.loads(p.read_text()) for p in metadata_paths]
+    successful = next(m for m in metadata if m['status'] == 0)
+    require(set(successful['required_tests']) == set(expected) - set(manual), 'automatic release includes manual cases')
+    require(set(successful['manual_tests']) == set(manual), 'automatic evidence hides manual requirements')
     run('fast', valid=True)
     run('fast', 'skip', valid=True)
     for mode in ('empty', 'missing', 'failure', 'malformed'): run('fast', mode)

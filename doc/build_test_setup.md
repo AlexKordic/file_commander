@@ -21,7 +21,7 @@ For an existing build:
 ```sh
 cmake -S . -B build -G Ninja
 cmake --build build -j6
-ctest --test-dir build -LE 'slow|extended|benchmark' --output-on-failure -j6
+ctest --test-dir build -LE 'slow|extended|benchmark|manual' --output-on-failure -j6
 ctest --test-dir build -R 'fc.contract.locations|fc.fault.copy' --output-on-failure
 ctest --test-dir build -N
 ```
@@ -38,7 +38,46 @@ python3 tools/run_test_lane.py extended --build build
 
 The runner writes CTest output, JUnit and platform/revision/command metadata into a unique `BUILD/test-logs/lane-*` directory. `--expect-os Linux --expect-arch x86_64` prevents a cross build or a different host from being mistaken for native qualification. Per-test logs are under `BUILD/test-logs`; package evidence is under `BUILD/dist/test-logs`.
 
-The extended lane includes resource cycles, measurement-only benchmarks, real Fresh handoff and real EXDEV. EXDEV verifies different `st_dev` values, using `FC_TEST_EXDEV_ROOT` or `/dev/shm`. On macOS, `python3 tools/test_exdev_volume.py --binary build/fc_file_fault_tests` creates and tears down a disposable APFS volume for this case. An unavailable capability reports a skip; `FC_REQUIRE_EXDEV=1` makes it fail. Resource tests check live descriptors/threads and owned history/detail/event bounds. Benchmarks report timings without percentage gates; compare results only on a named Release-build machine.
+All automatic lanes and CTest presets exclude the `manual` category. The extended
+lane includes resource cycles, measurement-only benchmarks and real Fresh handoff.
+Resource tests check live descriptors/threads and owned history/detail/event bounds.
+Benchmarks report timings without percentage gates; compare results only on a named
+Release-build machine.
+
+### Manual environment checks
+
+The following seven tests require a working native service context or a second
+filesystem. They have the `manual` CTest label, driven by the `manual` list in
+`test/release_required.json`:
+
+| Tests | Native requirement |
+| --- | --- |
+| `fc.regression.watcher_lifetime`, `fc.regression.late_panel_delivery`, `fc.regression.watcher_recovery` | Working native directory notifications (FSEvents on macOS). |
+| `fc.lua.test_archive`, `fc.lua.test_pause_resume` | End-to-end workflows with no watcher startup errors. |
+| `fc.package` | Relocated package workflow with native watchers and source-read isolation. |
+| `fc.fault.exdev` | Writable destination on a different filesystem (`st_dev`). |
+
+Run them from a normal Terminal with the second filesystem supplied:
+
+```sh
+FC_TEST_EXDEV_ROOT=/path/on/second/filesystem \
+  python3 tools/run_test_lane.py manual --build build-release
+```
+
+On macOS, this helper provisions and cleans up a disposable APFS volume while
+running the entire manual lane:
+
+```sh
+python3 tools/test_exdev_volume.py --manual-build build-release
+```
+
+Linux can normally use `FC_TEST_EXDEV_ROOT=/dev/shm`. The manual lane records its
+own JUnit/logs and rejects missing, disabled, failed or skipped manual tests.
+`ctest --preset manual` is also available once the required volume is supplied.
+Use `ctest --test-dir build-release -N -L manual` to list the category. Bare
+`ctest` includes all registered tests; use the presets or lane runner for the
+automatic/manual split. The aggregate Lua smoke command likewise explicitly runs
+all Lua cases, including the two manual workflows.
 
 ```sh
 cmake --preset asan-ubsan
@@ -76,6 +115,8 @@ target is macOS 26.7.1.
 
 ```sh
 cmake --build build --target package_static_dist
+ctest --test-dir build -R '^fc.package_build$' --output-on-failure
+# Manual relocation check, from a healthy native session:
 ctest --test-dir build -R '^fc.package$' --output-on-failure
 ```
 
@@ -84,8 +125,7 @@ The relocated package runs from an unrelated directory with isolated HOME/XDG se
 ```sh
 cmake --preset release
 cmake --build --preset release
-FC_TEST_EXDEV_ROOT=/path/on/second/filesystem \
-  python3 tools/run_test_lane.py release --build build-release --expect-os Darwin --expect-arch arm64
+python3 tools/run_test_lane.py release --build build-release --expect-os Darwin --expect-arch arm64
 ```
 
 Release requires a native `Release` build of this checkout with tests, pinned
@@ -96,15 +136,25 @@ negative-control registries. Missing, extra, duplicate, disabled or unbuilt test
 fail qualification. Add new standalone tests to the qualification contract when
 registering them in CMake.
 
-The final JUnit report must contain the entire expected suite without failures
-or skips. The package must contain executable fc, Fresh and 7zr files whose
+The automatic release JUnit report must contain every non-manual test without
+failures or skips. Its metadata explicitly lists the manual tests not run; an
+automatic pass does not claim those checks passed. Full native qualification
+combines successful automatic release and manual evidence for the same source
+revision/build. Manual checks stay registered and enabled, and an unexpected
+`manual` label fails release preflight rather than silently removing coverage.
+
+`fc.package_build` keeps distribution creation in automatic testing. The package
+must contain executable fc, Fresh and 7zr files whose
 SHA-256 hashes match the build outputs; those hashes are recorded in the lane
 metadata. A core-only build, an unrelated CTest project or a stale package cannot
-qualify. Release rejects every absent required capability. A macOS release runner must provision a writable second volume; a Linux runner normally uses `/dev/shm`. The slow rebuild check only touches timestamps and restores them; it runs serially with packaging. The dependency self-test mutates disposable copies, never developer checkouts.
+qualify. Manual checks reject absent required capabilities; only that lane needs
+the second filesystem and a healthy native watcher service. The slow rebuild
+check only touches timestamps and restores them; it runs serially with packaging.
+The dependency self-test mutates disposable copies, never developer checkouts.
 
 ## Repository CI
 
-`.github/workflows/tests.yml` defines native macOS arm64, Linux x86-64 and Linux arm64 jobs, plus separate native macOS/Linux sanitizer jobs. Actions are pinned to commits. It runs on pushes/manual dispatch, with extended work nightly and strict release on manual request. It does not run untrusted fork PR code on the private runners.
+`.github/workflows/tests.yml` defines native macOS arm64, Linux x86-64 and Linux arm64 jobs, plus separate native macOS/Linux sanitizer jobs. Actions are pinned to commits. It runs automatic lanes on pushes/manual dispatch, with extended work nightly and the automatic release lane on request. The separate `manual_tests` workflow-dispatch input explicitly selects manual environment checks; neither pushes nor nightly runs select them. It does not run untrusted fork PR code on the private runners.
 
 Provision self-hosted runners labelled `fc-pinned`, with the matching OS/architecture labels, the build tools above, a pinned-compatible Rust toolchain, Linux bubblewrap, and these environment variables:
 

@@ -3,7 +3,11 @@ name: Native qualification
   workflow_dispatch:
     inputs:
       release:
-        description: Run strict release gates (requires a second filesystem)
+        description: Run all automatic release checks
+        type: boolean
+        default: false
+      manual_tests:
+        description: Run manual checks (requires working native watchers and a second filesystem)
         type: boolean
         default: false
   push:
@@ -36,14 +40,17 @@ jobs:
           cmake --build build-ci -j6
       - name: Fast contracts
         run: python3 tools/run_test_lane.py fast --build build-ci --expect-os '${{ matrix.system }}' --expect-arch '${{ matrix.machine }}'
-      - name: Native integration and relocation
+      - name: Native integration and package build
         run: python3 tools/run_test_lane.py integration --build build-ci --expect-os '${{ matrix.system }}' --expect-arch '${{ matrix.machine }}'
       - name: Extended native tests
         if: github.event_name == 'schedule' || inputs.release
         run: python3 tools/run_test_lane.py extended --build build-ci --expect-os '${{ matrix.system }}' --expect-arch '${{ matrix.machine }}'
-      - name: Strict release (no skipped capabilities)
+      - name: Automatic release (no skipped tests)
         if: inputs.release
         run: python3 tools/run_test_lane.py release --build build-ci --expect-os '${{ matrix.system }}' --expect-arch '${{ matrix.machine }}'
+      - name: Manual native checks (explicit dispatch only)
+        if: inputs.manual_tests
+        run: python3 tools/run_test_lane.py manual --build build-ci --expect-os '${{ matrix.system }}' --expect-arch '${{ matrix.machine }}'
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: always()
         with:

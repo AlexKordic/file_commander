@@ -23,6 +23,13 @@ def required_tests(repo):
     return names
 
 
+def manual_tests(repo):
+    names = json.loads((repo / 'test/release_required.json').read_text())['manual']
+    if len(names) != len(set(names)) or set(names) - required_tests(repo):
+        raise ValueError('manual tests must be unique entries in the qualification registry')
+    return set(names)
+
+
 def check_names(actual, expected):
     counts = Counter(actual)
     missing, extra = expected - counts.keys(), counts.keys() - expected
@@ -62,10 +69,14 @@ def check_build(build, repo, system, arch):
     return binaries, build / 'dist' / (package_name + '.tar.gz')
 
 
-def check_discovery(discovery, expected):
+def check_discovery(discovery, expected, manual=None):
     tests = discovery['tests']
     check_names([test['name'] for test in tests], expected)
     for test in tests:
+        if manual is not None:
+            labels = next((p['value'] for p in test.get('properties', []) if p['name'] == 'LABELS'), [])
+            if ('manual' in labels) != (test['name'] in manual):
+                raise ValueError(f"manual test label disagrees with qualification registry: {test['name']}")
         disabled = next((p['value'] for p in test.get('properties', []) if p['name'] == 'DISABLED'), False)
         if disabled or not test.get('command'):
             raise ValueError(f"required release test disabled or not built: {test['name']}")
