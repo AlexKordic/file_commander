@@ -131,6 +131,49 @@ std::vector<Filepath> Panel::tab_paths() const {
   return out;
 }
 
+PanelWorkspace Panel::capture_workspace() const {
+  PanelWorkspace out;
+  out.active = _active_tab;
+  for (size_t i = 0; i < _tabs.size(); ++i) {
+    const auto& tab = _tabs[i];
+    if (tab.restore) { out.tabs.push_back(*tab.restore); continue; }
+    const bool active = int(i) == _active_tab;
+    const auto& directory = active ? dir : tab.dir;
+    TabWorkspace saved;
+    saved.path = archive_service().logical_location(directory.path).encode();
+    saved.sort = directory.order_by;
+    saved.filter = active ? _state->filter_txt : tab.filter_txt;
+    saved.permissions = active ? _state->show_permissions_column : tab.show_permissions_column;
+    saved.owner_group = active ? _state->show_owner_group_column : tab.show_owner_group_column;
+    int focused = active && _state->get_focused_index ? _state->get_focused_index() : tab.focused_index;
+    if (focused >= 0 && size_t(focused) < directory.items.size())
+      saved.focused = archive_service().logical_location(directory.items[focused].path_ref()).encode();
+    for (const auto& item : directory.items)
+      if (item.selected()) saved.selected.push_back(archive_service().logical_location(item.path_ref()).encode());
+    out.tabs.push_back(std::move(saved));
+  }
+  return out;
+}
+
+void Panel::restore_workspace(const PanelWorkspace& saved) {
+  ++_load_generation;
+  _loader.cancel();
+  _tabs.clear();
+  for (const auto& entry : saved.tabs) {
+    TabState tab;
+    tab.dir.path = entry.path;
+    tab.dir.path_txt = entry.path;
+    tab.dir.order_by = entry.sort;
+    tab.filter_txt = entry.filter;
+    tab.show_permissions_column = entry.permissions;
+    tab.show_owner_group_column = entry.owner_group;
+    tab.restore = entry;
+    _tabs.push_back(std::move(tab));
+  }
+  _active_tab = int(saved.active);
+  load_active_tab();
+}
+
 void Panel::new_tab() {
   sync_active_tab_state();
   TabState clone = _tabs.at(_active_tab);
@@ -180,7 +223,10 @@ void Panel::switch_to_tab(int index) {
 
 Location Panel::location() const { return archive_service().logical_location(dir.path); }
 
-void Panel::move_to(const Filepath& where, Filepath focus) { load_directory(where, false, false, std::move(focus)); }
+void Panel::move_to(const Filepath& where, Filepath focus) {
+  if (!_tabs.empty()) _tabs[_active_tab].restore.reset();
+  load_directory(where, false, false, std::move(focus));
+}
 
 void Panel::load_directory(Filepath where, bool archive, bool recover, Filepath focus, bool background_refresh) {
   const auto generation = ++_load_generation;
@@ -231,6 +277,8 @@ void Panel::load_directory(Filepath where, bool archive, bool recover, Filepath 
       _loading = false;
       if (!error.ok()) {
         file_operations().report_error("[Panel load] " + error.steps.front());
+        if (recover && !_tabs.empty() && _tabs[_active_tab].restore && Location::decode(_tabs[_active_tab].restore->path).read_only())
+          load_directory(boost::filesystem::current_path(), false, false);
         return;
       }
       const bool same = dir.path == where;
@@ -252,6 +300,18 @@ void Panel::load_directory(Filepath where, bool archive, bool recover, Filepath 
       _archive_stack = stack;
       _prune_archive_stack(where);
       dir.path_txt = location().display();
+      if (!_tabs.empty() && _tabs[_active_tab].restore) {
+        const auto& saved = *_tabs[_active_tab].restore;
+        std::unordered_set<std::string> wanted(saved.selected.begin(), saved.selected.end());
+        std::unordered_set<std::string> actual;
+        for (const auto& item : dir.items) {
+          auto logical = archive_service().logical_location(item.path_ref()).encode();
+          if (wanted.contains(logical)) actual.insert(item.path_ref().native());
+          if (logical == saved.focused) old_focus = item.path_ref();
+        }
+        dir.restore_selection(actual);
+        if (location().encode() == saved.path) _tabs[_active_tab].restore.reset();
+      }
       _restore_focus_after_update(old_focus, old_index);
       start_watcher(where);
       sync_active_tab_state();
@@ -454,7 +514,7 @@ void Panel::load_active_tab() {
   }
   if (!dir.path.empty()) {
     auto where = dir.path;
-    move_to(where);  // Reconcile changes made while this tab had no watcher.
+    load_directory(where, false, tab.restore.has_value());  // Reconcile inactive/restored tabs.
   } else {
     update_funnel.reset();
   }
@@ -768,6 +828,38 @@ void FileCommander::save_settings() const {
   } catch (const std::exception& e) { file_operations().report_error("[Settings] " + std::string(e.what())); }
 }
 
+void FileCommander::enable_workspace(bool restore_paths) {
+  try {
+    auto saved = WorkspaceStore::load(SettingsStore::path("workspace.json"));
+    if (saved && restore_paths) {
+      left.restore_workspace(saved->left);
+      right.restore_workspace(saved->right);
+      set_single_panel_mode(saved->single_panel);
+      _last_main_focus_left = saved->focused_panel == "left";
+      (_last_main_focus_left ? left : right).navigation->TakeFocus();
+    }
+    _workspace_enabled = true;
+  } catch (const std::exception& e) {
+    _workspace_enabled = false;
+    file_operations().report_error("[Workspace] " + std::string(e.what()) + "; checkpoint retained");
+  }
+}
+
+void FileCommander::checkpoint_workspace(bool force) {
+  if (!_workspace_enabled || left.loading() || right.loading()) return;
+  auto now = std::chrono::steady_clock::now();
+  if (!force && now - _last_workspace_check < std::chrono::milliseconds(500)) return;
+  _last_workspace_check = now;
+  try {
+    AppWorkspace saved{left.capture_workspace(), right.capture_workspace(), _single_panel_mode,
+      &focused_panel() == &left ? "left" : "right"};
+    auto text = WorkspaceStore::encode(saved);
+    if (text == _last_workspace_text) return;
+    SettingsStore::atomic_write(SettingsStore::path("workspace.json"), text);
+    _last_workspace_text = std::move(text);
+  } catch (const std::exception& e) { file_operations().report_error("[Workspace] " + std::string(e.what())); }
+}
+
 std::vector<Filepath> FileCommander::list_bookmarks() const {
   std::vector<Filepath> paths;
   for (const auto& p : _bookmarks) paths.emplace_back(p.encode());
@@ -925,6 +1017,7 @@ FileCommander::FileCommander(Filepath l, Filepath r, ExecuteOnUiThread exec, std
   file_operations().set_event_sink(emit);
   register_commands();
   _editor_manager.set_run_foreground([this](const std::function<int()>& run) -> int {
+    checkpoint_workspace(true);
     if (_run_with_restored_io) return _run_with_restored_io(run);
     return run();
   });

@@ -101,6 +101,10 @@ void SettingsStore::atomic_write(const Filepath& path, const std::string& data, 
     auto rc=::close(fd); fd=-1; if (rc!=0) throw std::runtime_error("cannot close settings");
     fault("commit");
     if (replace) replace(temp,path); else boost::filesystem::rename(temp,path);
+    int parent = ::open(path.parent_path().c_str(), O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+    if (parent < 0) throw std::runtime_error("cannot open checkpoint directory");
+    auto synced = ::fsync(parent); ::close(parent);
+    if (synced != 0) throw std::runtime_error("cannot flush checkpoint directory");
   } catch (...) {
     if (fd>=0) ::close(fd);
     boost::system::error_code ec; boost::filesystem::remove(temp,ec); throw;

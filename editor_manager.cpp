@@ -1,6 +1,7 @@
 #include "editor_manager.hpp"
 #include "runtime_paths.hpp"
 #include "settings.hpp"
+#include "shutdown_signal.hpp"
 #include <boost/json.hpp>
 #include <fstream>
 
@@ -211,6 +212,15 @@ int EditorManager::run_command(const Filepath& cwd, const std::vector<std::strin
       auto done = waitpid(child, &status, WNOHANG);
       if (done == child) return decode_exit_code(status);
       if (done < 0 && errno != EINTR) return -1;
+      if (shutdown_requested()) {
+        // The backend is in its own session. Stop only this owned attachment.
+        kill(child, SIGTERM);
+        auto stop = std::chrono::steady_clock::now() + std::chrono::seconds(1);
+        while (waitpid(child, &status, WNOHANG) == 0 && std::chrono::steady_clock::now() < stop)
+          std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        if (waitpid(child, &status, WNOHANG) == 0) { kill(child, SIGKILL); while (waitpid(child, &status, 0) < 0 && errno == EINTR) {} }
+        return 0;
+      }
       if (!interactive && std::chrono::steady_clock::now() >= deadline) {
         kill(-child, SIGKILL);
         while (waitpid(child, &status, 0) < 0 && errno == EINTR) {}

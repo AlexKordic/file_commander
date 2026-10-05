@@ -6,6 +6,7 @@
 #include "file_io_jobs.hpp"
 #include "location.hpp"
 #include "settings.hpp"
+#include "workspace.hpp"
 #include "support/contracts.hpp"
 #include "traversal.hpp"
 using namespace test;
@@ -311,6 +312,29 @@ void typed() {
   until([&] { return clipboard->idle(); }, "clipboard timeout");
   require(copied == "exact\ntext" && job->_state == JobState::COMPLETED, "typed clipboard");
 }
+void workspace() {
+  Fixture f;
+  AppWorkspace w;
+  TabWorkspace t;
+  t.path = f.root.native(); t.focused = (f / "name with \' quote").native();
+  t.filter = "a\nb"; t.selected = {t.focused}; t.sort = Orderby::TIME_DESC;
+  t.permissions = true; t.owner_group = true;
+  w.left.tabs = {t, t}; w.left.active = 1; w.right.tabs = {t};
+  w.focused_panel = "right"; w.single_panel = true;
+  auto path = f / "workspace.json";
+  SettingsStore::atomic_write(path, WorkspaceStore::encode(w));
+  require(WorkspaceStore::encode(*WorkspaceStore::load(path)) == WorkspaceStore::encode(w), "workspace round trip lost state");
+  require(!WorkspaceStore::load(f / "missing"), "missing workspace is not normal");
+  auto malformed = WorkspaceStore::encode(w);
+  malformed.replace(malformed.find("\"active\":1"), 10, "\"active\":9");
+  write(path, malformed);
+  rejects([&] { WorkspaceStore::load(path); }, "invalid tab index accepted");
+  require(read(path) == malformed, "failed restore overwrote checkpoint");
+  { WorkspaceLease first(f / "workspace.lock");
+    rejects([&] { WorkspaceLease second(f / "workspace.lock"); }, "two processes could own one workspace"); }
+  WorkspaceLease next(f / "workspace.lock");
+}
+
 int main(int argc, char** argv) {
   try {
     require(argc == 2, "one core contract ID required");
@@ -321,7 +345,7 @@ int main(int argc, char** argv) {
     n();                                                                                                                                                       \
     found = true;                                                                                                                                              \
   }
-    RUN(locations) RUN(settings) RUN(directory) RUN(traversal) RUN(events) RUN(retention) RUN(typed) require(found, "unknown core contract");
+    RUN(locations) RUN(settings) RUN(workspace) RUN(directory) RUN(traversal) RUN(events) RUN(retention) RUN(typed) require(found, "unknown core contract");
     std::cout << "PASS core " << name << "\n";
   } catch (const std::exception& e) {
     std::cerr << e.what() << "\n";

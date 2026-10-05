@@ -2,6 +2,7 @@
 #include "app.hpp"
 #include "scripting.hpp"
 #include "ui_dispatcher.hpp"
+#include "shutdown_signal.hpp"
 
 #include <ftxui/component/loop.hpp>
 
@@ -56,6 +57,7 @@ int main(int argc, char** argv) {
   // set_console_size(140, 60);
   // -------------
 
+  ShutdownSignals shutdown_signals;
   auto screen = ScreenInteractive::Fullscreen();
   auto cwd = boost::filesystem::current_path();
 
@@ -66,6 +68,11 @@ int main(int argc, char** argv) {
   auto left_path  = (!lua_mode && argc > 1) ? boost::filesystem::path(argv[1]) : cwd;
   auto right_path = (!lua_mode && argc > 2) ? boost::filesystem::path(argv[2]) : cwd;
 
+  std::unique_ptr<WorkspaceLease> workspace_lease;
+  if (!lua_mode) {
+    try { workspace_lease = std::make_unique<WorkspaceLease>(SettingsStore::path("workspace.lock")); }
+    catch (const std::exception& e) { std::cerr << e.what() << "\n"; return 1; }
+  }
   UiDispatcher dispatcher;
   auto exec = dispatcher.poster();
   file_operations().set_update_sink(dispatcher.notifier());
@@ -88,6 +95,7 @@ int main(int argc, char** argv) {
   if (!lua_mode) {
     const bool explicit_panel_paths = argc > 1;
     app.load_settings(!explicit_panel_paths);
+    app.enable_workspace(!explicit_panel_paths);
   }
 
   app.start_initial_navigation();
@@ -114,12 +122,14 @@ int main(int argc, char** argv) {
     scripting.cleanup();
   } else {
     // Normal mode — no Lua
-    while (!loop.HasQuitted()) {
+    while (!loop.HasQuitted() && !shutdown_requested()) {
       if (dispatcher.drain()) screen.Post(Event::Custom);
       loop.RunOnce();
       app.observe_state();
+      app.checkpoint_workspace();
       dispatcher.wait();
     }
+    app.checkpoint_workspace(true);
     app.save_settings();
   }
 

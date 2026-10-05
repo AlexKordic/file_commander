@@ -7,6 +7,7 @@
     "fc.extended.fresh_success",
     "fc.extended.fresh_failure",
     "fc.extended.editor_recovery",
+    "fc.extended.workspace_recovery",
     "fc.harness.fresh_bundle",
     "fc.package",
     "fc.dependency_rebuild",
@@ -16,6 +17,7 @@
     "contract": [
       "locations",
       "settings",
+      "workspace",
       "directory",
       "traversal",
       "events",
@@ -35,6 +37,7 @@
       "rename",
       "directory_access",
       "settings",
+      "workspace",
       "move",
       "move_metadata",
       "partial",

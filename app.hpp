@@ -11,6 +11,7 @@
 #include "custom_controls.hpp"
 #include "dialogs.hpp"
 #include "editor_manager.hpp"
+#include "workspace.hpp"
 #include "file_io_jobs.hpp"
 #include "latest_work.hpp"
 #include "log.hpp"
@@ -75,6 +76,7 @@ class Panel : public DialogOverlay {
     bool                     show_permissions_column = false;
     bool                     show_owner_group_column = false;
     std::vector<ArchiveView> archive_stack;
+    std::optional<TabWorkspace> restore;
   };
 
   Dir        dir;
@@ -104,6 +106,8 @@ class Panel : public DialogOverlay {
   int active_tab_index() const;
 
   std::vector<Filepath> tab_paths() const;
+  PanelWorkspace capture_workspace() const;
+  void restore_workspace(const PanelWorkspace&);
 
   void new_tab();
 
@@ -233,6 +237,8 @@ class FileCommander : public DialogOverlay {
   void load_settings(bool restore_paths);
 
   void save_settings() const;
+  void enable_workspace(bool restore_paths);
+  void checkpoint_workspace(bool force = false);
 
   std::vector<Filepath> list_bookmarks() const;
   void                  add_bookmark(const Filepath& path);
@@ -268,6 +274,9 @@ class FileCommander : public DialogOverlay {
 
  private:
   static void save_theme_colors();
+  bool _workspace_enabled = false;
+  std::string _last_workspace_text;
+  std::chrono::steady_clock::time_point _last_workspace_check{};
 
  public:
   bool handle_global_shortcuts(Event event);
