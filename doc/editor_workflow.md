@@ -5,8 +5,8 @@ below describe the reviewed baseline; the implementation notes describe current
 behavior and its recovery limits.
 
 Reviewed File Commander revision: `213196066011ebc6ede102dc6034791a6da9d589`.
-Reviewed Fresh revision: `21610e4530a5dbd56027dcae81f3b05fccc2c465`, pinned in
-[dependencies.json](../dependencies.json).
+Reviewed Fresh baseline: `21610e4530a5dbd56027dcae81f3b05fccc2c465` (0.2.3).
+The current integration is pinned in [dependencies.json](../dependencies.json).
 
 This document replaces the multiple-editor-session design in
 [fresh_editor_integration_plan.md](fresh_editor_integration_plan.md).
@@ -87,7 +87,9 @@ Missing locations use an existing ancestor while retaining the intended tab
 state. Invalid checkpoints remain on disk and are reported rather than silently
 replaced. Writes use private temporary files, atomic rename and directory fsync.
 
-Fresh's named-session checkpoint lives under its own data directory. Dirty text
+Fresh's native workspace and recovery records live in a private data directory
+for FC's editor identity. Legacy 0.2.3 checkpoints are imported once and retained
+as `.json.imported` backups; see [the CLI contract](fresh_cli_contract.md). Dirty text
 is recovery data, not an implicit Save to the source file. Abrupt loss can discard
 edits since the last successful two-second checkpoint. FC's corresponding panel
 state window is 500 ms. Undo history remains live across detach/reattach; it is

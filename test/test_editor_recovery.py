@@ -100,7 +100,7 @@ def main():
                                         cwd=root, env=env, capture_output=True, timeout=15)
             assert select.select([opener.stdout], [], [], 15)[0], "Opener did not finish"
             initial_code = int(opener.stdout.readline().strip())
-            assert sorted([initial_code, concurrent.returncode]) == [0, 2], "Concurrent launch started multiple backends"
+            assert sorted([initial_code, concurrent.returncode]) == [0, 0], "Concurrent launch started multiple backends"
             pid = int(pidfile.read_text())
             owned.add(pid)
             assert os.getpgid(pid) == pid, "Backend inherited the shell process group"
@@ -121,20 +121,29 @@ def main():
             assert all(path.read_text() == "ORIGINAL\n" for path in files)
             print("PASS editor survives client disconnect and shell process-group hangup")
 
+            def native_data():
+                return next(root.rglob("fc-daemons/" + session))
+
             def checkpoint():
-                paths = list(root.rglob(session + ".json"))
-                return json.loads(paths[0].read_text()) if paths else {}
+                paths = list((native_data() / "workspaces").glob("*.json"))
+                records = [json.loads(p.read_text()) for p in paths]
+                return next((r for r in records if "split_states" in r), {})
 
             def has_text(text):
-                return any(text in (b["text"] or "") for b in checkpoint().get("buffers", []))
+                return any(text.encode() in p.read_bytes() for p in native_data().rglob("*.chunk.*"))
 
             eventually(lambda: has_text("UNSAVED_SENTINEL"))
             def view_state():
                 saved = checkpoint()
-                names = {json.dumps(b["id"]): b["path"] or b["name"] for b in saved["buffers"]}
-                return [(tuple(names.get(json.dumps(i)) for i in view["tabs"]),
-                         names.get(json.dumps(view["active"])), view["cursor"])
-                        for view in saved["views"]]
+                result = []
+                for view in saved.get("split_states", {}).values():
+                    tabs = view["open_tabs"]
+                    names = [str(root / t["File"]) if "File" in t else t["Unnamed"] for t in tabs]
+                    active = view.get("active_tab_index") or 0
+                    state = view.get("file_states", {}).get(tabs[active].get("File", ""), {}) if tabs else {}
+                    result.append((tuple(names), names[active] if names else None, state.get("cursor", {}).get("position", 0)))
+                return result
+            eventually(lambda: view_state() and view_state()[0][2] == len("UNSAVED_SENTINEL"))
             saved_view = view_state()
             assert saved_view[0][0] == tuple(map(str, files)), ("Opened file order not retained", saved_view, files)
             assert saved_view[0][1] == str(files[1]) and saved_view[0][2] == len("UNSAVED_SENTINEL")
@@ -155,7 +164,7 @@ def main():
             third.pump(0.3)
             os.write(third.master, b"\x1bw")  # Alt+W: close clean alpha tab
             eventually(lambda: (third.pump() is not None) and checkpoint() and
-                       not any(b["path"] == str(files[0]) for b in checkpoint()["buffers"]))
+                       all(str(files[0]) not in view[0] for view in view_state()))
             os.write(third.master, b"\x0e")  # Ctrl+N: untitled buffer
             third.pump(0.3)
             os.write(third.master, b"UNTITLED_SENTINEL")
@@ -171,6 +180,8 @@ def main():
             owned.add(int(pidfile.read_text()))
             assert b"alpha.txt" not in fourth.pump(), "Editor-closed tab was resurrected"
             assert has_text("UNSAVED_SENTINEL"), "Inactive dirty buffer lost on second restart"
+            eventually(lambda: view_state() and len(view_state()[0][0]) == 2)
+            assert len(view_state()[0][0]) == 2, "Recovery duplicated the untitled tab"
             assert all(path.read_text() == "ORIGINAL\n" for path in files)
             fourth.detach()
             clients.remove(fourth)
@@ -188,12 +199,13 @@ def main():
             clean_session = "clean-idle-test"
             opened = subprocess.run([str(binary), "--cmd", "session", "open-file", clean_session, *map(str, files)],
                                     cwd=root, env=env, capture_output=True, timeout=15)
-            assert opened.returncode == 2, opened.stderr
+            assert opened.returncode == 0, opened.stderr
             clean_pidfile = pidfile.with_name(clean_session + ".pid")
             owned.add(int(clean_pidfile.read_text()))
             clean = Client(binary, root, env, clean_session)
             clients.append(clean)
             clean.wait_text(b"alpha.txt", b"beta.txt")
+            assert b"UNSAVED_SENTINEL" not in clean.pump() and b"UNTITLED_SENTINEL" not in clean.pump(), "Named sessions shared recovery data"
             clean.detach(b"\x1b[19~")
             clients.remove(clean)
             eventually(lambda: not clean_pidfile.exists(), 8)
@@ -210,8 +222,8 @@ def main():
             if opener.poll() is None:
                 os.killpg(opener.pid, signal.SIGKILL)
                 opener.wait(timeout=3)
-            if pidfile.exists():
-                owned.add(int(pidfile.read_text()))
+            for record in (root / "runtime/fresh").glob("*.pid"):
+                owned.add(int(record.read_text()))
             for pid in owned:
                 try:
                     os.kill(pid, signal.SIGKILL)
@@ -219,5 +231,98 @@ def main():
                     pass
 
 
+def migration(binary):
+    """Fixture captured from pinned 356a988, including dirty + untitled tabs."""
+    with tempfile.TemporaryDirectory(prefix="fc-migrate-", dir="/tmp") as directory:
+        root = Path(directory).resolve()
+        for name in ("home", "config", "data", "cache", "runtime"):
+            (root / name).mkdir(mode=0o700)
+        env = dict(os.environ, HOME=str(root / "home"),
+                   XDG_CONFIG_HOME=str(root / "config"), XDG_DATA_HOME=str(root / "data"),
+                   XDG_CACHE_HOME=str(root / "cache"), XDG_RUNTIME_DIR=str(root / "runtime"),
+                   TERM="xterm-256color", FC_EDITOR_SWITCH_KEY="f10")
+        data = (root / "home/Library/Application Support/fresh" if sys.platform == "darwin"
+                else root / "data/fresh")
+        legacy = data / "sessions/legacy-upgrade.json"
+        legacy.parent.mkdir(parents=True)
+        fixture = Path(__file__).with_name("fixtures") / "fresh-0.2.3-session.json"
+        original = fixture.read_text().replace("@ROOT@", str(root))
+        legacy.write_text(original)
+        for name in ("alpha.txt", "beta.txt"):
+            (root / name).write_text("ORIGINAL\n")
+        client = None
+        try:
+            for attempt in range(2):
+                client = Client(binary, root, env, "legacy-upgrade")
+                client.wait_text(b"alpha.txt", b"beta.txt", b"LEGACY_UNTITLED_" if attempt == 0 else b"LEGACY_DIRTY_")
+                assert legacy.with_suffix(".json.imported").read_text() == original
+                assert not legacy.exists(), "Migration will replay an obsolete checkpoint"
+                # Focus beta via a duplicate open: must retain unsaved text.
+                subprocess.run([str(binary), "--cmd", "session", "open-file", "legacy-upgrade", str(root / "beta.txt")],
+                               cwd=root, env=env, stdin=subprocess.DEVNULL, capture_output=True, check=True, timeout=15)
+                client.wait_text(b"LEGACY_DIRTY_")
+                client.detach(); client = None
+                pidfile = root / "runtime/fresh/legacy-upgrade.pid"
+                os.kill(int(pidfile.read_text()), signal.SIGKILL)
+                time.sleep(0.2)
+            assert (root / "beta.txt").read_text() == "ORIGINAL\n", "Migration saved source files"
+            print("PASS old checkpoint imports dirty and untitled tabs, keeps backup, survives another restart")
+            corrupt = legacy.with_name("corrupt-upgrade.json")
+            corrupt.write_text('{"version":999,"broken":')
+            failed = subprocess.run([str(binary), "--cmd", "session", "open-file", "corrupt-upgrade", str(root / "alpha.txt")],
+                                    cwd=root, env=env, stdin=subprocess.DEVNULL, capture_output=True, timeout=15)
+            assert failed.returncode != 0 and b"checkpoint retained" in failed.stderr, failed.stderr
+            assert corrupt.read_text() == '{"version":999,"broken":'
+            assert not corrupt.with_suffix(".json.imported").exists()
+            print("PASS failed migration is reported and leaves the original recovery record intact")
+        finally:
+            if client: client.stop()
+            for pidfile in (root / "runtime/fresh").glob("*.pid"):
+                try: os.kill(int(pidfile.read_text()), signal.SIGKILL)
+                except ProcessLookupError: pass
+
+
+def handshake_failures(binary):
+    import socket
+    import threading
+    with tempfile.TemporaryDirectory(prefix="fc-handshake-", dir="/tmp") as directory:
+        root = Path(directory)
+        sockets = root / "runtime/fresh"; sockets.mkdir(parents=True)
+        env = dict(os.environ, XDG_RUNTIME_DIR=str(root / "runtime"), FC_EDITOR_SWITCH_KEY="f10")
+        source = root / "file.txt"; source.write_text("original")
+        for version in (2, 4, None):
+            listeners = []
+            for suffix in ("data.sock", "ctrl.sock"):
+                listener = socket.socket(socket.AF_UNIX)
+                path = sockets / ("incompatible." + suffix)
+                path.unlink(missing_ok=True)
+                listener.bind(str(path)); listener.listen(); listener.settimeout(15)
+                listeners.append(listener)
+            (sockets / "incompatible.pid").write_text(str(os.getpid()))
+            done = threading.Event()
+            def server():
+                with listeners[0].accept()[0] as data, listeners[1].accept()[0] as control:
+                    control.recv(65536)
+                    if version is not None:
+                        control.sendall((json.dumps({"type": "hello", "protocol_version": version,
+                                                    "server_version": "old", "session_id": "incompatible"}) + "\n").encode())
+                    done.wait(15)
+            worker = threading.Thread(target=server); worker.start()
+            try:
+                start = time.monotonic()
+                result = subprocess.run([str(binary), "--cmd", "session", "open-file", "incompatible", str(source)],
+                                        env=env, cwd=root, stdin=subprocess.DEVNULL, capture_output=True, timeout=13)
+                assert result.returncode != 0, "Incompatible or silent server was accepted"
+                assert time.monotonic() - start < 12, "Handshake exceeded its deadline"
+                assert source.read_text() == "original"
+                assert (sockets / "incompatible.pid").read_text() == str(os.getpid())
+            finally:
+                done.set(); worker.join(2)
+                for listener in listeners: listener.close()
+        print("PASS old/unpatched backends fail explicitly; silent handshake times out without killing server")
+
+
 if __name__ == "__main__":
     main()
+    migration(Path(sys.argv[1]).resolve())
+    handshake_failures(Path(sys.argv[1]).resolve())
