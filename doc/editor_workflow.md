@@ -399,6 +399,27 @@ The earlier user-reported 178/178 result applies to the earlier revision only.
 Fresh's release build and real PTY tests passed; its Rust unit-test target was
 not runnable with the uncached development dependencies available here.
 
+## Fresh upstream integration qualification
+
+The 2026-10-05 integration update advances Fresh to upstream `b10f9084f`
+(0.5.2 plus 40 commits), with seven compatibility and recovery fixes pinned at
+`ed213c6cf`. The [CLI contract](fresh_cli_contract.md) describes native recovery,
+legacy checkpoint migration, and the protocol transition. Save and quit an
+existing old editor before starting the updated one; incompatible live backends
+are rejected without being terminated.
+
+The final automatic Release lane passed **190/190**, with no failures or skips,
+at FC `2829f3f`. It covers real editor switching and recovery, source replacement,
+old checkpoint import, failed-startup retry, dependency reconstruction/rebuild,
+and package integrity. The packaged Fresh license and source metadata were also
+compared byte-for-byte with the pinned sources.
+[Fresh integration qualification record](qualification/macos-arm64-fresh-upgrade-2026-10-05.json).
+
+The seven manual-category checks have not been rerun for this update. Run the
+manual command above from a normal macOS Terminal. Earlier manual results do
+not qualify this new pin. Interrupted transfers continue to require explicit
+Resume after startup.
+
 ## Fix commits
 
 Fresh fixes are committed in its repository and included in the pinned dependency
