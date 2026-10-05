@@ -341,7 +341,46 @@ def handshake_failures(binary):
         print("PASS old/unpatched backends fail explicitly; silent handshake times out without killing server")
 
 
+def startup_timeout(binary):
+    """A daemon blocked reading configuration must be stopped before retry."""
+    with tempfile.TemporaryDirectory(prefix="fc-startup-", dir="/tmp") as directory:
+        root = Path(directory).resolve()
+        for name in ("home", "runtime", "config"):
+            (root / name).mkdir(mode=0o700)
+        env = dict(os.environ, HOME=str(root / "home"), XDG_CONFIG_HOME=str(root / "config"),
+                   XDG_RUNTIME_DIR=str(root / "runtime"), FC_EDITOR_SWITCH_KEY="f10")
+        config = root / "blocked-config.json"
+        os.mkfifo(config)
+        source = root / "file.txt"; source.write_text("STARTUP_RETRY\n")
+        session = "startup-timeout"
+        def blocked_pids():
+            records = subprocess.check_output(["ps", "-Aww", "-o", "pid=,args="], text=True).splitlines()
+            return [int(line.strip().split(None, 1)[0]) for line in records
+                    if str(config) in line and "--server" in line and str(binary) in line]
+        client = None
+        try:
+            result = subprocess.run([str(binary), "--config", str(config), "--cmd", "session", "open-file", session, str(source)],
+                                    cwd=root, env=env, stdin=subprocess.DEVNULL, capture_output=True, timeout=15)
+            assert result.returncode != 0 and b"did not start" in result.stderr, result.stderr
+            eventually(lambda: not blocked_pids(), 3)
+            config.unlink(); config.write_text("{}")
+            subprocess.run([str(binary), "--config", str(config), "--cmd", "session", "open-file", session, str(source)],
+                           cwd=root, env=env, stdin=subprocess.DEVNULL, capture_output=True, check=True, timeout=15)
+            client = Client(binary, root, env, session)
+            client.wait_text(b"STARTUP_RETRY")
+            client.detach(); client = None
+            print("PASS startup timeout stops its owned daemon; retry starts a usable editor")
+        finally:
+            if client: client.stop()
+            owned = blocked_pids()
+            owned += [int(p.read_text()) for p in (root / "runtime/fresh").glob("*.pid")]
+            for pid in owned:
+                try: os.kill(pid, signal.SIGKILL)
+                except ProcessLookupError: pass
+
+
 if __name__ == "__main__":
     main()
     migration(Path(sys.argv[1]).resolve())
     handshake_failures(Path(sys.argv[1]).resolve())
+    startup_timeout(Path(sys.argv[1]).resolve())

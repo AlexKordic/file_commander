@@ -44,7 +44,8 @@ The open command receives `/dev/null` as stdin: upstream may auto-attach on its
 first file open when stdin is a terminal. Only FC's explicit attachment owns the
 terminal. Startup lock acquisition and daemon readiness are each bounded to ten
 seconds, the handshake to ten seconds, and FC's entire noninteractive command
-to 25 seconds. Interactive editing has no duration limit. Failed attachment
+to 25 seconds. A readiness timeout stops only the backend spawned by that attempt, allowing a
+retry without a competing late startup. Interactive editing has no duration limit. Failed attachment
 retains the identity for retry and reports the failure.
 
 ## Recovery and dependency
@@ -72,7 +73,8 @@ On first startup after this upgrade, the backend imports an old
 dirty files and untitled text. It writes native recovery and workspace state
 before renaming the old record to `.json.imported`, retaining the original bytes
 as a backup. A failed import is reported during the handshake and leaves the old
-record intact. Recovery must be enabled to import. Subsequent starts use native
+record intact. Recovery must be enabled to import and remain enabled for unsaved-buffer crash
+recovery. Subsequent starts use native
 state, so the backup cannot resurrect tabs closed since the upgrade.
 
 This pin uses upstream IPC protocol **4** plus a separate FC integration
