@@ -203,6 +203,19 @@ static void blocked_recovery() {
   jobs->shutdown();
   auto restart = make_file_jobs(); restart->enable_recovery(f / "journal"); paused(*restart, 1);
 }
+static void unsupported_recovery() {
+  Fixture f; fs::create_directory(f / "source"); write(f / "source/retained", "do not delete");
+  auto plan = std::make_shared<OperationPlan>(selection_plan(OperationType::DELETE, {f / "source"}));
+  auto job = std::make_shared<JobSpec>(plan); job->_job_id = 1;
+  auto journal = TransferJournal::create(f / "journal", *job);
+  job->_items_done = 3; // Some discovered children were deleted before interruption.
+  journal->checkpoint(*job->snapshot(), JobState::RUNNING);
+  auto jobs = make_file_jobs(); jobs->enable_recovery(f / "journal"); paused(*jobs, 1);
+  require(by_id(*jobs, 1)->_items_done == 3, "Discovered delete progress was lost");
+  require(jobs->resume(1) == JobError::RECOVERY_BLOCKED, "Interrupted delete was replayed");
+  require(read(f / "source/retained") == "do not delete", "Startup or Resume deleted unverified files");
+  require(jobs->cancel(1) == JobError::OK, "Unsupported recovery cannot be cancelled");
+}
 
 int main(int argc, char** argv) {
   try {
@@ -223,6 +236,7 @@ int main(int argc, char** argv) {
     else if (name == "cancel") cancel_live();
     else if (name == "invalid") invalid_recovery();
     else if (name == "blocked") blocked_recovery();
+    else if (name == "unsupported") unsupported_recovery();
     else throw std::runtime_error("Unknown recovery case");
     std::cout << "PASS transfer recovery " << name << '\n';
   } catch (const std::exception& e) { std::cerr << e.what() << '\n'; return 1; }

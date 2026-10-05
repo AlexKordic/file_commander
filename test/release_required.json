@@ -27,7 +27,8 @@
       "directory",
       "cancel",
       "invalid",
-      "blocked"
+      "blocked",
+      "unsupported"
     ],
     "contract": [
       "locations",

@@ -254,7 +254,10 @@ std::vector<std::shared_ptr<JobSpec>> TransferJournal::restore(const Filepath& d
       if (phase != "ready" && p->index() == plan->steps.size()) throw std::runtime_error("Missing recovery operation");
       for (const auto key : {"done", "failed", "skipped", "partial"})
         if (number(p->state.at(key)) < 0) throw std::runtime_error("Invalid recovery counts");
-      if (number(p->state.at("done")) > int64_t(plan->steps.size())) throw std::runtime_error("Invalid recovery item count");
+      // Delete discovers descendants while running, so its item count can
+      // exceed the selected roots in the immutable plan.
+      if ((plan->type == OperationType::COPY || plan->type == OperationType::MOVE) &&
+          number(p->state.at("done")) > int64_t(plan->steps.size())) throw std::runtime_error("Invalid recovery item count");
       for (const auto key : {"bytes", "total"})
         if (!std::isfinite(p->state.at(key).to_number<double>()) || p->state.at(key).to_number<double>() < 0)
           throw std::runtime_error("Invalid recovery byte count");
