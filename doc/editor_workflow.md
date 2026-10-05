@@ -428,6 +428,13 @@ Resume after startup.
 
 ## Fix commits
 
+The palette restart addition is committed at FC `3e14178`, with Fresh support
+at `487ca3c33`. Its final automatic Release lane passed **192/192**, with no
+failures or skips. Isolated checks also confirmed dirty/untitled recovery when
+restarting both previous FC-integrated Fresh binaries (0.2.3 and 0.5.2).
+The seven manual checks remain unrun for this revision.
+[Restart qualification record](qualification/macos-arm64-editor-restart-2026-10-06.json).
+
 Fresh fixes are committed in its repository and included in the pinned dependency
 bundle, so a clean bootstrap can reproduce them:
 

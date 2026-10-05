@@ -1,0 +1,54 @@
+{
+  "date": "2026-10-06",
+  "tested_revision": "3e1417890b98fa7f44be829069ed5603fc90f0bd",
+  "platform": "macOS-26.7.1-arm64-arm-64bit-Mach-O",
+  "fresh_revision": "487ca3c33c50536c5ab6667d899d1076f83c1e0c",
+  "fresh_bundle_sha256": "95ebb5351e117bc6d264b882d572652f9d38b15ff31077fe6e35e12c96152775",
+  "automatic_release": {
+    "status": 0,
+    "tests": 192,
+    "failed": [],
+    "skipped": [],
+    "seconds": 213.5780999660492,
+    "artifact_sha256": {
+      "fc": "ae825f61f621e01ed75113c8a78f7c5efcf85525266de83589172da4c383c45e",
+      "fresh": "1a71a845477115370619968bff72413a5d4c15d867534b5eff73f127234a701c",
+      "7zr": "5126781f831f43442e6fe561a64f031b926f98f2176f801047f142252a437e8e"
+    }
+  },
+  "artifacts": "build-release/test-logs/lane-release-4cd1bc64aa",
+  "metadata_sha256": "137a20664bd4332a99d8747da02fc3faaf2d5d262fd67167ed393c4e78a254b7",
+  "junit_sha256": "37abde79c5091c45da9cd9dd75516f2297b5c37fd7937583f0ef7c3ea1bbfa50",
+  "restart_coverage": [
+    "Palette discovery, Cancel, rebind and command routing",
+    "Explicit second confirmation for older backends; Cancel clears consent",
+    "Same editor identity, stop before attach, captured failure diagnostics",
+    "Dirty and untitled text survives checkpoint-confirmed restart; source files unchanged",
+    "Filesystem checkpoint failure and attached clients retain live backend",
+    "Protocol-2 negotiation requires consent and waits for shutdown",
+    "Real previous 0.2.3 and 0.5.2 FC backends restore dirty/untitled tabs after confirmed restart"
+  ],
+  "previous_backend_checks": {
+    "log": "build-review-evidence/fresh-upgrade/restart-old-backends.log",
+    "log_sha256": "afb5684b68b76ffac21388551f43758a4053c6345a1dd89d10dd0ac7e3c112e8",
+    "binaries": {
+      "fresh-0.2.3-fc": "257eb6cb27236c5090eac4ba9baf93833960b60ed88dbf77cc73db1a0a9a36e2",
+      "fresh-before-restart-command": "ed5d63486d657b77770513282655daa988fed8feb8d0534d12ba7a4802be671a"
+    }
+  },
+  "manual_checks_not_run": [
+    "fc.fault.exdev",
+    "fc.lua.test_archive",
+    "fc.lua.test_pause_resume",
+    "fc.package",
+    "fc.regression.late_panel_delivery",
+    "fc.regression.watcher_lifetime",
+    "fc.regression.watcher_recovery"
+  ],
+  "manual_command": "python3 tools/test_exdev_volume.py --manual-build build-release",
+  "package": {
+    "path": "build-release/dist/fc-Darwin-arm64.tar.gz",
+    "sha256": "3c05b2bc223058650fb0b98c0b0c3712c575b63dde9c8fd4762b3656564b95cc",
+    "source_metadata_verified": true
+  }
+}
