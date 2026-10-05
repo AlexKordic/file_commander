@@ -90,6 +90,7 @@ std::string EditorManager::resolved_binary() const {
 }
 
 void EditorManager::set_last_session_id(std::string id) {
+  if (_last_session_id != id) _sessions.clear();
   _last_session_id = std::move(id);
   if (!_last_session_id.empty() && !find_session(_last_session_id)) {
     _sessions.push_back({_last_session_id, "Editor", boost::filesystem::current_path(), now_seconds(), true});
@@ -194,7 +195,14 @@ int EditorManager::run_command(const Filepath& cwd, const std::vector<std::strin
       posix_spawnattr_setflags(&attrs, POSIX_SPAWN_SETPGROUP);
     }
     pid_t child;
-    int rc = posix_spawn(&child, "/bin/sh", nullptr, &attrs, argv, environ);
+    std::vector<std::string> environment;
+    for (char** e = environ; *e; ++e)
+      if (std::string_view(*e).find("FC_EDITOR_SWITCH_KEY=") != 0) environment.emplace_back(*e);
+    environment.push_back("FC_EDITOR_SWITCH_KEY=" + _switch_key);
+    std::vector<char*> envp;
+    for (auto& e : environment) envp.push_back(e.data());
+    envp.push_back(nullptr);
+    int rc = posix_spawn(&child, "/bin/sh", nullptr, &attrs, argv, envp.data());
     posix_spawnattr_destroy(&attrs);
     if (rc) return rc;
     auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(25);

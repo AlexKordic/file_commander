@@ -38,9 +38,9 @@ Commands::Commands() {
   available.push_back({"open_bookmarks", keys().key_bookmarks_dialog, "Bookmarks", "Open Bookmarks", CommandScope::GLOBAL, CommandKind::SHOW_DIALOG});
   available.push_back({"edit_theme_colors", keys().key_theme_colors, "ThemeColors", "Edit Theme Colors", CommandScope::GLOBAL, CommandKind::SHOW_DIALOG});
   available.push_back({"open_in_editor", keys().key_open_in_editor, "", "Open in Fresh Editor", CommandScope::GLOBAL, CommandKind::EXECUTE_CALLBACK});
-  available.push_back({"switch_to_file_commander", keys().key_switch_to_file_commander, "", "Switch to File Commander", CommandScope::GLOBAL, CommandKind::EXECUTE_CALLBACK});
-  available.push_back({"switch_editor_prev", keys().key_switch_editor_prev, "", "Switch to Previous Editor Session", CommandScope::GLOBAL, CommandKind::EXECUTE_CALLBACK});
-  available.push_back({"switch_editor_next", keys().key_switch_editor_next, "", "Switch to Next Editor Session", CommandScope::GLOBAL, CommandKind::EXECUTE_CALLBACK});
+  available.push_back({"switch_to_file_commander", keys().key_switch_to_file_commander, "", "Switch to Editor / Back (detach)", CommandScope::GLOBAL, CommandKind::EXECUTE_CALLBACK});
+  available.push_back({"switch_editor_prev", keys().key_switch_editor_prev, "", "Switch to Editor (previous-session alias)", CommandScope::GLOBAL, CommandKind::EXECUTE_CALLBACK});
+  available.push_back({"switch_editor_next", keys().key_switch_editor_next, "", "Switch to Editor (next-session alias)", CommandScope::GLOBAL, CommandKind::EXECUTE_CALLBACK});
 }
 
 const Command* Commands::find_by_id(const std::string& id) const {

@@ -25,6 +25,7 @@ class EditorManager {
 
   void set_run_foreground(RunForeground run_foreground);
   void set_status_sink(StatusSink status_sink);
+  void set_switch_key(std::string key) { _switch_key = std::move(key); }
 
   void               set_binary_override(std::string path);
   const std::string& binary_override() const;
@@ -47,6 +48,7 @@ class EditorManager {
   RunForeground _run_foreground;
   StatusSink    _status_sink;
 
+  std::string _switch_key = "f10";
   std::string _binary_override;
   std::string _last_session_id;
   Filepath _session_store;

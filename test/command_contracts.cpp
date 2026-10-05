@@ -191,7 +191,7 @@ static void command(const std::string& id, int route) {
   else if (id == "target_left") require(left.dir.path == f / "left/sub", "left target");
   else if (id == "open_in_editor")
     require(fs::exists(f / "fresh.log") && read(f / "fresh.log").find("[-a]") != std::string::npos, "real editor handler not invoked");
-  else if (id == "switch_to_file_commander") require(&app.focused_panel() == &left, "return to commander changed focus");
+  else if (id == "switch_to_file_commander") require(&app.focused_panel() == &left && fs::exists(f / "fresh.log"), "editor toggle did not attach or changed FC focus");
   else if (id == "switch_editor_prev" || id == "switch_editor_next") require(!fs::exists(f / "fresh.log"), "empty editor switch created a session");
   else require(dialogs.contains(id), "command lacks behavior expectation: " + id);
   jobs->shutdown();

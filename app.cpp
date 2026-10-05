@@ -693,6 +693,7 @@ bool FileCommander::apply_key_bindings(const std::map<std::string, std::string>&
   }
   // Validation is complete before either the catalog or Theme is changed.
   for (const auto& command : proposed) { commands().set_key(command.id, command.key); }
+  _editor_manager.set_switch_key(event_to_token(keys().key_switch_to_file_commander));
   return true;
 }
 
@@ -857,7 +858,12 @@ void FileCommander::register_commands() {
       if (!open_in_editor(error) && !error.empty()) file_operations().report_error(error);
     },
     panel_ready);
-  add("switch_to_file_commander", [] {}, ready);
+  // Retain the old command ID for saved key bindings and Lua callers.
+  add("switch_to_file_commander", [this] {
+    std::string error;
+    if (!_editor_manager.switch_to_editor(focused_panel().dir.path, error) && !error.empty())
+      file_operations().report_error(error);
+  }, ready);
   add(
     "switch_editor_prev",
     [this] {

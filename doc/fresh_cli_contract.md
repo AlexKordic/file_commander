@@ -1,39 +1,67 @@
-# Fresh CLI Contract for File Commander Integration
+# Fresh CLI contract for File Commander
 
-This document fixes the runtime contract used by File Commander when integrating with Fresh from local source.
+FC owns one persistent editor identity per configuration profile. A directory
+open establishes its initial project directory; subsequent directory opens and
+file opens reuse that identity without changing the project or closing tabs.
+Fresh owns tab closure, dirty prompts, saving, and unsaved-buffer recovery.
 
-## Binary Resolution Order
-1. `fresh_binary_path` from FC settings (if set)
-2. `FC_FRESH_BIN` environment variable (if set)
-3. Compile-time default `FC_FRESH_DEFAULT_BIN` (staged by CMake when `FC_BUILD_FRESH=ON`)
+## Controls
 
-## Commands Used by File Commander
-1. Open directory in a new editor session:
-   - Run in target directory `cwd`
-   - `fresh -a <session_id>`
-2. Open file(s) in last-used editor session:
-   - Run in session `cwd`
-   - `fresh --cmd session open-file <session_id> <abs_file_1> [abs_file_n...]`
-   - Then attach:
-   - `fresh -a <session_id>`
-3. Switch to previous/next tracked editor session:
-   - `fresh -a <session_id>`
+- `F4`: open selected files as tabs, focusing existing tabs for reopened files.
+- `F10`: switch to the editor; the same key in the attached editor detaches and
+  returns to FC, retaining tabs, dirty buffers, cursor, and undo state.
+- The palette can rebind the switch key. FC sends its current key token in
+  `FC_EDITOR_SWITCH_KEY` with each attachment. Fresh applies it to that client;
+  global Fresh configuration is untouched. `Alt+F` still opens Fresh's File menu.
+- `Ctrl+Y` / `Ctrl+U` remain compatibility shortcuts to the same editor.
+  The saved command ID `switch_to_file_commander` now performs the editor toggle.
+- Fresh Quit is an explicit editor operation, separate from detach.
 
-## Exit Code Expectations
-1. `0` means success.
-2. For `session open-file`, `2` is accepted as success (Fresh uses it when the command starts a new session and caller should attach).
-3. Any other non-zero code is treated as failure and surfaced in FC errors.
+## Invocation and identity
 
-## Important Behavior
-1. `session open-file` ignores/skips directory arguments in Fresh, so FC must not use it for directory-open flows.
-2. Return path from Fresh to FC is based on Fresh `detach` behavior in attached session mode (`-a`).
-3. FC remains the parent process and runs attach commands with restored terminal IO.
+Binary resolution is `fresh_binary_path` in FC settings, then `FC_FRESH_BIN`,
+then the bundled build-time default. Relative overrides are normalized before
+changing directories.
 
-## Build Integration
-1. CMake option `FC_BUILD_FRESH` controls local Fresh build (default `ON`).
-2. `FC_FRESH_SOURCE_DIR` defaults to:
-   - `${CMAKE_CURRENT_SOURCE_DIR}/../editor-fresh`
-3. Build command executed by CMake target:
-   - `cargo build --release --manifest-path <FC_FRESH_SOURCE_DIR>/Cargo.toml`
-4. Staged binary output:
-   - `build/third_party/fresh/bin/fresh`
+The profile's `editor_session.json` stores a stable ID and original working
+directory. FC writes it atomically before launching the editor, and a short
+process lock prevents concurrent identity creation. Restarting FC reconstructs
+this identity; a missing original directory uses a valid launch fallback.
+
+File opens use absolute canonical paths:
+
+```text
+fresh --cmd session open-file <session_id> <abs_file_1> [abs_file_n...]
+fresh -a <session_id>
+```
+
+Switching and directory opens only attach. `session open-file` skips directory
+arguments, so FC does not send directories through that operation. FC restores
+terminal IO around attachment and resumes its own terminal after detach.
+
+Exit `0` means success; `2` from `session open-file` means a new backend started
+and is also successful. Other statuses are failures. Startup is serialized and
+bounded to ten seconds, the handshake to ten seconds, and FC's noninteractive
+open command to 25 seconds. Interactive editing has no duration limit. Failed
+attachment retains the identity for retry and reports the failure.
+
+## Recovery and dependency
+
+The pinned Fresh backend runs in its own Unix process session. It checkpoints
+named sessions every two seconds and on detach/clean shutdown, using an atomic
+private JSON file under Fresh's data directory at `sessions/<id>.json`. This
+stores workspace/tab state and recoverable dirty and untitled text separately
+from source files. After abrupt backend loss, edits since the last successful
+checkpoint can be lost. A failed restore retains the checkpoint and reports an
+error instead of overwriting it.
+
+Dirty buffers prevent idle shutdown. Clean sessions default to a one-hour idle
+timeout; `FRESH_SESSION_IDLE_TIMEOUT_SECS` can adjust that positive duration.
+Protocol version 2 rejects older backends that lack this integration. Save work
+and quit such an old editor explicitly before reconnecting with the new build.
+
+Fresh is built from the exact revision in `dependencies.json` with
+`cargo build --release --locked`, then staged under
+`<build>/third_party/fresh/bin/fresh`. The default source checkout is
+`../editor-fresh`. The committed [dependency bundle](../dependencies/README.md)
+makes the integration changes reproducible without an unpublished remote fork.

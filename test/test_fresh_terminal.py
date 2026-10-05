@@ -1,4 +1,4 @@
-"""Pinned real Fresh attach/quit returns functioning terminal input to fc."""
+"""Pinned real Fresh detach/reattach preserves dirty text and FC terminal input."""
 import json
 import os
 from pathlib import Path
@@ -32,6 +32,13 @@ with tempfile.TemporaryDirectory(prefix='fc-fresh-',dir='/tmp') as directory:
          'XDG_CACHE_HOME':str(root/'cache'),'XDG_RUNTIME_DIR':str(root/'runtime'),'FC_FRESH_BIN':str(wrapper),'FC_FRESH_FIXTURE':str(root)}
     script=root/'test.lua'
     script.write_text('''local root=os.getenv('FC_FRESH_FIXTURE')
+-- Watcher capability has its own required native contract. This test isolates
+-- editor handoff errors so a missing watcher cannot hide terminal regressions.
+local function integration_errors()
+  local out={}; for _,e in ipairs(fc.errors()) do
+    if not e:find('^%[Panel watch%]') then table.insert(out,e) end
+  end; return out
+end
 local function mark(name) local f=assert(io.open(root..'/'..name,'w'));f:write('ready');f:close() end
 fc.left_cd(root); assert(fc.wait_event('dir_changed',2000))
 -- Select the editor directory explicitly, independent of fixture filename sorting.
@@ -40,12 +47,16 @@ mark('starting'); local deadline=fc.monotonic_ms()+2000
 while true do local f=io.open(root..'/ack','r'); if f then f:close(); break end; assert(fc.monotonic_ms()<deadline,'PTY setup handshake'); fc.sleep(1) end
 fc.cmd('open_in_editor')
 for _,e in ipairs(fc.errors()) do print('EDITOR ERROR',e) end
-assert(#fc.errors()==0,'real Fresh attach failed')
+assert(#integration_errors()==0,'real Fresh attach failed')
 mark('returned'); assert(fc.wait_event('selection_changed',3000)); assert(#fc.selected()>1,'terminal input did not resume')
+mark('switching_back')
+local deadline2=fc.monotonic_ms()+2000
+while true do local f=io.open(root..'/ack2','r'); if f then f:close(); break end; assert(fc.monotonic_ms()<deadline2,'second PTY handshake'); fc.sleep(1) end
+fc.cmd('switch_to_file_commander'); assert(#integration_errors()==0,'editor toggle failed')
 print('[PASS] fresh_handoff')
 ''')
     if negative:
-        script.write_text(script.read_text().replace("assert(#fc.errors()==0,'real Fresh attach failed')","assert(#fc.errors()>0,'invalid Fresh invocation falsely succeeded')"))
+        script.write_text(script.read_text().replace("assert(#integration_errors()==0,'real Fresh attach failed')","assert(#integration_errors()>0,'invalid Fresh invocation falsely succeeded')").replace("assert(#integration_errors()==0,'editor toggle failed')", "assert(#integration_errors()>0,'invalid toggle falsely succeeded')"))
     seen=bytearray();sent=set();modes={}
     def output(data):
         seen.extend(data)
@@ -53,8 +64,12 @@ print('[PASS] fresh_handoff')
     def tick(master,elapsed):
         if (root/'starting').exists() and 'before' not in modes:
             modes['before']=termios.tcgetattr(master)[3];(root/'ack').write_text('ready')
-        if b'Ln 1, Col 1' in seen and 'quit' not in sent:
-            os.write(master,b'\x11');sent.add('quit')
+        if b'Ln 1, Col 1' in seen and 'detach' not in sent:
+            os.write(master,b'DIRTY_ROUND_TRIP\x1b[21~');sent.add('detach')
+        if (root/'switching_back').exists() and 'second_start' not in sent:
+            seen.clear();sent.add('second_start');(root/'ack2').write_text('ready')
+        if 'second_start' in sent and b'DIRTY_ROUND_TRIP' in seen and 'second_detach' not in sent:
+            os.write(master,b'\x1b[21~');sent.add('second_detach')
         if (root/'returned').exists() and 'select' not in sent:
             modes['after']=termios.tcgetattr(master)[3];os.write(master,b'\x01');sent.add('select')
     try:
@@ -62,7 +77,7 @@ print('[PASS] fresh_handoff')
         rc,seconds,killed,data=result;(logs/'terminal.log').write_bytes(data)
         debug=(root/'config/lua-debug.log').read_text();(logs/'debug.log').write_text(debug)
         validate_result('fresh_handoff',rc,killed,data,debug)
-        require(sent==({'select'} if negative else {'quit','select'}),'real Fresh did not render its status line and return input')
+        require(sent==({'select','second_start'} if negative else {'detach','select','second_start','second_detach'}),'real Fresh did not render its status line and return input')
         (logs/'modes.json').write_text(json.dumps(modes))
         mask=termios.ICANON|termios.ECHO
         require(modes['before']&mask==modes['after']&mask,'terminal mode restoration changed canonical/echo flags')
@@ -72,4 +87,4 @@ print('[PASS] fresh_handoff')
             if '-a' in arguments:
                 session=arguments[arguments.index('-a')+1]
                 subprocess.run([str(fresh),'--cmd','session','kill',session],env=dict(os.environ,**env),capture_output=True,timeout=5)
-print('PASS real Fresh failure' if negative else 'PASS real Fresh attach/quit', 'input/modes; logs:',logs)
+print('PASS real Fresh failure' if negative else 'PASS real Fresh dirty detach/reattach', 'input/modes; logs:',logs)

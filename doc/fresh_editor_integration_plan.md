@@ -1,5 +1,9 @@
 # Fresh Editor Integration Plan
 
+Historical plan. The multiple-session workflow below is superseded by
+[editor_workflow.md](editor_workflow.md) and the implemented
+[fresh_cli_contract.md](fresh_cli_contract.md).
+
 ## Summary
 Integrate local Fresh source from `/Users/alexkordic/code/editor-fresh` into File Commander build/runtime and implement full-session switching between File Commander and Fresh.
 
