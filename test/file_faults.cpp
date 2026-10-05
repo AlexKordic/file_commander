@@ -235,7 +235,7 @@ void settings_faults() {
   }
 }
 void move_faults() {
-  for (auto phase : {"read", "write", "move_metadata", "move_commit", "source_remove", "success"}) {
+  for (auto phase : {"read", "write", "move_metadata", "move_metadata_verify", "move_commit", "source_remove", "success"}) {
     Fixture f;
     write(f / "source", "complete payload");
     write(f / "destination", "old");
@@ -270,14 +270,14 @@ void set_attribute(const Filepath& path, const char* name, const std::string& va
   require(result == 0, "set metadata fixture xattr");
 }
 std::string attribute(const Filepath& path, const char* name) {
-  char bytes[128];
+  std::vector<char> bytes(200000);
 #if defined(__APPLE__)
-  auto size = ::getxattr(path.c_str(), name, bytes, sizeof(bytes), 0, XATTR_NOFOLLOW);
+  auto size = ::getxattr(path.c_str(), name, bytes.data(), bytes.size(), 0, XATTR_NOFOLLOW);
 #else
-  auto size = ::lgetxattr(path.c_str(), name, bytes, sizeof(bytes));
+  auto size = ::lgetxattr(path.c_str(), name, bytes.data(), bytes.size());
 #endif
   require(size >= 0, "read moved xattr");
-  return {bytes, static_cast<size_t>(size)};
+  return {bytes.data(), static_cast<size_t>(size)};
 }
 struct stat entry_stat(const Filepath& path) {
   struct stat info {};
@@ -294,18 +294,82 @@ void same_metadata(const struct stat& before, const Filepath& after) {
 #endif
   require(a.tv_sec == b.tv_sec && a.tv_nsec == b.tv_nsec, "move modification time lost");
 }
+void silent_metadata_failures() {
+  std::vector<std::string> changes = {"mtime", "mode", "xattr"};
+#if defined(__APPLE__)
+  changes.push_back("acl"); changes.push_back("resourcefork");
+#endif
+  for (auto& change : changes) {
+    Fixture f;
+    write(f / "source", "original"); write(f / "destination", "old");
+    fs::permissions(f / "source", static_cast<fs::perms>(0640));
+    set_attribute(f / "source", "user.fc-test", "original");
+#if defined(__APPLE__)
+    fixture_acl(f / "source", ACL_EXTENDED_DENY);
+    set_attribute(f / "source", "com.apple.ResourceFork", "original");
+#endif
+    struct Mutation { Filepath root; std::string kind; bool changed = false; } mutation{f.root, change};
+    auto hooks = std::make_shared<fs::copy_file_io_hooks>(); hooks->context = &mutation;
+    hooks->fault = [](void* context, const char* phase) {
+      if (std::string(phase) == "move_rename") return EXDEV;
+      if (std::string(phase) != "move_metadata_verify") return 0;
+      auto& m = *static_cast<Mutation*>(context);
+      for (fs::directory_iterator it(m.root), end; it != end; ++it) {
+        if (!it->path().filename().string().starts_with(".fc-move-")) continue;
+        auto path = it->path() / "entry";
+        if (m.kind == "mode") fs::permissions(path, static_cast<fs::perms>(0600));
+        if (m.kind == "mtime") { const timespec times[] = {{946684800, 0}, {946684800, 0}}; ::utimensat(AT_FDCWD, path.c_str(), times, 0); }
+        if (m.kind == "xattr") set_attribute(path, "user.fc-test", "changed!");
+#if defined(__APPLE__)
+        if (m.kind == "acl") fixture_acl(path, ACL_EXTENDED_ALLOW);
+        if (m.kind == "resourcefork") set_attribute(path, "com.apple.ResourceFork", "changed!");
+#endif
+        m.changed = true;
+      }
+      return 0; // Simulate an OS metadata API reporting success after losing data.
+    };
+    FileJobServices services; services.file_io = hooks;
+    auto jobs = make_file_jobs({}, services);
+    auto plan = std::make_shared<OperationPlan>(); plan->type = OperationType::MOVE;
+    plan->steps.push_back({Operation::Kind::MoveEntry, f / "source", f / "destination"});
+    auto job = std::make_shared<JobSpec>(plan); jobs->add_job(job);
+    until([&] { return jobs->idle(); }, "silent metadata error timeout");
+    require(mutation.changed && job->_state == JobState::COMPLETED_WITH_ERRORS, "silent metadata loss accepted: " + change);
+    require(read(f / "source") == "original" && read(f / "destination") == "old", "silent metadata error lost original: " + change);
+    no_staging(f);
+  }
+}
+void immutable_staging_cleanup() {
+#if defined(__APPLE__)
+  Fixture f;
+  write(f / "source", "locked source");
+  Defer unlock([&] { ::chflags((f / "source").c_str(), 0); });
+  require(::chflags((f / "source").c_str(), UF_IMMUTABLE) == 0, "immutable source fixture");
+  Fault fault; fault.exdev = true; fault.phase = "move_commit";
+  FileJobServices services; services.file_io = std::make_shared<fs::copy_file_io_hooks>(fault.hooks());
+  auto jobs = make_file_jobs({}, services);
+  auto plan = std::make_shared<OperationPlan>(); plan->type = OperationType::MOVE;
+  plan->steps.push_back({Operation::Kind::MoveEntry, f / "source", f / "destination"});
+  auto job = std::make_shared<JobSpec>(plan); jobs->add_job(job);
+  until([&] { return jobs->idle(); }, "immutable staging cleanup timeout");
+  require(job->_state == JobState::COMPLETED_WITH_ERRORS && read(f / "source") == "locked source", "immutable rollback lost source");
+  require((entry_stat(f / "source").st_flags & UF_IMMUTABLE) != 0, "cleanup modified source flags");
+  no_staging(f);
+#endif
+}
 void move_metadata() {
   Fixture f;
   fs::create_directories(f / "source/child");
   write(f / "source/child/file", "metadata payload");
   write(f / "outside", "do not follow");
   fs::create_symlink("../../outside", f / "source/child/link");
+  fs::create_symlink(f / "outside", f / "source/child/absolute");
   fs::permissions(f / "source", static_cast<fs::perms>(0750));
   fs::permissions(f / "source/child/file", static_cast<fs::perms>(0640));
   set_attribute(f / "source/child/file", "user.fc-test", "file attribute");
   set_attribute(f / "source", "user.fc-test", "directory attribute");
 #if defined(__APPLE__)
-  set_attribute(f / "source/child/file", "com.apple.ResourceFork", "resource fork payload");
+  set_attribute(f / "source/child/file", "com.apple.ResourceFork", std::string(150000, 'r'));
   fixture_acl(f / "source", ACL_EXTENDED_DENY);
   fixture_acl(f / "source/child/file", ACL_EXTENDED_DENY);
   const auto directory_acl = access_acl(f / "source"), file_acl = access_acl(f / "source/child/file");
@@ -315,6 +379,7 @@ void move_metadata() {
     require(::utimensat(AT_FDCWD, (f / name).c_str(), times, AT_SYMLINK_NOFOLLOW) == 0, "timestamp fixture");
   auto root_info = entry_stat(f / "source"), child_info = entry_stat(f / "source/child"), file_info = entry_stat(f / "source/child/file"),
        link_info = entry_stat(f / "source/child/link"), outside_info = entry_stat(f / "outside");
+  const auto absolute_info = entry_stat(f / "source/child/absolute");
   Fault fault; fault.exdev = true;
   FileJobServices services; services.file_io = std::make_shared<fs::copy_file_io_hooks>(fault.hooks());
   auto jobs = make_file_jobs({}, services);
@@ -338,11 +403,12 @@ void move_metadata() {
   same_metadata(root_info, f / "destination"); same_metadata(child_info, f / "destination/child");
   same_metadata(file_info, f / "destination/child/file"); same_metadata(link_info, f / "destination/child/link");
   same_metadata(outside_info, f / "outside");
+  same_metadata(absolute_info, f / "destination/child/absolute");
   require(fs::read_symlink(f / "destination/child/link") == Filepath("../../outside"), "move followed symlink");
   require(attribute(f / "destination/child/file", "user.fc-test") == "file attribute" &&
           attribute(f / "destination", "user.fc-test") == "directory attribute", "move xattrs lost");
 #if defined(__APPLE__)
-  require(attribute(f / "destination/child/file", "com.apple.ResourceFork") == "resource fork payload", "resource fork lost");
+  require(attribute(f / "destination/child/file", "com.apple.ResourceFork") == std::string(150000, 'r'), "resource fork lost");
   require(access_acl(f / "destination") == directory_acl && access_acl(f / "destination/child/file") == file_acl, "move ACL lost");
 #endif
   no_staging(f);
@@ -402,7 +468,7 @@ int main(int argc, char** argv) {
     if (name == "directory_access" || name == "all") directory_access();
     if (name == "settings" || name == "all") settings_faults();
     if (name == "move" || name == "all") move_faults();
-    if (name == "move_metadata" || name == "all") move_metadata();
+    if (name == "move_metadata" || name == "all") { move_metadata(); silent_metadata_failures(); immutable_staging_cleanup(); }
     if (name == "partial" || name == "all") partial_copy();
     std::cout << "PASS file faults " << name << "\n";
   } catch (const std::exception& error) {

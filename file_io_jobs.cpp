@@ -327,6 +327,11 @@ bool copy_move_tree(const Filepath& source, const Filepath& destination,
     int injected = options.io && options.io->fault ? options.io->fault(options.io->context, "move_metadata") : 0;
     if (injected) ec.assign(injected, boost::system::system_category());
     else copy_entry_metadata(e.path, target(e), ec);
+    if (!ec) {
+      injected = options.io && options.io->fault ? options.io->fault(options.io->context, "move_metadata_verify") : 0;
+      if (injected) ec.assign(injected, boost::system::system_category());
+      else verify_entry_metadata(e.path, target(e), ec);
+    }
   };
   auto result=traverse({source},{},cb);
   return !ec && !result.cancelled && !result.truncated;
