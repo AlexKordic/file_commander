@@ -128,6 +128,25 @@ filesystem and transfer contracts, and for the editor contract using Fresh
 local/remote UID permission mismatch; the repeat after that fix passed SSH
 edit/save, one backend across workspace switches, and retention of dirty local text.
 
+Automatic qualification on 2026-10-07 used FC
+`3d9e8e5d74d6a7ed04ed09a3887de863b7a939ee`, the pinned Fresh revision above, and
+native macOS arm64 builds with unpinned dependencies disabled:
+
+| Check | Result | Evidence directory |
+| --- | --- | --- |
+| Release lane, including package build and dependency rebuilds | 197/197 passed; no skips | `build-release/test-logs/lane-release-a26bc36a8e` |
+| AddressSanitizer + UndefinedBehaviorSanitizer core lane | 38/38 passed; no skips | `build-asan-ubsan/test-logs/lane-sanitizer-b92f8e2dcf` |
+| Fresh endpoint routing, IPC protocol, SSH carrier and remote permissions | 23 targeted tests passed | `build-review-evidence/remote-fresh-*.log` |
+| Reconstruct Fresh from its upstream base and fingerprinted bundle | Passed | `build-review-evidence/remote-bundle-tests.log` |
+
+The release gate also verified that packaged FC, Fresh and 7zr executable hashes
+match their build outputs. The seven existing manual-category checks were
+excluded from this automatic release run; native `box` checks above are separate
+SSH qualification and do not replace that manual lane. The transfer fixture
+also loses a move acknowledgement after publication: it verifies that the
+source stays intact while paused and that explicit Resume reconciles the
+destination, cleans the source and removes the owned empty staging directory.
+
 For a manual UI check, open one panel at `ssh://box/tmp`, keep the other local,
 and exercise upload/download, same-host copy, mkdir, rename and delete on your
 own fixture. Open two remote text files with F4, edit and save one, detach with
