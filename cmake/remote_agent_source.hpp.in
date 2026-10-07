@@ -1,0 +1,3 @@
+#pragma once
+#include <string_view>
+inline constexpr std::string_view remote_agent_source = R"FC_AGENT(@_fc_agent_source@)FC_AGENT";

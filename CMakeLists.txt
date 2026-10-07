@@ -86,12 +86,21 @@ file(GLOB _boost_lib_include_dirs "${boost_SOURCE_DIR}/libs/*/include")
 set(BOOST_LIBRARY_INCLUDES ${_boost_lib_include_dirs} CACHE INTERNAL "Boost library include paths for config checks")
 add_subdirectory(boost/filesystem)
 
+file(READ "${CMAKE_CURRENT_SOURCE_DIR}/remote_agent.py" _fc_agent_source)
+configure_file(cmake/remote_agent_source.hpp.in generated/remote_agent_source.hpp @ONLY)
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS remote_agent.py)
 add_library(fc_core STATIC
   commander.cpp operation.cpp copy_planner.cpp file_io_jobs.cpp archive.cpp location.cpp
-  traversal.cpp settings.cpp workspace.cpp transfer_journal.cpp runtime_paths.cpp scheduled_updates.cpp file_metadata.cpp log.cpp err.cpp)
+  traversal.cpp settings.cpp workspace.cpp transfer_journal.cpp runtime_paths.cpp scheduled_updates.cpp file_metadata.cpp log.cpp err.cpp remote_fs.cpp)
 target_include_directories(fc_core PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
+target_include_directories(fc_core PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/generated")
 target_link_libraries(fc_core PUBLIC Boost::filesystem Boost::json Threads::Threads)
 if(BUILD_TESTING)
+  add_executable(fc_remote_fs_tests test/remote_fs.cpp)
+  target_link_libraries(fc_remote_fs_tests PRIVATE fc_core)
+  add_test(NAME fc.remote.filesystem COMMAND fc_remote_fs_tests)
+  set_tests_properties(fc.remote.filesystem PROPERTIES LABELS "core;unit;remote" TIMEOUT 45
+    ENVIRONMENT "FC_SSH_BIN=${CMAKE_CURRENT_SOURCE_DIR}/test/ssh_fixture.py")
   add_executable(fc_resource_tests test/resource_stress.cpp)
   target_link_libraries(fc_resource_tests PRIVATE fc_core)
   add_test(NAME fc.extended.resources COMMAND fc_resource_tests stress)
