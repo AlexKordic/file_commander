@@ -1,6 +1,7 @@
 
 #include "commander.hpp"
 #include "log.hpp"
+#include "remote_fs.hpp"
 
 #include <boost/filesystem/file_status.hpp>
 #include <boost/system/detail/error_code.hpp>
@@ -100,6 +101,15 @@ void DirItem::update(Type type, Perms perms) {
   _perms = perms;
   // Allow files we cant access to exist in our lists
   if (_type == boost::filesystem::status_error) return;
+  if (is_remote(_path)) {
+    auto m = RemoteFS::inspect(_path);
+    _size = m.size;
+    _w_time = m.mtime_ns / 1000000000;
+    _owner = m.owner;
+    _group = m.group;
+    _symlink = m.symlink() ? std::optional<Filepath>(m.link) : std::nullopt;
+    return;
+  }
 
   error_code ec;
   _symlink.reset();
@@ -138,6 +148,14 @@ void DirItem::update(Type type, Perms perms) {
 
 DirItem::DirItem(Filepath p) : _path(std::move(p)) {
   _filename = _path.filename().native();
+  if (is_remote(_path)) {
+    auto m = RemoteFS::inspect(_path);
+    auto status = m.status();
+    if (m.symlink() && RemoteFS::inspect(_path, true).directory())
+      status = boost::filesystem::file_status(directory_file, status.permissions());
+    update(status.type(), status.permissions());
+    return;
+  }
   error_code  ec;
   file_status fs = symlink_status(_path, ec);
   if (ec.failed()) {
@@ -182,7 +200,7 @@ void Dir::publish_delta(std::vector<DirectoryDelta> delta) {
 }
 
 Err Dir::leave_dir() {
-  auto parent_dir = path.parent_path();
+  auto parent_dir = location_parent(path);
   if (parent_dir == path) { return Err("leave_dir() on root"); }
   return move_to(parent_dir);
 }
@@ -190,6 +208,29 @@ Err Dir::leave_dir() {
 Err Dir::refresh() { return move_to(path); }
 
 Err Dir::move_to(const Filepath p, const std::atomic<bool>* cancelled) {
+  if (is_remote(p)) {
+    try {
+      auto where = normalize_location(p);
+      std::vector<DirItem> loaded;
+      for (auto &e : RemoteFS::list(where, cancelled)) {
+        auto &m = e.metadata;
+        auto type = m.target_directory ? directory_file : m.status().type();
+        DirItem item(e.path, e.path.filename().native(), type, m.status().permissions(),
+                     m.mtime_ns / 1000000000, m.size);
+        item._set_ownership(m.owner, m.group);
+        if (m.symlink())
+          item._set_symlink_target(m.link);
+        loaded.push_back(std::move(item));
+      }
+      if (cancelled && cancelled->load())
+        return Err("Directory loading cancelled");
+      publish({where, std::move(loaded)});
+      path_txt = Location::decode(where.native()).display();
+      return {};
+    } catch (const std::exception &e) {
+      return Err(e.what());
+    }
+  }
   error_code ec;
   if (!is_directory(p, ec) || ec) return Err("cannot open directory " + p.native() + (ec ? ": " + ec.message() : ""));
   std::vector<DirItem> loaded;

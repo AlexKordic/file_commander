@@ -1,12 +1,12 @@
 #include "traversal.hpp"
 
-#include "file_io_jobs.hpp"
-#include "transfer_journal.hpp"
-#include "file_metadata.hpp"
 #include "archive.hpp"
 #include "fifo_queue.hpp"
+#include "file_io_jobs.hpp"
+#include "file_metadata.hpp"
 #include "log.hpp"
-
+#include "remote_fs.hpp"
+#include "transfer_journal.hpp"
 
 #include <algorithm>
 #include <condition_variable>
@@ -564,7 +564,13 @@ class ThreadedFileJobs : public FileJobs {
     }
     try {
       std::lock_guard lock(job->_m);
-      job->_journal->prepare_resume(*job);
+      const bool remote = std::any_of(job->_plan->steps.begin(), job->_plan->steps.end(), [](const auto &op) {
+        return is_remote(op.source) || is_remote(op.destination);
+      });
+      if (remote)
+        job->_resume_validate = true;
+      else
+        job->_journal->prepare_resume(*job);
       job->_recovery_note.clear(); job->_cancel_requested = false; job->_pause_requested = false;
       job->_user_cancel_requested = false; job->_shutdown_requested = false;
       job->_recovery_waiting = false; job->_state = JobState::QUEUED;
@@ -698,12 +704,30 @@ class ThreadedFileJobs : public FileJobs {
       try {
       if (_active_job->_cancel_requested.load()) {
         _active_job->_state = JobState::CANCELLED;
-      } else if (validate_mutation_paths(_active_job.get())) switch (_active_job->_type) {
-      case JobSpec::Type::COPY: run_copy(_active_job.get()); break;
-      case JobSpec::Type::MOVE: run_move(_active_job.get()); break;
-      case JobSpec::Type::DELETE: run_delete(_active_job.get()); break;
-      case JobSpec::Type::ARCHIVE_CREATE: run_archive_create(_active_job.get()); break;
-      case JobSpec::Type::MKDIR: case JobSpec::Type::RENAME: case JobSpec::Type::CLIPBOARD: run_small(_active_job.get()); break;
+      } else if (validate_mutation_paths(_active_job.get())) {
+        if (std::any_of(_active_job->_plan->steps.begin(), _active_job->_plan->steps.end(),
+                        [](const auto &op) { return is_remote(op.source) || is_remote(op.destination); }))
+          run_remote(_active_job.get());
+        else
+          switch (_active_job->_type) {
+          case JobSpec::Type::COPY:
+            run_copy(_active_job.get());
+            break;
+          case JobSpec::Type::MOVE:
+            run_move(_active_job.get());
+            break;
+          case JobSpec::Type::DELETE:
+            run_delete(_active_job.get());
+            break;
+          case JobSpec::Type::ARCHIVE_CREATE:
+            run_archive_create(_active_job.get());
+            break;
+          case JobSpec::Type::MKDIR:
+          case JobSpec::Type::RENAME:
+          case JobSpec::Type::CLIPBOARD:
+            run_small(_active_job.get());
+            break;
+          }
       }
       } catch (const std::exception& e) {
         { std::lock_guard lock(_active_job->_m);
@@ -777,6 +801,232 @@ class ThreadedFileJobs : public FileJobs {
       DirItem item(e.path); update.file_found(std::max(int64_t{0},item.size()),job); files.push(std::move(item));
     };
     traverse(roots,{},cb);
+  }
+
+  void run_remote(JobSpec *job) {
+    using namespace RemoteFS;
+    if (job->_type == OperationType::ARCHIVE_CREATE || job->_type == OperationType::CLIPBOARD)
+      throw std::runtime_error("This operation is not supported in SSH tabs");
+    if (job->_resume_validate.exchange(false)) {
+      std::lock_guard lock(job->_m);
+      job->_journal->prepare_resume(*job);
+    }
+    if (job->_journal)
+      job->_journal->prepare_inputs();
+    auto checkpoint = [&] {
+      if (job->_cancel_requested || !wait_for_resume(job))
+        throw ConnectionError("Transfer interrupted; Resume requires validation");
+    };
+    auto copy_started = std::chrono::steady_clock::now();
+    auto progress = [&](int64_t n) {
+      checkpoint();
+      auto rate = _transfer_rate.load();
+      if (rate) {
+        auto deadline = copy_started + std::chrono::duration_cast<std::chrono::steady_clock::duration>(
+                                           std::chrono::duration<double>(double(n) / rate));
+        while (std::chrono::steady_clock::now() < deadline) {
+          checkpoint();
+          std::this_thread::sleep_for(std::chrono::milliseconds(20));
+        }
+      }
+      {
+        std::lock_guard lock(job->_m);
+        job->_copy_bytes = n;
+        job->_current_item.current_size = n;
+        job->_total.update(int64_t(job->_bytes_processed) + n, int64_t(job->_bytes_total));
+      }
+      job->updated();
+    };
+    struct CopiedDirectory {
+      Filepath source, destination;
+      Metadata metadata;
+    };
+    std::vector<CopiedDirectory> directories;
+    if (job->_journal && job->_resume_index) {
+      std::vector<Operation> restored;
+      job->_journal->prepare_copy_directories(restored);
+      for (auto &op : restored)
+        directories.push_back({op.source, op.destination, inspect(op.source, true)});
+    }
+    std::function<void(const Filepath &, const Filepath &)> copy_tree;
+    copy_tree = [&](const Filepath &source, const Filepath &target) {
+      checkpoint();
+      auto before = inspect(source);
+      if (!before.exists)
+        throw std::runtime_error("Source is unavailable: " + source.native());
+      if (before.directory()) {
+        mkdir(target);
+        for (auto &entry : list(source, &job->_cancel_requested))
+          copy_tree(entry.path, target / entry.path.filename());
+      } else if (before.symlink())
+        symlink(before.link, target);
+      else if ((before.mode & S_IFMT) == S_IFREG) {
+        copy_started = std::chrono::steady_clock::now();
+        auto l = Location::decode(source.native()), r = Location::decode(target.native());
+        if (l.remote() && r.remote() && l.ssh == r.ssh) {
+          auto p = params(source);
+          p["destination64"] = base64(r.local.native());
+          p["checkpoint"] = true;
+          request(l.ssh, "copy", std::move(p), &job->_cancel_requested, true, progress);
+        } else {
+          write(target, 0, "", true);
+          uint64_t offset = 0;
+          for (;;) {
+            checkpoint();
+            auto bytes = read(source, offset, 1024 * 1024);
+            if (bytes.empty())
+              break;
+            write(target, offset, bytes);
+            offset += bytes.size();
+            progress(offset);
+          }
+        }
+        if (digest(source, &job->_cancel_requested) != digest(target, &job->_cancel_requested))
+          throw std::runtime_error("Transfer digest mismatch; destination was not published");
+      } else
+        throw std::runtime_error("SSH transfers support regular files, directories and symbolic links");
+      if (inspect(source).stamp() != before.stamp())
+        throw std::runtime_error("Source changed while copying; destination was not published");
+      auto attrs = attributes(source);
+      auto target_attrs = attributes(target);
+      if (attrs.at("acl").as_bool())
+        throw std::runtime_error("Extended ACLs are not supported in SSH transfers; source retained");
+      if (attrs.at("platform") != target_attrs.at("platform")) {
+        attrs.at("attributes").as_object().erase(base64("com.apple.provenance"));
+      }
+      if (!attrs.at("attributes").as_object().empty() && attrs.at("platform") != target_attrs.at("platform"))
+        throw std::runtime_error(
+            "Extended attributes cannot be translated between these platforms; source retained");
+      attributes(target, attrs.at("attributes").as_object());
+      metadata(target, before);
+      sync(target);
+    };
+    for (size_t index = job->_resume_index; index < job->_plan->steps.size(); ++index) {
+      checkpoint();
+      const auto &op = job->_plan->steps[index];
+      bool skipped = false;
+      if (job->_journal && job->_journal->cleanup_pending()) {
+        job->_journal->remove_source(op.source, op.destination);
+        job->_journal->cleanup_committed_staging();
+      } else {
+        if (job->_journal)
+          job->_journal->begin_step(index);
+        {
+          std::lock_guard lock(job->_m);
+          job->_current_item.current_size = 0;
+          job->_copy_bytes = 0;
+        }
+        if (op.kind == Operation::Kind::DiscoveryFailure)
+          throw std::runtime_error(op.message);
+        if (op.kind == Operation::Kind::CreateDirectory) {
+          auto existing = inspect(op.destination);
+          if (existing.exists && !existing.directory())
+            throw std::runtime_error("Directory destination is occupied");
+          if (!existing.exists) {
+            mkdir(op.destination);
+            if (!op.source.empty())
+              directories.push_back({op.source, op.destination, inspect(op.source, true)});
+          }
+        } else if (op.kind == Operation::Kind::DeleteEntry) {
+          if (Location::decode(op.source.native()).local == "/")
+            throw std::runtime_error("Deleting a filesystem root is forbidden");
+          // Recursive removal never follows a final symlink.
+          remove(op.source, true);
+        } else if (op.kind == Operation::Kind::RenameEntry) {
+          rename(op.source, op.destination, false);
+        } else {
+          auto before = op.source.empty() ? Metadata{} : inspect(op.source);
+          auto destination = inspect(op.destination);
+          if (op.kind == Operation::Kind::CreateSymlink && op.source.empty()) {
+            before.exists = true;
+            before.mode = S_IFLNK | 0777;
+            before.mtime_ns = int64_t(op.modified) * 1000000000;
+          }
+          if (op.source == op.destination)
+            throw std::runtime_error("Source and destination are the same entry");
+          if (before.directory() &&
+              Location::decode(op.source.native()).ssh == Location::decode(op.destination.native()).ssh) {
+            auto source = RemoteFS::canonical(op.source),
+                 parent = RemoteFS::canonical(location_parent(op.destination));
+            if (parent == source || path_is_under(source, parent))
+              throw std::runtime_error("Cannot copy or move a directory into itself");
+          }
+          if (op.kind != Operation::Kind::MoveEntry && destination.exists &&
+              (job->_copy_conflict == CopyConflictMode::Skip ||
+               (job->_copy_conflict == CopyConflictMode::Update && before.mtime_ns <= destination.mtime_ns)))
+            skipped = true;
+          else {
+            if (op.kind == Operation::Kind::MoveEntry && destination.exists)
+              throw std::runtime_error("Move destination already exists");
+            bool renamed = false;
+            if (op.kind == Operation::Kind::MoveEntry) {
+              try {
+                rename(op.source, op.destination, false);
+                renamed = true;
+              } catch (const std::system_error &e) {
+                if (e.code().value() != EXDEV)
+                  throw;
+              }
+            }
+            if (!renamed) {
+              if (destination.directory())
+                throw std::runtime_error("Cannot replace a directory with a file");
+              auto root = location_parent(op.destination) /
+                          boost::filesystem::unique_path(op.kind == Operation::Kind::MoveEntry
+                                                             ? ".fc-move-%%%%%%%%-%%%%%%%%"
+                                                             : ".fc-copy-%%%%%%%%-%%%%%%%%");
+              mkdir(root);
+              auto stage = root / (op.kind == Operation::Kind::MoveEntry ? "entry" : "data");
+              if (job->_journal)
+                job->_journal->transaction("staging", stage, op.destination);
+              if (op.kind == Operation::Kind::CreateSymlink) {
+                symlink(op.link_text.native(), stage);
+                metadata(stage, before);
+              } else
+                copy_tree(op.source, stage);
+              checkpoint();
+              if (inspect(op.destination).stamp() != destination.stamp())
+                throw std::runtime_error("Destination changed before commit; source retained");
+              if (job->_journal)
+                job->_journal->transaction("commit_ready", stage, op.destination);
+              rename(stage, op.destination, destination.exists, &destination);
+              if (job->_journal)
+                job->_journal->transaction("committed", stage, op.destination);
+              if (op.kind == Operation::Kind::MoveEntry) {
+                if (!job->_journal)
+                  throw std::runtime_error("Cross-filesystem move requires a transfer journal; destination "
+                                           "copied and source retained");
+                job->_journal->remove_source(op.source, op.destination);
+              }
+              RemoteFS::remove(root);
+            }
+          }
+        }
+      }
+      {
+        std::lock_guard lock(job->_m);
+        ++job->_items_done;
+        job->_items_skipped += skipped;
+        job->_bytes_processed += skipped ? 0 : std::max(int64_t(0), op.bytes);
+        job->_current_item_index = int(index + 1);
+        job->_current_item.current_size = 0;
+        if (job->_journal)
+          job->_journal->finish_step(*job);
+      }
+      job->updated();
+    }
+    for (auto it = directories.rbegin(); it != directories.rend(); ++it) {
+      auto attrs = attributes(it->source), target = attributes(it->destination);
+      if (attrs.at("platform") != target.at("platform"))
+        attrs.at("attributes").as_object().erase(base64("com.apple.provenance"));
+      if (attrs.at("acl").as_bool() ||
+          (!attrs.at("attributes").as_object().empty() && attrs.at("platform") != target.at("platform")))
+        throw std::runtime_error(
+            "Directory access metadata cannot be preserved over SSH; review the paused copy");
+      attributes(it->destination, attrs.at("attributes").as_object());
+      metadata(it->destination, it->metadata);
+      sync(it->destination);
+    }
   }
 
   void run_delete(JobSpec* job) {

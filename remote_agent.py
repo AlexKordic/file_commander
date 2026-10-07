@@ -5,6 +5,7 @@ The helper speaks protocol 1 on stdout; stderr is reserved for diagnostics.
 """
 import base64
 import errno
+import ctypes
 import grp
 import hashlib
 import json
@@ -14,6 +15,54 @@ import shutil
 import stat
 import sys
 import time
+
+
+def attributes(value):
+    if hasattr(os, "listxattr"):
+        return {encode(name): base64.b64encode(os.getxattr(value, name, follow_symlinks=False)).decode("ascii")
+                for name in os.listxattr(value, follow_symlinks=False)}
+    if sys.platform != "darwin":
+        raise OSError(errno.ENOTSUP, "Cannot inspect extended attributes")
+    libc = ctypes.CDLL(None, use_errno=True)
+    raw = os.fsencode(value)
+    size = libc.listxattr(raw, None, 0, 1)
+    if size < 0:
+        raise OSError(ctypes.get_errno(), "Cannot list extended attributes")
+    names = ctypes.create_string_buffer(size)
+    if libc.listxattr(raw, names, size, 1) < 0:
+        raise OSError(ctypes.get_errno(), "Cannot list extended attributes")
+    out = {}
+    for name in names.raw.split(b"\0"):
+        if not name:
+            continue
+        size = libc.getxattr(raw, name, None, 0, 0, 1)
+        if size < 0:
+            raise OSError(ctypes.get_errno(), "Cannot read extended attribute")
+        data = ctypes.create_string_buffer(size)
+        count = libc.getxattr(raw, name, data, size, 0, 1)
+        if count < 0:
+            raise OSError(ctypes.get_errno(), "Cannot read extended attribute")
+        out[encode(name)] = base64.b64encode(data.raw[:count]).decode("ascii")
+    return out
+
+
+def acl_present(value):
+    if sys.platform != "darwin":
+        return False  # Linux ACLs are represented in xattrs.
+    libc = ctypes.CDLL(None, use_errno=True)
+    libc.acl_get_link_np.restype = ctypes.c_void_p
+    libc.acl_get_entry.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.POINTER(ctypes.c_void_p)]
+    libc.acl_free.argtypes = [ctypes.c_void_p]
+    acl = libc.acl_get_link_np(os.fsencode(value), 0x100)  # ACL_TYPE_EXTENDED
+    if not acl:
+        if ctypes.get_errno() in (errno.ENOENT, errno.ENOTSUP):
+            return False
+        raise OSError(ctypes.get_errno(), "Cannot inspect ACL")
+    try:
+        entry = ctypes.c_void_p()
+        return libc.acl_get_entry(acl, 0, ctypes.byref(entry)) == 0
+    finally:
+        libc.acl_free(acl)
 
 
 def encode(value):
@@ -56,12 +105,29 @@ def sync_directory(value):
         os.close(fd)
 
 
-def digest(value):
+def digest(value, send):
     h = hashlib.sha256()
+    total = 0
     with open(value, "rb") as f:
         for block in iter(lambda: f.read(1024 * 1024), b""):
             h.update(block)
+            total += len(block)
+            send({"bytes": total})
     return h.hexdigest()
+
+
+def rename_exclusive(source, destination):
+    libc = ctypes.CDLL(None, use_errno=True)
+    a, b = os.fsencode(source), os.fsencode(destination)
+    if sys.platform == "darwin":
+        result = libc.renamex_np(a, b, 4)  # RENAME_EXCL
+    elif hasattr(libc, "renameat2"):
+        result = libc.renameat2(-100, a, -100, b, 1)  # RENAME_NOREPLACE
+    else:
+        raise OSError(errno.ENOTSUP, "Atomic exclusive rename is unavailable")
+    if result:
+        error = ctypes.get_errno()
+        raise OSError(error, os.strerror(error), destination)
 
 
 def dispatch(method, p, send):
@@ -106,6 +172,25 @@ def dispatch(method, p, send):
         return {}
     if method == "mkdir":
         os.mkdir(value, 0o700)
+        if sys.platform == "darwin":
+            libc = ctypes.CDLL(None, use_errno=True)
+            libc.acl_init.restype = ctypes.c_void_p
+            libc.acl_set_file.argtypes = [ctypes.c_char_p, ctypes.c_int, ctypes.c_void_p]
+            libc.acl_free.argtypes = [ctypes.c_void_p]
+            acl = libc.acl_init(0)
+            try:
+                if not acl or libc.acl_set_file(os.fsencode(value), 0x100, acl):
+                    raise OSError(ctypes.get_errno(), "Cannot make staging directory private")
+            finally:
+                if acl:
+                    libc.acl_free(acl)
+        elif hasattr(os, "removexattr"):
+            for name in ("system.posix_acl_access", "system.posix_acl_default"):
+                try:
+                    os.removexattr(value, name)
+                except OSError as error:
+                    if error.errno not in (errno.ENODATA, errno.ENOTSUP):
+                        raise
         sync_directory(os.path.dirname(value))
         return {}
     if method == "remove":
@@ -120,9 +205,14 @@ def dispatch(method, p, send):
         return {}
     if method == "rename":
         destination = path(p, "destination")
-        if not p.get("replace") and os.path.lexists(destination):
-            raise FileExistsError(errno.EEXIST, "Destination already exists", destination)
-        os.rename(value, destination)
+        if "expected" in p:
+            current = stamp(destination)
+            if any(current.get(key, "" if key == "link64" else None) != data for key, data in p["expected"].items()):
+                raise OSError(errno.ESTALE, "Destination changed before commit", destination)
+        if p.get("replace"):
+            os.rename(value, destination)
+        else:
+            rename_exclusive(value, destination)
         sync_directory(os.path.dirname(destination))
         sync_directory(os.path.dirname(value))
         return {}
@@ -135,7 +225,40 @@ def dispatch(method, p, send):
         os.utime(value, ns=(p["mtime_ns"], p["mtime_ns"]), follow_symlinks=False)
         return {}
     if method == "digest":
-        return {"sha256": digest(value)}
+        return {"sha256": digest(value, send)}
+    if method == "fsync":
+        if not os.path.islink(value):
+            sync_directory(value)
+        return {}
+    if method == "access":
+        return {"allowed": os.access(value, p["mode"])}
+    if method == "tree":
+        entries = [{"relative64": "", "stamp": stamp(value, p.get("follow", False))}]
+        if p.get("recursive", True) and stat.S_ISDIR(entries[0]["stamp"].get("mode", 0)):
+            for root, directories, files in os.walk(value, followlinks=False):
+                for name in directories + files:
+                    child = os.path.join(root, name)
+                    entries.append({"relative64": encode(os.path.relpath(child, value)), "stamp": stamp(child)})
+                    if len(entries) >= 256:
+                        send({"entries": entries})
+                        entries = []
+        return {"entries": entries}
+    if method == "attributes":
+        attrs = attributes(value)
+        acl = acl_present(value) or any(base64.b64decode(name).startswith(b"system.posix_acl_") for name in attrs)
+        return {"attributes": attrs, "platform": sys.platform, "acl": acl}
+    if method == "set_attributes":
+        for name, data in p["attributes"].items():
+            name, data = base64.b64decode(name), base64.b64decode(data)
+            if hasattr(os, "setxattr"):
+                os.setxattr(value, os.fsdecode(name), data, follow_symlinks=False)
+            elif sys.platform == "darwin":
+                libc = ctypes.CDLL(None, use_errno=True)
+                if libc.setxattr(os.fsencode(value), name, data, len(data), 0, 1):
+                    raise OSError(ctypes.get_errno(), "Cannot set extended attribute")
+            else:
+                raise OSError(errno.ENOTSUP, "Cannot set extended attributes")
+        return {}
     if method == "copy":
         destination = path(p, "destination")
         # Only an owned staging path may be passed by the coordinator.
@@ -148,6 +271,8 @@ def dispatch(method, p, send):
                 target.write(block)
                 total += len(block)
                 send({"bytes": total})
+                if p.get("checkpoint") and sys.stdin.readline() != "continue\n":
+                    raise OSError(errno.ECANCELED, "Copy coordinator disconnected")
             target.flush()
             os.fsync(target.fileno())
         return {"bytes": total}

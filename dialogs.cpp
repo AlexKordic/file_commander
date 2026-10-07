@@ -219,7 +219,7 @@ bool execute_file_command(PanelSharedState* app,DataSource* data_source,const st
         return true;
       }
       const Filepath old_path   = app->dir->path;
-      const Filepath parent_dir = app->dir->path.parent_path();
+      const Filepath parent_dir = location_parent(app->dir->path);
       app->filter_txt.clear();
       app->move_to(parent_dir, old_path);
       return true;

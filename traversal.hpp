@@ -14,6 +14,8 @@ struct TraversalEntry {
   boost::filesystem::file_status status;
   std::optional<Filepath> link_text;
   std::optional<Filepath> duplicate_of;
+  std::optional<int64_t> bytes;
+  std::optional<std::time_t> modified;
 };
 struct TraversalResult { size_t entries = 0, errors = 0; bool cancelled = false, truncated = false; };
 struct TraversalCallbacks {

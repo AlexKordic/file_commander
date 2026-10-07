@@ -729,6 +729,7 @@ static void R28() {
   int result = 0;
   EditorManager manager([&](const std::function<int()>&) { return result; }, [](const std::string&) {});
   std::string error;
+  manager.set_binary_override("/usr/bin/true");
   for (const auto& name : {"a", "b", "c"}) require(manager.open_directory_new_session(f.dir(name), error), "session fixture failed");
   require(manager.sessions().size() == 1, "directory opens created multiple editors");
   const auto id = manager.last_session_id();

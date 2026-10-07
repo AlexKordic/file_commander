@@ -1,18 +1,19 @@
 #include "transfer_journal.hpp"
 #include "file_io_jobs.hpp"
 #include "file_metadata.hpp"
-#include "settings.hpp"
 #include "log.hpp"
-#include <fcntl.h>
-#include <unistd.h>
-#include <boost/json.hpp>
+#include "remote_fs.hpp"
+#include "settings.hpp"
 #include <algorithm>
-#include <fstream>
-#include <map>
-#include <limits>
+#include <boost/json.hpp>
 #include <cmath>
 #include <cstring>
+#include <fcntl.h>
+#include <fstream>
+#include <limits>
+#include <map>
 #include <sys/stat.h>
+#include <unistd.h>
 
 namespace Perun {
 namespace {
@@ -20,9 +21,33 @@ namespace j = boost::json;
 namespace fs = boost::filesystem;
 std::string text(const j::value& v) { return std::string(v.as_string()); }
 int64_t number(const j::value& v) { return v.to_number<int64_t>(); }
-Filepath absolute_path(const Filepath& p) { return p.empty() ? p : fs::absolute(p).lexically_normal(); }
+Filepath absolute_path(const Filepath &p) {
+  return p.empty() ? p : is_remote(p) ? normalize_location(p) : fs::absolute(p).lexically_normal();
+}
+
+j::object remote_stamp(const j::object &s) {
+  if (!s.at("exists").as_bool())
+    return {{"exists", false}};
+  j::object out;
+  for (auto key : {"exists", "dev", "ino", "mode", "size", "uid", "gid"})
+    out[key] = s.at(key);
+  for (auto key : {"mtime", "ctime"}) {
+    auto ns = number(s.at(std::string(key) + "_ns"));
+    out[key] = ns / 1000000000;
+    out[std::string(key) + "_ns"] = ns % 1000000000;
+  }
+  if (s.contains("link64"))
+    out["link"] = RemoteFS::unbase64(s.at("link64").as_string());
+  return out;
+}
 
 j::object stamp(const Filepath& path, bool follow = false) {
+  if (is_remote(path)) {
+    auto p = RemoteFS::params(path);
+    p["follow"] = follow;
+    return remote_stamp(
+        RemoteFS::request(Location::decode(path.native()).ssh, "stat", std::move(p)).as_object());
+  }
   struct stat s{};
   const auto rc = follow ? ::stat(path.c_str(), &s) : ::lstat(path.c_str(), &s);
   if (rc != 0) {
@@ -52,6 +77,22 @@ bool unchanged(j::object a, j::object b, bool renamed = false) {
   return a == b;
 }
 j::array tree(const Filepath& path, bool follow = false, bool recursive = true) {
+  if (is_remote(path)) {
+    auto p = RemoteFS::params(path);
+    p["follow"] = follow;
+    p["recursive"] = recursive;
+    auto result = RemoteFS::request(Location::decode(path.native()).ssh, "tree", std::move(p));
+    std::map<std::string, j::object> entries;
+    for (auto &value : result.as_object().at("entries").as_array()) {
+      auto &entry = value.as_object();
+      entries.emplace(RemoteFS::unbase64(entry.at("relative64").as_string()),
+                      remote_stamp(entry.at("stamp").as_object()));
+    }
+    j::array out;
+    for (auto &[relative, s] : entries)
+      out.emplace_back(j::object{{"relative", relative}, {"stamp", std::move(s)}});
+    return out;
+  }
   j::array out;
   auto root = stamp(path, follow);
   out.emplace_back(j::object{{"relative", ""}, {"stamp", root}});
@@ -73,11 +114,14 @@ bool matches_tree(const Filepath& path, const j::array& expected, bool renamed =
   return true;
 }
 j::object anchor(Filepath path) {
-  path = path.parent_path();
+  path = location_parent(path);
   while (!path.empty()) {
     auto s = stamp(path, true);
     if (exists(s)) return {{"path", path.native()}, {"stamp", std::move(s)}};
-    auto parent = path.parent_path(); if (parent == path) break; path = parent;
+    auto parent = location_parent(path);
+    if (parent == path)
+      break;
+    path = parent;
   }
   return {};
 }
@@ -99,6 +143,11 @@ void save(const Filepath& path, const j::object& o) {
   SettingsStore::atomic_write(path, bytes);
 }
 void sync_path(const Filepath& path) {
+  if (is_remote(path)) {
+    if (RemoteFS::inspect(path).exists)
+      RemoteFS::sync(path);
+    return;
+  }
   const auto s = stamp(path);
   if (!exists(s)) return;
   if ((number(s.at("mode")) & S_IFMT) == S_IFLNK) return;
@@ -126,7 +175,8 @@ Operation decode(const j::object& o) {
   Operation op{static_cast<Operation::Kind>(k), text(o.at("source")), text(o.at("destination")), text(o.at("link")),
     text(o.at("message")), number(o.at("bytes")), std::time_t(number(o.at("modified"))),
     static_cast<DirItem::Perms>(number(o.at("permissions")))};
-  if ((!op.source.empty() && !op.source.is_absolute()) || (!op.destination.empty() && !op.destination.is_absolute()))
+  if ((!op.source.empty() && !op.source.is_absolute() && !is_remote(op.source)) ||
+      (!op.destination.empty() && !op.destination.is_absolute() && !is_remote(op.destination)))
     throw std::runtime_error("Recovery operations require absolute paths");
   if (op.source != op.source.lexically_normal() || op.destination != op.destination.lexically_normal())
     throw std::runtime_error("Recovery paths must be normalized");
@@ -178,7 +228,9 @@ struct TransferJournal::Impl {
     job._total.update(int64_t(job._bytes_processed) + job._current_item.current_size, int64_t(job._bytes_total));
     job._errors.clear(); job._error_count_total = 0;
     for (const auto& value : state.at("errors").as_array()) {
-      const auto& e = value.as_object(); job.report_error(DirItem(text(e.at("path"))), text(e.at("message")));
+      const auto &e = value.as_object();
+      DirItem item(Filepath(text(e.at("path"))), "", fs::regular_file, fs::no_perms, 0, 0);
+      job.report_error(std::move(item), text(e.at("message")));
     }
   }
   void complete_proven_commit() {
@@ -200,20 +252,49 @@ std::shared_ptr<TransferJournal> TransferJournal::create(const Filepath& directo
   p->state_path = directory / (std::to_string(job._job_id) + ".state.json");
   if (fs::exists(p->plan_path)) throw std::runtime_error("Transfer journal identity already exists");
   j::array steps;
+  bool remote = std::any_of(job._plan->steps.begin(), job._plan->steps.end(),
+                            [](const auto &op) { return is_remote(op.source) || is_remote(op.destination); });
   for (const auto& original : job._plan->steps) {
     const auto op = decode(encode(original));
-    steps.emplace_back(j::object{{"operation", encode(op)},
-      {"source", op.source.empty() ? j::array{} : tree(op.source, op.kind == Operation::Kind::CopyFile, op.kind == Operation::Kind::MoveEntry)},
-      {"destination", op.destination.empty() ? j::object{} : stamp(op.destination)},
-      {"source_anchor", op.source.empty() ? j::object{} : anchor(op.source)},
-      {"destination_anchor", op.destination.empty() ? j::object{} : anchor(op.destination)}});
+    steps.emplace_back(j::object{
+        {"operation", encode(op)},
+        {"source", remote || op.source.empty() ? j::array{}
+                                               : tree(op.source, op.kind == Operation::Kind::CopyFile,
+                                                      op.kind == Operation::Kind::MoveEntry)},
+        {"destination", remote || op.destination.empty() ? j::object{} : stamp(op.destination)},
+        {"source_anchor", remote || op.source.empty() ? j::object{} : anchor(op.source)},
+        {"destination_anchor", remote || op.destination.empty() ? j::object{} : anchor(op.destination)}});
   }
-  p->plan = {{"version", 1}, {"id", job._job_id}, {"type", int(job._type)},
-    {"conflict", int(job._copy_conflict)}, {"steps", std::move(steps)}};
+  p->plan = {{"version", 1},
+             {"id", job._job_id},
+             {"type", int(job._type)},
+             {"conflict", int(job._copy_conflict)},
+             {"steps", std::move(steps)},
+             {"prepared", !remote}};
   p->state = {{"version", 1}, {"next", 0}, {"phase", "ready"}, {"state", int(JobState::QUEUED)}, {"directories", j::array{}}};
   p->stats(job, job._errors);
   save(p->plan_path, p->plan); p->save();
   return std::shared_ptr<TransferJournal>(new TransferJournal(std::move(p)));
+}
+
+void TransferJournal::prepare_inputs() {
+  std::lock_guard lock(impl->mutex);
+  if (!impl->plan.contains("prepared") || impl->plan.at("prepared").as_bool())
+    return;
+  auto steps = impl->plan.at("steps").as_array();
+  for (auto &value : steps) {
+    auto &input = value.as_object();
+    auto op = decode(input.at("operation").as_object());
+    input["source"] = op.source.empty() ? j::array{}
+                                        : tree(op.source, op.kind == Operation::Kind::CopyFile,
+                                               op.kind == Operation::Kind::MoveEntry);
+    input["destination"] = op.destination.empty() ? j::object{} : stamp(op.destination);
+    input["source_anchor"] = op.source.empty() ? j::object{} : anchor(op.source);
+    input["destination_anchor"] = op.destination.empty() ? j::object{} : anchor(op.destination);
+  }
+  impl->plan["steps"] = std::move(steps);
+  impl->plan["prepared"] = true;
+  save(impl->plan_path, impl->plan);
 }
 
 std::vector<std::shared_ptr<JobSpec>> TransferJournal::restore(const Filepath& directory, uint64_t& next_id,
@@ -354,8 +435,21 @@ bool TransferJournal::cleanup_pending() const {
   return impl->phase() == "committed" || impl->phase() == "source_remove";
 }
 
+void TransferJournal::cleanup_committed_staging() {
+  std::lock_guard lock(impl->mutex);
+  if (!impl->state.contains("stage_root")) return;
+  const auto root = Filepath(text(impl->state.at("stage_root")));
+  const auto current = stamp(root);
+  if (!exists(current)) return;
+  if (!identity(current, impl->state.at("stage_identity").as_object()))
+    throw std::runtime_error("Recovery staging ownership changed; cleanup blocked");
+  RemoteFS::remove(root);
+  sync_path(root.parent_path());
+}
+
 void TransferJournal::prepare_resume(JobSpec& job) {
   std::lock_guard lock(impl->mutex);
+  prepare_inputs();
   if (job._type != OperationType::COPY && job._type != OperationType::MOVE)
     throw std::runtime_error("This operation cannot resume safely. Cancel recovery and start a new operation after reviewing its files.");
   if (impl->index() < job._plan->steps.size() && impl->phase() != "ready") {
@@ -386,7 +480,7 @@ void TransferJournal::prepare_resume(JobSpec& job) {
       throw std::runtime_error("Source changed or is unavailable: " + op.source.native() + ". Cancel recovery and start a new transfer after reviewing it.");
     if (!op.destination.empty() && !unchanged(stamp(op.destination), input.at("destination").as_object()))
       throw std::runtime_error("Destination conflict: " + op.destination.native() + ". Resolve it before Resume, or cancel and start a new transfer.");
-    if (op.kind == Operation::Kind::CopyFile && ::access(op.source.c_str(), R_OK) != 0)
+    if (op.kind == Operation::Kind::CopyFile && !RemoteFS::access(op.source, R_OK))
       throw std::runtime_error("Source is not readable: " + op.source.native());
     if (!op.destination.empty()) {
       auto parent = op.destination.parent_path();
@@ -397,7 +491,7 @@ void TransferJournal::prepare_resume(JobSpec& job) {
         const auto step = decode(impl->plan.at("steps").as_array().at(size_t(number(saved.at("index")))).as_object().at("operation").as_object());
         if (step.destination == parent && identity(stamp(parent), saved.at("stamp").as_object())) owned = true;
       }
-      if (!owned && ::access(parent.c_str(), W_OK | X_OK) != 0)
+      if (!owned && !RemoteFS::access(parent, W_OK | X_OK))
         throw std::runtime_error("Destination directory is not writable: " + parent.native());
     }
   }
@@ -407,20 +501,35 @@ void TransferJournal::prepare_resume(JobSpec& job) {
     auto current = stamp(root);
     if (exists(current)) {
       if (!identity(current, impl->state.at("stage_identity").as_object())) throw std::runtime_error("Recovery staging ownership changed; cleanup blocked");
-      // Graceful shutdown restored original directory permissions. Temporarily
-      // allow cleanup of our staging child, then restore access before returning.
-      auto parent = root.parent_path(); const auto previous = fs::status(parent).permissions();
-      bool restore_access = false;
-      for (const auto& value : impl->state.at("directories").as_array()) {
-        const auto& saved = value.as_object();
-        const auto step = decode(impl->plan.at("steps").as_array().at(size_t(number(saved.at("index")))).as_object().at("operation").as_object());
-        if (step.destination == parent && identity(stamp(parent), saved.at("stamp").as_object())) {
-          fs::permissions(parent, fs::add_perms | fs::owner_all); restore_access = true; break;
+      if (is_remote(root)) {
+        RemoteFS::remove(root, true);
+      } else {
+        // Graceful shutdown restored original directory permissions. Temporarily
+        // allow cleanup of our staging child, then restore access before returning.
+        auto parent = root.parent_path();
+        const auto previous = fs::status(parent).permissions();
+        bool restore_access = false;
+        for (const auto &value : impl->state.at("directories").as_array()) {
+          const auto &saved = value.as_object();
+          const auto step = decode(impl->plan.at("steps")
+                                       .as_array()
+                                       .at(size_t(number(saved.at("index"))))
+                                       .as_object()
+                                       .at("operation")
+                                       .as_object());
+          if (step.destination == parent && identity(stamp(parent), saved.at("stamp").as_object())) {
+            fs::permissions(parent, fs::add_perms | fs::owner_all);
+            restore_access = true;
+            break;
+          }
         }
+        boost::system::error_code ec;
+        remove_owned_staging(root, ec);
+        if (restore_access)
+          fs::permissions(parent, previous);
+        if (ec)
+          throw std::runtime_error("Cannot clean interrupted staging: " + ec.message());
       }
-      boost::system::error_code ec; remove_owned_staging(root, ec);
-      if (restore_access) fs::permissions(parent, previous);
-      if (ec) throw std::runtime_error("Cannot clean interrupted staging: " + ec.message());
     }
   }
   impl->apply(job);
@@ -436,7 +545,12 @@ void TransferJournal::prepare_copy_directories(std::vector<Operation>& out) {
     if (!op.source.empty() && !matches_tree(op.source, step.at("source").as_array(), false, false, false))
       throw std::runtime_error("Source directory changed; restoring its access settings is unsafe: " + op.source.native());
     if (!identity(stamp(op.destination), saved.at("stamp").as_object())) throw std::runtime_error("Created destination directory was replaced; Resume blocked");
-    fs::permissions(op.destination, fs::add_perms | fs::owner_all);
+    if (is_remote(op.destination)) {
+      auto m = RemoteFS::inspect(op.destination);
+      m.mode |= 0700;
+      RemoteFS::metadata(op.destination, m);
+    } else
+      fs::permissions(op.destination, fs::add_perms | fs::owner_all);
     out.push_back(std::move(op));
   }
 }
@@ -471,7 +585,7 @@ int TransferJournal::remove_source(const Filepath& source, const Filepath& desti
       const auto found = outputs.find(relative);
       if (found == outputs.end() || !unchanged(stamp(target), *found->second, relative.empty()))
         throw std::runtime_error("Destination changed during move cleanup: " + target.native());
-      fs::remove(path);
+      RemoteFS::remove(path);
       sync_path(path.parent_path());
       if (io && io->fault) { int error = io->fault(io->context, "recovery_source_item"); if (error) return error; }
     }

@@ -218,8 +218,9 @@ void FindDialog::start_search() {
     return;
   }
   boost::system::error_code ec;
-  const bool root_exists = boost::filesystem::exists(root, ec);
-  const bool root_is_dir = root_exists && !ec.failed() && boost::filesystem::is_directory(root, ec);
+  const bool root_exists = is_remote(root) || boost::filesystem::exists(root, ec);
+  const bool root_is_dir =
+      root_exists && !ec.failed() && (is_remote(root) || boost::filesystem::is_directory(root, ec));
   if (ec.failed() || !root_exists || !root_is_dir) {
     status = "Root path must be an existing directory";
     return;

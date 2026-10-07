@@ -28,7 +28,10 @@ The current baseline is upstream Fresh 0.5.2 plus the fixes through
 `cargo build --release --locked -p fresh-editor --bin fresh`. The FC commits
 preserve attachment bindings and bounded startup, isolate daemon data, import
 legacy checkpoints, fix recovered cursor positions and duplicate untitled
-tabs, and support checkpoint-confirmed backend restart. See
+tabs, support checkpoint-confirmed backend restart, and explicitly route local/SSH
+locations to filesystem workspaces in the same backend. Remote opens use
+Fresh's native SSH agent and preserve dirty local tabs. Write permissions are
+evaluated by the remote login rather than comparing remote owners to local UIDs. See
 `doc/fresh_cli_contract.md` in the FC source tree for upgrade and restart behavior.
 
 Fresh's license is GPL-3.0-or-later. The packaged license is in

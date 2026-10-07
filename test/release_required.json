@@ -13,7 +13,11 @@
     "fc.package",
     "fc.dependency_rebuild",
     "fc.terminal.input_resize",
-    "fc.extended.editor_restart"
+    "fc.extended.editor_restart",
+    "fc.remote.filesystem",
+    "fc.remote.transfers",
+    "fc.remote.panels",
+    "fc.extended.ssh_editor"
   ],
   "groups": {
     "recovery": [

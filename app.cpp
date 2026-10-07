@@ -1,4 +1,6 @@
 #include "app.hpp"
+#include "remote_fs.hpp"
+#include "settings.hpp"
 #include <algorithm>
 #include <cmath>
 #include <cstdlib>
@@ -8,7 +10,6 @@
 #include <ftxui/dom/table.hpp>
 #include <regex>
 #include <sstream>
-#include "settings.hpp"
 
 ftxui::Dialog::P DialogOverlay::get_overlay_dialog(const std::string& name) {
   auto it = _overlay_dialogs.find(name);
@@ -229,6 +230,17 @@ void Panel::move_to(const Filepath& where, Filepath focus) {
 }
 
 void Panel::load_directory(Filepath where, bool archive, bool recover, Filepath focus, bool background_refresh) {
+  try {
+    where = normalize_location(where);
+  } catch (const std::exception &e) {
+    file_operations().report_error(e.what());
+    return;
+  }
+  if (is_remote(where) && where != dir.path) {
+    dir.publish(DirectorySnapshot{where, {}});
+    dir.path_txt = Location::decode(where.native()).display();
+    remote_error.clear();
+  }
   const auto generation = ++_load_generation;
   if (!background_refresh) _refresh_after_load = false;
   if (archive || where != dir.path) {
@@ -260,7 +272,7 @@ void Panel::load_directory(Filepath where, bool archive, bool recover, Filepath 
           where = extracted;
         }
       }
-      if (recover) {
+      if (recover && !is_remote(where)) {
         for (;;) {
           boost::system::error_code ec;
           if (boost::filesystem::is_directory(where, ec) && !ec) break;
@@ -276,11 +288,20 @@ void Panel::load_directory(Filepath where, bool archive, bool recover, Filepath 
       if (!alive->load() || cancelled->load() || generation != _load_generation) return;
       _loading = false;
       if (!error.ok()) {
-        file_operations().report_error("[Panel load] " + error.steps.front());
+        if (!is_remote(where) || remote_error != error.steps.front())
+          file_operations().report_error("[Panel load] " + error.steps.front());
+        if (is_remote(where)) {
+          remote_error = error.steps.front();
+          dir.path = where;
+          dir.path_txt = Location::decode(where.native()).display();
+          sync_active_tab_state();
+          start_watcher(where);
+        }
         if (recover && !_tabs.empty() && _tabs[_active_tab].restore && Location::decode(_tabs[_active_tab].restore->path).read_only())
           load_directory(boost::filesystem::current_path(), false, false);
         return;
       }
+      remote_error.clear();
       const bool same = dir.path == where;
       if (recover && !same) file_operations().report_error("Watched directory is unavailable; moved to " + where.native());
       int                             old_index = same && _state->get_focused_index ? _state->get_focused_index() : 0;
@@ -324,9 +345,13 @@ void Panel::load_directory(Filepath where, bool archive, bool recover, Filepath 
 Element Panel::render() {
   // Panel is always shown
   Element document = vbox({
-    render_tabs(),
-    _loading ? hbox({text(" Loading "), text(_loading_path.native()) | xflex, text(" Esc: cancel ")}) | dim : text(""),
-    _main_document->renderer->Render() | yflex,
+      render_tabs(),
+      _loading ? hbox({text(" Loading "), text(Location::decode(_loading_path.native()).display()) | xflex,
+                       text(" Esc: cancel ")}) |
+                     dim
+      : remote_error.empty() ? text("")
+                             : text(" SSH disconnected — retrying; " + remote_error) | color(Color::Red),
+      _main_document->renderer->Render() | yflex,
   });
   // Overwrite with active dialog
   if (!_overlay_renderer) return document;
@@ -340,6 +365,12 @@ Filepath Panel::focused_dir() {
   // get focused item, if its dir return item's path
   auto focused = _state->get_focused_item();
   if (!focused) return dir.path;
+  if (is_remote(*focused)) {
+    for (auto &item : dir.items)
+      if (item.path_ref() == *focused)
+        return item.is_dir() ? *focused : location_parent(*focused);
+    return dir.path;
+  }
   boost::system::error_code ec;
   const bool                isdir = boost::filesystem::is_directory(*focused, ec);
   if (!ec.failed() && isdir) return *focused;
@@ -348,6 +379,10 @@ Filepath Panel::focused_dir() {
 }
 
 bool Panel::enter_archive(const Filepath& archive_candidate) {
+  if (is_remote(archive_candidate)) {
+    file_operations().report_error("Copy remote archives to a local tab before opening them");
+    return false;
+  }
   if (!is_archive_file_path(archive_candidate)) return false;
   load_directory(archive_candidate, true, false);
   return true;
@@ -395,6 +430,8 @@ Element Panel::render_tabs() const {
     std::string label = path.filename().native();
     if (label.empty()) label = path.native();
     if (label.empty()) label = "/";
+    if (is_remote(path))
+      label = Location::decode(path.native()).ssh + ":" + label;
     Element cell = text(" " + std::to_string(i + 1) + ":" + label + " ");
     if (i == _active_tab) {
       cell |= bold;
@@ -423,6 +460,7 @@ void Panel::sync_active_tab_state() {
     tab.show_owner_group_column = _state->show_owner_group_column;
   }
   tab.archive_stack = _archive_stack;
+  tab.remote_error = remote_error;
 }
 
 void Panel::start_watcher(const Filepath& where) {
@@ -503,6 +541,7 @@ void Panel::load_active_tab() {
   if (_tabs.empty() || _active_tab < 0 || _active_tab >= static_cast<int>(_tabs.size())) return;
   TabState& tab  = _tabs[_active_tab];
   dir            = std::move(tab.dir);
+  remote_error = tab.remote_error;
   _archive_stack = tab.archive_stack;
   _prune_archive_stack(dir.path);
   if (_state) {
@@ -691,7 +730,13 @@ bool FileCommander::open_in_editor(std::string& error) {
     return false;
   }
 
-  auto is_directory = [](const Filepath& p) -> bool {
+  auto is_directory = [&panel](const Filepath &p) -> bool {
+    if (is_remote(p)) {
+      for (auto &item : panel.dir.items)
+        if (item.path_ref() == p)
+          return item.is_dir();
+      return false;
+    }
     boost::system::error_code ec;
     const bool                isdir = boost::filesystem::is_directory(p, ec);
     return !ec.failed() && isdir;
@@ -797,7 +842,9 @@ void FileCommander::load_settings(bool restore_paths) {
     if (restore_paths) {
       auto navigate = [](Panel& panel, const std::string& path) {
         boost::system::error_code ec;
-        if (!path.empty() && (Location::decode(path).read_only() || (boost::filesystem::is_directory(path, ec) && !ec))) panel.move_to(path);
+        if (!path.empty() && (Location::decode(path).remote() || Location::decode(path).read_only() ||
+                              (boost::filesystem::is_directory(path, ec) && !ec)))
+          panel.move_to(path);
       };
       navigate(left, s.left.path);
       navigate(right, s.right.path);
@@ -868,7 +915,8 @@ std::vector<Filepath> FileCommander::list_bookmarks() const {
 
 void FileCommander::add_bookmark(const Filepath& path) {
   auto location = Location::decode(path.native());
-  if (!location.read_only()) location = archive_service().logical_location(location.local);
+  if (!location.read_only() && !location.remote())
+    location = archive_service().logical_location(location.local);
   if (std::find(_bookmarks.begin(), _bookmarks.end(), location) == _bookmarks.end()) {
     _bookmarks.push_back(std::move(location));
     std::sort(_bookmarks.begin(), _bookmarks.end(), [](const auto& a, const auto& b) { return a.display() < b.display(); });
@@ -1085,6 +1133,28 @@ FileCommander::FileCommander(Filepath l, Filepath r, ExecuteOnUiThread exec, std
       std::string error;
       if (!_editor_manager.switch_to_editor(focused_panel().dir.path, error) && !error.empty()) file_operations().report_error(error);
     });
+  _overlay_dialogs["ConnectSSH"] = std::make_shared<ConnectSSHDialog>(
+      _close_dialog, [this](const std::string &host, const std::string &path, std::string &error) {
+        try {
+          if (path.empty() || path.front() != '/')
+            throw std::runtime_error("An absolute remote directory is required");
+          auto location = Location::decode("ssh://" + host + path);
+          auto authenticate = [&] { return RemoteFS::authenticate(location.ssh); };
+          const int rc = _run_with_restored_io ? _run_with_restored_io(authenticate) : authenticate();
+          if (rc) {
+            error = "SSH authentication failed (exit " + std::to_string(rc) +
+                    "). Check the host alias in your SSH config.";
+            return false;
+          }
+          auto &panel = focused_panel();
+          panel.new_tab();
+          panel.move_to(location.resource());
+          return true;
+        } catch (const std::exception &e) {
+          error = e.what();
+          return false;
+        }
+      });
   renderer                           = Renderer(navigation, [=, this]() -> Element {
     // check for resize:
     int screen_w = _get_dimx();

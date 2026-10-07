@@ -1,6 +1,7 @@
 #include "copy_planner.hpp"
-#include <unordered_set>
+#include "remote_fs.hpp"
 #include "traversal.hpp"
+#include <unordered_set>
 using namespace Perun;
 namespace {
 std::atomic<uint64_t> sequence{1};
@@ -64,9 +65,13 @@ void CopyPlanner::run() {
   cb.error     = [&](const Filepath& p, const std::string& message) { error(p, _request.destination / p.filename(), message); };
   cb.enter     = [&](const TraversalEntry& e) {
     auto                      target = _request.destination / e.relative;
-    DirItem                   item(e.path);
+    DirItem item = e.bytes ? DirItem(e.path, e.path.filename().native(), e.status.type(),
+                                     e.status.permissions(), *e.modified, *e.bytes)
+                           : DirItem(e.path);
     boost::system::error_code ec;
-    if (boost::filesystem::equivalent(e.path, target, ec) && !ec) {
+    if ((is_remote(e.path) || is_remote(target))
+            ? e.path == target
+            : (boost::filesystem::equivalent(e.path, target, ec) && !ec)) {
       error(e.path, target, "Copy to self");
       return false;
     }
@@ -74,13 +79,13 @@ void CopyPlanner::run() {
     if (e.duplicate_of) {
       op.kind = Operation::Kind::CreateSymlink;
       op.source.clear();
-      op.link_text = _request.destination / *e.duplicate_of;
+      op.link_text = (_request.destination / *e.duplicate_of).lexically_relative(target.parent_path());
       append(std::move(op));
       return false;
     }
     if (e.link_text && !_request.follow_links) {
       auto text = *e.link_text;
-      if (!(_request.preserve_relative_links && text.is_relative())) {
+      if (!is_remote(e.path) && !(_request.preserve_relative_links && text.is_relative())) {
         text = resolve_link(e.path);
         if (text.empty()) {
           error(e.path, target, "Cyclic symlink");
@@ -95,7 +100,18 @@ void CopyPlanner::run() {
       append(std::move(op));
       return false;
     }
+    if (e.link_text && _request.follow_links && is_remote(e.path))
+      op.source = RemoteFS::canonical(e.path);
     if (boost::filesystem::is_directory(e.status)) {
+      if (is_remote(e.path) || is_remote(target)) {
+        if (e.path == target || path_is_under(e.path, target)) {
+          error(e.path, target, "Copy dir into itself");
+          return false;
+        }
+        op.kind = Operation::Kind::CreateDirectory;
+        append(std::move(op));
+        return true;
+      }
       auto source   = boost::filesystem::canonical(e.path, ec);
       auto resolved = boost::filesystem::weakly_canonical(target, ec);
       if (!ec && path_is_under(source, resolved)) {

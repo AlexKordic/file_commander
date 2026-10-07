@@ -146,13 +146,14 @@ archive.cpp
 
 - Local Fresh integration is built from `../editor-fresh` when `FC_BUILD_FRESH=ON`.
 - Runtime command set:
-  - `F9`: open focused item(s) in Fresh
-  - `Ctrl+Y`: switch to previous tracked editor session
-  - `Ctrl+U`: switch to next tracked editor session
-  - `F10`: semantic "switch to file commander" command on FC side (no-op while FC is active)
+  - `F4`: open focused item(s) in Fresh
+  - `F10`: switch to Fresh and detach back to FC
+  - `Restart editor backend` in the palette: checkpoint and restart the backend
 - Opening policy:
-  - single focused directory -> new Fresh session attach
-  - file(s) -> open in last-used session, then attach
+  - one backend per FC profile; Fresh owns file tabs and tab closure
+  - a directory selects its filesystem workspace, then attaches
+  - files route explicitly to their local or SSH filesystem workspace, then attach
+  - local and remote workspaces retain unsaved buffers when switching
 - Attach runs with restored terminal IO so control cleanly returns when Fresh detaches/exits.
 - Session metadata (`last_editor_session_id`) and binary override (`fresh_binary_path`)
   are persisted in FC settings.
@@ -654,8 +655,7 @@ Implemented:
 5. Contract documented in `doc/fresh_cli_contract.md`.
 
 Deferred:
-1. Explicit session-picker dialog UX beyond prev/next shortcuts.
-2. Windows-specific integration path.
+1. Windows-specific integration path.
 
 ---
 

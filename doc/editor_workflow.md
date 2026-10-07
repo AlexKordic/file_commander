@@ -513,3 +513,11 @@ real Fresh PTY tests as well as deterministic manager/journal tests. Qualificati
 must cover shell interruption while either application owns the terminal, editor
 backend loss, and startup with interrupted transfers; success is preservation of
 the specified state, not merely a clean process exit.
+
+## SSH filesystem workspaces
+
+The editor also routes local and SSH files to separate filesystem workspaces
+inside the same persistent backend. Endpoint and root identify the workspace,
+and Fresh owns its file tabs. See [SSH workflow](ssh_workflow.md) for the
+implemented transfer/recovery rules, controls and native tests. The decision
+that interrupted transfers always start paused still applies to remote jobs.

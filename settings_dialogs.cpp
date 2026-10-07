@@ -51,6 +51,45 @@ using Perun::selection_plan;
 std::string time_to_string(double time);
 
 namespace ftxui {
+ConnectSSHDialog::ConnectSSHDialog(
+    std::function<void()> close,
+    std::function<bool(const std::string &, const std::string &, std::string &)> connect)
+    : Dialog(nullptr) {
+  host_input = Input(&host, "SSH config alias (for example box)");
+  path_input = Input(&path, "Absolute remote directory");
+  ButtonOption option;
+  option.transform = ascii_button_transform();
+  auto button = Button(
+      " Connect ",
+      [this, close, connect] {
+        error.clear();
+        if (connect(host, path, error))
+          close();
+      },
+      option);
+  auto cancel = Button(" Cancel ", close, option);
+  navigation =
+      CatchEvent(Container::Vertical({host_input, path_input, Container::Horizontal({button, cancel})}),
+                 [close](Event e) {
+                   if (e == keys().key_cancel_dialog) {
+                     close();
+                     return true;
+                   }
+                   return false;
+                 });
+  renderer = Renderer(navigation, [this, button, cancel] {
+    return window(text(" Connect SSH ") | bold,
+                  vbox({text("Host alias or user@host"), host_input->Render(), text("Remote directory"),
+                        path_input->Render(), paragraph(error) | color(Color::Red), separator(),
+                        hbox({button->Render(), filler(), cancel->Render()})})) |
+           size(WIDTH, LESS_THAN, 72);
+  });
+}
+void ConnectSSHDialog::OnShow() {
+  error.clear();
+  host_input->TakeFocus();
+}
+
 RestartEditorDialog::RestartEditorDialog(std::function<void()> close,
   std::function<EditorManager::RestartResult(bool, std::string&)> prepare_restart,
   std::function<void()> attach_editor)

@@ -60,6 +60,10 @@ class DirItem {
 
   void _set_symlink_target(Filepath p) { _symlink = std::move(p); }
   void _set_warning(std::string w) { _warning = std::move(w); }
+  void _set_ownership(std::string owner, std::string group) {
+    _owner = std::move(owner);
+    _group = std::move(group);
+  }
 
  private:
   Filepath    _path;

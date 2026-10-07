@@ -1,9 +1,11 @@
 #include "editor_manager.hpp"
+#include "remote_fs.hpp"
 #include "runtime_paths.hpp"
 #include "settings.hpp"
 #include "shutdown_signal.hpp"
 #include <boost/json.hpp>
 #include <fstream>
+#include <map>
 
 #include <boost/filesystem.hpp>
 
@@ -331,11 +333,37 @@ bool EditorManager::ensure_session(const Filepath& initial_directory, std::strin
 
 bool EditorManager::open_directory(const Filepath& directory, std::string& error) {
   boost::system::error_code ec;
-  if (!boost::filesystem::is_directory(directory, ec) || ec) {
+  if (!is_remote(directory) && (!boost::filesystem::is_directory(directory, ec) || ec)) {
     error = "Not a directory: " + directory.native();
     return false;
   }
-  return switch_to_editor(directory, error);
+  return route_location(directory, {}, error) && attach_session(_last_session_id, error);
+}
+
+bool EditorManager::route_location(const Filepath &directory, const std::vector<Filepath> &files,
+                                   std::string &error) {
+  if (!ensure_session(directory, error))
+    return false;
+  auto *session = find_session(_last_session_id);
+  auto location = Location::decode(directory.native());
+  std::vector<std::string> args{resolved_binary(),
+                                "--cmd",
+                                "session",
+                                "open-location",
+                                session->id,
+                                location.remote() ? location.ssh : "-",
+                                location.remote() ? location.local.native()
+                                                  : boost::filesystem::absolute(directory).native(),
+                                location.remote() ? RemoteFS::control_path(location.ssh) : "-"};
+  for (auto &file : files)
+    args.push_back(Location::decode(file.native()).local.native());
+  int rc = run_command(session->cwd, args, false, &error);
+  if (rc) {
+    if (error.empty())
+      error = "Editor location open failed (exit " + std::to_string(rc) + ")";
+    return false;
+  }
+  return true;
 }
 
 bool EditorManager::switch_to_editor(const Filepath& initial_directory, std::string& error) {
@@ -366,6 +394,10 @@ bool EditorManager::open_files_in_last_session(const std::vector<Filepath>& file
 
   for (const auto& f : files) {
     if (f.empty()) continue;
+    if (is_remote(f)) {
+      normalized.push_back(normalize_location(f));
+      continue;
+    }
     Filepath p = f;
     if (p.is_relative()) {
       boost::system::error_code cwd_ec;
@@ -391,23 +423,13 @@ bool EditorManager::open_files_in_last_session(const std::vector<Filepath>& file
     return false;
   }
 
-  std::vector<std::string> args;
-  args.reserve(5 + normalized.size());
-  args.push_back(resolved_binary());
-  args.push_back("--cmd");
-  args.push_back("session");
-  args.push_back("open-file");
-  args.push_back(session->id);
-  for (const auto& f : normalized) args.push_back(f.native());
-
-  if (!persist_session(error)) return false;
-  const int open_rc = run_command(session->cwd, args, false);
-  // Fresh uses exit code 2 for "open-file started a new session".
-  if (open_rc != 0 && open_rc != 2) {
-    session->alive = false;
-    error = "Failed to open files in editor session '" + session->id + "' (exit " + std::to_string(open_rc) + ")";
-    report_status(error);
-    return false;
+  std::map<std::string, std::vector<Filepath>> groups;
+  for (auto &file : normalized)
+    groups[Location::decode(file.native()).ssh].push_back(file);
+  for (auto &[host, paths] : groups) {
+    auto root = host.empty() ? session->cwd : Location::decode("ssh://" + host + "/").resource();
+    if (!route_location(root, paths, error))
+      return false;
   }
 
   return attach_session(session->id, error);

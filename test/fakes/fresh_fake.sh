@@ -11,7 +11,7 @@ log_file="${FC_FRESH_FAKE_LOG:-/tmp/fc_fresh_fake.log}"
   printf '\n'
 } >> "$log_file"
 
-if [[ "${1-}" == "--cmd" && "${2-}" == "session" && "${3-}" == "open-file" ]]; then
+if [[ "${1-}" == "--cmd" && "${2-}" == "session" && ( "${3-}" == "open-file" || "${3-}" == "open-location" ) ]]; then
   # A real Fresh first-open command attaches automatically if it sees a tty.
   if [[ -t 0 ]] || read -r -t 1 _input; then exit 91; fi
   exit "${FC_FRESH_FAKE_OPEN_RC:-0}"

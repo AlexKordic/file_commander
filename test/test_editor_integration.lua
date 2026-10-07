@@ -66,8 +66,8 @@ fc.key("cA")
 check(#fc.selected() > 0, "expected selected files before opening editor")
 fc.key("f4")
 
-local log_txt = wait_for_log_contains("args=[--cmd][session][open-file]", 5000)
-check(log_txt:find("args=[-a][", 1, true), "expected attach command after open-file")
+local log_txt = wait_for_log_contains("args=[--cmd][session][open-location]", 5000)
+check(log_txt:find("args=[-a][", 1, true), "expected attach command after open-location")
 check(log_txt:find("[" .. h.realpath(src .. "/a.txt") .. "]", 1, true), "editor did not receive a.txt")
 check(log_txt:find("[" .. h.realpath(src .. "/b.txt") .. "]", 1, true), "editor did not receive b.txt")
 

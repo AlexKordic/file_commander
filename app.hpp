@@ -77,9 +77,11 @@ class Panel : public DialogOverlay {
     bool                     show_owner_group_column = false;
     std::vector<ArchiveView> archive_stack;
     std::optional<TabWorkspace> restore;
+    std::string remote_error;
   };
 
   Dir        dir;
+  std::string remote_error;
   TargetFunc get_target;
 
   std::shared_ptr<std::atomic<bool>> _callback_alive = std::make_shared<std::atomic<bool>>(true);

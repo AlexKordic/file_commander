@@ -101,6 +101,7 @@ struct JobSpec : JobInstructions, JobStats, JobInterface {
   uint64_t           _job_id = 0;
   std::shared_ptr<TransferJournal> _journal;
   std::atomic<bool> _recovery_waiting{false};
+  std::atomic<bool> _resume_validate{false};
   size_t _resume_index = 0;
   const boost::filesystem::copy_file_io_hooks* _journal_io = nullptr;
   std::atomic<bool>  _cancel_requested{false};

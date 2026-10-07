@@ -59,6 +59,7 @@ class EditorManager {
 
   std::vector<EditorSessionInfo> _sessions;
   bool ensure_session(const Filepath& initial_directory, std::string& error);
+  bool route_location(const Filepath &directory, const std::vector<Filepath> &files, std::string &error);
 
   void report_status(const std::string& text) const;
 

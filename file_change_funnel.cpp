@@ -1,5 +1,7 @@
 #include "commander.hpp"
 #include "file_io_jobs.hpp"
+#include "location.hpp"
+#include <condition_variable>
 
 #include <functional>
 #include <memory>
@@ -10,6 +12,36 @@
 #include <vector>
 
 #include <boost/filesystem.hpp>
+
+// Poll only while the tab is active. Network reads run on Panel's latest-work
+// reader; this timer merely requests a coalesced rescan.
+class RemoteDirEvents : public FileChangeFunnel {
+  std::mutex mutex;
+  std::condition_variable wake;
+  bool stopped = false;
+  std::thread thread;
+
+public:
+  RemoteDirEvents(Filepath root, Callback cb)
+      : thread([this, root = std::move(root), cb = std::move(cb)] {
+          std::unique_lock lock(mutex);
+          while (!wake.wait_for(lock, std::chrono::seconds(3), [this] { return stopped; })) {
+            lock.unlock();
+            auto changes = std::make_unique<std::vector<DirItemUpdated>>();
+            changes->emplace_back(root.c_str(), DirItemUpdated::Event::Rescan);
+            cb(std::move(changes));
+            lock.lock();
+          }
+        }) {}
+  ~RemoteDirEvents() override {
+    {
+      std::lock_guard lock(mutex);
+      stopped = true;
+    }
+    wake.notify_all();
+    thread.join();
+  }
+};
 
 #ifdef __APPLE__
 
@@ -142,6 +174,8 @@ void DirEvents_callback(ConstFSEventStreamRef sr, void* callback_info, size_t nu
 }
 
 std::unique_ptr<FileChangeFunnel> FileChangeFunnel::create(Filepath root, Callback cb) {
+  if (is_remote(root))
+    return std::make_unique<RemoteDirEvents>(root, std::move(cb));
   return std::make_unique<DirEvents>(root, std::move(cb));
 }
 
@@ -248,6 +282,8 @@ class LinuxDirEvents : public FileChangeFunnel {
 };
 
 std::unique_ptr<FileChangeFunnel> FileChangeFunnel::create(Filepath root, Callback cb) {
+  if (is_remote(root))
+    return std::make_unique<RemoteDirEvents>(root, std::move(cb));
   return std::make_unique<LinuxDirEvents>(root, std::move(cb));
 }
 
@@ -260,6 +296,8 @@ class NoopDirEvents : public FileChangeFunnel {
 };
 
 std::unique_ptr<FileChangeFunnel> FileChangeFunnel::create(Filepath root, Callback cb) {
+  if (is_remote(root))
+    return std::make_unique<RemoteDirEvents>(root, std::move(cb));
   return std::make_unique<NoopDirEvents>(root, std::move(cb));
 }
 

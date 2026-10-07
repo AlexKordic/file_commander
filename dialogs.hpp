@@ -356,6 +356,14 @@ struct RestartEditorDialog : Dialog {
   std::string error;
 };
 
+struct ConnectSSHDialog : Dialog {
+  ConnectSSHDialog(std::function<void()> close,
+                   std::function<bool(const std::string &, const std::string &, std::string &)> connect);
+  void OnShow() override;
+  std::string host, path = "/", error;
+  Component host_input, path_input;
+};
+
 struct CommandPaletteDialog : Dialog {
   CommandPaletteDialog(
     std::function<void()> close_dialog,

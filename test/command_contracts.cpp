@@ -109,7 +109,8 @@ static void command(const std::string& id, int route) {
                                                              {"toggle_job_list", "JobList"},
                                                              {"open_bookmarks", "Bookmarks"},
                                                              {"edit_theme_colors", "ThemeColors"},
-                                                             {"restart_editor_backend", "RestartEditor"}};
+                                                             {"restart_editor_backend", "RestartEditor"},
+                                                             {"connect_ssh", "ConnectSSH"}};
   if (dialogs.contains(id)) {
     auto name = dialogs.at(id);
     require(left._active_dialog_name == name || app._active_dialog_name == name, "wrong real dialog: " + id);

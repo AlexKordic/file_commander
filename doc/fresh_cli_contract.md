@@ -1,8 +1,8 @@
 # Fresh CLI contract for File Commander
 
-FC owns one persistent editor identity per configuration profile. A directory
-open establishes its initial project directory; subsequent directory opens and
-file opens reuse that identity without changing the project or closing tabs.
+FC owns one persistent editor identity per configuration profile. Directory and file opens reuse that identity and route to a filesystem
+workspace without closing existing tabs. Local and SSH workspaces coexist in
+one backend; endpoint and root jointly identify the workspace.
 Fresh owns tab closure, dirty prompts, saving, and unsaved-buffer recovery.
 
 ## Controls
@@ -55,18 +55,23 @@ directory. FC writes it atomically before launching the editor, and a short
 process lock prevents concurrent identity creation. Restarting FC reconstructs
 this identity; a missing original directory uses a valid launch fallback.
 
-File opens use absolute canonical paths:
+Local file opens use absolute canonical paths; SSH opens use absolute paths on
+the selected host. FC passes the filesystem identity explicitly:
 
 ```text
-fresh --cmd session open-file <session_id> <abs_file_1> [abs_file_n...]
+fresh --cmd session open-location <session_id> <target-or-minus> <root> <control-path-or-minus> [abs_files...]
 fresh -a <session_id>
 ```
 
-Switching and directory opens only attach. `session open-file` skips directory
-arguments, so FC does not send directories through that operation. FC restores
+Switching attaches. Directory opens route an empty file list to that root, then
+attach. `-` identifies the local filesystem. SSH file opens use `/` as the
+workspace root; SSH directory opens use the selected directory. FC restores
 terminal IO around attachment and resumes its own terminal after detach.
 
-Exit `0` means success. FC also accepts legacy exit `2` from `session open-file`.
+Exit `0` means the location was routed and queued. The handshake requires
+`fc_locations`; an older running backend reports that Restart editor backend
+is needed. A queued remote open connects asynchronously, with connection errors
+shown inside Fresh.
 The open command receives `/dev/null` as stdin: upstream may auto-attach on its
 first file open when stdin is a terminal. Only FC's explicit attachment owns the
 terminal. Startup lock acquisition and daemon readiness are each bounded to ten
@@ -123,3 +128,6 @@ the 0.5.2 tag. FC's patch series also fixes cursor clamping before dirty-text
 recovery and duplicate adoption of recovered untitled buffers. Fresh is now
 GPL-3.0-or-later; the distribution includes its license, dependency manifest,
 patch bundle, and reconstruction instructions.
+
+See [SSH workflow](ssh_workflow.md) for remote persistence, transfer contracts
+and native qualification.
