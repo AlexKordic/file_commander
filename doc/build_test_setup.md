@@ -177,15 +177,30 @@ The dependency self-test mutates disposable copies, never developer checkouts.
 
 ## Repository CI
 
-`.github/workflows/tests.yml` defines native macOS arm64, Linux x86-64 and Linux arm64 jobs, plus separate native macOS/Linux sanitizer jobs. Actions are pinned to commits. It runs automatic lanes on pushes/manual dispatch, with extended work nightly and the automatic release lane on request. The separate `manual_tests` workflow-dispatch input explicitly selects manual environment checks; neither pushes nor nightly runs select them. It does not run untrusted fork PR code on the private runners.
+`.github/workflows/public-core.yml` runs an isolated headless build and core
+contracts on GitHub-hosted Ubuntu 24.04/GCC 14 for pushes to `main` and pull
+requests. It needs only public Boost and the repository sources; it is not a
+full FC/Fresh release qualification.
+
+`.github/workflows/tests.yml` defines native macOS arm64, Linux x86-64 and Linux
+arm64 jobs, plus separate native macOS/Linux sanitizer jobs. It is invoked only
+by explicit maintainer dispatch with trusted source. Actions are pinned to
+commits. The `release` input selects extended and automatic release checks; the
+separate `manual_tests` input selects manual environment checks. Neither public
+pushes nor fork PRs select private runners. A public repository must not use its
+internal runners to execute untrusted PR code.
 
 Provision self-hosted runners labelled `fc-pinned`, with the matching OS/architecture labels, the build tools above, a pinned-compatible Rust toolchain, Linux bubblewrap, and these environment variables:
 
 - `FC_FTXUI_MIRROR`: optional reachable mirror containing the exact FTXUI revision;
   the manifest now defaults to the public FC fork.
-- `FC_LZMA_SDK`: provisioned SDK 26.00 source directory for the existing native
-  workflow, verified by the manifest fingerprint. Bootstrap itself can instead
-  unpack the committed SDK source snapshot when `--lzma-source` is omitted.
+- SDK sources come from the committed snapshot. An optional `--lzma-source`
+  override can provision the same verified source set for local runs.
 - `FC_TEST_EXDEV_ROOT`: second-filesystem fixture parent when `/dev/shm` is unavailable.
 
-`tools/bootstrap_dependencies.py --root build-ci-deps --ftxui-url "$FC_FTXUI_MIRROR" --lzma-source "$FC_LZMA_SDK"` creates isolated checkouts at the declared revisions and validates them. It refuses mismatched existing inputs instead of resetting them. CI builds from this isolated root and uploads JUnit/logs/distributions even after failures. Defining the workflow does not constitute a native Linux run; qualification status is recorded separately.
+`tools/bootstrap_dependencies.py --root build-ci-deps` creates isolated checkouts
+at the declared revisions and validates them. It refuses mismatched existing
+inputs instead of resetting them. CI builds from this isolated root and uploads
+JUnit/logs/distributions even after failures. Defining a workflow does not
+constitute a passing GitHub or native Linux run; qualification status is recorded
+separately.

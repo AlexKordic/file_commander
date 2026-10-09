@@ -10,10 +10,6 @@ name: Native qualification
         description: Run manual checks (requires working native watchers and a second filesystem)
         type: boolean
         default: false
-  push:
-    branches: [main, pack_release]
-  schedule:
-    - cron: '23 2 * * *'
 permissions:
   contents: read
 jobs:
@@ -30,7 +26,7 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - name: Provision isolated pinned sources
-        run: python3 tools/bootstrap_dependencies.py --root build-ci-deps --ftxui-url "$FC_FTXUI_MIRROR" --lzma-source "$FC_LZMA_SDK"
+        run: python3 tools/bootstrap_dependencies.py --root build-ci-deps
       - name: Configure and build native binaries
         shell: bash
         run: |
@@ -43,7 +39,7 @@ jobs:
       - name: Native integration and package build
         run: python3 tools/run_test_lane.py integration --build build-ci --expect-os '${{ matrix.system }}' --expect-arch '${{ matrix.machine }}'
       - name: Extended native tests
-        if: github.event_name == 'schedule' || inputs.release
+        if: inputs.release
         run: python3 tools/run_test_lane.py extended --build build-ci --expect-os '${{ matrix.system }}' --expect-arch '${{ matrix.machine }}'
       - name: Automatic release (no skipped tests)
         if: inputs.release

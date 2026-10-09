@@ -1,0 +1,30 @@
+name: Public core checks
+'on':
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  core:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Configure public headless build
+        run: cmake -S . -B build-core -G Ninja -DCMAKE_BUILD_TYPE=Release -DFC_CORE_ONLY=ON -DCMAKE_CXX_COMPILER=g++-14
+      - name: Build
+        run: cmake --build build-core --parallel 2
+      - name: Test core contracts
+        run: ctest --test-dir build-core --output-on-failure --parallel 2 -LE 'extended|benchmark|manual' --output-junit "$PWD/build-core/core-tests.xml"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: public-core-linux-x86_64
+          path: |
+            build-core/core-tests.xml
+            build-core/Testing

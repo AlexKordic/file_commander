@@ -12,7 +12,7 @@ from qualifying and distributing the complete FC/Fresh/7zr binary package.
 | OS-03 | Packages carried Fresh's GPL text but omitted other top-level dependency notices. | Added an inventory and license copies for FTXUI, LuaJIT/Lua/dlmalloc, Boost and LZMA, plus Fresh's separate asset notices. Packaging must retain them; the package gate rejects missing required notices. This does not complete OS-07. |
 | OS-04 | FTXUI bootstrap pointed at localhost; the SDK needed a provisioned local folder. | Changed FTXUI to its public fork and LuaJIT to the public GitHub mirror; included a checksum-verified SDK 26.00 source snapshot. Bootstrap preserves existing inputs, supports mirror overrides and checks the unchanged source fingerprint. Publish the pinned FTXUI branch before FC. |
 | OS-05 | No root README, contribution guide or security-reporting policy. | Added build/use/test/license documentation, contribution guidance, a security policy and an unreleased changelog. Removed the personal checkout path from the SSH instructions. |
-| OS-06 | GitHub CI expected private self-hosted runners and dependency provisioning. | The publishing checkout needs hosted core checks for pushes/PRs and explicitly dispatched full native checks. Full native Linux qualification remains a separate release task. Do not execute untrusted fork PRs on internal runners. |
+| OS-06 | GitHub CI expected private self-hosted runners and dependency provisioning. | Added hosted Ubuntu 24.04/GCC 14 core checks for pushes/PRs in the publishing checkout. Full native/sanitizer workflows require explicit maintainer dispatch and use the public bootstrap. Their first GitHub run and full native Linux qualification remain separate checks. Do not execute untrusted fork PRs on internal runners. |
 | OS-07 | Fresh's Rust and embedded dependency notices were not fully audited or packaged. | A pinned macOS default-feature normal/build dependency inventory is recorded in `qualification/open-source-license-audit-2026-10-09.json`. Resolve missing notice files from the corresponding upstream source, select permitted alternatives where needed, review embedded grammars/themes/plugins/native libraries, and generate a complete notice bundle for each shipping target. Missing a separate file is a review item, not proof of incompatibility. Block a public binary release until this is complete. |
 | OS-08 | Fresh's upstream reference and delta bundle are not our complete binary-source delivery process. | Publish an exact Fresh source archive with locked non-system dependency sources, build instructions and source checksums alongside each binary download. The procedure below is the starting point; verify the exported source builds. Block a public binary release until source delivery and OS-07 are complete. |
 | OS-09 | Earlier release evidence is macOS-specific and predates publication changes. | Existing SSH qualification and 197-test automatic macOS run remain historical evidence. Requalify the final source revision, then run the manual lane in a native service context. Qualify Linux on native hosts before claiming Linux release support. |
@@ -123,3 +123,14 @@ on macOS arm64 on 2026-10-09:
 
 All four targeted CTest cases passed. This is publication-preparation evidence;
 the complete final automatic/manual release qualification has not been rerun.
+
+The publishing checkout's clean Release headless build passed all 38 selected
+core cases on macOS arm64. Its pinned FTXUI/Fresh branches and SDK source set
+passed dependency verification. GitHub workflow YAML and local documentation
+links were checked. The ignored `github-release` user preset selects the sibling
+`FTXUI` and `fresh` clones and local verified LuaJIT/SDK inputs. A cached official
+Boost archive was checksum-verified by CMake; these local checks do not establish
+anonymous download availability or a passing Linux GitHub runner.
+
+The publishing checkout also includes the follow-up Python version guard from
+`70cec86`: unsupported Python fails before cloning or creating dependency inputs.

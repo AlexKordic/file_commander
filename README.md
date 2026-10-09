@@ -102,6 +102,11 @@ Read [CONTRIBUTING.md](CONTRIBUTING.md) before sending a change. Report bugs in
 [GitHub Issues](https://github.com/AlexKordic/file_commander/issues); report
 vulnerabilities using [SECURITY.md](SECURITY.md).
 
+GitHub-hosted core checks run on pushes to `main` and pull requests. Full native
+and sanitizer qualification uses explicit maintainer dispatch on provisioned
+runners. Hosted core checks are useful contributor feedback and do not qualify
+the full binary package.
+
 ## License
 
 FC's original code is [MIT licensed](LICENSE), copyright Alex Kordic.
