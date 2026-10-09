@@ -92,6 +92,16 @@ def check_discovery(discovery, expected, manual=None):
 def check_package(archive, binaries):
     hashes = {}
     with tarfile.open(archive, 'r:gz') as package:
+        # An executable-only archive must not pass distribution qualification.
+        notices = ('share/licenses/file-commander/LICENSE', 'share/licenses/ftxui/LICENSE',
+                   'share/licenses/luajit/COPYRIGHT', 'share/licenses/boost/LICENSE_1_0.txt',
+                   'share/licenses/lzma-sdk/lzma-sdk.txt', 'share/licenses/fresh/LICENSE',
+                   'share/file-commander/THIRD_PARTY_NOTICES.md',
+                   'share/file-commander/open_source_release.md', 'share/file-commander/dependencies.json')
+        for relative in notices:
+            members = [m for m in package.getmembers() if m.name == f'{archive.name[:-7]}/{relative}']
+            if len(members) != 1 or not members[0].isfile() or not members[0].size:
+                raise ValueError(f'package missing license/source notice: {relative}')
         for name, binary in binaries.items():
             members = [m for m in package.getmembers() if m.name == f'{archive.name[:-7]}/bin/{name}']
             if len(members) != 1 or not members[0].isfile() or not members[0].mode & 0o111:

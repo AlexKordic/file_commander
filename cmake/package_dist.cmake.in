@@ -11,6 +11,14 @@ set(_tar "${FC_DIST_ROOT}/${FC_DIST_NAME}.tar.gz")
 file(REMOVE_RECURSE "${_stage}")
 file(MAKE_DIRECTORY "${_stage}/bin")
 file(COPY "${FC_BIN}" DESTINATION "${_stage}/bin")
+file(COPY "@CMAKE_CURRENT_SOURCE_DIR@/licenses" DESTINATION "${_stage}/share")
+file(MAKE_DIRECTORY "${_stage}/share/licenses/file-commander" "${_stage}/share/file-commander")
+file(COPY "@CMAKE_CURRENT_SOURCE_DIR@/LICENSE" DESTINATION "${_stage}/share/licenses/file-commander")
+file(COPY "@CMAKE_CURRENT_SOURCE_DIR@/README.md" DESTINATION "${_stage}")
+file(COPY "@CMAKE_CURRENT_SOURCE_DIR@/THIRD_PARTY_NOTICES.md"
+          "@CMAKE_CURRENT_SOURCE_DIR@/doc/open_source_release.md"
+          "@CMAKE_CURRENT_SOURCE_DIR@/dependencies.json"
+     DESTINATION "${_stage}/share/file-commander")
 
 if(DEFINED FC_DIST_FRESH AND EXISTS "${FC_DIST_FRESH}")
   file(COPY "${FC_DIST_FRESH}" DESTINATION "${_stage}/bin")

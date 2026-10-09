@@ -86,8 +86,23 @@ else:
     package_name = f'fc-{platform.system()}-{platform.machine()}'
     archive = build / 'dist' / (package_name + '.tar.gz')
     archive.parent.mkdir()
-    def make_package(stale=False, missing=False):
+    def make_package(stale=False, missing=False, missing_notice=False):
         with tarfile.open(archive, 'w:gz') as package:
+            notices = {'share/licenses/file-commander/LICENSE': 'LICENSE',
+                       'share/licenses/ftxui/LICENSE': 'licenses/ftxui/LICENSE',
+                       'share/licenses/luajit/COPYRIGHT': 'licenses/luajit/COPYRIGHT',
+                       'share/licenses/boost/LICENSE_1_0.txt': 'licenses/boost/LICENSE_1_0.txt',
+                       'share/licenses/lzma-sdk/lzma-sdk.txt': 'licenses/lzma-sdk/lzma-sdk.txt',
+                       'share/licenses/fresh/LICENSE': 'licenses/fresh/LICENSE',
+                       'share/file-commander/THIRD_PARTY_NOTICES.md': 'THIRD_PARTY_NOTICES.md',
+                       'share/file-commander/open_source_release.md': 'doc/open_source_release.md',
+                       'share/file-commander/dependencies.json': 'dependencies.json'}
+            for relative, source in notices.items():
+                if missing_notice and relative == 'share/licenses/ftxui/LICENSE': continue
+                data = (repo / source).read_bytes()
+                member = tarfile.TarInfo(f'{package_name}/{relative}')
+                member.size = len(data); member.mode = 0o644
+                package.addfile(member, io.BytesIO(data))
             for name, path in binaries.items():
                 if missing and name == '7zr': continue
                 data = b'old executable' if stale else path.read_bytes()
@@ -131,6 +146,7 @@ else:
         path.chmod(0o600); run(); path.chmod(0o700)
     make_package(stale=True); run()
     make_package(missing=True); run()
+    make_package(missing_notice=True); run()
     archive.unlink(); run(); make_package()
     # Exercise the real package entry point with no compiler toolchain. Replace
     # only native relocation with a sentinel so this check needs no OS services.
@@ -176,6 +192,7 @@ raise SystemExit(97)
     run_package(smoke_status=23)
     make_package(stale=True); run_package(valid=False)
     make_package(missing=True); run_package(valid=False)
+    make_package(missing_notice=True); run_package(valid=False)
     archive.write_bytes(b'invalid archive'); run_package(valid=False)
     archive.unlink(); run_package(valid=False); make_package()
     binaries['fresh'].chmod(0o600); run_package(valid=False); binaries['fresh'].chmod(0o700)
