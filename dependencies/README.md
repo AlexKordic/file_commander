@@ -1,8 +1,9 @@
 # Pinned dependency sources
 
 `dependencies.json` declares the exact inputs; bootstrap does not track moving
-branches. FTXUI's FC changes are published on the `fc-integration` branch of
-`AlexKordic/FTXUI`. That branch must be pushed before the first public FC build.
+branches. FTXUI's FC changes are published on the
+[`fc-integration` branch](https://github.com/AlexKordic/FTXUI/tree/fc-integration)
+of `AlexKordic/FTXUI`.
 LuaJIT and Boost use their public upstream sources.
 
 `lzma-sdk-26.00.tar.gz` contains SDK 26.00 source and documentation, excluding
@@ -17,8 +18,10 @@ is retained in `DOC/lzma-sdk.txt` and `licenses/lzma-sdk/lzma-sdk.txt`.
 
 `fresh-fc.bundle` contains the committed FC editor fixes on top of the upstream
 `base_revision` in `dependencies.json`. That manifest pins the final commit and
-the SHA-256 of the bundle. The source remains the declared upstream repository;
-the bundle supplies the additional commits without requiring a private fork.
+the SHA-256 of the bundle. The same integration history is published on the
+[`fc-editor-workflow` branch](https://github.com/AlexKordic/fresh/tree/fc-editor-workflow)
+of `AlexKordic/fresh`. Bootstrap uses the declared upstream repository and the
+bundle to reconstruct the exact pinned revision.
 
 `tools/bootstrap_dependencies.py` clones the source, verifies and fetches this
 bundle, and checks out the exact final revision. Use `--fresh-url` or

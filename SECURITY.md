@@ -1,7 +1,7 @@
 # Security reports
 
-This project is preparing its first public release. There is not yet a supported
-release series or a guaranteed security-response timeline.
+FC is a public open-source project at the release-candidate stage. There is no
+supported stable binary release series or guaranteed security-response timeline.
 
 Report vulnerabilities privately through GitHub's **Report a vulnerability**
 entry on the repository Security tab when available. If private reporting is not

@@ -4,11 +4,14 @@ File Commander (FC) is a terminal file manager with two panels, background file
 operations, panel tabs, Lua automation, and a shared Fresh editor backend.
 Local and SSH locations can be opened in separate panels and tabs.
 
+The source is available on [GitHub](https://github.com/AlexKordic/file_commander),
+with the modified FTXUI and Fresh sources in the published dependency forks.
+
 The current release candidate has been qualified on macOS arm64. Linux code and
 build configurations are present; full native Linux release qualification is
 still required. Windows is not supported by this release. See the
-[publication review and release plan](doc/open_source_release.md) for the
-remaining work and the scope of existing evidence.
+[open-source status and binary-release requirements](doc/open_source_release.md)
+for the remaining work and the scope of existing evidence.
 
 ## Build from source
 
@@ -19,7 +22,7 @@ requires Cargo and the Rust toolchain pinned by its `rust-toolchain.toml`
 install the C/C++ development libraries required by the Fresh build. SSH
 locations require OpenSSH locally and Python 3 on the remote host.
 
-Once the pinned FTXUI fork branch has been published:
+Clone the public repository and build its pinned dependencies:
 
 ```sh
 git clone https://github.com/AlexKordic/file_commander.git

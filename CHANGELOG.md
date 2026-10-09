@@ -11,6 +11,6 @@
 - MIT licensing for FC, preserved third-party notices, public pinned dependency
   sources, and contributor/build/release documentation.
 
-This is a release candidate. Supported platform claims and the first public tag
-will be established by final native qualification; see
-[the release plan](doc/open_source_release.md).
+The source is published on GitHub. This is a release candidate; stable binary
+releases require final native qualification of each supported platform. See
+[the binary-release requirements](doc/open_source_release.md).

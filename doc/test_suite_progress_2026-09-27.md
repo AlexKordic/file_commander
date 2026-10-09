@@ -59,7 +59,7 @@ Final integration JUnit and metadata: `build/test-logs/lane-integration-a539ecf9
 - Benchmarks: 1k/10k/100k publication/selection/delta, event polling, and real UI rendering at 0/1/10/100% selection pass as non-gating measurements. Render records include p50/p95/max and median C++ allocation-call counts (direct library malloc calls are excluded). Current local measurements are Debug, not a Release performance baseline.
 - ASan+UBSan: tests time out before main. TSan: all five lifetime tests terminate before main. A minimal program that only writes `entered main` reproduces an ASan timeout and TSan signal 11; the unsanitized program succeeds. Evidence: `build/architecture-validation/sanitizer-startup/results.json`, plus each sanitizer build's CTest/JUnit artifacts.
 - Real EXDEV: **passed on a disposable APFS disk image**, with verified different `st_dev`, complete destination bytes and source removal through the real worker fallback. `tools/test_exdev_volume.py` detaches/removes the owned volume in teardown; log: `build/architecture-validation/TS09-exdev-volume.log`. Ordinary CTest still skips when no second filesystem is configured; strict release rejects that skip.
-- Native Linux x86-64/arm64: CI definitions are provided; execution is pending a provisioned native runner with the pinned private dependency mirror. No Linux runtime pass is claimed.
+- Native Linux x86-64/arm64: full native qualification requires provisioned runners and the public pinned dependency inputs. The GitHub repository provides hosted core checks and separate maintainer-dispatched native workflows. No full native Linux runtime pass is recorded here.
 
 ## Coverage index
 

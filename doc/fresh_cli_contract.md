@@ -120,7 +120,10 @@ Fresh is built from the exact revision in `dependencies.json` with
 `cargo build --release --locked -p fresh-editor --bin fresh`, then staged under
 `<build>/third_party/fresh/bin/fresh`. The default source checkout is
 `../editor-fresh`. The committed [dependency bundle](../dependencies/README.md)
-makes the integration changes reproducible without an unpublished remote fork.
+makes the integration changes reproducible from the pinned upstream base. The
+same history is published in the
+[`fc-editor-workflow` branch](https://github.com/AlexKordic/fresh/tree/fc-editor-workflow)
+of the Fresh fork.
 
 The upstream baseline is `b10f9084f5eae571e9b8dac1a0f3694384bcb53d` (0.5.2 plus
 40 commits), built with Rust 1.95. It includes the daemon recovery tick fix after

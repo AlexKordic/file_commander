@@ -19,7 +19,7 @@ The separate-program distribution must preserve users' rights under each
 component's license; see GPLv3's discussion of aggregates in
 [section 5](https://www.gnu.org/licenses/gpl-3.0.html#section5).
 
-## Source publication and binary releases
+## Published source and binary distributions
 
 The pinned commits, checksum-verified SDK source, modified Boost subtree, and
 Fresh integration bundle identify the source inputs. The bundle is additional
@@ -37,4 +37,4 @@ Fresh's separate asset notices, and the source instructions. Rust crate
 attributions also need review for the exact default-feature `fresh-editor`
 build and target; some published crates omit separate license files. Do not
 interpret the top-level inventory as a completed transitive-license audit.
-See [the publication review and release plan](doc/open_source_release.md).
+See [the open-source status and binary-release requirements](doc/open_source_release.md).
