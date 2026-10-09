@@ -360,8 +360,14 @@ struct ConnectSSHDialog : Dialog {
   ConnectSSHDialog(std::function<void()> close,
                    std::function<bool(const std::string &, const std::string &, std::string &)> connect);
   void OnShow() override;
-  std::string host, path = "/", error;
+  void submit();
+  // An empty path connects to "/". Cursors start after any retained text, so
+  // typing extends a value instead of being inserted in front of it.
+  std::string host, path, error;
+  int host_cursor = 0, path_cursor = 0;
   Component host_input, path_input;
+  std::function<void()> close;
+  std::function<bool(const std::string &, const std::string &, std::string &)> connect;
 };
 
 struct CommandPaletteDialog : Dialog {

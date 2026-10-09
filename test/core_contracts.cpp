@@ -43,6 +43,10 @@ void locations() {
                    "fc-archive:%2Fouter!%2Fabsolute", "fc-archive:%2Fouter!..%2Fescape", "fc-archive:%2Fouter!..!"})
     rejects([&] { Location::decode(bad); }, std::string("malformed location accepted: ") + bad);
   require(Location::decode("/a/./b/../c").local == Filepath("/a/c"), "local normalization");
+  require(Location::decode("/a/b/").local == Filepath("/a/b") && Location::decode("/").local == Filepath("/"), "trailing separator kept");
+  auto trailing = Location::decode("ssh://host/tmp/fc/");
+  require(trailing.local == Filepath("/tmp/fc") && trailing.display() == "ssh://host/tmp/fc", "remote trailing separator kept");
+  require(Location::decode("ssh://host/").local == Filepath("/") && Location::decode(".").local == Filepath("."), "root normalization");
 }
 void settings() {
   Fixture     f;

@@ -519,6 +519,96 @@ static void R20() {
   require(*state->get_focused_item() == first / "keep", "surviving focus lost");
 }
 
+static void UX_palette_ranking() {
+  CommandPaletteDialog palette([] {}, [] { return commands().list_all(); }, [](const std::string&) {},
+                               [](const std::string&, const Event&, std::string&) { return false; });
+  auto first = [&](const std::string& query) {
+    palette.OnShow();
+    for (char c : query) palette.navigation->OnEvent(Event::Character(c));
+    require(!palette.visible_ids.empty(), "palette found nothing for " + query);
+    return palette.commands_all.at(palette.visible_ids.front()).id;
+  };
+  require(first("ssh") == "connect_ssh", "letters scattered across words outranked the typed word");
+  require(first("copy") == "copy" && first("refresh") == "refresh_dir" && first("bookmark") == "open_bookmarks", "literal matches lost rank");
+  first("cnssh");
+  bool fuzzy = false;
+  for (auto id : palette.visible_ids) fuzzy |= palette.commands_all.at(id).id == "connect_ssh";
+  require(fuzzy, "subsequence matching stopped working");
+}
+
+static void UX_ssh_dialog_keyboard() {
+  std::vector<std::pair<std::string, std::string>> calls;
+  int closed = 0;
+  ConnectSSHDialog dialog([&] { ++closed; }, [&](const std::string& host, const std::string& path, std::string&) {
+    calls.emplace_back(host, path);
+    return true;
+  });
+  auto type = [&](const std::string& text) { for (char c : text) dialog.navigation->OnEvent(Event::Character(c)); };
+  dialog.OnShow();
+  type("dev");
+  dialog.navigation->OnEvent(Event::Return);
+  require(dialog.host == "dev" && calls.empty(), "Enter in the host field edited the host or connected");
+  type("/tmp/fc");
+  require(dialog.path == "/tmp/fc", "typed path was not entered as typed: " + dialog.path);
+  dialog.navigation->OnEvent(Event::Return);
+  require(calls.size() == 1 && calls[0].first == "dev" && calls[0].second == "/tmp/fc" && closed == 1, "Enter in the path field did not connect");
+  dialog.OnShow();
+  dialog.navigation->OnEvent(Event::ArrowDown);
+  type("/www");
+  require(dialog.host == "dev" && dialog.path == "/tmp/fc/www", "reopened fields did not continue after their text: " + dialog.path);
+  dialog.path.clear();
+  dialog.navigation->OnEvent(Event::Return);
+  require(calls.size() == 2 && calls[1].second == "/", "an empty path did not mean /");
+}
+
+static void UX_dialog_click_through() {
+  Fixture f; auto left = f.dir("left"); auto right = f.dir("right");
+  for (int i = 0; i < 30; ++i) { f.file("left/l" + std::to_string(i)); f.file("right/r" + std::to_string(i)); }
+  f.file("left/a_left_target"); f.file("right/a_right_target");
+  UiQueue ui;
+  FileCommander app(left, right, [&](auto work) { ui.post(std::move(work)); }, [] { return 100; });
+  ui.wait(app.get_left()); ui.wait(app.get_right());
+  auto interactive = ScreenInteractive::FixedSize(100, 30);
+  Loop active_screen(&interactive, app.renderer);
+  auto screen = Screen::Create(Dimension::Fixed(100), Dimension::Fixed(30));
+  auto find = [&](const std::string& label) -> std::pair<int, int> {
+    Render(screen, app.renderer->Render());
+    for (int y = 0; y < screen.dimy(); ++y) {
+      std::string line;
+      std::vector<int> columns;
+      for (int x = 0; x < screen.dimx(); ++x) {
+        line += screen.PixelAt(x, y).character;
+        while (columns.size() < line.size()) columns.push_back(x);
+      }
+      if (auto at = line.find(label); at != std::string::npos) return {columns[at + label.size() / 2], y};
+    }
+    return {-1, -1};
+  };
+  auto click = [&](std::pair<int, int> at, Mouse::Motion motion) {
+    Mouse mouse; mouse.button = Mouse::Left; mouse.motion = motion; mouse.x = at.first; mouse.y = at.second;
+    app.renderer->OnEvent(Event::Mouse("", mouse));
+  };
+  // File lists act on every left-button event over a row, the release included.
+  // Use a button that lies over the list rows of a panel.
+  app.execute_palette_command("connect_ssh");
+  auto button = find(" Cancel ");
+  require(button.first >= 0 && button.second >= 6, "Connect SSH Cancel is not over the file rows");
+  // Keep focus on the panel that is not under the button, so a leaked release would move it.
+  Panel& keep = button.first >= 50 ? app.get_left() : app.get_right();
+  keep.navigation->TakeFocus();
+  app.execute_palette_command("connect_ssh");
+  find(" Cancel ");
+  click(button, Mouse::Pressed);
+  require(app._active_dialog == 0, "pressing Cancel did not close the dialog");
+  click(button, Mouse::Released);
+  require(&app.focused_panel() == &keep, "the release of a click that closed a dialog moved focus to the panel beneath");
+  Panel& other = &keep == &app.get_left() ? app.get_right() : app.get_left();
+  auto target = find(&other == &app.get_left() ? "a_left_target" : "a_right_target");
+  click(target, Mouse::Pressed);
+  click(target, Mouse::Released);
+  require(&app.focused_panel() == &other, "the click after the swallowed release did not reach the panel");
+}
+
 static void R21() {
   Fixture f; auto old = f.dir("old"); auto current = f.dir("current");
   f.file("current/a", "KEEP");

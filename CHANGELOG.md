@@ -13,6 +13,13 @@
 - `transfer_rate_limit` in `settings.json` limits the speed of copies, moves and
   SSH transfers.
 - A scripted promo storyboard and player under `tools/promo/`.
+- Fixed: the command palette ranks a typed word above letters scattered across
+  other commands ("ssh" finds Connect SSH first).
+- Fixed: the Connect SSH dialog works from the keyboard (`Enter` moves to the
+  path, then connects), and typing no longer lands in front of a pre-filled `/`.
+- Fixed: a trailing `/` no longer shows as `/.` in panel paths.
+- Fixed: the click that closes a dialog no longer moves focus or the file cursor
+  in the panel beneath it.
 - Documentation reorganized into a user guide, key reference, SSH, editor and
   Lua scripting guides, and contributor guides under `doc/dev/`.
 

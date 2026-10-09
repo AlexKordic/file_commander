@@ -54,19 +54,21 @@ namespace ftxui {
 ConnectSSHDialog::ConnectSSHDialog(
     std::function<void()> close,
     std::function<bool(const std::string &, const std::string &, std::string &)> connect)
-    : Dialog(nullptr) {
-  host_input = Input(&host, "SSH config alias (for example box)");
-  path_input = Input(&path, "Absolute remote directory");
+    : Dialog(nullptr), close(close), connect(std::move(connect)) {
+  // Single-line fields: Enter moves from the host to the path, then connects.
+  InputOption host_option;
+  host_option.multiline       = false;
+  host_option.cursor_position = &host_cursor;
+  host_option.on_enter        = [this] { path_input->TakeFocus(); };
+  host_input = Input(&host, "SSH config alias (for example box)", host_option) | showInputCursor(&host_cursor);
+  InputOption path_option;
+  path_option.multiline       = false;
+  path_option.cursor_position = &path_cursor;
+  path_option.on_enter        = [this] { submit(); };
+  path_input = Input(&path, "Absolute remote directory (empty for /)", path_option) | showInputCursor(&path_cursor);
   ButtonOption option;
   option.transform = ascii_button_transform();
-  auto button = Button(
-      " Connect ",
-      [this, close, connect] {
-        error.clear();
-        if (connect(host, path, error))
-          close();
-      },
-      option);
+  auto button = Button(" Connect ", [this] { submit(); }, option);
   auto cancel = Button(" Cancel ", close, option);
   navigation =
       CatchEvent(Container::Vertical({host_input, path_input, Container::Horizontal({button, cancel})}),
@@ -87,7 +89,14 @@ ConnectSSHDialog::ConnectSSHDialog(
 }
 void ConnectSSHDialog::OnShow() {
   error.clear();
+  host_cursor = static_cast<int>(host.size());
+  path_cursor = static_cast<int>(path.size());
   host_input->TakeFocus();
+}
+
+void ConnectSSHDialog::submit() {
+  error.clear();
+  if (connect(host, path.empty() ? "/" : path, error)) close();
 }
 
 RestartEditorDialog::RestartEditorDialog(std::function<void()> close,
@@ -300,7 +309,15 @@ int fuzzy_score(const std::string& query_lower, const std::string& text_lower) {
   }
   if (qpos != static_cast<int>(query_lower.size())) return -1;
   if (has_prefix) score += 10;
-  return score;
+  // Letters scattered across words must not outrank the query typed as a
+  // whole: "ssh" belongs to "Connect SSH", not to "Switch focuSed panel".
+  int literal_bonus = 0;
+  for (size_t at = text_lower.find(query_lower); at != std::string::npos; at = text_lower.find(query_lower, at + 1)) {
+    const bool word_start = at == 0 || text_lower[at - 1] == ' ' || text_lower[at - 1] == '_' || text_lower[at - 1] == '-';
+    literal_bonus = std::max(literal_bonus, word_start ? 150 : 100);
+    if (word_start) break;
+  }
+  return score + literal_bonus;
 }
 
 }  // namespace

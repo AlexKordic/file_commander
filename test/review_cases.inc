@@ -1,3 +1,6 @@
+FC_REVIEW_CASE(UX_palette_ranking, "palette_literal_ranking")
+FC_REVIEW_CASE(UX_ssh_dialog_keyboard, "ssh_dialog_keyboard")
+FC_REVIEW_CASE(UX_dialog_click_through, "dialog_click_through")
 FC_REVIEW_CASE(RELEASE_archive_names, "archive_literal_names")
 FC_REVIEW_CASE(TS07_render_sizes, "tiny_unicode_rendering")
 FC_REVIEW_CASE(TS06_archive_contracts, "archive_byte_limits")

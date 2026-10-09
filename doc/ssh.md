@@ -17,9 +17,10 @@ agents all come from `~/.ssh/config` and your SSH agent.
 
 ## Connect
 
-1. Press `F1` and run **Connect SSH**.
-2. Enter a host: an alias from `~/.ssh/config` or `user@host`.
-3. Enter an absolute directory on that host, such as `/var/log`.
+1. Press `F1`, type `ssh` and press `Enter` to run **Connect SSH**.
+2. Type a host, an alias from `~/.ssh/config` or `user@host`, and press `Enter`.
+3. Type an absolute directory on that host, such as `/var/log`, and press
+   `Enter`. Leave it empty for `/`.
 
 If SSH needs a password, a passphrase or a host-key confirmation, FC hands the
 terminal to `ssh` so you can answer it. FC then opens the directory in a new tab

@@ -39,6 +39,14 @@ std::string unescape(const std::string &text) {
   }
   return out;
 }
+// lexically_normal() keeps a trailing separator as a "." element
+// ("/tmp/fc/" becomes "/tmp/fc/."). A location names the directory itself.
+Filepath normal_path(const Filepath &p) {
+  auto out = p.lexically_normal();
+  if (out.filename() == "." && out.has_parent_path())
+    out = out.parent_path();
+  return out;
+}
 void validate_relative(const Filepath &p) {
   if (p.is_absolute())
     throw std::runtime_error("absolute internal archive path");
@@ -94,11 +102,11 @@ Location Location::decode(const std::string &text) {
       value = "/";
     if (value.front() != '/')
       throw std::runtime_error("SSH paths must be absolute");
-    result.local = Filepath(value).lexically_normal();
+    result.local = normal_path(value);
     return result;
   }
   if (text.rfind("fc-archive:", 0) != 0) {
-    result.local = Filepath(text).lexically_normal();
+    result.local = normal_path(text);
     return result;
   }
   size_t at = 11, end;

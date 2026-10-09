@@ -11,6 +11,33 @@
 #include <regex>
 #include <sstream>
 
+namespace {
+// Buttons act on mouse press. When that press closes a dialog, the rest of the
+// click must not reach what was beneath it: file lists act on any left-button
+// event over a row, so the release would move focus and the file cursor.
+struct ClosingClick {
+  bool press_in_flight = false;
+  bool swallow         = false;
+} closing_click;
+
+bool swallow_closing_click(Event event) {
+  if (!event.is_mouse()) {
+    closing_click.press_in_flight = false;
+    return false;
+  }
+  const auto& mouse = event.mouse();
+  const bool button = mouse.button == Mouse::Left || mouse.button == Mouse::Middle || mouse.button == Mouse::Right;
+  if (button && mouse.motion == Mouse::Pressed) {
+    closing_click = {true, false};
+    return false;
+  }
+  closing_click.press_in_flight = false;
+  if (!closing_click.swallow) return false;
+  if (mouse.motion == Mouse::Released) closing_click.swallow = false;
+  return true;
+}
+}  // namespace
+
 ftxui::Dialog::P DialogOverlay::get_overlay_dialog(const std::string& name) {
   auto it = _overlay_dialogs.find(name);
   if (it != _overlay_dialogs.end()) return it->second;
@@ -20,6 +47,7 @@ ftxui::Dialog::P DialogOverlay::get_overlay_dialog(const std::string& name) {
 bool DialogOverlay::dialog_active() { return _active_dialog > 0; }
 
 void DialogOverlay::close_dialog() {
+  if (closing_click.press_in_flight) closing_click.swallow = true;
   std::string closed_dialog_name = _active_dialog_name;
   // Move navigation to main document
   _active_dialog                 = 0;
@@ -1158,7 +1186,7 @@ FileCommander::FileCommander(Filepath l, Filepath r, ExecuteOnUiThread exec, std
           return false;
         }
       });
-  renderer                           = Renderer(navigation, [=, this]() -> Element {
+  renderer                           = Renderer(CatchEvent(navigation, swallow_closing_click), [=, this]() -> Element {
     // check for resize:
     int screen_w = _get_dimx();
     if (screen_w != _screen_dimx) {
