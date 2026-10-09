@@ -609,6 +609,45 @@ static void UX_dialog_click_through() {
   require(&app.focused_panel() == &other, "the click after the swallowed release did not reach the panel");
 }
 
+static void UX_narrow_status_rows() {
+  Fixture f; auto left = f.dir("left"); auto right = f.dir("right");
+  for (int i = 0; i < 36; ++i) f.file("left/IMG_" + std::to_string(2041 + i) + ".jpg", std::string(4096 + i, 'x'));
+  auto deep = f.dir("a-rather-long-directory-name-for-a-wide-progress-bar");
+  auto source = f.file(deep.filename().native() + "/a-very-long-file-name-that-does-not-fit-the-progress-row.bin", std::string(2 * 1024 * 1024, 'x'));
+  UiQueue ui;
+  FileCommander app(left, right, [&](auto work) { ui.post(std::move(work)); }, [] { return 120; });
+  ui.wait(app.get_left()); ui.wait(app.get_right());
+  auto interactive = ScreenInteractive::FixedSize(120, 34);
+  Loop active_screen(&interactive, app.renderer);
+  for (int i = 0; i < 24; ++i) app.get_left().dir.item_toggle_select(i);
+  auto screen = Screen::Create(Dimension::Fixed(120), Dimension::Fixed(34));
+  auto row = [&](const std::string& marker) {
+    Render(screen, app.renderer->Render());
+    for (int y = 0; y < screen.dimy(); ++y) {
+      std::string line;
+      for (int x = 0; x < screen.dimx(); ++x) line += screen.PixelAt(x, y).character;
+      if (line.find(marker) != std::string::npos) return line;
+    }
+    return std::string();
+  };
+  auto summary = row("Sel 24/36");
+  require(!summary.empty(), "selection count was clipped");
+  for (auto label : {"Name", "Size", "Date"}) require(summary.find(label) != std::string::npos, std::string("sort button clipped: ") + label);
+
+  DirItem item(source); item._set_symlink_target(f.root / "copy.bin");
+  auto job = std::make_shared<JobSpec>(JobSpec::Type::COPY, std::vector<DirItem>{item});
+  file_operations().set_transfer_rate(256 * 1024);
+  auto id = file_operations().add_job(job);
+  while (job->_copy_bytes.load() == 0 && !job->is_stopped()) std::this_thread::yield();
+  auto progress = row("[COPY]");
+  auto pause = row("Pause/Resume"), cancel = row("Cancel");
+  file_operations().cancel(id);
+  wait_job(id);
+  file_operations().set_transfer_rate(0);
+  require(!progress.empty(), "job type was clipped from the progress row");
+  require(!pause.empty() && !cancel.empty(), "progress row buttons were clipped");
+}
+
 static void R21() {
   Fixture f; auto old = f.dir("old"); auto current = f.dir("current");
   f.file("current/a", "KEEP");

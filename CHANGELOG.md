@@ -20,6 +20,10 @@
 - Fixed: a trailing `/` no longer shows as `/.` in panel paths.
 - Fixed: the click that closes a dialog no longer moves focus or the file cursor
   in the panel beneath it.
+- Fixed: in narrow panels the selection summary and the progress bar clip their
+  text instead of overprinting it; the summary shows sizes as KB/MB/GB, and the
+  progress bar keeps its job type and buttons whole. Delete progress gauges now
+  show their own measure.
 - Documentation reorganized into a user guide, key reference, SSH, editor and
   Lua scripting guides, and contributor guides under `doc/dev/`.
 

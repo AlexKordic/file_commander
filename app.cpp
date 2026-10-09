@@ -658,7 +658,7 @@ Element JobProgressBar::render() {
       text("|"),
       bgGaugeLeft(job->_total.percentage / 100, theme().size_gauge_full, theme().size_gauge_empty, text(total_info)) | theme().progress_total,
       text("|"),
-      bgGaugeLeft(job->_current_item.percentage / 100, theme().size_gauge_full, theme().size_gauge_empty, text(curr_info)) | xflex_grow | theme().progress_current,
+      bgGaugeLeft(job->_current_item.percentage / 100, theme().size_gauge_full, theme().size_gauge_empty, text(curr_info)) | xflex | theme().progress_current,
       text("|"),
       pause_el,
       cancel_el,
@@ -674,7 +674,7 @@ Element JobProgressBar::render() {
     return hbox({
       text(task_info) | theme().progress_operation,
       text("|"),
-      bgGaugeLeft(item_percentage / 100, theme().size_gauge_full, theme().size_gauge_empty, text(count_info)) | xflex_grow | theme().progress_current,
+      bgGaugeLeft(item_percentage / 100, theme().size_gauge_full, theme().size_gauge_empty, text(count_info)) | xflex | theme().progress_current,
       text("|"),
       pause_el,
       cancel_el,
@@ -688,9 +688,9 @@ Element JobProgressBar::render() {
     return hbox({
       text(task_info) | theme().progress_operation,
       text("|"),
-      bgGaugeLeft(item_percentage / 100, theme().size_gauge_full, theme().size_gauge_empty, text(byte_info)) | theme().progress_total,
+      bgGaugeLeft(byte_percentage / 100, theme().size_gauge_full, theme().size_gauge_empty, text(byte_info)) | theme().progress_total,
       text("|"),
-      bgGaugeLeft(byte_percentage / 100, theme().size_gauge_full, theme().size_gauge_empty, text(count_info)) | xflex_grow | theme().progress_current,
+      bgGaugeLeft(item_percentage / 100, theme().size_gauge_full, theme().size_gauge_empty, text(count_info)) | xflex | theme().progress_current,
       text("|"),
       pause_el,
       cancel_el,
@@ -702,7 +702,7 @@ Element JobProgressBar::render() {
     return hbox({
       text(task_info) | theme().progress_operation,
       text("|"),
-      bgGaugeLeft(item_percentage / 100, theme().size_gauge_full, theme().size_gauge_empty, text(count_info)) | xflex_grow | theme().progress_current,
+      bgGaugeLeft(item_percentage / 100, theme().size_gauge_full, theme().size_gauge_empty, text(count_info)) | xflex | theme().progress_current,
       text("|"),
       pause_el,
       cancel_el,

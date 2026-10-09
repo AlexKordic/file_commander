@@ -354,15 +354,15 @@ Files::Files(PanelSharedState::P s) : Dialog(std::move(s)) {
     case Orderby::TIME_DESC: prefixes[2] = "↓↓"; break;
     }
     auto     s        = state->dir->stats();
-    std::string columns = " cols:name,size,date";
+    // A panel is often narrower than every field together. The texts are
+    // clipped at their end before the sort buttons lose any width.
+    std::string columns;
     if (state->show_permissions_column) columns += ",perm";
     if (state->show_owner_group_column) columns += ",owner:group";
+    if (!columns.empty()) columns = " +" + columns.substr(1);
     Elements children = Elements({
-      text(" Sel " + std::to_string(s.items_selected) + "/" + std::to_string(s.items_total)),
-      text(" bytes "),
-      coloredInt(s.bytes_selected),
-      text("/"),
-      coloredInt(s.bytes_total),
+      text(std::format(" Sel {}/{}  {}/{}", s.items_selected, s.items_total, JobListDialog::format_bytes(double(s.bytes_selected)),
+                       JobListDialog::format_bytes(double(s.bytes_total)))) | xflex_shrink,
       text(" | "),
       text(prefixes[0]),
       sort_name->Render(),
@@ -370,7 +370,7 @@ Files::Files(PanelSharedState::P s) : Dialog(std::move(s)) {
       sort_size->Render(),
       text(prefixes[2]),
       sort_time->Render(),
-      text(columns) | dim,
+      text(columns) | dim | xflex_shrink,
     });
     return hbox(std::move(children));
   };
