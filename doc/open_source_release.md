@@ -103,3 +103,23 @@ published or that the transitive notice audit is finished.
 - [LZMA SDK public-domain statement and update history](https://www.7-zip.org/sdk.html).
 - [GPLv3](https://www.gnu.org/licenses/gpl-3.0.html), particularly sections 5 and 6.
 - [GitHub Actions security guidance](https://docs.github.com/en/actions/reference/security/secure-use).
+
+## Preparation verification
+
+The internal preparation through `6b3b9a9` passed the following targeted checks
+on macOS arm64 on 2026-10-09:
+
+- Isolated bootstrap and repeat validation using local mirrors for the pinned
+  Git objects and the bundled SDK snapshot. GitHub DNS was unavailable in the
+  agent environment, so public anonymous bootstrap remains a post-push check.
+- `fc.harness.dependencies`, including source corruption, archive checksum and
+  unsafe extraction rejection controls.
+- `fc.harness.lanes`, including rejection of packages missing dependency notices.
+- `fc.harness.fresh_bundle`, reconstructing the exact Fresh integration revision.
+- `fc.package_build`, including executable hashes against the build outputs.
+- Byte comparison of every packaged checked-in dependency notice and FC's MIT
+  license against its source copy.
+- Local Markdown link checks and Git whitespace checks.
+
+All four targeted CTest cases passed. This is publication-preparation evidence;
+the complete final automatic/manual release qualification has not been rerun.
