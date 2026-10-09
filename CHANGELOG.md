@@ -10,7 +10,8 @@
   transfer recovery requiring an explicit Resume after startup.
 - MIT licensing for FC, preserved third-party notices, public pinned dependency
   sources, and contributor/build/release documentation.
+- Documentation reorganized into a user guide, key reference, SSH, editor and
+  Lua scripting guides, and contributor guides under `doc/dev/`.
 
-The source is published on GitHub. This is a release candidate; stable binary
-releases require final native qualification of each supported platform. See
-[the binary-release requirements](doc/open_source_release.md).
+This is a release candidate. It is built from source; there are no binary
+releases yet.

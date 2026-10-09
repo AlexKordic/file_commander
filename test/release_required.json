@@ -70,7 +70,8 @@
       "protocol",
       "manifests",
       "supervisor",
-      "lanes"
+      "lanes",
+      "docs"
     ],
     "process_exit": [
       "syntax",

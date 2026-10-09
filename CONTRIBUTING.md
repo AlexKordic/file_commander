@@ -6,17 +6,31 @@ Keep communication respectful and focused on the work.
 
 ## Development
 
-Follow the [README](README.md) to provision pinned dependencies. Build instructions,
-test lanes and sanitizer configurations are in [doc/build_test_setup.md](doc/build_test_setup.md).
-Use the existing C++ style and `.clang-format`; avoid unrelated formatting changes.
-Core behavior should remain independent of terminal rendering. Filesystem work
-belongs off the UI thread, with updates delivered through the existing dispatch
-and lifetime mechanisms.
+- [Building](doc/dev/building.md) covers dependencies, presets and packages.
+- [Testing](doc/dev/testing.md) explains the test suite and how to run it.
+- [Architecture](doc/dev/architecture.md) describes how FC is put together and
+  the design rules that changes must keep.
 
-Include a focused regression test for behavior changes and run the relevant test
-lane. Describe what changed, the trigger it fixes, and the checks you actually
-ran. Manual tests require native capabilities; clearly state when they were not
-run. New registered tests must also be added to the independent release registry.
+Use the existing C++ style and `.clang-format`; avoid unrelated formatting
+changes. Core behavior should remain independent of terminal rendering.
+Filesystem work belongs off the UI thread, with updates delivered through the
+existing dispatch and lifetime mechanisms.
+
+Include a focused regression test for behavior changes. Before sending a pull
+request, run at least the fast tests:
+
+```sh
+python3 tools/run_test_lane.py fast --build build-release
+```
+
+Use the `release` lane for broader changes. Manual tests need real devices or
+hosts; state clearly in the pull request when you didn't run them. New
+registered tests must also be added to `test/release_required.json`.
+
+Keep the documentation in step with the code. A new command or key belongs in
+[doc/keys.md](doc/keys.md), and a new Lua function in
+[doc/scripting.md](doc/scripting.md); `fc.harness.docs` checks both, along with
+the links between documents.
 
 Dependency changes need an intentional revision update, preserved upstream
 notices, and the checks described in [dependencies/README.md](dependencies/README.md).

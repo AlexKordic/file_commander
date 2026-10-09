@@ -37,4 +37,5 @@ Fresh's separate asset notices, and the source instructions. Rust crate
 attributions also need review for the exact default-feature `fresh-editor`
 build and target; some published crates omit separate license files. Do not
 interpret the top-level inventory as a completed transitive-license audit.
-See [the open-source status and binary-release requirements](doc/open_source_release.md).
+The procedure for producing the Fresh source archive is in
+[Fresh source for binary releases](doc/dev/building.md#fresh-source-for-binary-releases).

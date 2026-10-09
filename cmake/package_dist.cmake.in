@@ -16,7 +16,6 @@ file(MAKE_DIRECTORY "${_stage}/share/licenses/file-commander" "${_stage}/share/f
 file(COPY "@CMAKE_CURRENT_SOURCE_DIR@/LICENSE" DESTINATION "${_stage}/share/licenses/file-commander")
 file(COPY "@CMAKE_CURRENT_SOURCE_DIR@/README.md" DESTINATION "${_stage}")
 file(COPY "@CMAKE_CURRENT_SOURCE_DIR@/THIRD_PARTY_NOTICES.md"
-          "@CMAKE_CURRENT_SOURCE_DIR@/doc/open_source_release.md"
           "@CMAKE_CURRENT_SOURCE_DIR@/dependencies.json"
      DESTINATION "${_stage}/share/file-commander")
 
