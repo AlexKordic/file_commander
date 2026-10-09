@@ -421,9 +421,6 @@ endif()
 
 fc_label_manual_tests()
 
-# add_executable(playground playground.cpp log.cpp err.cpp commander.cpp theme.cpp custom_controls.cpp dialogs.cpp shared_state.cpp file_change_funnel.cpp file_io_jobs.cpp)
-# target_link_libraries(playground PRIVATE ftxui::component ftxui::dom ftxui::screen Boost::filesystem "-framework CoreServices")
-
 # TODO: conditional parts for mac and linux
 # add_executable(dirnotify dir_notify/fsevents.cpp dir_notify/test.cpp)
 # target_link_libraries(dirnotify Boost::filesystem "-framework CoreServices")
