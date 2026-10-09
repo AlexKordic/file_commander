@@ -408,30 +408,34 @@ thresholds; compare them only between Release builds on the same machine.
 
 ## CI
 
-`.github/workflows/tests.yml` is the repository's only workflow. It runs on
-pushes to `main` and `pack_release`, nightly, and on manual dispatch. It has
-no pull request trigger, so pull requests are not tested automatically: run
-the lanes yourself and list them in the pull request.
+Two workflows live in `.github/workflows/`:
 
-Both jobs run on self-hosted runners labelled `fc-pinned` plus the OS and
-architecture:
+| Workflow | Runners | Triggers | What it does |
+| --- | --- | --- | --- |
+| `public-core.yml` | GitHub-hosted Ubuntu 24.04 with GCC 14 | Pushes to `main`, pull requests to `main`, manual dispatch | Headless core build (`FC_CORE_ONLY=ON`, Release), then `ctest -LE 'extended\|benchmark\|manual'`. Uploads the JUnit results. Needs no dependency checkouts. |
+| `tests.yml` | Self-hosted, labelled `fc-pinned` plus the OS and architecture | Manual dispatch by a maintainer only | The full native and sanitizer jobs below. |
+
+Pull requests get the hosted core checks only. They don't cover the UI, Lua,
+Fresh or SSH tests, so run the relevant lanes yourself and list them in the
+pull request. Pull request code never runs on the self-hosted runners.
+
+`tests.yml` has two jobs:
 
 | Job | Platforms | What it does |
 | --- | --- | --- |
-| `native` | macOS arm64, Linux x86-64, Linux arm64 | Bootstraps dependencies into `build-ci-deps`, configures a Release build in `build-ci` with `FC_TEST_DEPENDENCY_REBUILDS=ON`, builds it, and runs the `fast` and `integration` lanes with `--expect-os` and `--expect-arch`. The nightly run and the `release` dispatch option add the `extended` lane; the `release` option also adds the `release` lane. The `manual_tests` dispatch option adds the `manual` lane. |
-| `sanitizers` | macOS arm64 and Linux x86-64, each with `asan-ubsan` and `tsan` | Configures and builds the preset, then runs the `sanitizer` lane (`asan-ubsan`) or the `thread` lane (`tsan`). Runs on every trigger. |
+| `native` | macOS arm64, Linux x86-64, Linux arm64 | Bootstraps dependencies into `build-ci-deps`, configures a Release build in `build-ci` with `FC_TEST_DEPENDENCY_REBUILDS=ON`, builds it, and runs the `fast` and `integration` lanes with `--expect-os` and `--expect-arch`. The `release` dispatch option adds the `extended` and `release` lanes. The `manual_tests` dispatch option adds the `manual` lane. |
+| `sanitizers` | macOS arm64 and Linux x86-64, each with `asan-ubsan` and `tsan` | Configures and builds the preset, then runs the `sanitizer` lane (`asan-ubsan`) or the `thread` lane (`tsan`). Runs on every dispatch. |
 
 Both jobs upload `test-logs/` and `Testing/` from their build directory, and
 `native` also uploads `dist/`, even when a step fails.
 
-A runner needs the build requirements from [building.md](building.md),
-including the Rust toolchain, plus bubblewrap on Linux, and these environment
-variables:
+A self-hosted runner needs the build requirements from
+[building.md](building.md), including the Rust toolchain, plus bubblewrap on
+Linux. These environment variables are optional:
 
 | Variable | Purpose |
 | --- | --- |
-| `FC_LZMA_SDK` | Required. An LZMA SDK 26.00 source directory. The workflow always passes it to bootstrap's `--lzma-source`, and an empty value does not fall back to the bundled snapshot. |
-| `FC_FTXUI_MIRROR`, `FC_FRESH_MIRROR` | Optional mirrors for the FTXUI and upstream Fresh clones. When empty, bootstrap uses the URLs in `dependencies.json`. |
+| `FC_FTXUI_MIRROR`, `FC_FRESH_MIRROR` | Mirrors for the FTXUI and upstream Fresh clones. When unset, bootstrap uses the URLs in `dependencies.json`. |
 | `FC_TEST_EXDEV_ROOT` | For the manual lane: a writable directory on a second filesystem. Needed on macOS, and on Linux wherever `/dev/shm` is not a separate filesystem. |
 
 ## Common failures

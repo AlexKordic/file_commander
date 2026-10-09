@@ -125,11 +125,6 @@ Report bugs and suggest features in
 [GitHub Issues](https://github.com/AlexKordic/file_commander/issues). Report
 security problems privately as described in [SECURITY.md](SECURITY.md).
 
-GitHub-hosted core checks run on pushes to `main` and pull requests. Full native
-and sanitizer qualification uses explicit maintainer dispatch on provisioned
-runners. Hosted core checks are useful contributor feedback and do not qualify
-the full binary package.
-
 ## License
 
 FC is [MIT licensed](LICENSE), copyright Alex Kordic. Its dependencies keep
