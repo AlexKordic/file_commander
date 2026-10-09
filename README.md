@@ -1,28 +1,52 @@
 # File Commander
 
-File Commander (FC) is a terminal file manager with two panels, background file
-operations, panel tabs, Lua automation, and a shared Fresh editor backend.
-Local and SSH locations can be opened in separate panels and tabs.
+File Commander (FC) is a keyboard-driven, two-panel file manager for the
+terminal, in the tradition of Midnight Commander and Total Commander. It is
+built so that the interface never waits for the disk or the network.
 
-The source is available on [GitHub](https://github.com/AlexKordic/file_commander),
-with the modified FTXUI and Fresh sources in the published dependency forks.
+- **File operations run in the background.** Copies, moves and deletes are
+  queued as jobs you can pause, resume or cancel while you keep working.
+- **Transfers survive crashes.** If FC quits or the machine goes down in the
+  middle of a copy, the transfer is back, paused, the next time you start FC.
+  One key resumes it from the last finished file.
+- **SSH is just another panel.** Open any host from your `~/.ssh/config`,
+  browse it, copy between local and remote tabs or between two hosts. The
+  remote side only needs Python 3.
+- **An editor one key away.** `F4` opens files in a built-in
+  [Fresh](https://github.com/sinelaw/fresh) editor session, `F10` switches back
+  and forth. Tabs and unsaved text stay in the editor, even across restarts.
+- **Picks up where you left off.** Tabs, paths, selections and filters are
+  restored on the next start.
+- **Search, don't memorize.** `F1` opens a command palette with every command;
+  rebind any key from there. Also: bookmarks, tabs, glob selection,
+  find, 7z archive browsing and Lua scripting.
 
-The current release candidate has been qualified on macOS arm64. Linux code and
-build configurations are present; full native Linux release qualification is
-still required. Windows is not supported by this release. See the
-[open-source status and binary-release requirements](doc/open_source_release.md)
-for the remaining work and the scope of existing evidence.
+```text
+ Tabs  1:demo     cT:new cW:close f11/f12:switch ║ Tabs  1:2026      cT:new cW:close f11/f12:switch
+                                                 ║
+ ~/demo                                      5ms ║ ~/demo/photos/2026
+ Sel 2 byte9216/9216 |↑↑ Nam   Siz   Da cols:name║ Sel 0/ bytes0/0 | ↑↑ Name   Siz   Dat cols:name,s
+╭─────────────────────────────────┬─────────────╮║╭──────────────────────────────────┬─────────────╮
+│/music                           │Oct  9 21:49 │║│beach.jpg                        0│Oct  9 21:49 │
+│/photos                          │Oct  9 21:49 │║│city.jpg                         0│Oct  9 21:49 │
+│/projects                        │Oct  9 21:49 │║│                                                │
+│README.md                       0│Oct  9 21:49 │║│                                                │
+│backup.7z                  921600│Oct  9 21:49 │║│                                                │
+│budget.xlsx                     0│Oct  9 21:49 │║│                                                │
+│todo.txt                        0│Oct  9 21:49 │║│                                                │
+```
 
-## Build from source
+**Status:** release candidate, built from source. It is tested on macOS on
+Apple silicon. Linux builds are supported but not yet fully tested. There are no
+binary downloads yet, and Windows is not supported.
 
-Requirements: Git, CMake 3.21+ for presets, Ninja, a C++20 compiler and standard
-library with `std::format`, Python 3.12+, and Make. The bundled Fresh editor
-requires Cargo and the Rust toolchain pinned by its `rust-toolchain.toml`
-(currently 1.95); its native dependencies also require Clang/libclang. On Linux,
-install the C/C++ development libraries required by the Fresh build. SSH
-locations require OpenSSH locally and Python 3 on the remote host.
+## Build
 
-Clone the public repository and build its pinned dependencies:
+You need Git, CMake 3.21 or later, Ninja, Make, Python 3.12 or later, and a
+C++20 compiler whose standard library has `std::format`. The bundled editor is
+written in Rust, so you also need Cargo with the toolchain from Fresh's
+`rust-toolchain.toml` (currently 1.95) and Clang/libclang. On Linux, install the
+usual C/C++ development libraries as well.
 
 ```sh
 git clone https://github.com/AlexKordic/file_commander.git
@@ -37,73 +61,69 @@ cmake --build --preset release
 ./build-release/fc
 ```
 
-Bootstrap creates isolated checkouts at the revisions in
-[`dependencies.json`](dependencies.json), reconstructs the Fresh integration
-from its verified Git bundle, and unpacks the verified LZMA source snapshot.
-It validates existing inputs and does not reset them. Boost is downloaded and
-checksum-verified by CMake. The first build requires network access for Git,
-Boost and Rust crates; no private mirror is required.
+The bootstrap script downloads the exact dependency versions FC is tested with
+(listed in [`dependencies.json`](dependencies.json)) into `build-deps/`. The
+first build also downloads Boost and Rust crates, so it needs network access.
 
-For a headless build without FTXUI, LuaJIT, Fresh or LZMA:
+There is no install step yet. Run `build-release/fc` directly, or symlink it into
+a directory on your `PATH`. To move FC to another machine, build the
+self-contained package (`fc`, `fresh`, `7zr` and the license notices) described
+in [building FC](doc/dev/building.md).
+
+More build options, such as debug and sanitizer builds or using local
+dependency checkouts, are in [building FC](doc/dev/building.md).
+
+## First steps
 
 ```sh
-cmake --preset core
-cmake --build --preset core
-ctest --preset core
+./build-release/fc                  # restore the last session
+./build-release/fc ~/src ~/backup   # open two directories
 ```
-
-The detailed [build and test guide](doc/build_test_setup.md) covers toolchain
-overrides, sanitizers, packages and native qualification.
-
-## Use FC
-
-Start with `fc`, or `fc /left/path /right/path`. Explicit paths override restored
-panel locations. A normal start restores the last checkpointed workspace.
 
 | Key | Action |
 | --- | --- |
-| Tab | Switch panel |
-| Enter / `?` | Enter / leave directory |
-| Space / Ctrl+A | Toggle selection / select visible items |
-| F1 | Command palette, including Connect SSH and Restart editor backend |
-| F2 / F3 | Rename / find |
-| F4 | Open the focused file in the shared editor |
-| F5 / F6 / F7 / F8 | Copy / move / mkdir / delete |
-| F9 | Job list |
-| F10 | Switch between FC and the attached editor |
-| Ctrl+T / Ctrl+W | New / close panel tab |
-| Ctrl+R | Refresh directory |
+| `Tab` | Switch panel |
+| `Enter` / `?` | Open directory / go to the parent |
+| *type text* | Filter the listing |
+| `Space`, `+` | Select an item, select by pattern |
+| `F5` / `F6` / `F8` | Copy / move / delete |
+| `F7` / `F2` | New directory / rename |
+| `F3` | Find files |
+| `F9` | Job list: pause, resume, cancel |
+| `F4` / `F10` | Edit files / switch to the editor and back |
+| `Ctrl+T` / `Ctrl+W` | New / close tab |
+| `Ctrl+B` | Bookmarks |
+| `F1` | Command palette (every command, and key rebinding) |
+| `Ctrl+C` | Quit |
 
-Fresh owns its editor tabs and unsaved buffers. Returning to FC detaches the
-client; it does not close the backend or its tabs. See the
-[editor workflow](doc/editor_workflow.md) and
-[Fresh CLI contract](doc/fresh_cli_contract.md).
+To open a remote directory, press `F1`, run **Connect SSH**, and enter a host
+alias and a path.
 
-Use Connect SSH in the palette to open a configured OpenSSH host alias.
-Transfers can cross local and remote tabs; remote files open in the same Fresh
-backend as local files. See [SSH setup, limitations and tests](doc/ssh_workflow.md).
+## Documentation
 
-**Interrupted transfers always start paused and require an explicit Resume.**
-Workspace and editor recovery use completed checkpoints; keystrokes or state
-changes after the last successful checkpoint are not guaranteed to survive a
-forced termination. Recovery data is stored under
-`$XDG_CONFIG_HOME/file_commander`, or `~/.config/file_commander` when unset.
+For users:
 
-For automation, run `fc run script.lua`. See the
-[Lua testing framework](doc/testing_framework.md). Lua scripts are executable
-code and should only be run when trusted.
+- [User guide](doc/user_guide.md): panels, selection, file operations, jobs
+  and recovery, find, archives, bookmarks, configuration.
+- [Keys and commands](doc/keys.md): every key and command ID, and how to
+  rebind them.
+- [SSH locations](doc/ssh.md): connecting, transfers, limitations.
+- [The editor](doc/editor.md): working with the built-in Fresh editor.
+- [Lua scripting](doc/scripting.md): automating FC with `fc run script.lua`.
 
-## Test and contribute
+For contributors:
 
-Run `python3 tools/run_test_lane.py fast --build build-release` for fast checks,
-or `python3 tools/run_test_lane.py release --build build-release` for all
-automatic release checks. Native watcher, relocation and second-filesystem
-checks are in the separate manual lane. A passing automatic lane does not claim
-manual checks passed.
+- [CONTRIBUTING.md](CONTRIBUTING.md)
+- [Building](doc/dev/building.md), [testing](doc/dev/testing.md) and
+  [architecture](doc/dev/architecture.md).
+- [Fresh integration](doc/dev/fresh_integration.md) and
+  [pinned dependencies](dependencies/README.md).
 
-Read [CONTRIBUTING.md](CONTRIBUTING.md) before sending a change. Report bugs in
-[GitHub Issues](https://github.com/AlexKordic/file_commander/issues); report
-vulnerabilities using [SECURITY.md](SECURITY.md).
+## Feedback
+
+Report bugs and suggest features in
+[GitHub Issues](https://github.com/AlexKordic/file_commander/issues). Report
+security problems privately as described in [SECURITY.md](SECURITY.md).
 
 GitHub-hosted core checks run on pushes to `main` and pull requests. Full native
 and sanitizer qualification uses explicit maintainer dispatch on provisioned
@@ -112,7 +132,6 @@ the full binary package.
 
 ## License
 
-FC's original code is [MIT licensed](LICENSE), copyright Alex Kordic.
-Dependencies retain their own terms. In particular, Fresh is a separate
-GPL-3.0-or-later program. See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)
-and the [binary-release source requirements](doc/open_source_release.md).
+FC is [MIT licensed](LICENSE), copyright Alex Kordic. Its dependencies keep
+their own licenses. In particular, the bundled Fresh editor is a separate
+GPL-3.0-or-later program. See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).

@@ -95,7 +95,6 @@ else:
                        'share/licenses/lzma-sdk/lzma-sdk.txt': 'licenses/lzma-sdk/lzma-sdk.txt',
                        'share/licenses/fresh/LICENSE': 'licenses/fresh/LICENSE',
                        'share/file-commander/THIRD_PARTY_NOTICES.md': 'THIRD_PARTY_NOTICES.md',
-                       'share/file-commander/open_source_release.md': 'doc/open_source_release.md',
                        'share/file-commander/dependencies.json': 'dependencies.json'}
             for relative, source in notices.items():
                 if missing_notice and relative == 'share/licenses/ftxui/LICENSE': continue
