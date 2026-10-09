@@ -33,6 +33,8 @@ def provision_lzma(repo, spec, target, source=None):
 
 
 def main():
+    if sys.version_info < (3, 12):
+        raise SystemExit('Dependency bootstrap requires Python 3.12 or newer; select that interpreter before provisioning inputs.')
     repo = Path(__file__).resolve().parent.parent
     manifest = json.loads((repo / 'dependencies.json').read_text())
     parser = argparse.ArgumentParser(description=__doc__)
