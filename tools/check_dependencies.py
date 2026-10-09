@@ -32,6 +32,9 @@ for name, spec in manifest['git'].items():
     except (OSError, subprocess.CalledProcessError):
         failures.append(f'{name}: cannot read checkout at {path}')
 if not args.skip_lzma:
+    archive = repo / manifest['lzma']['archive']
+    if not archive.is_file() or hashlib.sha256(archive.read_bytes()).hexdigest() != manifest['lzma']['archive_sha256']:
+        failures.append('lzma: dependency archive fingerprint mismatch')
     root = args.lzma
     paths = sorted(p for p in root.rglob('*') if p.is_file() and '_o' not in p.parts and
                    (p.suffix in ('.c', '.h', '.cpp', '.mak', '.S', '.asm') or p.name.startswith('makefile')))

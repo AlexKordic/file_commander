@@ -9,12 +9,12 @@
   "git": {
     "ftxui": {
       "revision": "ff94e7a1008d41e11ce040702654eed6aff1e52c",
-      "source": "http://localhost:3000/PerunSoftware/ftxui.git",
+      "source": "https://github.com/AlexKordic/FTXUI.git",
       "default_path": "../alex_ftxui"
     },
     "luajit": {
       "revision": "233ad24035944ece5367157e824e8357df3417d9",
-      "source": "https://luajit.org/git/luajit.git",
+      "source": "https://github.com/LuaJIT/LuaJIT.git",
       "default_path": "../luajit"
     },
     "fresh": {
@@ -30,7 +30,9 @@
     "version": "26.00",
     "default_path": "../lzma2600",
     "source_files": 606,
-    "source_sha256": "744ef6617d606d78676e06d3ab30784072c8a936a4c629c76d5877b93710e66c"
+    "source_sha256": "744ef6617d606d78676e06d3ab30784072c8a936a4c629c76d5877b93710e66c",
+    "archive": "dependencies/lzma-sdk-26.00.tar.gz",
+    "archive_sha256": "282b4d32b47e83a4b4215b174988d967ba02407e243a46b963779cde38931cc6"
   },
   "requirements": {
     "cmake": ">=3.19",

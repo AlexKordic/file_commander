@@ -1,4 +1,19 @@
-# Fresh integration changes
+# Pinned dependency sources
+
+`dependencies.json` declares the exact inputs; bootstrap does not track moving
+branches. FTXUI's FC changes are published on the `fc-integration` branch of
+`AlexKordic/FTXUI`. That branch must be pushed before the first public FC build.
+LuaJIT and Boost use their public upstream sources.
+
+`lzma-sdk-26.00.tar.gz` contains SDK 26.00 source and documentation, excluding
+prebuilt executables and local object directories. Its archive SHA-256 and the
+606-file C/C++/assembly/makefile source fingerprint are pinned separately in the
+manifest. Bootstrap verifies the archive and extracts it with Python's data
+filter, then checks the source fingerprint. An optional `--lzma-source` folder
+can still supply the same verified source set. The SDK's public-domain statement
+is retained in `DOC/lzma-sdk.txt` and `licenses/lzma-sdk/lzma-sdk.txt`.
+
+## Fresh integration changes
 
 `fresh-fc.bundle` contains the committed FC editor fixes on top of the upstream
 `base_revision` in `dependencies.json`. That manifest pins the final commit and
