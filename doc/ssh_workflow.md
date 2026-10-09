@@ -111,7 +111,7 @@ real OpenSSH authentication, host keys, network reachability or remote OS
 behavior. For native qualification against the authorized `box` host:
 
 ```sh
-cd /Users/alex/perun/file_commander
+cd /path/to/file_commander
 env -u FC_SSH_BIN ./build-release/fc_remote_fs_tests box
 env -u FC_SSH_BIN ./build-release/fc_remote_transfer_tests box
 python3 test/test_ssh_editor.py ./build-release/third_party/fresh/bin/fresh --host box

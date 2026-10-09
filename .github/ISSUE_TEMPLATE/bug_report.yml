@@ -1,0 +1,31 @@
+name: Bug report
+description: Report a reproducible FC problem.
+body:
+  - type: markdown
+    attributes:
+      value: "For vulnerabilities, follow SECURITY.md. Remove credentials and private host/path information from public logs."
+  - type: input
+    id: revision
+    attributes:
+      label: FC revision and platform
+      description: Commit/tag, OS version, architecture, and terminal application.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+      description: Use a disposable fixture where possible; mention local, archive, or SSH locations.
+    validations:
+      required: true
+  - type: textarea
+    id: behavior
+    attributes:
+      label: Expected and actual behavior
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Logs and dependency revisions
+      description: Include relevant logs, dependency pins, and whether it reproduces with isolated settings.

@@ -14,7 +14,12 @@ cmake --build --preset core
 ctest --preset core
 ```
 
-`native` uses the pinned sibling dependency directories by default. Override `FC_FTXUI_SOURCE_DIR`, `FC_LUAJIT_SOURCE_DIR`, `FC_FRESH_SOURCE_DIR` and `FC_LZMA_SOURCE_DIR` at configure time for another layout. Core-only builds require repository sources and checksum-verified Boost, with no FTXUI, LuaJIT, Fresh or 7zr checkout.
+`native` uses the pinned sibling dependency directories by default. For a fresh
+checkout, use the public bootstrap and explicit paths in [the README](../README.md).
+Override `FC_FTXUI_SOURCE_DIR`, `FC_LUAJIT_SOURCE_DIR`, `FC_FRESH_SOURCE_DIR` and
+`FC_LZMA_SOURCE_DIR` at configure time for another layout. Core-only builds require
+repository sources and checksum-verified Boost, with no FTXUI, LuaJIT, Fresh or
+7zr checkout.
 
 For an existing build:
 
@@ -176,8 +181,11 @@ The dependency self-test mutates disposable copies, never developer checkouts.
 
 Provision self-hosted runners labelled `fc-pinned`, with the matching OS/architecture labels, the build tools above, a pinned-compatible Rust toolchain, Linux bubblewrap, and these environment variables:
 
-- `FC_FTXUI_MIRROR`: reachable mirror containing the exact FTXUI revision. The manifest's localhost/private URL is not a hosted-runner dependency source.
-- `FC_LZMA_SDK`: provisioned SDK 26.00 source directory, verified by the manifest fingerprint.
+- `FC_FTXUI_MIRROR`: optional reachable mirror containing the exact FTXUI revision;
+  the manifest now defaults to the public FC fork.
+- `FC_LZMA_SDK`: provisioned SDK 26.00 source directory for the existing native
+  workflow, verified by the manifest fingerprint. Bootstrap itself can instead
+  unpack the committed SDK source snapshot when `--lzma-source` is omitted.
 - `FC_TEST_EXDEV_ROOT`: second-filesystem fixture parent when `/dev/shm` is unavailable.
 
 `tools/bootstrap_dependencies.py --root build-ci-deps --ftxui-url "$FC_FTXUI_MIRROR" --lzma-source "$FC_LZMA_SDK"` creates isolated checkouts at the declared revisions and validates them. It refuses mismatched existing inputs instead of resetting them. CI builds from this isolated root and uploads JUnit/logs/distributions even after failures. Defining the workflow does not constitute a native Linux run; qualification status is recorded separately.

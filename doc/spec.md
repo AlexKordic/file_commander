@@ -48,10 +48,13 @@ A `fc` Lua module exposes key dispatch, state/query helpers, event waits, job wa
 and quit controls for automation and end-to-end tests. Scripts run as a UI-thread
 coroutine in `run` mode. Usage: `./build/fc run test/test_copy.lua`.
 
-### 5. Cross-Platform (Planned)
+### 5. Platform Boundaries
 
-Currently macOS only. Filesystem monitoring uses `FSEvents`. The architecture
-isolates platform-specific code behind `FileChangeFunnel::create()`.
+macOS filesystem monitoring uses FSEvents; Linux has an inotify backend.
+The architecture isolates platform-specific code behind
+`FileChangeFunnel::create()`. Native release evidence currently covers macOS
+arm64; full Linux qualification remains in the release plan. Windows support
+is not included in this release.
 
 ---
 
