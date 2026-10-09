@@ -56,6 +56,7 @@ void settings() {
   s.key_bindings           = {{"Copy", "f8"}};
   s.fresh_binary_path      = "/quoted ' editor";
   s.last_editor_session_id = "session Ω";
+  s.transfer_rate_limit    = 18446744073709551615ull;
   SettingsStore::save(f / "settings", s);
   auto loaded = SettingsStore::load(f / "settings");
   require(loaded.has_value(), "saved settings missing");
@@ -64,12 +65,14 @@ void settings() {
             && v.right.sort == s.right.sort && !v.right.permissions && v.right.owner_group,
           "panel round trip");
   require(v.single_panel && v.focused_panel == "right" && v.bookmarks == s.bookmarks && v.key_bindings == s.key_bindings
-            && v.command_use_count == s.command_use_count && v.fresh_binary_path == s.fresh_binary_path && v.last_editor_session_id == s.last_editor_session_id,
+            && v.command_use_count == s.command_use_count && v.fresh_binary_path == s.fresh_binary_path && v.last_editor_session_id == s.last_editor_session_id
+            && v.transfer_rate_limit == s.transfer_rate_limit,
           "settings fields lost");
   require(!SettingsStore::load(f / "missing"), "missing config is not normal");
   for (auto json :
        {"[", "[]", "{\"version\":2}", "{\"left_sort\":\"bogus\"}", "{\"focused_panel\":\"middle\"}", "{\"single_panel_mode\":0}", "{\"bookmarks\":[3]}",
-        "{\"key_bindings\":{\"Copy\":false}}", "{\"command_use_count\":{\"Copy\":-1}}", "{\"command_use_count\":{\"Copy\":2147483648}}"}) {
+        "{\"key_bindings\":{\"Copy\":false}}", "{\"command_use_count\":{\"Copy\":-1}}", "{\"command_use_count\":{\"Copy\":2147483648}}",
+        "{\"transfer_rate_limit\":-1}", "{\"transfer_rate_limit\":1.5}", "{\"transfer_rate_limit\":\"fast\"}"}) {
     write(f / "bad", json);
     rejects([&] { SettingsStore::load(f / "bad"); }, "malformed settings accepted");
     require(read(f / "bad") == json, "load modified bad settings");

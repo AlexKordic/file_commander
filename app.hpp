@@ -202,6 +202,7 @@ class FileCommander : public DialogOverlay {
   std::vector<Location> _bookmarks;
   bool                  _last_main_focus_left = true;
   bool                  _single_panel_mode    = false;
+  std::uint64_t         _transfer_rate_limit  = 0;
   EditorManager         _editor_manager;
   RunWithRestoredIO     _run_with_restored_io;
 

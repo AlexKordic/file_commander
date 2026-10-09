@@ -168,6 +168,20 @@ Jobs run one at a time in the order you start them; later jobs wait in a queue.
   second to clear them.
 - Cancelling keeps the files that were already copied; it is not an undo.
 
+### Limit transfer speed
+
+To keep a large copy from saturating a disk or network link, set
+`transfer_rate_limit` in `settings.json` to a speed in bytes per second. It
+applies to copies, moves between filesystems and SSH transfers; `0`, the
+default, means no limit. For example, 10 MiB/s:
+
+```json
+"transfer_rate_limit": 10485760
+```
+
+Edit the file while FC isn't running: FC rewrites `settings.json` when it
+exits. See [configuration files](#configuration-files).
+
 ## After a crash or quit
 
 FC records copy and move jobs on disk before they start. If FC quits, crashes
@@ -269,7 +283,7 @@ is a separate profile.
 
 | File | Contents |
 | --- | --- |
-| `settings.json` | Panel paths and options, bookmarks, key bindings, palette usage counts, editor path. |
+| `settings.json` | Panel paths and options, bookmarks, key bindings, palette usage counts, editor path, transfer speed limit. |
 | `theme_colors.json` | Colors saved from the theme editor. |
 | `workspace.json` | Tabs, selections and filters for workspace restore. |
 | `editor_session.json` | The identity of FC's editor session. |

@@ -837,6 +837,8 @@ void FileCommander::load_settings(bool restore_paths) {
       if (!p.empty()) add_bookmark(p);
     for (const auto& [id, count] : s.command_use_count) commands().set_use_count(id, count);
     _editor_manager.set_binary_override(s.fresh_binary_path);
+    _transfer_rate_limit = s.transfer_rate_limit;
+    file_operations().set_transfer_rate(_transfer_rate_limit);
     if (_editor_manager.last_session_id().empty()) _editor_manager.set_last_session_id(s.last_editor_session_id);
     theme().import_color_tokens(colors);
     if (restore_paths) {
@@ -870,6 +872,7 @@ void FileCommander::save_settings() const {
     }
     s.fresh_binary_path      = _editor_manager.binary_override();
     s.last_editor_session_id = _editor_manager.last_session_id();
+    s.transfer_rate_limit    = _transfer_rate_limit;
     SettingsStore::save(SettingsStore::path(), s);
     save_theme_colors();
   } catch (const std::exception& e) { file_operations().report_error("[Settings] " + std::string(e.what())); }

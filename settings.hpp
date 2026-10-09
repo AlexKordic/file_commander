@@ -1,5 +1,6 @@
 #pragma once
 #include "commander.hpp"
+#include <cstdint>
 #include <map>
 #include <optional>
 
@@ -16,6 +17,7 @@ struct AppSettings {
   std::map<std::string, int> command_use_count;
   std::map<std::string, std::string> key_bindings;
   std::string fresh_binary_path, last_editor_session_id;
+  std::uint64_t transfer_rate_limit = 0;  // Bytes per second for copy and move; 0 is unlimited.
 };
 class SettingsStore {
  public:

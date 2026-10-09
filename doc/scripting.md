@@ -377,7 +377,7 @@ scripts rarely need them. For how the test suite uses them, see
 
 | Function | Description |
 | --- | --- |
-| `fc.set_transfer_rate(bytes_per_second)` | Limits how fast jobs copy file data, for the rest of the run; 0 removes the limit. Tests use it to make a copy slow enough to pause or cancel. |
+| `fc.set_transfer_rate(bytes_per_second)` | Limits how fast jobs copy file data, for the rest of the run; 0 removes the limit. Tests use it to make a copy slow enough to pause or cancel. Run mode doesn't load `settings.json`, so this is the only way to limit speed from a script; see [limit transfer speed](user_guide.md#limit-transfer-speed). |
 | `fc.test_heartbeat()` | Restarts the 6-second clock without waiting. The screen still doesn't update, so prefer `fc.sleep(0)`. |
 | `test_pass(name)` | A global function. Prints `[PASS] name`, records the result for FC's test runner when it runs the script, and restarts the 6-second clock. |
 

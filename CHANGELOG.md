@@ -10,6 +10,8 @@
   transfer recovery requiring an explicit Resume after startup.
 - MIT licensing for FC, preserved third-party notices, public pinned dependency
   sources, and contributor/build/release documentation.
+- `transfer_rate_limit` in `settings.json` limits the speed of copies, moves and
+  SSH transfers.
 - Documentation reorganized into a user guide, key reference, SSH, editor and
   Lua scripting guides, and contributor guides under `doc/dev/`.
 
