@@ -17,14 +17,18 @@ The AR01–AR09 implementation replaces the former monolithic compilation with s
 
 [dependencies.json](../dependencies.json) records Boost's archive checksum, exact FTXUI/LuaJIT/Fresh revisions, and a fingerprint of LZMA SDK 26.00 sources. The modified Boost.Filesystem subtree belongs to the File Commander revision itself. Configure checks dependency revisions and tracked-file cleanliness; builds validate them again. Boost downloads and local tarballs are checksum checked.
 
-Provide the declared checkouts via `FC_FTXUI_SOURCE_DIR`, `FC_LUAJIT_SOURCE_DIR`, `FC_FRESH_SOURCE_DIR` and `FC_LZMA_SOURCE_DIR`. Clone the manifest's source and check out its exact revision; extract LZMA SDK 26.00 into its source directory. The FTXUI fork's recorded remote is a local server. Outside this environment, a reachable mirror of the same commit must be supplied; the manifest does not claim that this private fork is publicly downloadable. Validate with:
+Bootstrap provisions the exact Git revisions from public sources, reconstructs Fresh's integration history from the verified bundle, and extracts the committed checksum-verified LZMA SDK snapshot. FTXUI's integration branch is published in `AlexKordic/FTXUI`; Fresh's is in `AlexKordic/fresh`. Mirrors are optional. Create and validate the inputs with:
 
 ```sh
-python3 tools/check_dependencies.py
-cmake -S . -B build -G Ninja
-cmake --build build -j8
-ctest --test-dir build --output-on-failure -j3
+python3 tools/bootstrap_dependencies.py --root build-deps
+python3 tools/check_dependencies.py \
+  --ftxui build-deps/ftxui \
+  --luajit build-deps/luajit \
+  --fresh build-deps/fresh \
+  --lzma build-deps/lzma
 ```
+
+Select these checkouts through `FC_FTXUI_SOURCE_DIR`, `FC_LUAJIT_SOURCE_DIR`, `FC_FRESH_SOURCE_DIR` and `FC_LZMA_SOURCE_DIR`, as shown in the [source build instructions](../README.md#build-from-source). Existing verified checkouts can also supply those paths.
 
 For intentional dependency development, `-DFC_ALLOW_UNPINNED_DEPENDENCIES=ON` explicitly disables checkout validation and emits a configure warning. This does not disable Boost's checksum. Disabled Fresh/7zr builds do not require their source trees. Core-only builds need only repository sources and Boost:
 

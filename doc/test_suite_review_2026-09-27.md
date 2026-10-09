@@ -239,7 +239,7 @@ Times below are proposed warm-build budgets, not measurements of an implemented 
 
 The existing macOS ASan startup hang must remain a visible infrastructure failure, not a test pass or blanket sanitizer exemption. Establish a working Linux sanitizer lane and diagnose the macOS runtime separately. Run TSan separately from ASan. Treat sanitizer reports in the test harness as defects too.
 
-There is no application CI workflow checked into this revision. Use the project's chosen CI service and publish the commands/presets in the repository. The pinned FTXUI remote is local/private, so hosted clean builds require an accessible mirror/artifact of the exact revision first. Retain revision validation and checksums; do not make unpinned builds the CI default. Test a clean environment without the developer's home-directory setup.
+The GitHub repository provides hosted core checks, maintainer-dispatched native workflows, and public pinned dependency bootstrap. These address the CI and private-source gaps found in the original review. Commands, presets and qualification limits are in [the build and test guide](build_test_setup.md). CI retains revision validation and checksums; unpinned builds are not the default. Full native Linux qualification remains a separate requirement.
 
 ## Implementation sequence and completion criteria
 
