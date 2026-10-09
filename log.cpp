@@ -1,6 +1,3 @@
-#pragma GCC target("avx2")
-#pragma GCC optimize("O3")
-
 #include "log.hpp"
 
 #include <iomanip>
