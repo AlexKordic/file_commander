@@ -25,7 +25,7 @@ FC yet, start with the [README](../README.md). For all keys on one page, see
 - [Limitations](#limitations)
 
 Related guides: [SSH locations](ssh.md), [the editor](editor.md),
-[Lua scripting](scripting.md).
+[Lua scripting](scripting.md), [the macOS app](macos_app.md).
 
 ## Start FC
 

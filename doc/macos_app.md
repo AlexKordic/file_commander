@@ -1,0 +1,233 @@
+# The macOS app
+
+File Commander for macOS is a native app with the same features as the
+terminal interface: two panes with tabs, background jobs that survive crashes,
+SSH and 7z locations, the Fresh editor, bookmarks, the command palette and
+key rebinding. It adds menus, a sidebar, sheets and windows in place of the
+terminal dialogs, light and dark themes with a font for each element, and a
+built-in tutorial that explains every feature by doing it.
+
+It needs macOS 14 or later. To build it, see
+[building the macOS app](dev/macos_app.md#build).
+
+- [The window](#the-window)
+- [Keys](#keys)
+- [Selecting](#selecting)
+- [File operations and jobs](#file-operations-and-jobs)
+- [Transfer speed](#transfer-speed)
+- [SSH](#ssh)
+- [The editor](#the-editor)
+- [Lua scripts](#lua-scripts)
+- [Themes](#themes)
+- [Help and the tutorial](#help-and-the-tutorial)
+- [Settings and the profile](#settings-and-the-profile)
+- [Differences from the terminal interface](#differences-from-the-terminal-interface)
+
+## The window
+
+```text
++--------------------------------------------------------------------------+
+| ● ● ●   /path of the focused pane       Copy Move New Folder Delete Find |
++-----------+-----------------------------+--------------------------------+
+| Bookmarks | [ camera ][ photos ][+]     | [ backup ][+]                  |
+| Servers   | ~ › camera          Filter  | ~ › backup              Filter |
+| Locations | Name          Size  Date    | Name           Size  Date      |
+|           | lighthouse.jpg 3 MB Today   |                                |
+|           | 8 of 14 selected, 36 MB     | 0 items, 0 B                   |
++-----------+-----------------------------+--------------------------------+
+| ! error lines (most recent), All Errors…, clear                          |
+| Copy +1 queued  ███████░░░  62 MB of 116 MB  12 MB/s  [Pause] [Cancel]   |
++--------------------------------------------------------------------------+
+```
+
+- **Toolbar**: Copy, Move, New Folder, Delete, Find, an activity ring that
+  opens the Activity window, an error badge, the command palette and Help.
+- **Sidebar**: your bookmarks, the SSH servers in your tabs, Home and the
+  mounted volumes. A click opens the item in the focused pane; right-click a
+  bookmark to open it elsewhere or remove it.
+- **Panes**: each has its own tabs, path bar, filter and list. The focused
+  pane has an accent line at the top. Drag the line between the panes to
+  resize them. A tab with a graduation cap belongs to the tutorial.
+- **Path bar**: click a folder in the path to go there. The filter field at
+  its right shows what you typed into the list.
+- **List**: Name, Size and Date Modified, plus Permissions and Owner when you
+  turn them on (right-click a column header, or the View menu). A thin bar
+  under each file shows its size against the largest file in the folder.
+- **Status line**: what is selected and how many bytes, how long the folder
+  took to read, and a **Stop** button while a folder is still being read.
+- **Error lines and job bar**: the latest errors, and the running job with
+  its speed, **Pause/Resume** and **Cancel**.
+
+## Keys
+
+Every command is in the menu bar with its key, and in the command palette.
+Choose a key preset in the welcome sheet or in Settings › Keys:
+
+| | Commander preset | Mac preset |
+| --- | --- | --- |
+| Command palette | `F1` | `⇧⌘P` |
+| Open / Enclosing folder | `Enter` / `?` | `⌘↓` / `⌘↑` |
+| Rename, Find, Open in Editor | `F2`, `F3`, `F4` | `Return`, `⌘F`, `⌘O` |
+| Copy, Move | `F5`, `F6` | `⇧⌘C`, `⇧⌘X` |
+| New Folder, Delete | `F7`, `F8` | `⇧⌘N`, `⌥⌘⌫` |
+| Activity, Switch to Editor | `F9`, `F10` | `⌥⌘L`, `⌃⌘E` |
+| Previous / Next Tab | `F11` / `F12` | `⌃⇧⇥` / `⌃⇥` |
+| New / Close Tab | `⌃T` / `⌃W` | `⌘T` / `⌘W` |
+| Copy Names / Copy Paths | `⌃N` / `⌃P` | `⌘C` / `⌥⌘C` |
+| Select All, Refresh, Single Pane | `⌃A`, `⌃R`, `⌃O` | `⌘A`, `⌘R`, `⌥⌘1` |
+| Show in Left / Right Pane | `⌃←` / `⌃→` | `⌥⌘←` / `⌥⌘→` |
+| Connect to Server | palette | `⌘K` |
+| Sort by Name / Size / Date | View menu | `⌃⌥⌘1` / `2` / `3` |
+
+Both presets: `Tab` switches panes, `Space` marks an item, `+` and `-` select
+and deselect by pattern, `Esc` deselects, and `Esc` three times within a
+second clears the error lines. `⌘Q` quits.
+
+While a list has the focus, keys without `⌘` or `⌃` that run no command are
+typed into the pane's filter; `Backspace` edits it.
+
+To change a key, select the command in the palette and press `⌃K`, then the
+new key; or use Settings › Keys. A key another command already uses, or one
+macOS keeps for itself, is refused.
+
+macOS takes some keys before any app sees them. With default settings, F-keys
+control brightness and volume unless you hold `Fn`, `F11` shows the desktop,
+and `⌃←` `⌃→` switch Spaces. Turn on **Use F1, F2, etc. keys as standard
+function keys** in System Settings › Keyboard › Keyboard Shortcuts › Function
+Keys, and turn off the Mission Control shortcuts you want for File Commander;
+or use the Mac preset.
+
+## Selecting
+
+Settings › General › Selection style:
+
+- **Commander** (the default): arrow keys move a cursor; `Space` marks the
+  item under it and moves down. Marked items are shown in bold, tinted. With
+  nothing marked, commands act on the item under the cursor.
+- **Finder**: arrow keys select, `⇧`-click extends and `⌘`-click adds.
+  Commands act on the selection.
+
+## File operations and jobs
+
+Copy, Move, Delete, Rename and New Folder open sheets:
+
+- **Copy** lists everything it is about to copy while it scans, with the
+  total size. Edit the destination (or **Choose…**), follow links or keep
+  relative links, and choose *Replace existing*, *Update if newer* or *Skip
+  existing* (`1`, `2`, `3`). A destination ending in `.7z` creates an archive.
+- **Delete** is permanent; there is no trash. Links are deleted, not what they
+  point to.
+- **Rename** renames one item or every selected item.
+
+You can also drag items onto the other pane to copy them, or hold `⌘` to move
+them; the sheet still opens. Files dropped from Finder open the Copy sheet.
+
+Jobs run one at a time in the background. The job bar shows the running job;
+the **Activity** window (`F9`) lists every job with its details and lets you
+pause, resume, cancel or dismiss it. Errors don't stop a job: the item is
+skipped and listed in the error lines and the **Errors** window.
+
+If File Commander quits or crashes in the middle of a transfer, the transfer is
+back, paused, in Activity the next time; **Resume** checks the files first and
+continues file by file. See
+[after a crash or quit](user_guide.md#after-a-crash-or-quit).
+
+## Transfer speed
+
+**Transfer Speed** (Transfers menu, the palette, or a click on the speed in the
+job bar) limits copies, moves between disks and SSH transfers. A change applies
+at once, even in the middle of a file. With **Keep for future sessions** off,
+the limit lasts until you quit.
+
+## SSH
+
+File › Connect to Server (`⌘K` in the Mac preset) opens a folder on an SSH
+host in a new tab. Hosts come from `~/.ssh/config`; the sheet lists your
+aliases. When ssh asks for a password, a passphrase or whether to trust a host
+key, File Commander asks in a sheet instead of a terminal. See
+[SSH locations](ssh.md) for how it works.
+
+## The editor
+
+Open in Editor (`F4`) shows the files in [Fresh](editor.md) in its own window.
+`F10` in the editor comes back; Switch to Editor goes there again. The editor's
+tabs and unsaved text stay when you switch, quit or crash. Window › Restart
+Editor Backend restarts Fresh after an upgrade.
+
+## Lua scripts
+
+File › Run Lua Script… runs a script with `fc run`, the terminal interface
+driven by the script, in a terminal window. Scripts work exactly as
+[the scripting guide](scripting.md) describes. The app bundle includes the `fc`
+program, so `File Commander.app/Contents/MacOS/fc run script.lua` works from a
+terminal too.
+
+## Themes
+
+A theme has a color for light and one for dark appearance for every element,
+and a font, size and weight for every element: names, sizes and dates in the
+list, tabs, the path bar, the status line, the job bar, dialogs, the palette,
+the editor's terminal and the tutorial's captions.
+
+- **Appearance**: System, Light or Dark (Settings › General, or View).
+- **Text size**: View › Bigger Text and Smaller Text (`⌘+`, `⌘-`, `⌘0`)
+  scale every font.
+- **Built-in themes**: *Default* uses system colors, so it follows your accent
+  color and Increase Contrast. *Commander Classic* looks like the terminal
+  interface. *High Contrast* has stronger colors.
+- **Theme editor**: Settings › Appearance (or Edit Theme Colors). Pick an
+  element, set its light and dark colors (or a system color) or its font, and
+  watch the preview and the window change. **Save** keeps it as your own
+  theme, **Revert** drops the edits, **Reset to Defaults** goes back to the
+  theme it is based on. **More** imports, exports, duplicates and deletes
+  themes, and imports the terminal interface's `theme_colors.json`.
+
+Your themes are saved in the profile's `themes/` folder and store only what
+differs from their base theme.
+
+## Help and the tutorial
+
+Help (the graduation cap, the Help menu, or `help` in the palette) lists the
+feature explainers by chapter, and **Entire tutorial**, which runs all of
+them in order and remembers where you stopped. An explainer:
+
+- builds demo files in `~/Library/Application Support/File Commander/Tutorial`
+  and opens its own tabs on them;
+- runs real operations there, pressing the keys of your preset, while captions,
+  highlights, a pointer and key badges explain each step;
+- removes the demo files and its tabs when it ends, and puts back what it
+  changed, such as the transfer speed, the theme or a key binding.
+
+**Watch** plays every step. **Guided** stops where you can do a step yourself
+and waits; **Show Me** does it for you. The controls at the top of the window
+pause (`Space`), skip a step, or stop (`Esc`). While an explainer plays in
+Watch mode, other keys are ignored so a stray key can't derail it, and it
+pauses while File Commander is in the background.
+
+Two explainers restart the app: *Quit and come back* quits normally, and
+*Crash recovery* kills File Commander with `SIGKILL` in the middle of a copy,
+after asking. Both continue by themselves after the restart. The *Copy names
+and paths* and *Multiple cursors* explainers put demo paths on your
+clipboard.
+
+## Settings and the profile
+
+The app uses the same profile as the terminal interface:
+`$XDG_CONFIG_HOME/file_commander`, or `~/.config/file_commander`. Workspace,
+bookmarks, palette usage, the editor session and paused transfers carry over
+between the two; only one of them can use a profile at a time. Start the app
+with `--profile DIR` to use another profile (`DIR/file_commander`).
+
+App-only settings (key preset and bindings, selection style, theme, appearance,
+text size and tutorial progress) are in `app_settings.json` in the profile,
+so the terminal interface's `settings.json` key bindings stay its own.
+Preferences are saved as soon as they change.
+
+## Differences from the terminal interface
+
+- Settings are saved immediately, not only on a normal exit.
+- Sorting has keys (View › Sort By).
+- The terminal interface's dialogs are sheets, popovers and windows; the
+  palette's **Help** and **Transfer Speed** are new.
+- Lua scripts run the terminal interface (`fc run`) in a window; they don't
+  drive the app's own window yet.

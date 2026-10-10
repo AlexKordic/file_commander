@@ -50,4 +50,9 @@ std::string unbase64(std::string_view);
 void close_connections();
 std::string control_path(const std::string &host);
 int authenticate(const std::string &host); // foreground terminal owns prompts
+// The ssh program for a host: a registered override, else FC_SSH_BIN, else ssh.
+std::string ssh_command(const std::string &host);
+// Registers a stand-in for ssh for one host name (an empty command removes it).
+// The tutorial's demo server uses it; every other host keeps the normal ssh.
+void set_endpoint_command(const std::string &host, std::string command);
 } // namespace RemoteFS

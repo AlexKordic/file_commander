@@ -20,6 +20,9 @@ built so that the interface never waits for the disk or the network.
 - **Search, don't memorize.** `F1` opens a command palette with every command;
   rebind any key from there. Also: bookmarks, tabs, glob selection,
   find, 7z archive browsing and Lua scripting.
+- **A native Mac app too.** The same file manager with menus, sheets, themes
+  with fonts for every element, and a tutorial that explains each feature by
+  doing it. See [the macOS app](doc/macos_app.md).
 
 ```text
  Tabs  1:demo     cT:new cW:close f11/f12:switch ║ Tabs  1:2026      cT:new cW:close f11/f12:switch

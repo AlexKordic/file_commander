@@ -73,6 +73,27 @@ std::string unbase64(std::string_view in) {
   return out;
 }
 namespace {
+std::mutex endpoint_commands_mutex;
+std::map<std::string, std::string> endpoint_commands;
+}  // namespace
+void set_endpoint_command(const std::string &host, std::string command) {
+  std::lock_guard lock(endpoint_commands_mutex);
+  if (command.empty())
+    endpoint_commands.erase(host);
+  else
+    endpoint_commands[host] = std::move(command);
+}
+std::string ssh_command(const std::string &host) {
+  {
+    std::lock_guard lock(endpoint_commands_mutex);
+    if (auto at = endpoint_commands.find(host); at != endpoint_commands.end())
+      return at->second;
+  }
+  if (const char *binary = std::getenv("FC_SSH_BIN"))
+    return binary;
+  return "ssh";
+}
+namespace {
 struct Client {
   std::mutex mutex;
   pid_t pid = -1;
@@ -200,8 +221,7 @@ struct Client {
                                   "-o",  "ServerAliveInterval=10",
                                   "-o",  "ServerAliveCountMax=2",
                                   host,  bootstrap};
-    if (const char *binary = std::getenv("FC_SSH_BIN"))
-      args[0] = binary;
+    args[0] = ssh_command(host);
     std::vector<char *> argv;
     for (auto &a : args)
       argv.push_back(a.data());
@@ -357,8 +377,7 @@ int authenticate(const std::string &host) {
                                 "ConnectTimeout=10",
                                 host,
                                 "true"};
-  if (const char *binary = getenv("FC_SSH_BIN"))
-    args[0] = binary;
+  args[0] = ssh_command(host);
   std::vector<char *> argv;
   for (auto &a : args)
     argv.push_back(a.data());

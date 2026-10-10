@@ -19,6 +19,12 @@ class EditorManager {
  public:
   using RunForeground = std::function<int(const std::function<int()>&)>;
   using StatusSink    = std::function<void(const std::string&)>;
+  // An attach the host runs itself, for example in a terminal view of a GUI.
+  struct AttachRequest {
+    Filepath                 cwd;
+    std::vector<std::string> argv, environment;
+  };
+  using AttachHandler = std::function<bool(const AttachRequest&, std::string& error)>;
 
   EditorManager() = default;
   EditorManager(RunForeground run_foreground, StatusSink status_sink);
@@ -26,6 +32,10 @@ class EditorManager {
   void set_run_foreground(RunForeground run_foreground);
   void set_status_sink(StatusSink status_sink);
   void set_switch_key(std::string key) { _switch_key = std::move(key); }
+  // With a handler, attaching hands the command to it instead of this process's terminal.
+  void set_attach_handler(AttachHandler handler) { _attach_handler = std::move(handler); }
+  // NAME=value entries added to every Fresh command's environment, replacing inherited ones.
+  void set_extra_environment(std::vector<std::string> environment) { _extra_environment = std::move(environment); }
 
   void               set_binary_override(std::string path);
   const std::string& binary_override() const;
@@ -49,6 +59,9 @@ class EditorManager {
  private:
   RunForeground _run_foreground;
   StatusSink    _status_sink;
+  AttachHandler _attach_handler;
+  std::vector<std::string> _extra_environment;
+  std::vector<std::string> environment() const;
 
   std::string _switch_key = "f10";
   std::string _binary_override;

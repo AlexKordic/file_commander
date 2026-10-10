@@ -1,0 +1,223 @@
+{
+  "id": "editor_multicursor",
+  "title": "Multiple cursors",
+  "order": 19,
+  "duration": 60,
+  "chapter": "editor",
+  "needs": {
+    "editor": true
+  },
+  "summary": "Paste photo paths into code, then edit every line at once with multiple cursors.",
+  "covers": {
+    "anchors": [
+      "editor.text"
+    ]
+  },
+  "steps": [
+    {
+      "open_tabs": {
+        "left": "{home}/camera",
+        "right": "{home}/projects/website",
+        "focus": "left"
+      }
+    },
+    {
+      "chapter": "Editor"
+    },
+    {
+      "caption": "Copy the photo paths",
+      "sub": "Select the photos and Copy Paths"
+    },
+    {
+      "keys": [
+        "@glob_select"
+      ]
+    },
+    {
+      "wait": {
+        "glob": true
+      }
+    },
+    {
+      "wait": {
+        "text_focus": true
+      }
+    },
+    {
+      "type": "*.jpg"
+    },
+    {
+      "keys": [
+        "Enter"
+      ]
+    },
+    {
+      "wait": {
+        "glob": false
+      }
+    },
+    {
+      "keys": [
+        "@paths_to_clipboard"
+      ]
+    },
+    {
+      "wait": {
+        "hud": "8 paths copied"
+      }
+    },
+    {
+      "caption": "Open the code",
+      "sub": "app.js builds the photo grid"
+    },
+    {
+      "focus": "right"
+    },
+    {
+      "cursor": {
+        "side": "right",
+        "name": "app.js"
+      }
+    },
+    {
+      "keys": [
+        "@open_in_editor"
+      ]
+    },
+    {
+      "wait": {
+        "editor": {
+          "contains": "Builds the photo grid"
+        }
+      },
+      "timeout": 25
+    },
+    {
+      "caption": "Paste them as an array",
+      "sub": ""
+    },
+    {
+      "editor_keys": [
+        "Down",
+        "Down",
+        "Down"
+      ]
+    },
+    {
+      "editor_type": "const photos = ["
+    },
+    {
+      "editor_keys": [
+        "Enter",
+        "Ctrl+V"
+      ]
+    },
+    {
+      "wait": {
+        "editor": {
+          "contains": "street-musicians\\.jpg"
+        }
+      }
+    },
+    {
+      "editor_keys": [
+        "Enter"
+      ]
+    },
+    {
+      "editor_type": "];"
+    },
+    {
+      "caption": "Select the common prefix with the mouse",
+      "sub": ""
+    },
+    {
+      "drag": {
+        "from": "editor.text[{home}/camera/]",
+        "to": "editor.text[{home}/camera/]"
+      }
+    },
+    {
+      "caption": "Every line at once",
+      "sub": "Ctrl+D adds a cursor at the next match"
+    },
+    {
+      "editor_keys": [
+        "Ctrl+D",
+        "Ctrl+D",
+        "Ctrl+D",
+        "Ctrl+D",
+        "Ctrl+D",
+        "Ctrl+D",
+        "Ctrl+D"
+      ],
+      "gap": 280
+    },
+    {
+      "editor_keys": [
+        "Backspace"
+      ]
+    },
+    {
+      "caption": "End and Home move every cursor",
+      "sub": "Quote each name, whatever its length"
+    },
+    {
+      "editor_keys": [
+        "End"
+      ]
+    },
+    {
+      "editor_type": "\","
+    },
+    {
+      "editor_keys": [
+        "Home"
+      ]
+    },
+    {
+      "editor_type": "\""
+    },
+    {
+      "editor_keys": [
+        "Home",
+        "Tab",
+        "Esc"
+      ]
+    },
+    {
+      "wait": {
+        "editor": {
+          "contains": "\"lighthouse\\.jpg\","
+        }
+      }
+    },
+    {
+      "pause": 1500
+    },
+    {
+      "editor_keys": [
+        "Ctrl+S"
+      ]
+    },
+    {
+      "pause": 600
+    },
+    {
+      "editor_keys": [
+        "F10"
+      ]
+    },
+    {
+      "wait": {
+        "editor": {
+          "running": false
+        }
+      },
+      "timeout": 10
+    },
+    {
+      "uncaption": true
+    }
+  ]
+}

@@ -1,0 +1,269 @@
+{
+  "id": "archives",
+  "title": "7z archives",
+  "order": 12,
+  "duration": 60,
+  "chapter": "files",
+  "needs": {
+    "idle_queue": true
+  },
+  "summary": "Browse an archive, copy files out, create an archive, and why archives are read-only.",
+  "covers": {
+    "anchors": [
+      "pane.left.path",
+      "errors.lines"
+    ]
+  },
+  "steps": [
+    {
+      "open_tabs": {
+        "left": "{home}",
+        "right": "{home}/backup",
+        "focus": "left"
+      }
+    },
+    {
+      "chapter": "Files"
+    },
+    {
+      "caption": "Archives open like folders",
+      "sub": "Open on a .7z file browses it, read-only"
+    },
+    {
+      "cursor": {
+        "side": "left",
+        "name": "website-2025.7z"
+      }
+    },
+    {
+      "keys": [
+        "@enter_dir"
+      ]
+    },
+    {
+      "wait": {
+        "rows": {
+          "side": "left",
+          "contains": "app.js"
+        }
+      },
+      "timeout": 20
+    },
+    {
+      "highlight": "pane.left.path",
+      "hold": 1600
+    },
+    {
+      "unhighlight": true
+    },
+    {
+      "caption": "Copy files out",
+      "sub": "Copy works as anywhere else"
+    },
+    {
+      "keys": [
+        "@select_all"
+      ]
+    },
+    {
+      "keys": [
+        "@copy"
+      ]
+    },
+    {
+      "wait": {
+        "sheet": "copy"
+      }
+    },
+    {
+      "wait": {
+        "anchor": "sheet.copy.start"
+      }
+    },
+    {
+      "click": "sheet.copy.start",
+      "as_job": "out"
+    },
+    {
+      "wait": {
+        "sheet": null
+      },
+      "timeout": 30
+    },
+    {
+      "wait": {
+        "rows": {
+          "side": "right",
+          "contains": "index.html"
+        }
+      },
+      "timeout": 20
+    },
+    {
+      "caption": "Read-only",
+      "sub": "Changing files inside an archive is refused; copy them out first"
+    },
+    {
+      "keys": [
+        "@mkdir"
+      ]
+    },
+    {
+      "wait": {
+        "errors_at_least": 1
+      }
+    },
+    {
+      "highlight": "errors.lines",
+      "hold": 2000
+    },
+    {
+      "unhighlight": true
+    },
+    {
+      "click": "errors.clear"
+    },
+    {
+      "keys": [
+        "@leave_dir"
+      ]
+    },
+    {
+      "wait": {
+        "path": {
+          "side": "left",
+          "ends_with": "/home"
+        }
+      }
+    },
+    {
+      "caption": "Make an archive",
+      "sub": "Copy to a destination that ends in .7z, and FC creates the archive"
+    },
+    {
+      "navigate": {
+        "side": "left",
+        "to": "{home}/photos/2026"
+      }
+    },
+    {
+      "keys": [
+        "@glob_select"
+      ]
+    },
+    {
+      "wait": {
+        "glob": true
+      }
+    },
+    {
+      "wait": {
+        "text_focus": true
+      }
+    },
+    {
+      "type": "*.jpg"
+    },
+    {
+      "keys": [
+        "Enter"
+      ]
+    },
+    {
+      "wait": {
+        "glob": false
+      }
+    },
+    {
+      "keys": [
+        "@copy"
+      ]
+    },
+    {
+      "wait": {
+        "sheet": "copy"
+      }
+    },
+    {
+      "wait": {
+        "text_focus": true
+      }
+    },
+    {
+      "keys": [
+        "Cmd+A"
+      ]
+    },
+    {
+      "type": "{home}/backup/photos.7z"
+    },
+    {
+      "pause": 600
+    },
+    {
+      "click": "sheet.copy.start",
+      "as_job": "archive"
+    },
+    {
+      "wait": {
+        "sheet": null
+      },
+      "timeout": 20
+    },
+    {
+      "wait": {
+        "job": {
+          "name": "archive",
+          "state": "finished"
+        }
+      },
+      "timeout": 40
+    },
+    {
+      "wait": {
+        "rows": {
+          "side": "right",
+          "contains": "photos.7z"
+        }
+      }
+    },
+    {
+      "caption": "And it opens like a folder",
+      "sub": ""
+    },
+    {
+      "focus": "right"
+    },
+    {
+      "cursor": {
+        "side": "right",
+        "name": "photos.7z"
+      }
+    },
+    {
+      "keys": [
+        "@enter_dir"
+      ]
+    },
+    {
+      "wait": {
+        "rows": {
+          "side": "right",
+          "contains": "beach.jpg"
+        }
+      },
+      "timeout": 20
+    },
+    {
+      "pause": 1200
+    },
+    {
+      "keys": [
+        "@leave_dir"
+      ]
+    },
+    {
+      "uncaption": true
+    }
+  ]
+}

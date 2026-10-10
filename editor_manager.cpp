@@ -219,10 +219,7 @@ int EditorManager::run_command(const Filepath& cwd, const std::vector<std::strin
       if (!setup_error) setup_error = posix_spawn_file_actions_adddup2(&actions, fileno(capture.get()), STDERR_FILENO);
     }
     pid_t child;
-    std::vector<std::string> environment;
-    for (char** e = environ; *e; ++e)
-      if (std::string_view(*e).find("FC_EDITOR_SWITCH_KEY=") != 0) environment.emplace_back(*e);
-    environment.push_back("FC_EDITOR_SWITCH_KEY=" + _switch_key);
+    auto environment = this->environment();
     std::vector<char*> envp;
     for (auto& e : environment) envp.push_back(e.data());
     envp.push_back(nullptr);
@@ -278,6 +275,23 @@ void EditorManager::touch_session(const std::string& id, bool alive) {
   }
 }
 
+std::vector<std::string> EditorManager::environment() const {
+  auto replaced = [this](std::string_view entry) {
+    if (entry.find("FC_EDITOR_SWITCH_KEY=") == 0) return true;
+    for (const auto& extra : _extra_environment) {
+      auto name = std::string_view(extra).substr(0, extra.find('=') + 1);
+      if (!name.empty() && entry.find(name) == 0) return true;
+    }
+    return false;
+  };
+  std::vector<std::string> out;
+  for (char** e = environ; *e; ++e)
+    if (!replaced(*e)) out.emplace_back(*e);
+  out.push_back("FC_EDITOR_SWITCH_KEY=" + _switch_key);
+  out.insert(out.end(), _extra_environment.begin(), _extra_environment.end());
+  return out;
+}
+
 bool EditorManager::attach_session(const std::string& id, std::string& error) {
   EditorSessionInfo* session = find_session(id);
   if (!session) {
@@ -287,6 +301,13 @@ bool EditorManager::attach_session(const std::string& id, std::string& error) {
 
   _last_session_id = id;
   if (!persist_session(error)) return false;
+  if (_attach_handler) {
+    boost::system::error_code ec;
+    auto cwd = boost::filesystem::is_directory(session->cwd, ec) && !ec ? session->cwd : boost::filesystem::current_path();
+    if (!_attach_handler({cwd, {resolved_binary(), "-a", session->id}, environment()}, error)) return false;
+    touch_session(session->id, true);
+    return true;
+  }
   const int rc = run_command(session->cwd, {resolved_binary(), "-a", session->id}, true);
   if (rc != 0) {
     session->alive = false;

@@ -33,6 +33,20 @@
   `pause_button_bg` and `stop_button_bg`).
 - Documentation reorganized into a user guide, key reference, SSH, editor and
   Lua scripting guides, and contributor guides under `doc/dev/`.
+- A native macOS app (`macos/`, built with `macos/build_app.sh`) with the
+  terminal interface's features: menus, a sidebar, sheets, Activity, Errors and
+  Find windows, Commander and Mac key presets, Commander and Finder selection
+  styles, Fresh in its own window, SSH password prompts in sheets, and light
+  and dark themes with a color and a font for every element. See
+  [doc/macos_app.md](doc/macos_app.md).
+- Help explains every feature with an explainer that runs real operations on
+  demo files, with captions, highlights, a pointer and key badges; **Entire
+  tutorial** runs all 25. ExplainerKit, the annotation engine, also records
+  explainers to video, captions and Markdown pages.
+- **Transfer Speed** in the palette changes the speed limit while a copy runs;
+  the new limit applies within the running file.
+- The application model shared by both interfaces is now its own library,
+  `fc_model`, under the terminal interface.
 
 This is a release candidate. It is built from source; there are no binary
 releases yet.

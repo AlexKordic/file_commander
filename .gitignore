@@ -5,3 +5,5 @@ build-*
 __pycache__/
 .DS_Store
 CMakeUserPresets.json
+macos/.build/
+macos/.swiftpm/

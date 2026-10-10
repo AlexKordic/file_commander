@@ -1,0 +1,149 @@
+{
+  "id": "clipboard",
+  "title": "Copy names and paths",
+  "order": 10,
+  "duration": 30,
+  "chapter": "files",
+  "summary": "Put the selected names or full paths on the clipboard, in the order you see them.",
+  "covers": {
+    "commands": [
+      "names_to_clipboard",
+      "paths_to_clipboard"
+    ],
+    "anchors": [
+      "hud"
+    ]
+  },
+  "steps": [
+    {
+      "open_tabs": {
+        "left": "{home}/camera",
+        "right": "{home}/backup",
+        "focus": "left"
+      }
+    },
+    {
+      "chapter": "Files"
+    },
+    {
+      "caption": "Copy paths",
+      "sub": "Copy Paths puts the selected full paths on the clipboard, one per line"
+    },
+    {
+      "keys": [
+        "@glob_select"
+      ]
+    },
+    {
+      "wait": {
+        "glob": true
+      }
+    },
+    {
+      "wait": {
+        "text_focus": true
+      }
+    },
+    {
+      "type": "*.jpg"
+    },
+    {
+      "keys": [
+        "Enter"
+      ]
+    },
+    {
+      "wait": {
+        "glob": false
+      }
+    },
+    {
+      "wait": {
+        "selected": {
+          "side": "left",
+          "count": 8
+        }
+      }
+    },
+    {
+      "keys": [
+        "@paths_to_clipboard"
+      ]
+    },
+    {
+      "wait": {
+        "hud": "8 paths copied"
+      }
+    },
+    {
+      "wait": {
+        "clipboard": {
+          "contains": "{home}/camera/cathedral-steps.jpg"
+        }
+      }
+    },
+    {
+      "highlight": "hud",
+      "hold": 1500
+    },
+    {
+      "caption": "Or just the names",
+      "sub": ""
+    },
+    {
+      "keys": [
+        "@names_to_clipboard"
+      ]
+    },
+    {
+      "wait": {
+        "hud": "8 names copied"
+      }
+    },
+    {
+      "wait": {
+        "clipboard": {
+          "contains": "street-musicians.jpg"
+        }
+      }
+    },
+    {
+      "caption": "In the order you see",
+      "sub": "Sort by size first, and the clipboard lists the photos by size"
+    },
+    {
+      "keys": [
+        "@sort_by_size"
+      ]
+    },
+    {
+      "keys": [
+        "@paths_to_clipboard"
+      ]
+    },
+    {
+      "wait": {
+        "hud": "8 paths copied"
+      }
+    },
+    {
+      "pause": 1500
+    },
+    {
+      "keys": [
+        "@sort_by_name"
+      ]
+    },
+    {
+      "keys": [
+        "@clear_selection"
+      ]
+    },
+    {
+      "unhighlight": true
+    },
+    {
+      "uncaption": true
+    }
+  ]
+}

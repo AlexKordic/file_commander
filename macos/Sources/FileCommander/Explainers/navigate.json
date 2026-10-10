@@ -1,0 +1,219 @@
+{
+  "id": "navigate",
+  "title": "Move around",
+  "order": 2,
+  "duration": 50,
+  "chapter": "basics",
+  "summary": "Open folders and archives, go back up, use the path bar, and show a folder in the other pane.",
+  "covers": {
+    "commands": [
+      "enter_dir",
+      "leave_dir",
+      "target_right",
+      "target_left",
+      "refresh_dir"
+    ]
+  },
+  "steps": [
+    {
+      "open_tabs": {
+        "left": "{home}",
+        "right": "{home}/projects",
+        "focus": "left"
+      }
+    },
+    {
+      "chapter": "Basics"
+    },
+    {
+      "caption": "Open a folder",
+      "sub": "Move the cursor with the arrow keys, then Open. Double-click works too"
+    },
+    {
+      "cursor": {
+        "side": "left",
+        "name": "photos"
+      }
+    },
+    {
+      "pause": 600
+    },
+    {
+      "keys": [
+        "@enter_dir"
+      ]
+    },
+    {
+      "wait": {
+        "path": {
+          "side": "left",
+          "ends_with": "/photos"
+        }
+      }
+    },
+    {
+      "expect": {
+        "rows": {
+          "side": "left",
+          "contains": "2026"
+        }
+      }
+    },
+    {
+      "caption": "Back up",
+      "sub": "Enclosing Folder goes to the parent and puts the cursor on the folder you came from"
+    },
+    {
+      "keys": [
+        "@leave_dir"
+      ]
+    },
+    {
+      "wait": {
+        "path": {
+          "side": "left",
+          "ends_with": "/home"
+        }
+      }
+    },
+    {
+      "wait": {
+        "cursor": {
+          "side": "left",
+          "name": "photos"
+        }
+      }
+    },
+    {
+      "caption": "The path bar",
+      "sub": "Click any folder in the path to jump straight there"
+    },
+    {
+      "highlight": "pane.left.path",
+      "hold": 1800
+    },
+    {
+      "unhighlight": true
+    },
+    {
+      "caption": "Show it in the other pane",
+      "sub": "Show in Right Pane opens the folder under the cursor on the right"
+    },
+    {
+      "cursor": {
+        "side": "left",
+        "name": "music"
+      }
+    },
+    {
+      "keys": [
+        "@target_right"
+      ]
+    },
+    {
+      "wait": {
+        "path": {
+          "side": "right",
+          "ends_with": "/music"
+        }
+      }
+    },
+    {
+      "focus": "right"
+    },
+    {
+      "cursor": {
+        "side": "right",
+        "name": "Field Notes"
+      }
+    },
+    {
+      "caption": "And the other way",
+      "sub": "Show in Left Pane does the same for the left pane"
+    },
+    {
+      "keys": [
+        "@target_left"
+      ]
+    },
+    {
+      "wait": {
+        "path": {
+          "side": "left",
+          "ends_with": "/Field Notes"
+        }
+      }
+    },
+    {
+      "focus": "left"
+    },
+    {
+      "caption": "Folders keep themselves up to date",
+      "sub": "FC watches the folder; Refresh reads it again on demand"
+    },
+    {
+      "keys": [
+        "@refresh_dir"
+      ]
+    },
+    {
+      "wait": {
+        "loaded": "left"
+      }
+    },
+    {
+      "caption": "Archives open like folders",
+      "sub": "Open on a .7z file browses it, read-only. The Archives explainer shows more"
+    },
+    {
+      "navigate": {
+        "side": "left",
+        "to": "{home}",
+        "focus": "{home}/website-2025.7z"
+      }
+    },
+    {
+      "cursor": {
+        "side": "left",
+        "name": "website-2025.7z"
+      }
+    },
+    {
+      "keys": [
+        "@enter_dir"
+      ]
+    },
+    {
+      "wait": {
+        "rows": {
+          "side": "left",
+          "contains": "app.js"
+        }
+      },
+      "timeout": 20
+    },
+    {
+      "highlight": "pane.left.path",
+      "hold": 1800
+    },
+    {
+      "unhighlight": true
+    },
+    {
+      "keys": [
+        "@leave_dir"
+      ]
+    },
+    {
+      "wait": {
+        "path": {
+          "side": "left",
+          "ends_with": "/home"
+        }
+      }
+    },
+    {
+      "uncaption": true
+    }
+  ]
+}

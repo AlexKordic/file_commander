@@ -142,6 +142,48 @@ if(BUILD_TESTING)
   add_test(NAME fc.core COMMAND fc_core_tests)
   set_tests_properties(fc.core PROPERTIES LABELS "unit;core" TIMEOUT 30)
 endif()
+# The application model without a UI toolkit, shared by the terminal interface
+# and the macOS app: panes, tabs, commands, dialogs' workers, watchers, editor.
+add_library(fc_model STATIC pane_model.cpp app_model.cpp dialog_models.cpp file_change_funnel.cpp editor_manager.cpp)
+target_link_libraries(fc_model PUBLIC fc_core)
+if(APPLE)
+  target_link_libraries(fc_model PUBLIC "-framework CoreServices")
+endif()
+# The facade the macOS app imports through Swift's C++ interop (macos/).
+add_library(fc_engine STATIC fc_engine.cpp)
+target_link_libraries(fc_engine PUBLIC fc_model)
+if(APPLE)
+  # One archive with everything the app links: facade, model, core and Boost.
+  set(_fc_engine_bundle "${CMAKE_BINARY_DIR}/libfc_engine_bundle.a")
+  set(_fc_engine_parts $<TARGET_FILE:fc_engine> $<TARGET_FILE:fc_model> $<TARGET_FILE:fc_core>
+    $<TARGET_FILE:Boost::filesystem> $<TARGET_FILE:Boost::json> $<TARGET_FILE:Boost::container>)
+  if(TARGET Boost::atomic)
+    list(APPEND _fc_engine_parts $<TARGET_FILE:Boost::atomic>)
+  endif()
+  add_custom_command(OUTPUT "${_fc_engine_bundle}"
+    COMMAND libtool -static -no_warning_for_no_symbols -o "${_fc_engine_bundle}" ${_fc_engine_parts}
+    DEPENDS fc_engine fc_model fc_core Boost::filesystem Boost::json Boost::container
+    COMMENT "Bundling the engine libraries for the macOS app"
+    VERBATIM)
+  add_custom_target(fc_engine_bundle ALL DEPENDS "${_fc_engine_bundle}")
+endif()
+if(BUILD_TESTING)
+  add_executable(fc_model_tests test/model_contracts.cpp)
+  target_link_libraries(fc_model_tests PRIVATE fc_engine)
+  foreach(_case panes commands rate engine)
+    add_test(NAME fc.model.${_case} COMMAND fc_model_tests ${_case})
+    set_tests_properties(fc.model.${_case} PROPERTIES LABELS "core;unit;model" TIMEOUT 30)
+  endforeach()
+  add_test(NAME fc.model.large COMMAND fc_model_tests large)
+  set_tests_properties(fc.model.large PROPERTIES LABELS "extended;benchmark;model" TIMEOUT 120)
+  # The macOS app's explainers: steps, anchors, commands and coverage, checked without the app.
+  find_package(Python3 COMPONENTS Interpreter)
+  if(APPLE AND Python3_FOUND)
+    add_test(NAME fc.macos.explainers COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/macos/tools/check_explainers.py")
+    set_tests_properties(fc.macos.explainers PROPERTIES LABELS "unit;macos" TIMEOUT 30)
+  endif()
+endif()
+
 if(FC_CORE_ONLY)
   fc_label_manual_tests()
   return()
@@ -256,12 +298,8 @@ set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${CMAKE_CURRENT_
 file(READ "${CMAKE_CURRENT_SOURCE_DIR}/fc_framework.lua" FC_FRAMEWORK_SOURCE)
 configure_file(cmake/fc_framework.hpp.in "${CMAKE_CURRENT_BINARY_DIR}/generated/fc_framework.hpp" @ONLY)
 
-add_library(fc_ui STATIC app.cpp theme.cpp custom_controls.cpp dialogs.cpp commands.cpp job_dialogs.cpp settings_dialogs.cpp find_dialog.cpp shared_state.cpp
-  file_change_funnel.cpp editor_manager.cpp)
-target_link_libraries(fc_ui PUBLIC fc_core ftxui::component)
-if(APPLE)
-  target_link_libraries(fc_ui PRIVATE "-framework CoreServices")
-endif()
+add_library(fc_ui STATIC app.cpp theme.cpp custom_controls.cpp dialogs.cpp commands.cpp job_dialogs.cpp settings_dialogs.cpp find_dialog.cpp shared_state.cpp)
+target_link_libraries(fc_ui PUBLIC fc_model ftxui::component)
 add_library(fc_lua STATIC scripting.cpp)
 target_include_directories(fc_lua PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/generated")
 target_link_libraries(fc_lua PUBLIC fc_ui luajit)
@@ -301,7 +339,7 @@ if(FC_BUILD_FRESH)
   endif()
 endif()
 
-target_compile_definitions(fc_ui PRIVATE FC_FRESH_DEFAULT_BIN="${_fc_fresh_default_bin}")
+target_compile_definitions(fc_model PRIVATE FC_FRESH_DEFAULT_BIN="${_fc_fresh_default_bin}")
 
 set(_fc_archive_default_bin "7zr")
 if(FC_BUILD_LZMA_TOOL)

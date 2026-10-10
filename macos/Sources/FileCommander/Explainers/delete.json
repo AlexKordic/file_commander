@@ -1,0 +1,152 @@
+{
+  "id": "delete",
+  "title": "Delete",
+  "order": 9,
+  "duration": 35,
+  "chapter": "files",
+  "needs": {
+    "idle_queue": true
+  },
+  "summary": "Delete asks first and is permanent; links go, not what they point to.",
+  "covers": {
+    "commands": [
+      "delete"
+    ],
+    "anchors": [
+      "sheet.delete.start"
+    ]
+  },
+  "steps": [
+    {
+      "open_tabs": {
+        "left": "{home}",
+        "right": "{home}/photos",
+        "focus": "left"
+      }
+    },
+    {
+      "chapter": "Files"
+    },
+    {
+      "caption": "Delete is permanent",
+      "sub": "There is no trash. FC lists what it will delete and asks first"
+    },
+    {
+      "cursor": {
+        "side": "left",
+        "name": "old-link"
+      }
+    },
+    {
+      "keys": [
+        "@delete"
+      ]
+    },
+    {
+      "wait": {
+        "sheet": "delete"
+      }
+    },
+    {
+      "highlight": "sheet.delete.start",
+      "hold": 2200
+    },
+    {
+      "click": "sheet.delete.start"
+    },
+    {
+      "wait": {
+        "sheet": null
+      }
+    },
+    {
+      "wait": {
+        "rows": {
+          "side": "left",
+          "lacks": "old-link"
+        }
+      }
+    },
+    {
+      "unhighlight": true
+    },
+    {
+      "caption": "Links go, not what they point to",
+      "sub": "Deleting latest-photos removes the link; photos/2026 stays"
+    },
+    {
+      "cursor": {
+        "side": "left",
+        "name": "latest-photos"
+      }
+    },
+    {
+      "keys": [
+        "@delete"
+      ]
+    },
+    {
+      "wait": {
+        "sheet": "delete"
+      }
+    },
+    {
+      "click": "sheet.delete.start"
+    },
+    {
+      "wait": {
+        "rows": {
+          "side": "left",
+          "lacks": "latest-photos"
+        }
+      }
+    },
+    {
+      "expect": {
+        "file": {
+          "exists": "{home}/photos/2026/beach.jpg"
+        }
+      }
+    },
+    {
+      "caption": "Folders too",
+      "sub": "A folder is deleted from the inside out, as a background job"
+    },
+    {
+      "navigate": {
+        "side": "left",
+        "to": "{home}/projects"
+      }
+    },
+    {
+      "cursor": {
+        "side": "left",
+        "name": "notes"
+      }
+    },
+    {
+      "keys": [
+        "@delete"
+      ]
+    },
+    {
+      "wait": {
+        "sheet": "delete"
+      }
+    },
+    {
+      "click": "sheet.delete.start"
+    },
+    {
+      "wait": {
+        "rows": {
+          "side": "left",
+          "lacks": "notes"
+        }
+      }
+    },
+    {
+      "uncaption": true
+    }
+  ]
+}

@@ -107,6 +107,7 @@ puts all three executables in one `bin/` directory.
 | `asan-ubsan` | `build-asan-ubsan` | Debug | `core` with AddressSanitizer and UndefinedBehaviorSanitizer. |
 | `ubsan` | `build-ubsan` | Debug | `core` with UndefinedBehaviorSanitizer. |
 | `tsan` | `build-tsan` | Debug | `core` with ThreadSanitizer. |
+| `macos-app` | `build-macos` | Release | The macOS app's engine (`fc_engine_bundle`), `fc`, `fresh`, `7zr` and `fc_model_tests`, for macOS 14 and later. `macos/build_app.sh` configures and builds it, then the app; see [macos_app.md](macos_app.md#build). |
 
 Every configure preset uses Ninja and sets `BUILD_TESTING=ON`. Each has a
 build preset of the same name that runs 6 jobs, and a test preset of the same

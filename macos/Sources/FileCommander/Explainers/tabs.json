@@ -1,0 +1,131 @@
+{
+  "id": "tabs",
+  "title": "Tabs",
+  "order": 5,
+  "duration": 40,
+  "chapter": "basics",
+  "summary": "Open, switch, reorder and close tabs; a tab can show a folder, a server or an archive.",
+  "covers": {
+    "commands": [
+      "tab_new",
+      "tab_close",
+      "tab_next",
+      "tab_prev"
+    ],
+    "anchors": [
+      "pane.left.tabs"
+    ]
+  },
+  "steps": [
+    {
+      "open_tabs": {
+        "left": "{home}/camera",
+        "right": "{home}/music",
+        "focus": "left"
+      }
+    },
+    {
+      "chapter": "Basics"
+    },
+    {
+      "remember": true
+    },
+    {
+      "caption": "New tab",
+      "sub": "New Tab opens a tab beside the current one, in the focused pane"
+    },
+    {
+      "keys": [
+        "@tab_new"
+      ]
+    },
+    {
+      "wait": {
+        "tabs": {
+          "side": "left",
+          "added": 1
+        }
+      }
+    },
+    {
+      "navigate": {
+        "side": "left",
+        "to": "{home}/photos"
+      }
+    },
+    {
+      "highlight": "pane.left.tabs",
+      "hold": 1500
+    },
+    {
+      "unhighlight": true
+    },
+    {
+      "caption": "Switch tabs",
+      "sub": "Previous Tab and Next Tab cycle through them; a click works too"
+    },
+    {
+      "keys": [
+        "@tab_prev"
+      ]
+    },
+    {
+      "wait": {
+        "path": {
+          "side": "left",
+          "ends_with": "/camera"
+        }
+      }
+    },
+    {
+      "pause": 700
+    },
+    {
+      "keys": [
+        "@tab_next"
+      ]
+    },
+    {
+      "wait": {
+        "path": {
+          "side": "left",
+          "ends_with": "/photos"
+        }
+      }
+    },
+    {
+      "caption": "Close a tab",
+      "sub": ""
+    },
+    {
+      "keys": [
+        "@tab_close"
+      ]
+    },
+    {
+      "wait": {
+        "tabs": {
+          "side": "left",
+          "added": 0
+        }
+      }
+    },
+    {
+      "caption": "Any kind of place",
+      "sub": "A tab shows a local folder, an SSH server or an archive. Drag a tab to reorder it"
+    },
+    {
+      "highlight": [
+        "pane.left.tabs",
+        "pane.right.tabs"
+      ],
+      "hold": 2400
+    },
+    {
+      "unhighlight": true
+    },
+    {
+      "uncaption": true
+    }
+  ]
+}

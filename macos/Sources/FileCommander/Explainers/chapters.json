@@ -1,0 +1,9 @@
+[
+  { "id": "basics", "title": "Basics", "recap": "Panes, tabs, the filter and the selection." },
+  { "id": "files", "title": "Files", "recap": "Copy, move, rename, delete, find and archives." },
+  { "id": "jobs", "title": "Jobs", "recap": "Everything runs in the background, at the speed you choose." },
+  { "id": "places", "title": "Places", "recap": "Bookmarks and servers." },
+  { "id": "editor", "title": "Editor", "recap": "Fresh, one keypress away." },
+  { "id": "yours", "title": "Make It Yours", "recap": "Commands, keys, themes and scripts." },
+  { "id": "recovery", "title": "Recovery", "recap": "What comes back after a quit or a crash." }
+]

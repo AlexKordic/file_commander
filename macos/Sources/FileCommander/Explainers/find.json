@@ -1,0 +1,102 @@
+{
+  "id": "find",
+  "title": "Find files",
+  "order": 11,
+  "duration": 40,
+  "chapter": "files",
+  "summary": "Search names below a folder and show a result in the pane.",
+  "covers": {
+    "commands": [
+      "find"
+    ],
+    "anchors": [
+      "find.pattern",
+      "find.results",
+      "find.reveal"
+    ]
+  },
+  "steps": [
+    {
+      "open_tabs": {
+        "left": "{home}",
+        "right": "{home}/backup",
+        "focus": "left"
+      }
+    },
+    {
+      "chapter": "Files"
+    },
+    {
+      "caption": "Find files by name",
+      "sub": "Find searches below the current folder. * and ? work; case is ignored"
+    },
+    {
+      "keys": [
+        "@find"
+      ]
+    },
+    {
+      "wait": {
+        "window": "find"
+      }
+    },
+    {
+      "wait": {
+        "text_focus": true
+      }
+    },
+    {
+      "type": "*.jpg"
+    },
+    {
+      "keys": [
+        "Enter"
+      ]
+    },
+    {
+      "wait": {
+        "anchor": "find.result[name=lighthouse.jpg]"
+      },
+      "timeout": 20
+    },
+    {
+      "highlight": "find.results",
+      "hold": 1800
+    },
+    {
+      "caption": "Show it in the pane",
+      "sub": "Show in Pane opens the folder with the cursor on the file"
+    },
+    {
+      "click": "find.result[name=lighthouse.jpg]"
+    },
+    {
+      "click": "find.reveal"
+    },
+    {
+      "wait": {
+        "path": {
+          "side": "left",
+          "ends_with": "/camera"
+        }
+      }
+    },
+    {
+      "wait": {
+        "cursor": {
+          "side": "left",
+          "name": "lighthouse.jpg"
+        }
+      }
+    },
+    {
+      "close_window": "find"
+    },
+    {
+      "unhighlight": true
+    },
+    {
+      "uncaption": true
+    }
+  ]
+}

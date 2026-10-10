@@ -11,6 +11,7 @@ notices in third-party source must be retained.
 | LuaJIT, including incorporated Lua and dlmalloc code | Exact commit in `dependencies.json`; [upstream](https://github.com/LuaJIT/LuaJIT) | MIT for LuaJIT/Lua; public domain for dlmalloc | [Complete upstream notices](licenses/luajit/COPYRIGHT) |
 | LZMA SDK / 7zr | SDK 26.00; fingerprinted source snapshot in `dependencies/` | Public domain; Igor Pavlov and the additional authors named upstream | [SDK statement](licenses/lzma-sdk/lzma-sdk.txt) |
 | Fresh editor | Exact commit and integration bundle in `dependencies.json`; [FC fork](https://github.com/AlexKordic/fresh), [upstream](https://github.com/sinelaw/fresh) | GPL-3.0-or-later; embedded assets and Rust dependencies retain their own terms | [GPLv3](licenses/fresh/LICENSE) |
+| SwiftTerm (macOS app only) | 1.11.2, pinned in `macos/Package.swift`; [upstream](https://github.com/migueldeicaza/SwiftTerm) | MIT, copyright Miguel de Icaza, the xterm.js authors and others | [MIT](licenses/swiftterm/LICENSE) |
 
 FC starts Fresh as a separate executable and communicates with it through its
 command-line/session interface. It does not link Fresh code into `fc`. FC's MIT

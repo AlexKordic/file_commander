@@ -56,17 +56,21 @@ digests, so a large transfer does not stall browsing.
 
 Sources live at the repository root. Library membership in `CMakeLists.txt`,
 not directories, defines the boundaries. Dependencies point one way only:
-`fc_core` <- `fc_ui` <- `fc_lua` <- `fc`.
+`fc_core` <- `fc_model` <- `fc_ui` <- `fc_lua` <- `fc`, and `fc_model` <-
+`fc_engine` <- the macOS app.
 
 | Target | Sources | Links | Rule |
 | --- | --- | --- | --- |
 | `fc_core` | `commander`, `operation`, `copy_planner`, `file_io_jobs`, `archive`, `location`, `traversal`, `settings`, `workspace`, `transfer_journal`, `remote_fs`, `file_metadata`, `runtime_paths`, `scheduled_updates`, `log`, `err` | Boost.Filesystem (patched subtree), Boost.JSON, threads | No FTXUI, Lua or editor headers. Builds alone with `FC_CORE_ONLY=ON`. |
-| `fc_ui` | `app`, `dialogs`, `find_dialog`, `job_dialogs`, `settings_dialogs`, `commands`, `theme`, `custom_controls`, `shared_state`, `file_change_funnel`, `editor_manager` | `fc_core`, FTXUI fork, CoreServices on macOS | Panel composition, dialogs, command catalog, watchers, editor adapter. |
+| `fc_model` | `pane_model`, `app_model`, `dialog_models`, `file_change_funnel`, `editor_manager` | `fc_core`, CoreServices on macOS | The application without a UI toolkit: panes and tabs, the app's command catalog and dispatch, copy discovery, Find, palette ranking, watchers, the editor. No FTXUI. |
+| `fc_engine` | `fc_engine` | `fc_model` | The facade the macOS app imports through Swift's C++ interop; value types only. With `libfc_engine_bundle.a` (engine, model, core and Boost in one archive). See [macos_app.md](macos_app.md). |
+| `fc_ui` | `app`, `dialogs`, `find_dialog`, `job_dialogs`, `settings_dialogs`, `commands`, `theme`, `custom_controls`, `shared_state` | `fc_model`, FTXUI fork | Panel composition, dialogs, the terminal command catalog. |
 | `fc_lua` | `scripting` | `fc_ui`, LuaJIT | Script runner and test adapter; uses application commands and events. |
 | `fc` | `main` | `fc_lua` | Startup, main loop, shutdown order. |
 
-Three libraries are enough: the UI-free core is the boundary that matters,
-and FTXUI-dependent orchestration stays in `fc_ui`. Configure also embeds
+The UI-free core is the boundary that matters. `fc_model` holds what both
+interfaces need above it; FTXUI-dependent orchestration stays in `fc_ui`, and
+the macOS app (`macos/`) is a second observer of `fc_model`. Configure also embeds
 `remote_agent.py` and `fc_framework.lua` into generated headers, builds `fresh`
 (Cargo) and `7zr` (LZMA SDK) as side targets, and bakes their paths in as
 defaults. The Boost.Filesystem changes (cancellable, throttled, staged
@@ -86,8 +90,9 @@ defaults. The Boost.Filesystem changes (cancellable, throttled, staged
 | `fc_render_benchmarks` | `fc_ui` | `fc.benchmark.render` |
 | `fc_command_tests` | `fc_lua` | `fc.command.*` |
 | `fc_review_tests` | `fc_lua` | `fc.regression.*` |
+| `fc_model_tests` | `fc_engine` | `fc.model.*` |
 
-A core-only build produces the first eight. Python drivers run the real `fc`
+A core-only build produces the first eight and `fc_model_tests`. Python drivers run the real `fc`
 binary in PTYs for the remaining suites; see [testing.md](testing.md).
 
 ## Key types

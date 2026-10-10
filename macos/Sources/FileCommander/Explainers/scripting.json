@@ -1,0 +1,78 @@
+{
+  "id": "scripting",
+  "title": "Lua scripts",
+  "order": 23,
+  "duration": 40,
+  "chapter": "yours",
+  "needs": {
+    "idle_queue": true
+  },
+  "summary": "Automate File Commander with Lua: a script copies the camera's photos.",
+  "covers": {
+    "commands": [
+      "run_script"
+    ]
+  },
+  "steps": [
+    {
+      "open_tabs": {
+        "left": "{home}/projects/tools",
+        "right": "{home}/backup",
+        "focus": "left"
+      }
+    },
+    {
+      "chapter": "Make It Yours"
+    },
+    {
+      "caption": "Scripts drive File Commander",
+      "sub": "A Lua script runs commands, presses keys and waits for jobs"
+    },
+    {
+      "cursor": {
+        "side": "left",
+        "name": "copy-jpg.lua"
+      }
+    },
+    {
+      "pause": 1200
+    },
+    {
+      "caption": "Run Lua Script",
+      "sub": "Runs it with fc run, in a terminal window. This one copies every photo to the backup"
+    },
+    {
+      "run_script": "{home}/projects/tools/copy-jpg.lua"
+    },
+    {
+      "wait": {
+        "window": "script"
+      }
+    },
+    {
+      "wait": {
+        "file": {
+          "exists": "{home}/backup/street-musicians.jpg"
+        }
+      },
+      "timeout": 60
+    },
+    {
+      "pause": 2000
+    },
+    {
+      "close_window": "script"
+    },
+    {
+      "front": true
+    },
+    {
+      "caption": "The scripting guide",
+      "sub": "doc/scripting.md describes the API, events and the state table",
+      "hold": 2400
+    },
+    {
+      "uncaption": true
+    }
+  ]
+}

@@ -1,0 +1,127 @@
+{
+  "id": "editor_restart",
+  "title": "Restart the editor",
+  "order": 20,
+  "duration": 35,
+  "chapter": "editor",
+  "needs": {
+    "editor": true
+  },
+  "summary": "After upgrading Fresh, restart its backend; unsaved text survives.",
+  "covers": {
+    "commands": [
+      "restart_editor_backend"
+    ],
+    "anchors": [
+      "sheet.restart.confirm"
+    ]
+  },
+  "steps": [
+    {
+      "open_tabs": {
+        "left": "{home}/projects/notes",
+        "right": "{home}",
+        "focus": "left"
+      }
+    },
+    {
+      "chapter": "Editor"
+    },
+    {
+      "cursor": {
+        "side": "left",
+        "name": "ideas.md"
+      }
+    },
+    {
+      "keys": [
+        "@open_in_editor"
+      ]
+    },
+    {
+      "wait": {
+        "editor": {
+          "contains": "Ideas"
+        }
+      },
+      "timeout": 25
+    },
+    {
+      "editor_keys": [
+        "End"
+      ]
+    },
+    {
+      "editor_type": " (unsaved)"
+    },
+    {
+      "editor_keys": [
+        "F10"
+      ]
+    },
+    {
+      "wait": {
+        "editor": {
+          "running": false
+        }
+      },
+      "timeout": 10
+    },
+    {
+      "caption": "Restart the backend",
+      "sub": "A running editor keeps the old Fresh until it restarts"
+    },
+    {
+      "keys": [
+        "@restart_editor_backend"
+      ]
+    },
+    {
+      "wait": {
+        "sheet": "restart"
+      }
+    },
+    {
+      "click": "sheet.restart.confirm"
+    },
+    {
+      "wait": {
+        "editor": {
+          "running": true
+        }
+      },
+      "timeout": 30
+    },
+    {
+      "wait": {
+        "editor": {
+          "contains": "unsaved"
+        }
+      },
+      "timeout": 20
+    },
+    {
+      "caption": "Your text is still there",
+      "sub": "Fresh saved its recovery data before stopping"
+    },
+    {
+      "pause": 1800
+    },
+    {
+      "editor_keys": [
+        "F10"
+      ]
+    },
+    {
+      "wait": {
+        "editor": {
+          "running": false
+        }
+      },
+      "timeout": 10
+    },
+    {
+      "uncaption": true
+    }
+  ]
+}
