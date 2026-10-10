@@ -10,6 +10,7 @@ FC itself.
 | `storyboard.json` | The scenes: what to type, what to wait for, captions, highlights, pointer moves. |
 | `make_world.py` | Builds the demo world in `/tmp/fc-promo` (demo files, a separate FC and Fresh profile) and a demo website in `/tmp/fc` on the SSH host. |
 | `play.py` | Plays the storyboard in your terminal, or headless for rehearsals. |
+| `runpromo.sh` | One command for a take with the overlay: builds and starts the overlay, rebuilds the world, plays, and stops the overlay on exit. |
 | `overlay/` | `fc-promo-overlay`, a macOS app that draws captions, highlights, a pointer and key badges over the terminal. |
 | `overlay_plan.md` | The design the overlay was built from. |
 
@@ -102,7 +103,19 @@ again after changing the font, the window style or the tab bar.
 
 ### Record with the overlay
 
-With the overlay running, rebuild the world, start the screen recorder, then:
+Start the screen recorder, then in the iTerm2 window you record:
+
+```sh
+tools/promo/runpromo.sh
+```
+
+It builds the overlay, sets up the venv if needed, starts the overlay,
+rebuilds the world, plays the storyboard and stops the overlay however the
+run ends (`Ctrl+\` aborts). It calibrates first when there is no calibration
+yet, or when given `--calibrate`. Other options go to `play.py`, for example
+`--speed 2` or `--skip ssh`. Captions land in `build-promo/captions.srt`.
+
+By hand, with the overlay running, rebuild the world, then:
 
 ```sh
 build-promo/venv/bin/python tools/promo/play.py --overlay \
