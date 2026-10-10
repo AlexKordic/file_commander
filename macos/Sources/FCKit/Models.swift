@@ -86,6 +86,8 @@ public struct AttachRequest: Sendable {
   public var cwd = ""
   public var argv: [String] = []
   public var environment: [String] = []
+  /// The Unix socket of the session's scene, for a native editor window; argv is then empty.
+  public var sceneSocket = ""
 }
 
 public struct JobInfo: Hashable, Sendable, Identifiable {

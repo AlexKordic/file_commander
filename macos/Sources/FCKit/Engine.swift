@@ -115,7 +115,8 @@ public final class Engine {
     }
     for notice in changes.notices { onNotice?(String(notice)) }
     for attach in changes.attaches {
-      onAttach?(AttachRequest(cwd: String(attach.cwd), argv: Engine.strings(attach.argv), environment: Engine.strings(attach.environment)))
+      onAttach?(AttachRequest(cwd: String(attach.cwd), argv: Engine.strings(attach.argv), environment: Engine.strings(attach.environment),
+                              sceneSocket: String(attach.scene_socket)))
     }
     if !eventObservers.isEmpty {
       let batch = fce.events_since(eventCursor)
@@ -306,6 +307,8 @@ public final class Engine {
     fce.set_editor_session(std.string(store), Engine.cxx(environment))
   }
   public func setEditorSwitchKey(_ key: String) { fce.set_editor_switch_key(std.string(key)) }
+  /// Attaches carry the session's scene socket when it has one, for a native editor window.
+  public func setEditorSceneAttach(_ on: Bool) { fce.set_editor_scene_attach(on) }
 
   // MARK: SSH
 

@@ -46,6 +46,7 @@ struct DialogRequest {
 struct AttachRequest {
   std::string              cwd;
   std::vector<std::string> argv, environment;
+  std::string              scene_socket;  // Set for a native editor window; argv is then empty.
 };
 struct Changes {
   uint64_t                   left_revision = 0, right_revision = 0, layout_revision = 0;
@@ -240,7 +241,8 @@ std::vector<BookmarkInfo> bookmarks();
 void                      add_bookmark(const std::string& location);
 void                      remove_bookmark(const std::string& encoded);
 
-// Editor. Attaching is reported through Changes::attaches; the app runs it in a terminal view.
+// Editor. Attaching is reported through Changes::attaches; the app shows it in a native window
+// (scene_socket) or runs it in a terminal view.
 std::string open_in_editor();
 std::string switch_to_editor();
 struct RestartResult {
@@ -250,6 +252,8 @@ struct RestartResult {
 RestartResult restart_editor(bool allow_legacy);
 void set_editor_session(const std::string& session_store, const StringList& environment);
 void set_editor_switch_key(const std::string& key);
+// The app draws Fresh's scene natively: attaches carry the session's scene socket when it has one.
+void set_editor_scene_attach(bool on);
 
 // SSH. authenticate blocks while ssh asks its questions (through SSH_ASKPASS); call it off the main thread.
 int         ssh_authenticate(const std::string& host);  // any thread

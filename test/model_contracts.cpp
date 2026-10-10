@@ -3,6 +3,7 @@
 #include <cstdlib>
 #include <iostream>
 #include "app_model.hpp"
+#include "editor_manager.hpp"
 #include "fc_engine.hpp"
 #include "file_io_jobs.hpp"
 #include "pane_model.hpp"
@@ -161,6 +162,41 @@ void engine() {
   require(!fce::started(), "engine must stop");
 }
 
+// Attaching hands the app Fresh's scene socket when the session serves one, and
+// the terminal command otherwise (an older Fresh, or a host without native view).
+void editor() {
+  Fixture f;
+  world(f);
+  setenv("FC_FRESH_FAKE_LOG", (f / "fresh.log").c_str(), 1);
+  setenv("FC_FRESH_BIN", (std::string(FC_TEST_SOURCE_DIR) + "/test/fakes/fresh_fake.sh").c_str(), 1);
+  unsetenv("FC_FRESH_FAKE_SCENE");
+  EditorManager editor;
+  editor.set_session_store(f / "editor_session.json");
+  std::vector<EditorManager::AttachRequest> attaches;
+  editor.set_attach_handler([&](const EditorManager::AttachRequest& request, std::string&) {
+    attaches.push_back(request);
+    return true;
+  });
+  std::string error;
+  require(editor.switch_to_editor(f.root, error), "terminal attach failed: " + error);
+  require(attaches.size() == 1 && attaches[0].scene_socket.empty() && attaches[0].argv.size() == 3 && attaches[0].argv[1] == "-a",
+          "without a native host the attach is the terminal command");
+  require(!fs::exists(f / "fresh.log"), "a terminal host must not ask for the scene");
+
+  editor.set_scene_attach(true);
+  require(editor.switch_to_editor(f.root, error), "attach without a scene failed: " + error);
+  require(attaches.size() == 2 && attaches[1].scene_socket.empty() && attaches[1].argv.size() == 3,
+          "a session without a scene falls back to the terminal command");
+
+  setenv("FC_FRESH_FAKE_SCENE", "/tmp/fresh-test/fc-x.scene.sock", 1);
+  require(editor.open_files_in_last_session({f / "README.md"}, error), "native open failed: " + error);
+  require(attaches.size() == 3 && attaches[2].scene_socket == "/tmp/fresh-test/fc-x.scene.sock" && attaches[2].argv.empty(),
+          "a session with a scene attaches natively");
+  auto log = read(f / "fresh.log");
+  require(log.rfind("[open-location]") < log.rfind("[ensure]"), "files are routed before the window attaches");
+  unsetenv("FC_FRESH_FAKE_SCENE");
+}
+
 // 100,000 entries: the listing must load, and filtering and sorting must stay
 // interactive (the app re-reads rows lazily, so the model is what costs).
 void large() {
@@ -204,7 +240,7 @@ int main(int argc, char** argv) {
     n();                                                                                                                                                       \
     found = true;                                                                                                                                              \
   }
-    RUN(panes) RUN(commands) RUN(rate) RUN(engine)
+    RUN(panes) RUN(commands) RUN(rate) RUN(engine) RUN(editor)
     if (name == "large") {  // Not part of "all": it writes 100,000 files.
       large();
       found = true;

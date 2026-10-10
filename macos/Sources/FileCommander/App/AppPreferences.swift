@@ -42,6 +42,10 @@ struct AppPreferences: Codable, Equatable {
   /// How far from the pane's edge keyboard moves keep the cursor: 0 lets it reach
   /// the edge, 10 keeps it in the middle (until the list's start or end).
   var scrollMargin = 3
+  /// In the editor, Option sends Alt (for Fresh's Alt shortcuts) instead of typing its character.
+  var optionAsAlt = false
+  /// Show the editor in a terminal view instead of drawing it natively.
+  var terminalEditor = false
 
   init() {}
 
@@ -63,6 +67,8 @@ struct AppPreferences: Codable, Equatable {
     tutorialPosition = try c.decodeIfPresent(Int.self, forKey: .tutorialPosition) ?? d.tutorialPosition
     paneSplit = try c.decodeIfPresent(Double.self, forKey: .paneSplit) ?? d.paneSplit
     scrollMargin = min(10, max(0, try c.decodeIfPresent(Int.self, forKey: .scrollMargin) ?? d.scrollMargin))
+    optionAsAlt = try c.decodeIfPresent(Bool.self, forKey: .optionAsAlt) ?? d.optionAsAlt
+    terminalEditor = try c.decodeIfPresent(Bool.self, forKey: .terminalEditor) ?? d.terminalEditor
   }
 
   static func load(from url: URL) -> AppPreferences {

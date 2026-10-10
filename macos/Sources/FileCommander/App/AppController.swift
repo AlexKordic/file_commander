@@ -149,6 +149,7 @@ final class AppController {
     engine.onNotice = { [weak self] in self?.flash($0) }
     engine.onAttach = { [weak self] in self?.editor.attach($0, app: self) }
     engine.setEditorSwitchKey(editorSwitchKey)
+    engine.setEditorSceneAttach(!preferences.terminalEditor)
     keyRouter = KeyRouter(app: self)
     if resumeExplainer {
       tutorial.resumeAfterRelaunch()

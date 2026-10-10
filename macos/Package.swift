@@ -28,15 +28,18 @@ let package = Package(
       ]),
     // Annotation engine for explainers: no dependency on File Commander.
     .target(name: "ExplainerKit"),
+    // Client of a Fresh session's scene channel: socket, scene model, key mapping.
+    .target(name: "FreshKit"),
     .executableTarget(
       name: "FileCommander",
-      dependencies: ["FCKit", "ExplainerKit", .product(name: "SwiftTerm", package: "SwiftTerm")],
+      dependencies: ["FCKit", "ExplainerKit", "FreshKit", .product(name: "SwiftTerm", package: "SwiftTerm")],
       resources: [.copy("Explainers"), .copy("Themes")],
       swiftSettings: [.interoperabilityMode(.Cxx)]),
     .executableTarget(name: "fc-relaunch"),
     .executableTarget(name: "fc-askpass"),
     .testTarget(name: "FCKitTests", dependencies: ["FCKit"], swiftSettings: [.interoperabilityMode(.Cxx)]),
     .testTarget(name: "ExplainerKitTests", dependencies: ["ExplainerKit"]),
+    .testTarget(name: "FreshKitTests", dependencies: ["FreshKit"]),
   ],
   swiftLanguageModes: [.v5],
   cxxLanguageStandard: .cxx20

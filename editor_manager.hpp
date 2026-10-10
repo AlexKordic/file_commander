@@ -19,10 +19,13 @@ class EditorManager {
  public:
   using RunForeground = std::function<int(const std::function<int()>&)>;
   using StatusSink    = std::function<void(const std::string&)>;
-  // An attach the host runs itself, for example in a terminal view of a GUI.
+  // An attach the host runs itself: a command for a terminal view of a GUI, or,
+  // when scene_socket is set, the Unix socket a native editor window connects to
+  // (argv is then empty).
   struct AttachRequest {
     Filepath                 cwd;
     std::vector<std::string> argv, environment;
+    std::string              scene_socket;
   };
   using AttachHandler = std::function<bool(const AttachRequest&, std::string& error)>;
 
@@ -34,6 +37,9 @@ class EditorManager {
   void set_switch_key(std::string key) { _switch_key = std::move(key); }
   // With a handler, attaching hands the command to it instead of this process's terminal.
   void set_attach_handler(AttachHandler handler) { _attach_handler = std::move(handler); }
+  // The handler can show Fresh's scene natively: attaching asks the session for
+  // its scene socket first, and falls back to the terminal command without one.
+  void set_scene_attach(bool on) { _scene_attach = on; }
   // NAME=value entries added to every Fresh command's environment, replacing inherited ones.
   void set_extra_environment(std::vector<std::string> environment) { _extra_environment = std::move(environment); }
 
@@ -60,6 +66,8 @@ class EditorManager {
   RunForeground _run_foreground;
   StatusSink    _status_sink;
   AttachHandler _attach_handler;
+  bool          _scene_attach = false;
+  std::string   scene_socket(const EditorSessionInfo& session);
   std::vector<std::string> _extra_environment;
   std::vector<std::string> environment() const;
 

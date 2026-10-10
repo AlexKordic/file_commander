@@ -275,7 +275,7 @@ StartResult start(const StartOptions& options) {
   };
   file_operations().set_event_sink(emit);
   e.app->editor().set_attach_handler([&e](const EditorManager::AttachRequest& request, std::string&) {
-    e.attaches.push_back({request.cwd.native(), request.argv, request.environment});
+    e.attaches.push_back({request.cwd.native(), request.argv, request.environment, request.scene_socket});
     return true;
   });
   const bool restore = options.restore && !explicit_paths;
@@ -787,6 +787,9 @@ void set_editor_session(const std::string& session_store, const StringList& envi
 }
 void set_editor_switch_key(const std::string& key) {
   if (started()) app().editor().set_switch_key(key);
+}
+void set_editor_scene_attach(bool on) {
+  if (started()) app().editor().set_scene_attach(on);
 }
 
 int ssh_authenticate(const std::string& host) {

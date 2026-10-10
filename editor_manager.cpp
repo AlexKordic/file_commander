@@ -292,6 +292,21 @@ std::vector<std::string> EditorManager::environment() const {
   return out;
 }
 
+// Starts the session if needed and returns where it serves its scene, or "" when
+// it serves none (an older Fresh, or a build without the scene channel).
+std::string EditorManager::scene_socket(const EditorSessionInfo& session) {
+  std::string output;
+  if (run_command(session.cwd, {resolved_binary(), "--cmd", "session", "ensure", session.id}, false, &output) != 0) return {};
+  // Fresh prints one JSON line; anything before it is log output.
+  auto start = output.rfind("\n{");
+  try {
+    auto record = boost::json::parse(start == std::string::npos ? output : output.substr(start + 1)).as_object();
+    if (auto* scene = record.if_contains("scene"); scene && scene->is_string()) return std::string(scene->as_string());
+  } catch (const std::exception&) {
+  }
+  return {};
+}
+
 bool EditorManager::attach_session(const std::string& id, std::string& error) {
   EditorSessionInfo* session = find_session(id);
   if (!session) {
@@ -304,7 +319,14 @@ bool EditorManager::attach_session(const std::string& id, std::string& error) {
   if (_attach_handler) {
     boost::system::error_code ec;
     auto cwd = boost::filesystem::is_directory(session->cwd, ec) && !ec ? session->cwd : boost::filesystem::current_path();
-    if (!_attach_handler({cwd, {resolved_binary(), "-a", session->id}, environment()}, error)) return false;
+    if (_scene_attach) {
+      if (auto socket = scene_socket(*session); !socket.empty()) {
+        if (!_attach_handler({cwd, {}, environment(), socket}, error)) return false;
+        touch_session(session->id, true);
+        return true;
+      }
+    }
+    if (!_attach_handler({cwd, {resolved_binary(), "-a", session->id}, environment(), {}}, error)) return false;
     touch_session(session->id, true);
     return true;
   }

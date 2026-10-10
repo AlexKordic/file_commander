@@ -434,14 +434,7 @@ final class TutorialCoordinator: ExplainerHost {
     guard let start = editorAnchors.cell(from), let end = editorAnchors.cell(to, after: true) else {
       throw ExplainerFailure(script: runner.script?.id ?? "", step: runner.stepIndex, message: "Can't find \(rawFrom) in the editor")
     }
-    let row = start.row + 1
-    app.editor.send("\u{1b}[<0;\(start.col + 1);\(row)M")
-    let steps = max(1, end.col - start.col)
-    for col in start.col + 1...max(start.col + 1, end.col) {
-      try await Task.sleep(for: .seconds(duration / Double(steps)))
-      app.editor.send("\u{1b}[<32;\(col + 1);\(row)M")
-    }
-    app.editor.send("\u{1b}[<0;\(end.col + 1);\(row)m")
+    await app.editor.drag(row: start.row, from: start.col, to: end.col, duration: duration)
   }
 
   // MARK: Host steps
@@ -533,21 +526,20 @@ final class TutorialCoordinator: ExplainerHost {
       let text = v.string ?? ""
       runner.overlay.badge("⌨ " + text)
       for character in text {
-        app.editor.send(String(character))
+        app.editor.type(String(character))
         try await runner.sleep(0.05)
       }
     case "notice":
       app.flash(world.expand(v.string ?? ""))
     case "editor_keys":
-      // Sent as terminal bytes, so they reach Fresh whatever has the focus.
+      // Sent to Fresh directly, so they reach it whatever has the focus.
       let gap = (step.option("gap")?.number ?? 200) / 1000
       for chord in v.strings {
         runner.overlay.badge(keyLabel(chord))
         runner.record("keys", chord)
-        guard let bytes = TerminalKeys.bytes(for: chord) else {
-          throw ExplainerFailure(script: runner.script?.id ?? "", step: runner.stepIndex, message: "No terminal sequence for \(chord)")
+        guard app.editor.press(chord, app: app) else {
+          throw ExplainerFailure(script: runner.script?.id ?? "", step: runner.stepIndex, message: "Can't send \(chord) to the editor")
         }
-        app.editor.send(bytes)
         try await runner.sleep(gap)
       }
     case "remove_bookmark":

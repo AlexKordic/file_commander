@@ -170,7 +170,8 @@ endif()
 if(BUILD_TESTING)
   add_executable(fc_model_tests test/model_contracts.cpp)
   target_link_libraries(fc_model_tests PRIVATE fc_engine)
-  foreach(_case panes commands rate engine)
+  target_compile_definitions(fc_model_tests PRIVATE FC_TEST_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
+  foreach(_case panes commands rate engine editor)
     add_test(NAME fc.model.${_case} COMMAND fc_model_tests ${_case})
     set_tests_properties(fc.model.${_case} PROPERTIES LABELS "core;unit;model" TIMEOUT 30)
   endforeach()
@@ -318,11 +319,13 @@ if(FC_BUILD_FRESH)
 
   if(EXISTS "${_fresh_manifest}")
     # Cargo tracks implementation, build-script, workspace and lockfile changes.
-    # Always ask it to check freshness, then stage only changed bytes.
+    # Always ask it to check freshness, then stage only changed bytes. The web
+    # feature gives FC sessions the scene channel the macOS app's native
+    # editor window attaches over.
     add_custom_target(fresh_bin ALL
       BYPRODUCTS "${_fresh_stage_bin}"
       COMMAND ${CMAKE_COMMAND} -E make_directory "${_fresh_stage_dir}"
-      COMMAND cargo build --release --locked -p fresh-editor --bin fresh --manifest-path "${_fresh_manifest}"
+      COMMAND cargo build --release --locked -p fresh-editor --bin fresh --features web --manifest-path "${_fresh_manifest}"
       # Replace the executable atomically: a detached editor may still have
       # the previous binary mapped while a new build is being staged.
       COMMAND ${CMAKE_COMMAND} -E copy_if_different "${_fresh_built_bin}" "${_fresh_stage_bin}.new"

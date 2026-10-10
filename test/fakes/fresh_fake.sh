@@ -17,6 +17,15 @@ if [[ "${1-}" == "--cmd" && "${2-}" == "session" && ( "${3-}" == "open-file" || 
   exit "${FC_FRESH_FAKE_OPEN_RC:-0}"
 fi
 
+if [[ "${1-}" == "--cmd" && "${2-}" == "session" && "${3-}" == "ensure" ]]; then
+  if [[ -n "${FC_FRESH_FAKE_SCENE-}" ]]; then
+    printf '{"scene":"%s","pid":1}\n' "$FC_FRESH_FAKE_SCENE"
+  else
+    printf '{"scene":null,"pid":1}\n'
+  fi
+  exit 0
+fi
+
 if [[ "${1-}" == "--cmd" && "${2-}" == "session" && "${3-}" == "prepare-restart" ]]; then
   if [[ "${FC_FRESH_FAKE_RESTART_RC:-0}" == "20" && "${5-}" == "--allow-legacy-checkpoint" ]]; then exit 0; fi
   if [[ "${FC_FRESH_FAKE_RESTART_RC:-0}" != "0" ]]; then printf '%s\n' 'Restart checkpoint unavailable' >&2; fi
