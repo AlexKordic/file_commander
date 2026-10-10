@@ -172,17 +172,19 @@ Jobs run one at a time in the order you start them; later jobs wait in a queue.
 
 ### Limit transfer speed
 
-To keep a large copy from saturating a disk or network link, set
-`transfer_rate_limit` in `settings.json` to a speed in bytes per second. It
-applies to copies, moves between filesystems and SSH transfers; `0`, the
-default, means no limit. For example, 10 MiB/s:
+To keep a large copy from saturating a disk or network link, run **Transfer
+Speed** from the palette (`F1`, type `speed`). Choose a preset or enter MiB/s;
+`0` or *Unlimited* means no limit. The limit applies to copies, moves between
+filesystems and SSH transfers, and a change applies to a running copy at once,
+even in the middle of a file. With **Keep for future sessions** on, it is saved
+as `transfer_rate_limit` (bytes per second) in `settings.json`:
 
 ```json
 "transfer_rate_limit": 10485760
 ```
 
-Edit the file while FC isn't running: FC rewrites `settings.json` when it
-exits. See [configuration files](#configuration-files).
+To edit the file by hand, do it while FC isn't running: FC rewrites
+`settings.json` when it exits. See [configuration files](#configuration-files).
 
 ## After a crash or quit
 

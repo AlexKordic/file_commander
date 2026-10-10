@@ -200,8 +200,10 @@ class FileJobs {
 
   /// Dismiss (remove) a job from history by ID.
   virtual void dismiss_job(uint64_t job_id) = 0;
-  // TODO: review later
+  // Bytes per second for copies and moves; 0 is unlimited. A change applies to
+  // running transfers within one throttle step and emits transfer_rate_changed.
   virtual void set_transfer_rate(uint64_t bytes_per_second) = 0;
+  virtual uint64_t transfer_rate() const = 0;
 
   virtual std::deque<JobErrorInfo> get_errors(int count) = 0;
 

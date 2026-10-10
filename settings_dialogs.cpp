@@ -99,6 +99,82 @@ void ConnectSSHDialog::submit() {
   if (connect(host, path.empty() ? "/" : path, error)) close();
 }
 
+namespace {
+// Presets in MiB/s; 0 is unlimited. The last entry takes the custom value.
+const uint64_t kSpeedPresets[] = {0, 100, 10, 2, 1};
+}  // namespace
+
+TransferSpeedDialog::TransferSpeedDialog(std::function<void()> close, std::function<uint64_t()> current,
+                                         std::function<void(uint64_t, bool)> apply)
+    : Dialog(nullptr), close(std::move(close)), current(std::move(current)), apply(std::move(apply)) {
+  labels = {"Unlimited", "100 MiB/s", "10 MiB/s", "2 MiB/s", "1 MiB/s", "Custom (MiB/s below)"};
+  presets = Radiobox(&labels, &selected);
+  InputOption option;
+  option.multiline       = false;
+  option.cursor_position = &custom_cursor;
+  option.on_enter        = [this] { submit(); };
+  custom_input           = Input(&custom, "for example 25", option) | showInputCursor(&custom_cursor);
+  keep                   = Checkbox("Keep for future sessions", &persist);
+  ButtonOption button_option;
+  button_option.transform = ascii_button_transform();
+  auto set    = Button(" Apply ", [this] { submit(); }, button_option);
+  auto cancel = Button(" Cancel ", this->close, button_option);
+  navigation  = CatchEvent(Container::Vertical({presets, custom_input, keep, Container::Horizontal({set, cancel})}), [this](Event e) {
+    if (e == keys().key_cancel_dialog) {
+      this->close();
+      return true;
+    }
+    if (e == Event::Return && presets->Focused()) {
+      submit();
+      return true;
+    }
+    return false;
+  });
+  renderer = Renderer(navigation, [this, set, cancel] {
+    const auto rate = this->current();
+    Elements content{
+      paragraph("Limits copies, moves between filesystems and SSH transfers. A change applies to a running copy at once."),
+      text(rate ? "Now: " + std::to_string(rate / (1024 * 1024)) + " MiB/s" : "Now: unlimited") | dim,
+      separator(),
+      presets->Render(),
+      hbox({text("Custom: "), custom_input->Render() | size(WIDTH, EQUAL, 12)}),
+      keep->Render(),
+    };
+    if (!error.empty()) content.push_back(paragraph(error) | color(Color::Red));
+    content.push_back(separator());
+    content.push_back(hbox({set->Render(), filler(), cancel->Render()}));
+    return window(text(" Transfer speed ") | bold, vbox(std::move(content))) | size(WIDTH, LESS_THAN, 72);
+  });
+}
+
+void TransferSpeedDialog::OnShow() {
+  error.clear();
+  const uint64_t mib = current() / (1024 * 1024);
+  selected = 5;
+  for (int i = 0; i < 5; ++i)
+    if (kSpeedPresets[i] == mib) selected = i;
+  custom = selected == 5 ? std::to_string(mib) : "";
+  custom_cursor = static_cast<int>(custom.size());
+  presets->TakeFocus();
+}
+
+void TransferSpeedDialog::submit() {
+  error.clear();
+  uint64_t mib = selected < 5 ? kSpeedPresets[selected] : 0;
+  if (selected == 5) {
+    try {
+      size_t used = 0;
+      mib = std::stoull(custom, &used);
+      if (used != custom.size()) throw std::invalid_argument(custom);
+    } catch (const std::exception&) {
+      error = "Enter a whole number of MiB/s, or 0 for unlimited";
+      return;
+    }
+  }
+  apply(mib * 1024 * 1024, persist);
+  close();
+}
+
 RestartEditorDialog::RestartEditorDialog(std::function<void()> close,
   std::function<EditorManager::RestartResult(bool, std::string&)> prepare_restart,
   std::function<void()> attach_editor)

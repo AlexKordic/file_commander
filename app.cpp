@@ -1160,6 +1160,12 @@ FileCommander::FileCommander(Filepath l, Filepath r, ExecuteOnUiThread exec, std
       std::string error;
       if (!_editor_manager.switch_to_editor(focused_panel().dir.path, error) && !error.empty()) file_operations().report_error(error);
     });
+  _overlay_dialogs["TransferSpeed"] = std::make_shared<TransferSpeedDialog>(
+      _close_dialog, [] { return file_operations().transfer_rate(); },
+      [this](uint64_t bytes_per_second, bool persist) {
+        file_operations().set_transfer_rate(bytes_per_second);
+        if (persist) _transfer_rate_limit = bytes_per_second;  // Saved with the other settings on exit.
+      });
   _overlay_dialogs["ConnectSSH"] = std::make_shared<ConnectSSHDialog>(
       _close_dialog, [this](const std::string &host, const std::string &path, std::string &error) {
         try {

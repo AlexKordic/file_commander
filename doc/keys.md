@@ -65,6 +65,7 @@ These act on the focused panel.
 | `Ctrl+U` | `switch_editor_next` | Alternative key for switching to the editor. |
 | – | `connect_ssh` | Open an SSH location in a new tab. Run it from the palette. |
 | – | `restart_editor_backend` | Restart the editor after upgrading Fresh. Run it from the palette. |
+| – | `transfer_speed` | Limit the speed of copies and moves, even while one runs. Run it from the palette. |
 
 Mouse: click a panel tab to activate it. Click the **Name**, **Size** and
 **Date** headers to sort; sorting has no keyboard command yet.

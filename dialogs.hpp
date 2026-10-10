@@ -370,6 +370,23 @@ struct ConnectSSHDialog : Dialog {
   std::function<bool(const std::string &, const std::string &, std::string &)> connect;
 };
 
+// Limits copies and moves, applied to running jobs at once.
+struct TransferSpeedDialog : Dialog {
+  TransferSpeedDialog(std::function<void()> close, std::function<uint64_t()> current,
+                      std::function<void(uint64_t bytes_per_second, bool persist)> apply);
+  void OnShow() override;
+  void submit();
+  std::vector<std::string> labels;
+  int selected = 0;
+  bool persist = true;
+  std::string custom, error;
+  int custom_cursor = 0;
+  Component presets, custom_input, keep;
+  std::function<void()> close;
+  std::function<uint64_t()> current;
+  std::function<void(uint64_t, bool)> apply;
+};
+
 struct CommandPaletteDialog : Dialog {
   CommandPaletteDialog(
     std::function<void()> close_dialog,

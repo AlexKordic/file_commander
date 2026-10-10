@@ -817,13 +817,22 @@ class ThreadedFileJobs : public FileJobs {
       if (job->_cancel_requested || !wait_for_resume(job))
         throw ConnectionError("Transfer interrupted; Resume requires validation");
     };
+    // The window restarts whenever the limit changes, so a new limit applies
+    // at once without a stall (lowered) or a burst to catch up (raised).
     auto copy_started = std::chrono::steady_clock::now();
+    int64_t window_bytes = 0;
+    uint64_t window_rate = _transfer_rate.load();
     auto progress = [&](int64_t n) {
       checkpoint();
       auto rate = _transfer_rate.load();
+      if (rate != window_rate) {
+        window_rate = rate;
+        copy_started = std::chrono::steady_clock::now();
+        window_bytes = n;
+      }
       if (rate) {
         auto deadline = copy_started + std::chrono::duration_cast<std::chrono::steady_clock::duration>(
-                                           std::chrono::duration<double>(double(n) / rate));
+                                           std::chrono::duration<double>(double(n - window_bytes) / rate));
         while (std::chrono::steady_clock::now() < deadline) {
           checkpoint();
           std::this_thread::sleep_for(std::chrono::milliseconds(20));
@@ -1135,7 +1144,7 @@ class ThreadedFileJobs : public FileJobs {
         boost::filesystem::copy_file_options options;
         options.io = _services.file_io.get();
         options.cancel_requested = &job->_cancel_requested;
-        options.bytes_per_second = _transfer_rate.load();
+        options.bytes_per_second_source = &_transfer_rate;
         options.bytes_copied = &job->_copy_bytes;
         options.checkpoint = [](void* context) { return wait_for_resume(static_cast<JobSpec*>(context)); };
         options.checkpoint_context = job;
@@ -1167,8 +1176,10 @@ class ThreadedFileJobs : public FileJobs {
   }
 
   void set_transfer_rate(uint64_t bytes_per_second) override {
-    _transfer_rate = bytes_per_second;
+    if (_transfer_rate.exchange(bytes_per_second) != bytes_per_second)
+      _updates->emit("transfer_rate_changed", std::to_string(bytes_per_second));
   }
+  uint64_t transfer_rate() const override { return _transfer_rate.load(); }
 
   void run_archive_create(JobSpec* job) {
     if (job->_items.empty()) {
@@ -1387,7 +1398,7 @@ class ThreadedFileJobs : public FileJobs {
       cfo.options = (job->_copy_conflict == CopyConflictMode::Skip)
         ? copy_options::none
         : copy_options::overwrite_existing;
-      cfo.bytes_per_second = _transfer_rate;  // TODO: make configurable per-job
+      cfo.bytes_per_second_source = &_transfer_rate;  // Read per chunk, so a new limit applies mid-file.
       cfo.cancel_requested = &job->_cancel_requested;
       cfo.bytes_copied = &job->_copy_bytes;
       cfo.checkpoint = [](void* context) { return wait_for_resume(static_cast<JobSpec*>(context)); };
