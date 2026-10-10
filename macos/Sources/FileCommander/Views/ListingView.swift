@@ -191,18 +191,29 @@ struct ListingView: NSViewRepresentable {
 
     // MARK: Keyboard cursor and scrolling
 
+    /// The part of the table rows can be seen in: the visible rect minus the
+    /// column header, which floats over the top of the content.
+    private func rowArea() -> NSRect? {
+      guard let table else { return nil }
+      var area = table.visibleRect
+      if let header = table.headerView, header.window != nil, !header.isHiddenOrHasHiddenAncestor {
+        let overlap = area.intersection(table.convert(header.bounds, from: header))
+        if !overlap.isNull, overlap.height > 0, overlap.minY <= area.minY + 0.5 {
+          area.origin.y = overlap.maxY
+          area.size.height -= overlap.height
+        }
+      }
+      return area.height > 0 ? area : nil
+    }
+
     /// The rows that are completely visible.
     func fullyVisibleRows() -> ClosedRange<Int>? {
-      guard let table, table.numberOfRows > 0 else { return nil }
-      var visible = table.visibleRect
-      let inset = table.enclosingScrollView?.contentInsets.top ?? 0
-      visible.origin.y += inset
-      visible.size.height -= inset
-      let range = table.rows(in: visible)
+      guard let table, table.numberOfRows > 0, let area = rowArea() else { return nil }
+      let range = table.rows(in: area)
       guard range.length > 0 else { return nil }
       var first = range.location, last = range.location + range.length - 1
-      if table.rect(ofRow: first).minY < visible.minY - 0.5, first < last { first += 1 }
-      if table.rect(ofRow: last).maxY > visible.maxY + 0.5, last > first { last -= 1 }
+      if table.rect(ofRow: first).minY < area.minY - 0.5, first < last { first += 1 }
+      if table.rect(ofRow: last).maxY > area.maxY + 0.5, last > first { last -= 1 }
       return first...last
     }
 
@@ -210,21 +221,23 @@ struct ListingView: NSViewRepresentable {
     /// Settings asks for: 0 lets it touch the edge, 10 keeps it centered, except
     /// near the start and end of the list.
     func scroll(toKeep row: Int) {
-      guard let table, let clip = table.enclosingScrollView?.contentView, row >= 0, row < table.numberOfRows,
-            let visible = fullyVisibleRows() else { return }
+      guard let table, let scrollView = table.enclosingScrollView, row >= 0, row < table.numberOfRows,
+            let visible = fullyVisibleRows(), let area = rowArea() else { return }
       let rowsShown = visible.count
       let margin = Int((Double(rowsShown - 1) / 2 * Double(app.preferences.scrollMargin) / 10).rounded(.down))
       var first = visible.lowerBound
       if row - margin < first { first = row - margin }
       if row + margin > first + rowsShown - 1 { first = row + margin - rowsShown + 1 }
       first = min(max(0, first), max(0, table.numberOfRows - rowsShown))
-      guard first != visible.lowerBound else { return }
-      let inset = table.enclosingScrollView?.contentInsets.top ?? 0
+      // Align row `first` with the top of the row area (below the header); the
+      // distance is measured, so insets and the header can't push a row under it.
+      let delta = table.rect(ofRow: first).minY - area.minY
+      guard abs(delta) > 0.5 else { return }
+      let clip = scrollView.contentView
       var origin = clip.bounds.origin
-      origin.y = table.rect(ofRow: first).minY - inset
-      if first == 0 { origin.y = -inset }
-      clip.setBoundsOrigin(origin)
-      table.enclosingScrollView?.reflectScrolledClipView(clip)
+      origin.y += delta
+      clip.setBoundsOrigin(clip.constrainBoundsRect(NSRect(origin: origin, size: clip.bounds.size)).origin)
+      scrollView.reflectScrolledClipView(clip)
     }
 
     /// Up, Down, Page Up, Page Down, Home and End move the cursor (and, with

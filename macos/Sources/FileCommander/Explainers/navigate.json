@@ -286,6 +286,98 @@
       }
     },
     {
+      "wait": {
+        "cursor_visible": {
+          "side": "left"
+        }
+      }
+    },
+    {
+      "keys": [
+        "Down",
+        "Down",
+        "Down",
+        "Down",
+        "Down",
+        "Down",
+        "Down",
+        "Down",
+        "Down",
+        "Down",
+        "Down",
+        "Down",
+        "Down",
+        "Down",
+        "Down",
+        "Down",
+        "Down",
+        "Down",
+        "Down",
+        "Down",
+        "Down",
+        "Down",
+        "Down",
+        "Down",
+        "Down",
+        "Down",
+        "Down",
+        "Down",
+        "Down",
+        "Down"
+      ],
+      "gap": 35
+    },
+    {
+      "keys": [
+        "Up",
+        "Up",
+        "Up",
+        "Up",
+        "Up",
+        "Up",
+        "Up",
+        "Up",
+        "Up",
+        "Up",
+        "Up",
+        "Up",
+        "Up",
+        "Up",
+        "Up",
+        "Up",
+        "Up",
+        "Up",
+        "Up",
+        "Up",
+        "Up",
+        "Up",
+        "Up",
+        "Up",
+        "Up",
+        "Up",
+        "Up",
+        "Up",
+        "Up",
+        "Up"
+      ],
+      "gap": 35
+    },
+    {
+      "wait": {
+        "cursor": {
+          "side": "left",
+          "name": "2026-05-01.log"
+        }
+      }
+    },
+    {
+      "wait": {
+        "cursor_visible": {
+          "side": "left"
+        }
+      }
+    },
+    {
       "caption": "Archives open like folders",
       "sub": "Open on a .7z file browses it, read-only. The Archives explainer shows more"
     },

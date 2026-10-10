@@ -212,11 +212,12 @@ struct FindWindow: View {
   var body: some View {
     VStack(spacing: 0) {
       Form {
-        TextField("Search in", text: $root).explainerAnchor("find.root")
+        // Name comes first, so it gets the focus when the window opens.
         TextField("Name", text: $pattern, prompt: Text("*.jpg — * and ? work, case is ignored"))
           .focused($patternFocused)
           .onSubmit(search)
           .explainerAnchor("find.pattern")
+        TextField("Search in", text: $root).explainerAnchor("find.root")
       }
       .padding()
       HStack {
