@@ -1124,16 +1124,10 @@ void ToClipboardDialog::OnShow() {
   std::string text;
   text.reserve(required_size);
   const bool just_names = app->action.dialog == "NameToClipboard";
-  if (just_names) {
-    for (int i = selected_count - 1; i >= 0; --i) {
-      text += selected.at(i).filename().native();
-      text += "\n";
-    }
-  } else {
-    for (int i = selected_count - 1; i >= 0; --i) {
-      text += selected.at(i).native();
-      text += "\n";
-    }
+  // The selection is in panel order, so the text lists items as they are shown.
+  for (const Filepath& path : selected) {
+    text += just_names ? path.filename().native() : path.native();
+    text += "\n";
   }
   if (!text.empty() && text.back() == '\n') {
     // remove last newline

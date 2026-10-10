@@ -18,6 +18,8 @@
 - Fixed: the Connect SSH dialog works from the keyboard (`Enter` moves to the
   path, then connects), and typing no longer lands in front of a pre-filled `/`.
 - Fixed: a trailing `/` no longer shows as `/.` in panel paths.
+- Fixed: Names to Clipboard and Paths to Clipboard list items in the order the
+  panel shows them, under any sort order; they came out reversed.
 - Fixed: the click that closes a dialog no longer moves focus or the file cursor
   in the panel beneath it.
 - Fixed: in narrow panels the selection summary and the progress bar clip their

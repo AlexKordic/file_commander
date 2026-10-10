@@ -649,6 +649,36 @@ static void UX_narrow_status_rows() {
   require(pause == progress && cancel == progress, "progress bar is taller than one row");
 }
 
+static void UX_clipboard_order() {
+  Fixture f; auto left = f.dir("left"); auto right = f.dir("right");
+  f.file("left/b-medium", std::string(200, 'x')); f.file("left/a-small", "x"); f.file("left/c-large", std::string(900, 'x'));
+  std::string copied;
+  FileJobServices services;
+  services.clipboard = [&](const auto& text) { copied = text; return Err(); };
+  auto jobs = make_file_jobs({}, services);
+  UiQueue ui;
+  FileCommander app(left, right, [&](auto work) { ui.post(std::move(work)); }, [] { return 120; });
+  ui.wait(app.get_left()); ui.wait(app.get_right());
+  auto& panel = app.get_left();
+  panel.get_shared_state()->jobs = jobs.get();
+  auto screen = ScreenInteractive::FixedSize(100, 30);
+  Loop loop(&screen, app.renderer);
+  panel.dir.select_all();
+  auto copy = [&](const std::string& id) {
+    copied.clear();
+    require(app.execute_command(id), "clipboard command rejected: " + id);
+    test::until([&] { ui.drain(); return jobs->idle() && !copied.empty(); }, "clipboard timeout");
+    panel.get_shared_state()->action.close_dialog();
+    return copied;
+  };
+  // The clipboard lists items as the panel shows them, under any sort order.
+  require(copy("names_to_clipboard") == "a-small\nb-medium\nc-large", "names left panel order: " + copied);
+  require(copy("paths_to_clipboard") == (left / "a-small").string() + "\n" + (left / "b-medium").string() + "\n" + (left / "c-large").string(),
+          "paths left panel order: " + copied);
+  while (panel.dir.order_by != Orderby::SIZE_DESC) panel.dir.sort_toggle_size_direction();
+  require(copy("names_to_clipboard") == "c-large\nb-medium\na-small", "names ignored the size sort: " + copied);
+}
+
 static void R21() {
   Fixture f; auto old = f.dir("old"); auto current = f.dir("current");
   f.file("current/a", "KEEP");
