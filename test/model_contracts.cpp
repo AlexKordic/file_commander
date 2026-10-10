@@ -88,6 +88,16 @@ void commands() {
   require(requests.size() == 1 && requests[0].name == "Copy" && requests[0].selected.size() == 1 && requests[0].target == f.root,
           "copy asks for the dialog with the selection and the other pane as target");
   require(app.use_count("copy") == 1, "running a command counts its use");
+  app.set_single_pane(true);
+  require(app.execute("switch_panel") && app.focused_side() == 0 && app.single_pane(),
+          "in single-pane mode Switch Pane shows the other pane, still alone");
+  auto content = app.pane(1).content_revision();
+  app.pane(1).set_cursor(0);
+  require(app.pane(1).content_revision() == content, "a cursor move is not a content change");
+  auto marks = app.pane(1).marks_revision();
+  app.pane(1).toggle_select(0);
+  require(app.pane(1).marks_revision() != marks && app.pane(1).content_revision() == content, "marking changes only the marks");
+  app.set_single_pane(false);
   app.add_bookmark(f / "photos");
   app.save_settings();
   require(fs::exists(f / "config" / "file_commander" / "settings.json"), "settings must be saved");

@@ -494,12 +494,14 @@ void PaneModel::set_columns(bool permissions, bool owner_group) {
   active().permissions = permissions;
   active().owner_group = owner_group;
   ++_revision;
+  ++_content_revision;
 }
 
 void PaneModel::toggle_select(int item_index) {
   if (item_index < 0 || item_index >= int(dir().items.size())) return;
   dir().item_toggle_select(item_index);
   ++_revision;
+  ++_marks_revision;
 }
 
 void PaneModel::set_selected(int item_index, bool selected) {
@@ -510,11 +512,13 @@ void PaneModel::set_selected(int item_index, bool selected) {
 void PaneModel::select_all() {
   dir().select_all();
   ++_revision;
+  ++_marks_revision;
 }
 
 void PaneModel::clear_selection() {
   dir().clear_selection();
   ++_revision;
+  ++_marks_revision;
 }
 
 int PaneModel::glob_select(const std::string& pattern, bool select) {

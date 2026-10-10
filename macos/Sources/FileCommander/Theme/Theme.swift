@@ -145,10 +145,12 @@ struct Theme: Codable, Equatable {
     c("listing.directory", "Folders", "Listing"); c("listing.executable", "Executables", "Listing")
     c("listing.symlink", "Symbolic links", "Listing"); c("listing.special", "Devices, pipes and sockets", "Listing")
     c("listing.error", "Unreadable items", "Listing"); c("listing.warning", "Warnings", "Listing")
-    c("listing.size", "Size text", "Listing"); c("listing.date", "Date text", "Listing")
+    c("listing.size", "Size text", "Listing"); c("listing.size.large", "Sizes over 1 MB (bold over 50 MB)", "Listing")
+    c("listing.size.huge", "Sizes over 1 GB (bold over 10 GB)", "Listing"); c("listing.date", "Date text", "Listing")
     c("listing.marked.text", "Selected text", "Listing"); c("listing.marked.background", "Selected rows", "Listing")
     c("listing.cursor", "Cursor (focused pane)", "Listing"); c("listing.cursor.inactive", "Cursor (other pane)", "Listing")
-    c("listing.gauge", "Size gauge", "Listing")
+    c("listing.gauge", "Size bar", "Listing"); c("listing.gauge.cursor", "Size bar on the cursor", "Listing")
+    c("listing.gauge.cursor.inactive", "Size bar on the cursor (other pane)", "Listing")
     f("pane.tabs", "Tabs", "Pane"); f("pane.path", "Path bar", "Pane"); f("pane.status", "Status line", "Pane")
     c("pane.tab.active", "Active tab", "Pane"); c("pane.tab.text", "Tab text", "Pane"); c("pane.tab.tutorial", "Tutorial tab", "Pane")
     c("pane.path", "Path text", "Pane"); c("pane.filter", "Filter text", "Pane"); c("pane.focus", "Focus ring", "Pane")
@@ -191,6 +193,10 @@ struct Theme: Codable, Equatable {
       "listing.cursor": ThemeColor("system:selectedContentBackground"),
       "listing.cursor.inactive": ThemeColor("system:unemphasizedSelectedContentBackground"),
       "listing.gauge": ThemeColor("#0A84FF59", "#409CFF73"),
+      "listing.gauge.cursor": ThemeColor("#FFFFFFB3", "#FFFFFFB3"),
+      "listing.gauge.cursor.inactive": ThemeColor("#0A84FFB3", "#409CFFCC"),
+      "listing.size.large": ThemeColor("#A66F00", "#FFD60A"),
+      "listing.size.huge": ThemeColor("#D12F2F", "#FF6961"),
       "pane.tab.active": ThemeColor("system:accent"),
       "pane.tab.text": ThemeColor("system:label"),
       "pane.tab.tutorial": ThemeColor("system:purple"),
@@ -257,6 +263,9 @@ struct Theme: Codable, Equatable {
       "listing.cursor": ThemeColor("#00A0A0"),
       "listing.cursor.inactive": ThemeColor("#335577"),
       "listing.gauge": ThemeColor("#5FD7D780"),
+      "listing.gauge.cursor": ThemeColor("#0A1A5CCC"),
+      "listing.size.large": ThemeColor("#FFFF5F"),
+      "listing.size.huge": ThemeColor("#FF5F5F"),
       "pane.filter": ThemeColor("#FFD700"),
       "bottom.pause": ThemeColor("#B8860B"),
       "bottom.cancel": ThemeColor("#8B0000"),

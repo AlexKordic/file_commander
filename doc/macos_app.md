@@ -47,12 +47,16 @@ It needs macOS 14 or later. To build it, see
   bookmark to open it elsewhere or remove it.
 - **Panes**: each has its own tabs, path bar, filter and list. The focused
   pane has an accent line at the top. Drag the line between the panes to
-  resize them. A tab with a graduation cap belongs to the tutorial.
+  resize them. A tab with a graduation cap belongs to the tutorial. In
+  single-pane mode a bar above the path shows the hidden pane's folder, where
+  copies and moves go; Switch Pane (`Tab`) shows that pane instead, still alone.
 - **Path bar**: click a folder in the path to go there. The filter field at
   its right shows what you typed into the list.
 - **List**: Name, Size and Date Modified, plus Permissions and Owner when you
   turn them on (right-click a column header, or the View menu). A thin bar
   under each file shows its size against the largest file in the folder.
+  Sizes over 1 MB are yellow (bold over 50 MB), over 1 GB red (bold over
+  10 GB).
 - **Status line**: what is selected and how many bytes, how long the folder
   took to read, and a **Stop** button while a folder is still being read.
 - **Error lines and job bar**: the latest errors, and the running job with
@@ -86,6 +90,11 @@ second clears the error lines. `⌘Q` quits.
 While a list has the focus, keys without `⌘` or `⌃` that run no command are
 typed into the pane's filter; `Backspace` edits it.
 
+Arrow keys, Page Up and Page Down (`fn`+`↑` `↓` on a laptop), Home and End
+move the cursor. **Settings › General › Cursor margin** (0–10) sets how far
+from the pane's edge the list keeps it while scrolling: 0 lets it reach the
+edge, 10 keeps it in the middle, except near the start and end of the list.
+
 To change a key, select the command in the palette and press `⌃K`, then the
 new key; or use Settings › Keys. A key another command already uses, or one
 macOS keeps for itself, is refused.
@@ -112,7 +121,7 @@ Settings › General › Selection style:
 Copy, Move, Delete, Rename and New Folder open sheets:
 
 - **Copy** lists everything it is about to copy while it scans, with the
-  total size. Edit the destination (or **Choose…**), follow links or keep
+  total size. Edit the destination, follow links or keep
   relative links, and choose *Replace existing*, *Update if newer* or *Skip
   existing* (`1`, `2`, `3`). A destination ending in `.7z` creates an archive.
 - **Delete** is permanent; there is no trash. Links are deleted, not what they

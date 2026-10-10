@@ -646,6 +646,12 @@ final class TutorialCoordinator: ExplainerHost {
       if let n = value["added"]?.number { return pane.tabs.count - rememberedTabs[sideOf(value["side"])] == Int(n) }
       return false
     case "focused": return app.engine.focusedSide == sideOf(value)
+    case "cursor_visible":
+      // The cursor row is fully on screen (keyboard moves keep it there).
+      let side = sideOf(value["side"])
+      let row = Int(app.engine.pane(side).cursorRow)
+      guard let visible = app.listing(side)?.coordinator?.fullyVisibleRows() else { return false }
+      return visible.contains(row)
     case "single": return app.engine.singlePane == (value.bool ?? true)
     case "sort": return app.engine.pane(sideOf(value["side"])).sort.rawValue == ["name", "name_desc", "size", "size_desc", "date", "date_desc"].firstIndex(of: value["is"]?.string ?? "")
     case "columns":

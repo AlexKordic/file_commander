@@ -14,6 +14,9 @@ struct PaneView: View {
     let focused = app.engine.focusedSide == side
     VStack(spacing: 0) {
       TabStrip(side: side, pane: pane, focused: focused)
+      if app.engine.singlePane && focused {
+        TargetBar(side: side)
+      }
       PathBar(side: side, pane: pane, focused: focused)
       ListingView(side: side)
         .explainerAnchor("pane.\(name).listing")
@@ -23,6 +26,37 @@ struct PaneView: View {
       Rectangle().fill(focused ? app.theme.color("pane.focus") : .clear).frame(height: 2)
     }
     .explainerAnchor("pane.\(name)")
+  }
+}
+
+/// In single-pane mode: where copies and moves go (the hidden pane), and how to get there.
+struct TargetBar: View {
+  let side: Int
+  @Environment(AppController.self) private var app
+
+  var body: some View {
+    let other = app.engine.pane(1 - side)
+    HStack(spacing: 6) {
+      Image(systemName: side == 0 ? "rectangle.righthalf.inset.filled.arrow.right" : "rectangle.lefthalf.inset.filled.arrow.left")
+        .foregroundStyle(.secondary)
+      Text(side == 0 ? "Right pane:" : "Left pane:").foregroundStyle(.secondary)
+      Text(other.path).lineLimit(1).truncationMode(.head)
+      Spacer(minLength: 8)
+      Text("Copies and moves go here").foregroundStyle(.tertiary)
+      Button {
+        app.run("switch_panel")
+      } label: {
+        Text("Show \(app.keymap.chord(for: "switch_panel").map { "(\($0.symbols))" } ?? "")")
+      }
+      .buttonStyle(.link)
+      .explainerAnchor("pane.target.show") { app.run("switch_panel") }
+    }
+    .font(app.theme.font("pane.status"))
+    .padding(.horizontal, 10).padding(.vertical, 4)
+    .background(app.theme.color("pane.focus").opacity(0.08))
+    .overlay(alignment: .bottom) { Divider() }
+    .help("Single-pane mode hides the other pane; operations still use it as their destination")
+    .explainerAnchor("pane.target")
   }
 }
 

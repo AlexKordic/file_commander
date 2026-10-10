@@ -165,7 +165,50 @@
       }
     },
     {
-      "pause": 1800
+      "pause": 1200
+    },
+    {
+      "caption": "The other pane is still the destination",
+      "sub": "The bar above the path says where copies and moves go"
+    },
+    {
+      "highlight": "pane.target",
+      "hold": 2000
+    },
+    {
+      "unhighlight": true
+    },
+    {
+      "caption": "Switch Pane shows it",
+      "sub": "Still one pane, full width"
+    },
+    {
+      "keys": [
+        "@switch_panel"
+      ]
+    },
+    {
+      "wait": {
+        "focused": "right"
+      }
+    },
+    {
+      "expect": {
+        "single": true
+      }
+    },
+    {
+      "pause": 1400
+    },
+    {
+      "keys": [
+        "@switch_panel"
+      ]
+    },
+    {
+      "wait": {
+        "focused": "left"
+      }
     },
     {
       "keys": [

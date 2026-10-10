@@ -82,7 +82,8 @@ struct ListingView: NSViewRepresentable {
     private var themeRevision = -1
     private var style: AppPreferences.SelectionStyle?
     private var focusRequest = -1
-    private var listingRevision: UInt64 = .max
+    private var contentRevision: UInt64 = .max
+    private var marksRevision: UInt64 = .max
 
     init(side: Int, app: AppController) {
       self.side = side
@@ -99,15 +100,17 @@ struct ListingView: NSViewRepresentable {
       return r
     }
 
-    /// Brings the table in line with the engine.
+    /// Brings the table in line with the engine. Only a content change reloads
+    /// everything; marks reload the visible rows; a cursor move reloads nothing,
+    /// so held arrow keys and scrolling don't fight a reload.
     func apply(force: Bool) {
       guard let table else { return }
       let pane = self.pane
-      let revision = engine.listingRevision[side]
       let themeChanged = themeRevision != app.theme.revision
       let styleChanged = style != app.preferences.selectionStyle
-      if force || revision != listingRevision || themeChanged || styleChanged {
-        listingRevision = revision
+      if force || pane.contentRevision != contentRevision || themeChanged || styleChanged {
+        contentRevision = pane.contentRevision
+        marksRevision = pane.marksRevision
         themeRevision = app.theme.revision
         style = app.preferences.selectionStyle
         cache.removeAll(keepingCapacity: true)
@@ -125,6 +128,23 @@ struct ListingView: NSViewRepresentable {
         if table.sortDescriptors != wanted { table.sortDescriptors = wanted }
         table.reloadData()
         syncSelection(pane)
+        scroll(toKeep: Int(pane.cursorRow))
+      } else if pane.marksRevision != marksRevision {
+        marksRevision = pane.marksRevision
+        cache.removeAll(keepingCapacity: true)
+        let visible = table.rows(in: table.visibleRect)
+        if visible.length > 0 {
+          table.reloadData(forRowIndexes: IndexSet(integersIn: visible.location..<visible.location + visible.length),
+                           columnIndexes: IndexSet(integersIn: 0..<table.numberOfColumns))
+        }
+        if app.preferences.selectionStyle == .finder { syncing = true; syncSelection(pane); syncing = false }
+      }
+      // The engine moved the cursor (Space, a command, a search result): follow it.
+      if pane.cursorRow >= 0, pane.cursorRow < table.numberOfRows, !table.selectedRowIndexes.contains(Int(pane.cursorRow)) {
+        syncing = true
+        syncSelection(pane)
+        syncing = false
+        scroll(toKeep: Int(pane.cursorRow))
       }
       if focusRequest != app.focusRequest {
         focusRequest = app.focusRequest
@@ -137,7 +157,18 @@ struct ListingView: NSViewRepresentable {
       if engine.focusedSide == side, let window = table.window, let current = window.firstResponder as? ListingTableView, current !== table {
         window.makeFirstResponder(table)
       }
-      table.needsDisplay = true
+      refreshRowStyles()
+    }
+
+    /// Cursor colors depend on which pane has the focus; visible rows redraw for it.
+    func refreshRowStyles() {
+      guard let table else { return }
+      table.enumerateAvailableRowViews { rowView, _ in
+        rowView.needsDisplay = true
+        for case let cell as NSTableCellView in rowView.subviews where cell.backgroundStyle != rowView.interiorBackgroundStyle {
+          cell.backgroundStyle = rowView.interiorBackgroundStyle
+        }
+      }
     }
 
     private func syncSelection(_ pane: PaneSnapshot) {
@@ -156,7 +187,73 @@ struct ListingView: NSViewRepresentable {
       } else {
         table.deselectAll(nil)
       }
-      if pane.cursorRow >= 0, pane.cursorRow < count { table.scrollRowToVisible(Int(pane.cursorRow)) }
+    }
+
+    // MARK: Keyboard cursor and scrolling
+
+    /// The rows that are completely visible.
+    func fullyVisibleRows() -> ClosedRange<Int>? {
+      guard let table, table.numberOfRows > 0 else { return nil }
+      var visible = table.visibleRect
+      let inset = table.enclosingScrollView?.contentInsets.top ?? 0
+      visible.origin.y += inset
+      visible.size.height -= inset
+      let range = table.rows(in: visible)
+      guard range.length > 0 else { return nil }
+      var first = range.location, last = range.location + range.length - 1
+      if table.rect(ofRow: first).minY < visible.minY - 0.5, first < last { first += 1 }
+      if table.rect(ofRow: last).maxY > visible.maxY + 0.5, last > first { last -= 1 }
+      return first...last
+    }
+
+    /// Scrolls without animation so `row` keeps the margin from the edges that
+    /// Settings asks for: 0 lets it touch the edge, 10 keeps it centered, except
+    /// near the start and end of the list.
+    func scroll(toKeep row: Int) {
+      guard let table, let clip = table.enclosingScrollView?.contentView, row >= 0, row < table.numberOfRows,
+            let visible = fullyVisibleRows() else { return }
+      let rowsShown = visible.count
+      let margin = Int((Double(rowsShown - 1) / 2 * Double(app.preferences.scrollMargin) / 10).rounded(.down))
+      var first = visible.lowerBound
+      if row - margin < first { first = row - margin }
+      if row + margin > first + rowsShown - 1 { first = row + margin - rowsShown + 1 }
+      first = min(max(0, first), max(0, table.numberOfRows - rowsShown))
+      guard first != visible.lowerBound else { return }
+      let inset = table.enclosingScrollView?.contentInsets.top ?? 0
+      var origin = clip.bounds.origin
+      origin.y = table.rect(ofRow: first).minY - inset
+      if first == 0 { origin.y = -inset }
+      clip.setBoundsOrigin(origin)
+      table.enclosingScrollView?.reflectScrolledClipView(clip)
+    }
+
+    /// Up, Down, Page Up, Page Down, Home and End move the cursor (and, with
+    /// Shift in Finder style, extend the selection), then scroll by the margin rule.
+    func moveCursor(_ key: String, extend: Bool) {
+      guard let table, table.numberOfRows > 0 else { return }
+      let count = table.numberOfRows
+      let current = pane.cursorRow >= 0 && pane.cursorRow < count ? Int(pane.cursorRow) : max(table.selectedRow, 0)
+      let page = max(1, (fullyVisibleRows()?.count ?? 10) - 1)
+      let target: Int
+      switch key {
+      case "Up": target = current - 1
+      case "Down": target = current + 1
+      case "PageUp": target = current - page
+      case "PageDown": target = current + page
+      case "Home": target = 0
+      default: target = count - 1
+      }
+      let row = min(max(0, target), count - 1)
+      syncing = true
+      if extend && app.preferences.selectionStyle == .finder {
+        table.selectRowIndexes(IndexSet(integersIn: min(current, row)...max(current, row)), byExtendingSelection: true)
+      } else {
+        table.selectRowIndexes([row], byExtendingSelection: false)
+      }
+      syncing = false
+      engine.setCursor(side, row: row)
+      if extend && app.preferences.selectionStyle == .finder { engine.setSelectedRows(side, rows: Array(table.selectedRowIndexes)) }
+      scroll(toKeep: row)
     }
 
     // MARK: Data source and delegate
@@ -331,14 +428,26 @@ final class ListingTableView: NSTableView {
   var side = 0
   weak var coordinator: ListingView.Coordinator?
 
+  /// Cursor keys move the cursor ourselves: the table's own handling scrolls
+  /// with animation and Page Up/Down would only scroll.
+  override func keyDown(with event: NSEvent) {
+    guard let chord = KeyChord(event: event), ["Up", "Down", "PageUp", "PageDown", "Home", "End"].contains(chord.key),
+          chord.modifiers.isEmpty || chord.modifiers == [.shift], let coordinator else {
+      super.keyDown(with: event)
+      return
+    }
+    MainActor.assumeIsolated { coordinator.moveCursor(chord.key, extend: chord.modifiers == [.shift]) }
+  }
+
   override func becomeFirstResponder() -> Bool {
     let ok = super.becomeFirstResponder()
-    if ok { MainActor.assumeIsolated { coordinator?.becameFocused() } }
+    if ok { MainActor.assumeIsolated { coordinator?.becameFocused(); coordinator?.refreshRowStyles() } }
     return ok
   }
   override func resignFirstResponder() -> Bool {
-    needsDisplay = true
-    return super.resignFirstResponder()
+    let ok = super.resignFirstResponder()
+    MainActor.assumeIsolated { coordinator?.refreshRowStyles() }
+    return ok
   }
 
   override func menu(for event: NSEvent) -> NSMenu? {
@@ -362,18 +471,11 @@ final class ListingRowView: NSTableRowView {
     MainActor.assumeIsolated {
       guard let coordinator else { return }
       let theme = coordinator.app.theme
-      let row = coordinator.row(rowIndex)
-      let largest = max(coordinator.pane.largestItem, 1)
-      // A thin bar along the bottom of the row: the item's size against the largest in the folder.
-      if !row.isDirectory, row.size > 0 {
-        let width = (bounds.width - 8) * CGFloat(Double(row.size) / Double(largest))
-        theme.nsColor("listing.gauge").setFill()
-        NSBezierPath(roundedRect: NSRect(x: 4, y: bounds.maxY - 3, width: max(width, 2), height: 2), xRadius: 1, yRadius: 1).fill()
-      }
-      if row.selected && coordinator.app.preferences.selectionStyle == .commander {
+      if coordinator.row(rowIndex).selected && coordinator.app.preferences.selectionStyle == .commander {
         theme.nsColor("listing.marked.background").setFill()
         bounds.fill()
       }
+      if !isSelected { drawGauge(theme.nsColor("listing.gauge")) }
     }
   }
 
@@ -381,10 +483,24 @@ final class ListingRowView: NSTableRowView {
     MainActor.assumeIsolated {
       guard let coordinator else { return }
       let focused = coordinator.engine.focusedSide == coordinator.side && window?.firstResponder === superview
-      let color = coordinator.app.theme.nsColor(focused ? "listing.cursor" : "listing.cursor.inactive")
-      color.setFill()
+      let theme = coordinator.app.theme
+      theme.nsColor(focused ? "listing.cursor" : "listing.cursor.inactive").setFill()
       NSBezierPath(roundedRect: bounds.insetBy(dx: 4, dy: 1), xRadius: 5, yRadius: 5).fill()
+      // On the cursor the size bar is drawn on top, in a color made for it.
+      drawGauge(theme.nsColor(focused ? "listing.gauge.cursor" : "listing.gauge.cursor.inactive"))
     }
+  }
+
+  /// A thin bar along the bottom of the row: the item's size against the largest in the folder.
+  @MainActor
+  private func drawGauge(_ color: NSColor) {
+    guard let coordinator else { return }
+    let row = coordinator.row(rowIndex)
+    guard !row.isDirectory, row.size > 0 else { return }
+    let largest = max(coordinator.pane.largestItem, 1)
+    let width = (bounds.width - 16) * CGFloat(Double(row.size) / Double(largest))
+    color.setFill()
+    NSBezierPath(roundedRect: NSRect(x: 8, y: bounds.maxY - 4, width: max(width, 2), height: 2), xRadius: 1, yRadius: 1).fill()
   }
 
   override var interiorBackgroundStyle: NSView.BackgroundStyle {
@@ -429,51 +545,76 @@ final class ListingCell: NSTableCellView {
   }
   required init?(coder: NSCoder) { fatalError() }
 
+  private var labelColor = NSColor.labelColor
+  private var iconColor: NSColor?
+
+  /// The row tells its cells when it becomes the emphasized cursor; then the
+  /// text turns white, and back to its own color afterwards.
+  override var backgroundStyle: NSView.BackgroundStyle {
+    didSet { applyColors() }
+  }
+
+  private func applyColors() {
+    let emphasized = backgroundStyle == .emphasized
+    label.textColor = emphasized ? .alternateSelectedControlTextColor : labelColor
+    if withIcon { icon.contentTintColor = emphasized ? .alternateSelectedControlTextColor : iconColor }
+  }
+
+  /// Size colors by magnitude: over 1 MB yellow, over 50 MB yellow and bold,
+  /// over 1 GB red, over 10 GB red and bold.
+  static func sizeStyle(_ size: Int64) -> (color: String, bold: Bool) {
+    let mb: Int64 = 1 << 20, gb: Int64 = 1 << 30
+    if size > 10 * gb { return ("listing.size.huge", true) }
+    if size > gb { return ("listing.size.huge", false) }
+    if size > 50 * mb { return ("listing.size.large", true) }
+    if size > mb { return ("listing.size.large", false) }
+    return ("listing.size", false)
+  }
+
   @MainActor
   func configure(row: Row, column: String, coordinator: ListingView.Coordinator, rowIndex: Int) {
     let theme = coordinator.app.theme
-    let isCursor = coordinator.table?.selectedRowIndexes.contains(rowIndex) ?? false
-    let focusedPane = coordinator.engine.focusedSide == coordinator.side
-    let emphasized = isCursor && focusedPane && coordinator.table?.window?.firstResponder === coordinator.table
     let marked = row.selected && coordinator.app.preferences.selectionStyle == .commander
+    let bold = { (font: NSFont) in NSFontManager.shared.convert(font, toHaveTrait: .boldFontMask) }
     label.alignment = column == "size" ? .right : .left
+    toolTip = nil
     switch column {
     case "name":
       label.stringValue = row.name
-      label.font = theme.nsFont("listing.name")
+      label.font = marked ? bold(theme.nsFont("listing.name")) : theme.nsFont("listing.name")
       icon.image = FileIcons.image(for: row)
-      let color: NSColor
-      if marked { color = theme.nsColor("listing.marked.text") }
-      else if row.kind == .error || row.kind == .notFound { color = theme.nsColor("listing.error") }
-      else if row.isDirectory { color = theme.nsColor("listing.directory") }
-      else if row.isLink { color = theme.nsColor("listing.symlink") }
-      else if [.block, .character, .fifo, .socket].contains(row.kind) { color = theme.nsColor("listing.special") }
-      else if row.isExecutable { color = theme.nsColor("listing.executable") }
-      else { color = theme.nsColor("listing.text") }
-      label.textColor = emphasized ? .alternateSelectedControlTextColor : color
-      icon.contentTintColor = emphasized ? .alternateSelectedControlTextColor : (row.isDirectory ? theme.nsColor("listing.directory") : color.withAlphaComponent(0.85))
-      if marked { label.font = NSFontManager.shared.convert(label.font!, toHaveTrait: .boldFontMask) }
+      if marked { labelColor = theme.nsColor("listing.marked.text") }
+      else if row.kind == .error || row.kind == .notFound { labelColor = theme.nsColor("listing.error") }
+      else if row.isDirectory { labelColor = theme.nsColor("listing.directory") }
+      else if row.isLink { labelColor = theme.nsColor("listing.symlink") }
+      else if [.block, .character, .fifo, .socket].contains(row.kind) { labelColor = theme.nsColor("listing.special") }
+      else if row.isExecutable { labelColor = theme.nsColor("listing.executable") }
+      else { labelColor = theme.nsColor("listing.text") }
+      iconColor = row.isDirectory ? theme.nsColor("listing.directory") : labelColor.withAlphaComponent(0.85)
       var tip = row.path
       if row.isLink { tip += "\n→ \(row.linkTarget)" }
       if !row.warning.isEmpty { tip += "\n\(row.warning)" }
       toolTip = tip
     case "size":
-      label.stringValue = row.isDirectory || row.size < 0 ? "—" : Format.bytes(row.size)
-      label.font = theme.nsFont("listing.size")
-      label.textColor = emphasized ? .alternateSelectedControlTextColor : (marked ? theme.nsColor("listing.marked.text") : theme.nsColor("listing.size"))
+      let known = !row.isDirectory && row.size >= 0
+      label.stringValue = known ? Format.bytes(row.size) : "—"
+      let style = known ? ListingCell.sizeStyle(row.size) : ("listing.size", false)
+      label.font = style.1 ? bold(theme.nsFont("listing.size")) : theme.nsFont("listing.size")
+      labelColor = theme.nsColor(style.0)
     case "date":
       label.stringValue = ListingCell.dateFormatter.string(from: Date(timeIntervalSince1970: TimeInterval(row.modified)))
       label.font = theme.nsFont("listing.date")
-      label.textColor = emphasized ? .alternateSelectedControlTextColor : (marked ? theme.nsColor("listing.marked.text") : theme.nsColor("listing.date"))
+      labelColor = marked ? theme.nsColor("listing.marked.text") : theme.nsColor("listing.date")
     case "permissions":
       label.stringValue = row.permissions
       label.font = theme.nsFont("listing.meta")
-      label.textColor = emphasized ? .alternateSelectedControlTextColor : theme.nsColor("listing.date")
+      labelColor = theme.nsColor("listing.date")
     default:
       label.stringValue = row.owner.isEmpty ? "" : "\(row.owner):\(row.group)"
       label.font = theme.nsFont("listing.meta")
-      label.textColor = emphasized ? .alternateSelectedControlTextColor : theme.nsColor("listing.date")
+      labelColor = theme.nsColor("listing.date")
     }
+    applyColors()
   }
 
   static let dateFormatter: DateFormatter = {

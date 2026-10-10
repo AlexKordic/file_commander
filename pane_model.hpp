@@ -42,6 +42,10 @@ class PaneModel {
 
   // Revisions: content changes the listing; layout changes tabs, path or columns.
   uint64_t revision() const { return _revision; }
+  // What changed: the listing itself (items, filter, sort, columns, tab), or
+  // only which items are selected. A cursor move changes neither.
+  uint64_t content_revision() const { return _content_revision; }
+  uint64_t marks_revision() const { return _marks_revision; }
   void     touch() { ++_revision; }
 
   const Tab& active() const { return _tabs[_active]; }
@@ -108,7 +112,7 @@ class PaneModel {
   void restore_cursor(const Filepath& focused_before, int index_before);
   void prune_archive_stack(const Filepath& path);
   bool leave_virtual_dir();
-  void changed() { ++_revision; _visible_dirty = true; }
+  void changed() { ++_revision; ++_content_revision; _visible_dirty = true; }
 
   Post                               _post;
   Emit                               _emit;
@@ -122,6 +126,8 @@ class PaneModel {
   uint64_t                           _watch_generation = 0;
   uint64_t                           _load_generation  = 0;
   uint64_t                           _revision         = 1;
+  uint64_t                           _content_revision = 1;
+  uint64_t                           _marks_revision   = 1;
   bool                               _loading            = false;
   bool                               _loading_unattended = false;
   bool                               _refresh_after_load = false;

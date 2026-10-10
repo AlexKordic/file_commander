@@ -90,7 +90,8 @@ LocationKind kind_of(const Location& location) {
 }
 
 std::string tab_title(const Location& location) {
-  Filepath    shown = location.read_only() ? (location.internal.empty() || location.internal == "/" ? location.archives.back() : location.internal) : location.local;
+  const bool  archive_root = location.read_only() && (location.internal.empty() || location.internal == "/" || location.internal == ".");
+  Filepath    shown = archive_root ? location.archives.back() : location.read_only() ? location.internal : location.local;
   std::string title = shown.filename().native();
   if (title.empty() || title == ".") title = shown.native();
   if (title.empty()) title = "/";
@@ -355,7 +356,9 @@ PaneInfo pane(int side) {
     tab.remote_error = p.tab(i).remote_error;
     out.tabs.push_back(std::move(tab));
   }
-  out.revision = p.revision();
+  out.revision         = p.revision();
+  out.content_revision = p.content_revision();
+  out.marks_revision   = p.marks_revision();
   return out;
 }
 

@@ -86,7 +86,6 @@ struct CopySheet: View {
             .font(app.theme.font("sheet.field"))
             .onSubmit(restart)
             .explainerAnchor("sheet.copy.destination")
-          Button("Choose…", action: choose)
         }
         if destination.lowercased().hasSuffix(".7z") {
           Label("Creates a 7z archive with the selection", systemImage: "archivebox").font(.callout).foregroundStyle(.secondary)
@@ -204,16 +203,6 @@ struct CopySheet: View {
     app.focusPane(request.side)
   }
 
-  private func choose() {
-    let panel = NSOpenPanel()
-    panel.canChooseDirectories = true
-    panel.canChooseFiles = false
-    panel.canCreateDirectories = true
-    if panel.runModal() == .OK, let url = panel.url {
-      destination = url.path
-      restart()
-    }
-  }
 }
 
 // MARK: Move, delete, new folder, rename

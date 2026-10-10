@@ -348,6 +348,8 @@ public final class Engine {
               kind: LocationKind(rawValue: Int($0.kind.rawValue)) ?? .local, tutorial: $0.tutorial, remoteError: String($0.remote_error))
     }
     s.revision = p.revision
+    s.contentRevision = p.content_revision
+    s.marksRevision = p.marks_revision
     return s
   }
 

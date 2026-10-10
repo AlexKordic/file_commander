@@ -39,6 +39,31 @@ struct AppPreferences: Codable, Equatable {
   var watchedExplainers: [String] = []
   var tutorialPosition = 0  // Next explainer of Entire tutorial.
   var paneSplit = 0.5
+  /// How far from the pane's edge keyboard moves keep the cursor: 0 lets it reach
+  /// the edge, 10 keeps it in the middle (until the list's start or end).
+  var scrollMargin = 3
+
+  init() {}
+
+  /// Every field is optional, so a file from an older version keeps its values.
+  init(from decoder: Decoder) throws {
+    let c = try decoder.container(keyedBy: CodingKeys.self)
+    let d = AppPreferences()
+    version = try c.decodeIfPresent(Int.self, forKey: .version) ?? d.version
+    keyPreset = try c.decodeIfPresent(KeyPreset.self, forKey: .keyPreset) ?? d.keyPreset
+    keyOverrides = try c.decodeIfPresent([String: [String: String]].self, forKey: .keyOverrides) ?? d.keyOverrides
+    selectionStyle = try c.decodeIfPresent(SelectionStyle.self, forKey: .selectionStyle) ?? d.selectionStyle
+    theme = try c.decodeIfPresent(String.self, forKey: .theme) ?? d.theme
+    appearance = try c.decodeIfPresent(Appearance.self, forKey: .appearance) ?? d.appearance
+    zoom = try c.decodeIfPresent(Double.self, forKey: .zoom) ?? d.zoom
+    welcomeShown = try c.decodeIfPresent(Bool.self, forKey: .welcomeShown) ?? d.welcomeShown
+    tutorialMode = try c.decodeIfPresent(TutorialMode.self, forKey: .tutorialMode) ?? d.tutorialMode
+    tutorialSpeed = try c.decodeIfPresent(Double.self, forKey: .tutorialSpeed) ?? d.tutorialSpeed
+    watchedExplainers = try c.decodeIfPresent([String].self, forKey: .watchedExplainers) ?? d.watchedExplainers
+    tutorialPosition = try c.decodeIfPresent(Int.self, forKey: .tutorialPosition) ?? d.tutorialPosition
+    paneSplit = try c.decodeIfPresent(Double.self, forKey: .paneSplit) ?? d.paneSplit
+    scrollMargin = min(10, max(0, try c.decodeIfPresent(Int.self, forKey: .scrollMargin) ?? d.scrollMargin))
+  }
 
   static func load(from url: URL) -> AppPreferences {
     guard let data = try? Data(contentsOf: url) else { return AppPreferences() }

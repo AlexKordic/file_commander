@@ -61,6 +61,8 @@ struct StartFailure: View {
 }
 
 /// Two panes side by side with a draggable divider, or the focused pane alone.
+/// Both panes always exist, so a hidden one keeps its scroll position and
+/// Switch Pane in single-pane mode just shows the other.
 struct PanesView: View {
   @Environment(AppController.self) private var app
 
@@ -68,17 +70,19 @@ struct PanesView: View {
     let single = app.engine.singlePane
     let focused = app.engine.focusedSide
     GeometryReader { geometry in
+      let leftWidth = single ? (focused == 0 ? geometry.size.width : 0) : max(220, geometry.size.width * app.preferences.paneSplit)
       HStack(spacing: 0) {
-        if !single || focused == 0 {
-          PaneView(side: 0)
-            .frame(width: single ? geometry.size.width : max(220, geometry.size.width * app.preferences.paneSplit))
-        }
+        PaneView(side: 0)
+          .frame(width: leftWidth)
+          .opacity(single && focused != 0 ? 0 : 1)
+          .allowsHitTesting(!single || focused == 0)
         if !single {
           PaneDivider(width: geometry.size.width)
         }
-        if !single || focused == 1 {
-          PaneView(side: 1)
-        }
+        PaneView(side: 1)
+          .frame(width: single && focused != 1 ? 0 : nil)
+          .opacity(single && focused != 1 ? 0 : 1)
+          .allowsHitTesting(!single || focused == 1)
       }
       // Exactly the space given, so the error lines and job bar below stay visible.
       .frame(width: geometry.size.width, height: geometry.size.height)

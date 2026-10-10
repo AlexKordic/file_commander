@@ -82,6 +82,7 @@ struct PaneInfo {
   int                  active_tab = 0;
   std::vector<TabInfo> tabs;
   uint64_t             revision = 0;
+  uint64_t             content_revision = 0, marks_revision = 0;  // Items or columns changed; selection changed.
 };
 using TabList = std::vector<TabInfo>;
 PaneInfo pane(int side);

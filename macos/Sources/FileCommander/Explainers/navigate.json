@@ -162,6 +162,130 @@
       }
     },
     {
+      "caption": "Page by page",
+      "sub": "Page Up and Page Down (fn+↑ ↓ on a laptop) move the cursor a screenful; Home and End jump to the ends"
+    },
+    {
+      "navigate": {
+        "side": "left",
+        "to": "{home}/projects/logs"
+      }
+    },
+    {
+      "wait": {
+        "rows": {
+          "side": "left",
+          "count": 120
+        }
+      }
+    },
+    {
+      "keys": [
+        "PageDown",
+        "PageDown"
+      ],
+      "gap": 600
+    },
+    {
+      "wait": {
+        "cursor_visible": {
+          "side": "left"
+        }
+      }
+    },
+    {
+      "caption": "Hold an arrow key",
+      "sub": "The list keeps the cursor in view; Settings › General › Cursor margin decides how far from the edge"
+    },
+    {
+      "keys": [
+        "Down",
+        "Down",
+        "Down",
+        "Down",
+        "Down",
+        "Down",
+        "Down",
+        "Down",
+        "Down",
+        "Down",
+        "Down",
+        "Down",
+        "Down",
+        "Down",
+        "Down",
+        "Down",
+        "Down",
+        "Down",
+        "Down",
+        "Down",
+        "Down",
+        "Down",
+        "Down",
+        "Down",
+        "Down",
+        "Down",
+        "Down",
+        "Down",
+        "Down",
+        "Down",
+        "Down",
+        "Down",
+        "Down",
+        "Down",
+        "Down",
+        "Down",
+        "Down",
+        "Down",
+        "Down",
+        "Down"
+      ],
+      "gap": 35
+    },
+    {
+      "wait": {
+        "cursor_visible": {
+          "side": "left"
+        }
+      }
+    },
+    {
+      "pause": 600
+    },
+    {
+      "keys": [
+        "End"
+      ]
+    },
+    {
+      "wait": {
+        "cursor": {
+          "side": "left",
+          "name": "2026-08-28.log"
+        }
+      }
+    },
+    {
+      "wait": {
+        "cursor_visible": {
+          "side": "left"
+        }
+      }
+    },
+    {
+      "keys": [
+        "Home"
+      ]
+    },
+    {
+      "wait": {
+        "cursor": {
+          "side": "left",
+          "name": "2026-05-01.log"
+        }
+      }
+    },
+    {
       "caption": "Archives open like folders",
       "sub": "Open on a .7z file browses it, read-only. The Archives explainer shows more"
     },

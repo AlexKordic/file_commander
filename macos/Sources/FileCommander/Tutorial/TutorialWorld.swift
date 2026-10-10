@@ -87,6 +87,12 @@ struct TutorialWorld {
     chmod(home.appendingPathComponent("projects/tools/backup.sh").path, 0o755)
     try text(home.appendingPathComponent("projects/tools/copy-jpg.lua"), TutorialWorld.copyScript(home: home.path), day: 21)
     try text(home.appendingPathComponent("todo.txt"), "Back up music\nPublish website\nSort camera roll\n", day: 25)
+    // A long list, for paging and held arrow keys.
+    for day in 1...120 {
+      let date = Calendar(identifier: .gregorian).date(byAdding: .day, value: day - 1, to: DateComponents(calendar: .init(identifier: .gregorian), year: 2026, month: 5, day: 1).date!)!
+      let name = ISO8601DateFormatter.string(from: date, timeZone: .current, formatOptions: [.withFullDate])
+      try text(home.appendingPathComponent("projects/logs/\(name).log"), "server log \(name)\n", day: day % 28 + 1)
+    }
     try text(home.appendingPathComponent("README.md"), "# Demo home\n\nFile Commander's tutorial made these files. They go away when the tutorial ends.\n", day: 1)
     // Links: one to a folder, one whose target is missing, for the delete explainer.
     try fm.createSymbolicLink(atPath: home.appendingPathComponent("latest-photos").path, withDestinationPath: "photos/2026")

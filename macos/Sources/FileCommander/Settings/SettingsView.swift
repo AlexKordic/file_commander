@@ -32,6 +32,18 @@ struct GeneralSettings: View {
       }
       Text("Commander: arrow keys move a cursor, Space marks items, commands act on the marked items or the cursor. Finder: arrow keys select, ⌘-click adds to the selection.")
         .font(.callout).foregroundStyle(.secondary)
+      LabeledContent("Cursor margin") {
+        HStack {
+          Text("Edge").font(.caption).foregroundStyle(.secondary)
+          Slider(value: Binding(get: { Double(app.preferences.scrollMargin) }, set: { app.preferences.scrollMargin = Int($0.rounded()) }),
+                 in: 0...10, step: 1)
+            .frame(width: 220)
+          Text("Center").font(.caption).foregroundStyle(.secondary)
+          Text("\(app.preferences.scrollMargin)").monospacedDigit().frame(width: 24)
+        }
+      }
+      Text("How far from the edge of a pane the arrow keys and Page Up/Down keep the cursor: 0 lets it reach the edge, 10 keeps it in the middle. Near the start and end of a list it moves closer to the edge.")
+        .font(.callout).foregroundStyle(.secondary)
       Picker("Appearance", selection: $app.preferences.appearance) {
         ForEach(AppPreferences.Appearance.allCases) { Text($0.title).tag($0) }
       }

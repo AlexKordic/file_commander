@@ -53,6 +53,7 @@ public struct PaneSnapshot: Equatable, Sendable {
   public var activeTab = 0
   public var tabs: [TabInfo] = []
   public var revision: UInt64 = 0
+  public var contentRevision: UInt64 = 0, marksRevision: UInt64 = 0
   public init() {}
 }
 

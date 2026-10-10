@@ -175,7 +175,8 @@ void AppModel::register_commands() {
   add("sort_by_date", [sort] { sort(Orderby::TIME_ASC, Orderby::TIME_DESC); }, always);
   add("names_to_clipboard", [this] { copy_to_clipboard(_focused, true); }, has_items);
   add("paths_to_clipboard", [this] { copy_to_clipboard(_focused, false); }, has_items);
-  add("switch_panel", [this] { set_focused_side(1 - _focused); }, [this] { return !_single; });
+  // In single-pane mode this shows the other pane, still alone.
+  add("switch_panel", [this] { set_focused_side(1 - _focused); }, always);
   add("tab_new", [focused] { focused().new_tab(); }, always);
   add("tab_close", [focused] { focused().close_tab(focused().active_tab_index()); }, [focused] { return focused().tab_count() > 1; });
   add("tab_next", [focused] { focused().cycle_tab(1); }, always);
