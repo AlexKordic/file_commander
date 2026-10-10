@@ -95,8 +95,8 @@ class Panel : public DialogOverlay {
   uint64_t        _load_generation    = 0;
   uint64_t        items_revision      = 0;
   bool            _loading            = false;
+  bool            _loading_unattended = false;  // An automatic refresh, not a read the user started.
   bool            _refresh_after_load = false;
-  Filepath        _loading_path;
   bool            loading() const;
   void            cancel_loading();
 

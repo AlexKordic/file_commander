@@ -56,6 +56,9 @@ struct PanelSharedState {
   std::function<Filepath const*()>        get_focused_item;
   std::function<void(int)>                set_focused_index;
   std::function<int()>                    get_focused_index;
+  // Whether a directory read is in flight, and stopping it.
+  std::function<bool()>                   loading      = [] { return false; };
+  std::function<void()>                   stop_loading = [] {};
 
   explicit PanelSharedState(Dir* d);
   PanelSharedState() = delete;

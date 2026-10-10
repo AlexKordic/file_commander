@@ -62,6 +62,8 @@ struct Theme {
     sort_button_bg,
     sort_button_active_bg,
     sort_button_active_fg,
+    pause_button_bg,
+    stop_button_bg,
     mkdir_errortxt_fg,
     clipboard_msg_fg,
     copy_destination_fg,
@@ -96,6 +98,8 @@ struct Theme {
 
     sort_button,
     sort_button_active,
+    pause_button,
+    stop_button,
 
     mkdir_errortxt,
     clipboard_msg,

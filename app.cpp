@@ -1,4 +1,5 @@
 #include "app.hpp"
+#include "dialog_support.hpp"
 #include "remote_fs.hpp"
 #include "settings.hpp"
 #include <algorithm>
@@ -107,6 +108,8 @@ Panel::Panel(Filepath location, TargetFunc get_target, ExecuteOnUiThread e, Dire
   _state->enter_archive       = [this](const Filepath& where) { return this->enter_archive(where); };
   _state->leave_virtual_dir   = [this](int64_t& focused_id) { return this->leave_virtual_dir(focused_id); };
   _state->action.close_dialog = [this]() { close_dialog(); };
+  _state->loading             = [this] { return _loading && !_loading_unattended; };
+  _state->stop_loading        = [this] { cancel_loading(); };
   _state->action.show_dialog  = [this]() {
     const auto& name = _state->action.dialog;
     if (name == "Mkdir" || name == "Rename" || name == "Move" || name == "Delete") {
@@ -277,7 +280,7 @@ void Panel::load_directory(Filepath where, bool archive, bool recover, Filepath 
     pending_changes.erase_if([](const UpdatedFiles&) { return true; });
   }
   _loading      = true;
-  _loading_path = where;
+  _loading_unattended = background_refresh;
   auto result   = std::make_shared<Dir>();
   auto stack    = _archive_stack;
   _loader.submit([this, alive = _callback_alive, post = run_on_ui, reader = _read_directory, generation, result, where, archive, recover, stack, focus, background_refresh](const LatestWork::Token& cancelled) mutable {
@@ -372,13 +375,10 @@ void Panel::load_directory(Filepath where, bool archive, bool recover, Filepath 
 
 Element Panel::render() {
   // Panel is always shown
+  // A directory read shows a Stop button in the selection row; SSH failures
+  // go to the error lines at the bottom.
   Element document = vbox({
       render_tabs(),
-      _loading ? hbox({text(" Loading "), text(Location::decode(_loading_path.native()).display()) | xflex,
-                       text(" Esc: cancel ")}) |
-                     dim
-      : remote_error.empty() ? text("")
-                             : text(" SSH disconnected — retrying; " + remote_error) | color(Color::Red),
       _main_document->renderer->Render() | yflex,
   });
   // Overwrite with active dialog
@@ -535,7 +535,7 @@ void Panel::load_delta(UpdatedFiles batch) {
     if (change.path.parent_path().lexically_normal() == dir.path.lexically_normal()) paths.insert(change.path.native());
   const auto generation = ++_load_generation;
   _loading              = true;
-  _loading_path         = dir.path;
+  _loading_unattended   = true;
   _loader.submit([this, alive = _callback_alive, post = run_on_ui, generation, paths = std::move(paths)](const LatestWork::Token& cancelled) {
     auto delta = std::make_shared<std::vector<DirectoryDelta>>();
     for (const auto& path : paths) {
@@ -626,14 +626,15 @@ void Panel::_prune_archive_stack(const Filepath& path) {
 }
 
 JobProgressBar::JobProgressBar() {
-  cancel_button = Button(" Cancel ", [] {
+  // One-row buttons keep the whole progress bar on a single row.
+  cancel_button = Button("Cancel", [] {
     auto jobinfo = file_operations().get_running_job();
     if (jobinfo.job && !jobinfo.job->is_stopped()) { file_operations().cancel(jobinfo.job->_job_id); }
-  });
-  pause_button  = Button(" Pause/Resume ", [] {
+  }, theme_button(&Theme::stop_button));
+  pause_button  = Button("Pause/Resume", [] {
     auto jobinfo = file_operations().get_running_job();
     if (jobinfo.job && !jobinfo.job->is_stopped()) { file_operations().pause(jobinfo.job->_job_id); }
-  });
+  }, theme_button(&Theme::pause_button));
 }
 
 Element JobProgressBar::render() {
@@ -646,8 +647,7 @@ Element JobProgressBar::render() {
   const DirItem& item        = *job->_focused_item;
   const int64_t  items_total = job->item_count();
 
-  auto cancel_el = cancel_button->Render();
-  auto pause_el  = pause_button->Render();
+  auto buttons = hbox({pause_button->Render(), text(" "), cancel_button->Render()});
 
   switch (job->_type) {
   case JobInstructions::Type::COPY: {
@@ -660,8 +660,7 @@ Element JobProgressBar::render() {
       text("|"),
       bgGaugeLeft(job->_current_item.percentage / 100, theme().size_gauge_full, theme().size_gauge_empty, text(curr_info)) | xflex | theme().progress_current,
       text("|"),
-      pause_el,
-      cancel_el,
+      buttons,
     });
   } break;
   case JobInstructions::Type::MKDIR:
@@ -676,8 +675,7 @@ Element JobProgressBar::render() {
       text("|"),
       bgGaugeLeft(item_percentage / 100, theme().size_gauge_full, theme().size_gauge_empty, text(count_info)) | xflex | theme().progress_current,
       text("|"),
-      pause_el,
-      cancel_el,
+      buttons,
     });
   } break;
   case JobInstructions::Type::DELETE: {
@@ -692,8 +690,7 @@ Element JobProgressBar::render() {
       text("|"),
       bgGaugeLeft(item_percentage / 100, theme().size_gauge_full, theme().size_gauge_empty, text(count_info)) | xflex | theme().progress_current,
       text("|"),
-      pause_el,
-      cancel_el,
+      buttons,
     });
   } break;
   case JobInstructions::Type::ARCHIVE_CREATE: {
@@ -704,8 +701,7 @@ Element JobProgressBar::render() {
       text("|"),
       bgGaugeLeft(item_percentage / 100, theme().size_gauge_full, theme().size_gauge_empty, text(count_info)) | xflex | theme().progress_current,
       text("|"),
-      pause_el,
-      cancel_el,
+      buttons,
     });
   } break;
   }

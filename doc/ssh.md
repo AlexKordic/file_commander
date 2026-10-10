@@ -48,8 +48,8 @@ than ask a question.
 
 The active SSH tab refreshes every three seconds; other SSH tabs refresh when
 you switch to them. If the host becomes unreachable, the tab stays open and
-shows that it is disconnected. It never falls back to a local directory with
-the same path.
+FC keeps retrying; the error lines at the bottom of the screen say why. It
+never falls back to a local directory with the same path.
 
 ## Copying and moving
 

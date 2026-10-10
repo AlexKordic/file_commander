@@ -54,7 +54,7 @@ struct Dialog {
 struct Files : Dialog {
   Component files;
   // std::string filter_txt;
-  Component sort_name, sort_size, sort_time;
+  Component sort_name, sort_size, sort_time, stop_loading;
   int       filter_cursor_pos = 0;
 
   explicit Files(PanelSharedState::P s);

@@ -81,6 +81,16 @@ std::function<Element(const EntryState&)> ascii_button_transform() {
   };
 }
 
+ButtonOption theme_button(Decorator Theme::*style) {
+  ButtonOption option;
+  option.transform = [style](const EntryState& s) -> Element {
+    // The theme is read on every render, so colour edits apply at once.
+    Element e = text(s.focused ? "[" + s.label + "]" : " " + s.label + " ") | theme().*style;
+    return s.focused ? e | bold : e;
+  };
+  return option;
+}
+
 std::function<Element(const EntryState& state)> text_menuitem_transform() {
   return [](const EntryState& state) -> Element {
     // std::string label = (state.active ? "> " : "  ") + state.label;
@@ -333,6 +343,8 @@ Files::Files(PanelSharedState::P s) : Dialog(std::move(s)) {
   sort_name = Button("Name", [dir = app->dir] { dir->sort_toggle_name_direction(); }, ascii_button);
   sort_size = Button("Size", [dir = app->dir] { dir->sort_toggle_size_direction(); }, ascii_button);
   sort_time = Button("Date", [dir = app->dir] { dir->sort_toggle_time_direction(); }, ascii_button);
+  stop_loading = Maybe(Button("Stop", [state = app] { state->stop_loading(); }, theme_button(&Theme::stop_button)),
+                       [state = app] { return state->loading(); });
 
   setup_filelist_datasource(app, _data_source);
 
@@ -343,7 +355,7 @@ Files::Files(PanelSharedState::P s) : Dialog(std::move(s)) {
     return handled || filelist_handle_filter(app.get(), data_source, ctx);
   };
 
-  auto render_selection = [state = app, sort_name = sort_name, sort_size = sort_size, sort_time = sort_time]() -> Element {
+  auto render_selection = [state = app, sort_name = sort_name, sort_size = sort_size, sort_time = sort_time, stop = stop_loading]() -> Element {
     std::string prefixes[3] = {"  ", "  ", "  "};
     switch (state->dir->order_by) {
     case Orderby::NAME_ASC: prefixes[0] = "↑↑"; break;
@@ -372,6 +384,10 @@ Files::Files(PanelSharedState::P s) : Dialog(std::move(s)) {
       sort_time->Render(),
       text(columns) | dim | xflex_shrink,
     });
+    if (state->loading()) {
+      children.push_back(text(" | "));
+      children.push_back(stop->Render());
+    }
     return hbox(std::move(children));
   };
   debug_info = [this]() -> Element { return text(" " + std::to_string(app->render_count) + " "); };
@@ -381,7 +397,7 @@ Files::Files(PanelSharedState::P s) : Dialog(std::move(s)) {
   //   text(std::to_string(_data_source.items_visible) + "/" + std::to_string(_data_source.v.items_total)),
   // }); };
 
-  navigation = Container::Vertical({Container::Horizontal({sort_name, sort_size, sort_time}), files});
+  navigation = Container::Vertical({Container::Horizontal({sort_name, sort_size, sort_time, stop_loading}), files});
   renderer   = Renderer(navigation, [app = app, render_selection = render_selection, files = files, this]() -> Element {
     app->render_count++;
     return vbox({

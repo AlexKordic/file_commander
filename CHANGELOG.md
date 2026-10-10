@@ -24,6 +24,11 @@
   text instead of overprinting it; the summary shows sizes as KB/MB/GB, and the
   progress bar keeps its job type and buttons whole. Delete progress gauges now
   show their own measure.
+- Panels no longer spend a row on a status line: a slow directory read shows a
+  **Stop** button after the sort buttons, and SSH failures appear only in the
+  error lines at the bottom. The progress bar is one row high, with dark yellow
+  **Pause/Resume** and dark red **Cancel** buttons (theme colours
+  `pause_button_bg` and `stop_button_bg`).
 - Documentation reorganized into a user guide, key reference, SSH, editor and
   Lua scripting guides, and contributor guides under `doc/dev/`.
 

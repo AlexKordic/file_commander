@@ -77,11 +77,13 @@ From the top, each panel shows:
    read took.
 3. **Summary line**: the number of selected items, selected bytes / total
    bytes, the sort order, the **Name**, **Size** and **Date** sort buttons
-   (click them), and the visible columns.
+   (click them), and the visible columns. While a directory is still being
+   read, a **Stop** button follows them; it cancels the read, as `Esc` does.
 4. **Listing**. Directories start with `/`.
 
 Messages from failed operations appear at the bottom of the screen. A running
-job shows a progress bar there, with **Pause** and **Cancel** buttons.
+job shows a one-row progress bar there, with **Pause/Resume** and **Cancel**
+buttons.
 
 ## Move around
 

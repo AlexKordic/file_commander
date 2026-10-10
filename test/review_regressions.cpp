@@ -646,6 +646,7 @@ static void UX_narrow_status_rows() {
   file_operations().set_transfer_rate(0);
   require(!progress.empty(), "job type was clipped from the progress row");
   require(!pause.empty() && !cancel.empty(), "progress row buttons were clipped");
+  require(pause == progress && cancel == progress, "progress bar is taller than one row");
 }
 
 static void R21() {
@@ -770,10 +771,37 @@ static void R25() {
     Loop active_screen(&interactive, panel.navigation);
     auto screen = Screen::Create(Dimension::Fixed(100), Dimension::Fixed(30));
     Render(screen, panel.render());
-    require(screen.ToString().find("Esc: cancel") != std::string::npos, "loading view could not redraw");
+    // The Stop button follows the sort buttons; no status row is spent on it.
+    int stop_x = -1, stop_y = -1;
+    for (int y = 0; y < screen.dimy() && stop_x < 0; ++y) {
+      bool sort_seen = false;
+      for (int x = 0; x + 3 < screen.dimx(); ++x) {
+        auto at = [&](int dx) { return screen.PixelAt(x + dx, y).character; };
+        if (at(0) == "D" && at(1) == "a" && at(2) == "t" && at(3) == "e") sort_seen = true;
+        if (sort_seen && at(0) == "S" && at(1) == "t" && at(2) == "o" && at(3) == "p") {
+          stop_x = x;
+          stop_y = y;
+          break;
+        }
+      }
+    }
+    require(stop_x >= 0, "loading view has no Stop button after the sort buttons");
+    Mouse mouse; mouse.button = Mouse::Left; mouse.motion = Mouse::Pressed; mouse.x = stop_x + 1; mouse.y = stop_y;
+    panel.navigation->OnEvent(Event::Mouse("", mouse));
+    require(!panel.loading(), "Stop did not cancel loading");
   }
+  entered = false;
+  panel.move_to(slow);
+  for (int i = 0; i < 500 && !entered; ++i) std::this_thread::sleep_for(std::chrono::milliseconds(2));
+  require(entered && panel.loading(), "second slow scan did not start");
   panel.navigation->OnEvent(Event::Escape);
   require(!panel.loading(), "Escape did not cancel loading");
+  entered = false;
+  panel.load_directory(slow, false, false, {}, true);
+  for (int i = 0; i < 500 && !entered; ++i) std::this_thread::sleep_for(std::chrono::milliseconds(2));
+  require(entered && panel.loading(), "background refresh did not start");
+  require(!panel.get_shared_state()->loading(), "an automatic refresh showed the Stop button");
+  panel.cancel_loading();
   panel.move_to(fast); ui.wait(panel);
   require(panel.dir.path == fast && panel.dir.items.size() == 1, "superseded scan replaced current directory");
   auto tool = f.file("slow-tool", "#!/bin/sh\nsleep 20\n");
