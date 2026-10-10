@@ -1,6 +1,24 @@
 # Plan: native promo overlay
 
-Status: proposal. Nothing here is built yet.
+Status: built, in `tools/promo/overlay`; usage is in [README.md](README.md#overlay).
+Differences from this plan:
+
+- Window titles are only visible to apps with the Screen Recording permission,
+  so the overlay doesn't look windows up by title. It follows the frontmost
+  iTerm2 window and locks onto it when a run starts.
+- iTerm2 reports its cell size in points (`OSC 1337 ; ReportCellSize`), which
+  the player asks for instead of `CSI 14 t` / `CSI 16 t`. Calibration places
+  the origin and can override the cell size.
+- The caption card is a solid, slightly transparent card rather than frosted
+  glass, so snapshots render exactly what the screen shows.
+- Key badges sit in a row above the caption card instead of in the
+  bottom-right corner, where they hid FC's progress bar buttons.
+- Calibration keys are typed in the terminal and forwarded by `play.py`; the
+  overlay never takes the keyboard, so the terminal keeps focus throughout.
+- A highlight goes away as soon as its text leaves that spot on FC's screen,
+  instead of lingering over whatever replaced it.
+- Added: `--snapshot` renders one moment of a recorded run to a PNG,
+  `--headless` checks the socket protocol, `--verbose` logs the followed window.
 
 ## Goal
 

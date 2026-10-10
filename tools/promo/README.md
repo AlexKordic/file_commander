@@ -10,7 +10,8 @@ FC itself.
 | `storyboard.json` | The scenes: what to type, what to wait for, captions, highlights, pointer moves. |
 | `make_world.py` | Builds the demo world in `/tmp/fc-promo` (demo files, a separate FC and Fresh profile) and a demo website in `/tmp/fc` on the SSH host. |
 | `play.py` | Plays the storyboard in your terminal, or headless for rehearsals. |
-| `overlay_plan.md` | Plan for a native app that draws captions, highlights and a pointer on top of the recording. |
+| `overlay/` | `fc-promo-overlay`, a macOS app that draws captions, highlights, a pointer and key badges over the terminal. |
+| `overlay_plan.md` | The design the overlay was built from. |
 
 ## Set up once
 
@@ -55,7 +56,89 @@ replies to FC and drops mouse input, so moving the real mouse is harmless,
 but move it out of the frame.
 
 `captions.srt` holds every caption with its timing, ready to import into a
-video editor. `events.jsonl` is the stream the overlay app will draw from.
+video editor. `events.jsonl` records what the overlay draws, for replays.
+
+## Overlay
+
+`fc-promo-overlay` draws the storyboard's explanations on top of the terminal
+while `play.py` plays: a lower-third caption card, a glowing frame around what
+a caption talks about, a pointer that glides to its target before each click,
+key badges for every key pressed, and a stamp when FC is killed. It is a
+transparent window over the terminal that clicks pass through, so the screen
+recorder captures terminal and overlay together.
+
+### Build
+
+Needs Xcode or the Swift 6 toolchain:
+
+```sh
+swift build -c release --package-path tools/promo/overlay
+OVERLAY="$(swift build -c release --package-path tools/promo/overlay --show-bin-path)/fc-promo-overlay"
+```
+
+### Calibrate once
+
+The overlay must know where the terminal's text starts inside the window. In
+iTerm2 the player asks the terminal for the exact cell size; only the origin
+depends on the window's title bar and tab bar. Calibrate in the window you
+will record in, at the size you will record at:
+
+```sh
+"$OVERLAY" > build-promo/overlay.log 2>&1 &    # keep it running for recording too
+build-promo/venv/bin/python tools/promo/play.py --pattern --overlay
+```
+
+The terminal fills with a pattern of coloured edge cells and the overlay
+draws its cell grid on top. Type in the terminal, which keeps the keyboard:
+the arrow keys move the grid until its lines sit on the cell edges (Shift
+moves 10 pt; `[` `]` and `-` `=` adjust the cell size if needed), Enter saves
+and Esc cancels; `Ctrl+\` aborts. The first lines of the pattern say whether
+the terminal reported its cell size; inside `screen` or `tmux` the player
+wraps the request so it reaches iTerm2 (tmux needs `allow-passthrough on`).
+
+The calibration is saved in
+`~/Library/Application Support/fc-promo-overlay/calibration.json`. Calibrate
+again after changing the font, the window style or the tab bar.
+
+### Record with the overlay
+
+With the overlay running, rebuild the world, start the screen recorder, then:
+
+```sh
+build-promo/venv/bin/python tools/promo/play.py --overlay \
+  --srt build-promo/captions.srt --events build-promo/events.jsonl
+```
+
+The overlay follows the iTerm2 window that is in front when the run starts,
+and logs to `build-promo/overlay.log`. Stop it with `kill %1`. To follow a
+window that may not be in front, such as one driven from another window,
+pass `--window-id N`; `--verbose` logs the ID of the window it follows.
+
+Turn iTerm2's window transparency off for recording (View > Use
+Transparency); otherwise windows behind the terminal show through FC.
+
+### Preview without FC
+
+`--replay` plays a recorded `events.jsonl` in a stand-in window, and
+`--snapshot` renders one moment to a PNG; both are quick ways to tune the
+theme. `--backdrop` draws a `--screens` text screen behind the overlay.
+
+```sh
+"$OVERLAY" --replay build-promo/events.jsonl --speed 2
+"$OVERLAY" --replay build-promo/events.jsonl --snapshot build-promo/ssh.png --at 25 \
+  --backdrop build-promo/screens/03-ssh.txt
+```
+
+### Theme
+
+`tools/promo/overlay/theme.json` lists every value with its default: colours,
+font sizes, the caption's width and position, durations, how long highlights,
+the pointer and badges linger, and the crash text. Copy it, change what you
+like (a theme file may list only the values it changes) and pass it with
+`--theme FILE`. `"sceneTitles": "chip"` also shows each scene's title briefly.
+
+`"$OVERLAY" --help` lists every option. `--verbose` logs the followed window
+and every event, which helps when something is drawn in the wrong place.
 
 ## Scenes
 

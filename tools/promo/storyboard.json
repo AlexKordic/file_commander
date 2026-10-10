@@ -15,7 +15,7 @@
         {"wait": "/camera"},
         {"caption": "File Commander", "sub": "A two-panel file manager for the terminal", "hold": 2500},
         {"keys": ["Down"]},
-        {"highlight": {"text": "/camera", "half": "left"}},
+        {"highlight": {"text": "/camera", "half": "left"}, "hold": 900},
         {"keys": ["Enter"]},
         {"wait": "IMG_2041"},
         {"caption": "Type to filter", "sub": "Only matching names stay in the list"},
@@ -32,7 +32,7 @@
         {"keys": ["Enter"]},
         {"wait_gone": "Select by Glob"},
         {"wait": "Sel 24/"},
-        {"highlight": {"text": "Sel 24/", "half": "left"}, "hold": 1800}
+        {"highlight": {"text": "Sel 24/\\d+", "half": "left"}, "hold": 1800}
       ]
     },
     {
