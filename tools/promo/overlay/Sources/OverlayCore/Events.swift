@@ -71,6 +71,8 @@ public enum OverlayEvent: Equatable, Sendable {
   case highlight(rect: CellRect, style: String, label: String)
   case unhighlight
   case pointer(rect: CellRect, milliseconds: Int, click: Bool)
+  /// A mouse drag from one cell to another, as when selecting text.
+  case drag(from: CellRect, to: CellRect, milliseconds: Int)
   case key(label: String)
   case type(text: String)
   case launch
@@ -103,8 +105,8 @@ public enum EventDecoder {
     func string(_ key: String) -> String { object[key] as? String ?? "" }
     func int(_ key: String) -> Int? { (object[key] as? NSNumber)?.intValue }
     func double(_ key: String) -> Double? { (object[key] as? NSNumber)?.doubleValue }
-    func rect() -> CellRect? {
-      guard let fields = object["rect"] as? [String: Any],
+    func rect(_ key: String = "rect") -> CellRect? {
+      guard let fields = object[key] as? [String: Any],
             let row = (fields["row"] as? NSNumber)?.intValue,
             let col = (fields["col"] as? NSNumber)?.intValue
       else { return nil }
@@ -131,6 +133,9 @@ public enum EventDecoder {
     case "pointer":
       guard let rect = rect() else { return nil }
       event = .pointer(rect: rect, milliseconds: int("ms") ?? 700, click: object["click"] as? Bool ?? false)
+    case "drag":
+      guard let from = rect(), let to = rect("to") else { return nil }
+      event = .drag(from: from, to: to, milliseconds: int("ms") ?? 900)
     case "key": event = .key(label: string("label"))
     case "type": event = .type(text: string("text"))
     case "launch": event = .launch

@@ -27,6 +27,22 @@ REPO = Path(__file__).resolve().parents[2]
 MIB = 1024 * 1024
 
 
+PHOTOS = ['cathedral-steps', 'cliff-path-at-sunset', 'fishing-boats', 'harbour-at-dawn', 'lighthouse',
+          'night-ferry', 'old-town-market', 'street-musicians']
+# The code scene pastes the photo paths into an array on the middle blank line.
+GALLERY_JS = """// Builds the photo grid on the home page.
+const grid = document.querySelector('#gallery');
+
+
+
+for (const name of photos) {
+  const figure = document.createElement('figure');
+  figure.innerHTML = `<img src="photos/${name}" alt="">`;
+  grid.append(figure);
+}
+"""
+
+
 def stamp(path, day, hour=10, minute=0):
     when = datetime.datetime(2026, 9, day, hour, minute).timestamp()
     os.utime(path, (when, when), follow_symlinks=False)
@@ -58,8 +74,9 @@ def build(root, rate, sevenzip, ssh_host, remote_dir):
     home, config, server = root / 'home', root / 'config' / 'file_commander', root / 'server'
     profile = root / 'profile'
 
-    for number in range(2041, 2065):
-        sized_file(home / 'camera' / f'IMG_{number}.jpg', (2 + number % 5) * MIB + number * 997, 20 + number % 7)
+    # Names of different lengths: the editor scene quotes each one with Home and End.
+    for index, name in enumerate(PHOTOS):
+        sized_file(home / 'camera' / f'{name}.jpg', (13 + index % 4) * MIB + index * 997, 20 + index % 7)
     for number in range(31, 37):
         sized_file(home / 'camera' / f'MOV_00{number}.mov', (18 + number % 4) * MIB, 26)
     for name, day in (('beach.jpg', 3), ('city.jpg', 4), ('harbour.jpg', 6)):
@@ -76,7 +93,7 @@ def build(root, rate, sevenzip, ssh_host, remote_dir):
 
     site = {'index.html': '<!doctype html>\n<title>Field Notes</title>\n<h1>Field Notes</h1>\n<p>Photos and music from the road.</p>\n',
             'style.css': 'body { font: 18px/1.5 system-ui; margin: 4rem auto; max-width: 42rem; }\nh1 { color: #2d6cdf; }\n',
-            'app.js': "document.querySelector('h1').addEventListener('click', () => alert('Hello!'));\n",
+            'app.js': GALLERY_JS,
             'README.md': '# Field Notes website\n\nStatic site. Upload `index.html`, `style.css` and `app.js` to the server.\n'}
     for name, body in site.items():
         text_file(home / 'projects' / 'website' / name, body, 22)
@@ -108,8 +125,11 @@ def build(root, rate, sevenzip, ssh_host, remote_dir):
     # first-run Welcome tab and update notices.
     fresh_config = profile / '.config' / 'fresh'
     fresh_config.mkdir(parents=True)
+    # No auto-closing or auto-indent: the code scene types every quote and bracket
+    # itself, and pasted lines must start in the same column.
     (fresh_config / 'config.json').write_text(json.dumps({
         'check_for_updates': False,
+        'editor': {'auto_close': False, 'auto_indent': False, 'tab_size': 2},
         'plugins': {'orchestrator': {'enabled': True, 'settings': {'autoOpenDock': 'never'}},
                     'welcome_screen': {'enabled': True, 'settings': {'showOnStartup': False}}}}, indent=2) + '\n')
 

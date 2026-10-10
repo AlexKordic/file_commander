@@ -157,17 +157,23 @@ and every event, which helps when something is drawn in the wrong place.
 
 | # | Scene | Shows |
 | --- | --- | --- |
-| 1 | `opening` | Two panels, type-to-filter, select by pattern (`+`) |
+| 1 | `opening` | Two panels, type-to-filter, select by pattern (`+`), `Ctrl+P` copies the selected paths |
 | 2 | `background_copy` | `F5` copy with a progress bar while you keep browsing |
 | 3 | `ssh` | Connect SSH from the palette, upload a folder to the server |
 | 4 | `editor` | `F4` into Fresh, `F10` back and forth, unsaved text survives |
-| 5 | `quick_tour` | Bookmarks, browsing a 7z archive, `F3` find, mouse sorting, single-panel mode |
-| 6 | `job_control` | A large copy; pause and resume it in the job list (`F9`) |
-| 7 | `crash_recovery` | FC is killed mid-copy, restarts with everything restored, the copy resumes |
-| 8 | `closing` | Closing caption |
+| 5 | `code` | Paste the copied paths into a JavaScript array, select their common prefix with the mouse, then `Ctrl+D` cursors remove it and `End`/`Home` quote every name |
+| 6 | `quick_tour` | Bookmarks, browsing a 7z archive, `F3` find, mouse sorting, single-panel mode |
+| 7 | `job_control` | A large copy; pause and resume it in the job list (`F9`) |
+| 8 | `crash_recovery` | FC is killed mid-copy, restarts with everything restored, the copy resumes |
+| 9 | `closing` | Closing caption |
 
-At real speed the storyboard runs for about two minutes without the SSH
-scene; cut it down to a shorter edit in the video editor.
+At real speed the storyboard runs for about two and a half minutes, SSH
+included; cut it down to a shorter edit in the video editor.
+
+`Ctrl+P` puts the photo paths on the system clipboard (`pbcopy`), so a run
+replaces whatever you had copied. The world's Fresh profile turns off
+auto-closing brackets and quotes and auto-indent, so the `code` scene types
+every character itself and pasted lines start in the same column.
 
 The world sets `transfer_rate_limit` to 12 MiB/s so that copies run long enough
 to see. Change it with `make_world.py --rate`.
@@ -207,6 +213,7 @@ thing:
 | `{"caption": "Title", "sub": "Line"}` | Start a caption; it lasts until the next one or `uncaption`. |
 | `{"highlight": {"text": "regex"}}` | Mark the matching text for the overlay. |
 | `{"point": {...}}`, `{"click": {...}}` | Move the overlay pointer to the matching text; `click` also clicks there in FC. |
+| `{"drag": {"text": "/tmp/\\S+/"}}` | Select the matching text with the mouse: press on its first character, drag past its last, release. The overlay pointer follows. `ms` sets the drag time. |
 | `{"crash": {"message": "..."}}` | Kill FC with `SIGKILL` and restore the terminal. |
 | `{"quit": true}` | Quit FC with `Ctrl+C`. |
 | `{"clear": true}`, `{"print": "text"}` | Clear the terminal, or print text, for the viewer only. |

@@ -14,6 +14,8 @@ final class EventDecoderTests: XCTestCase {
                    .geometry(TerminalGeometry(cellWidth: 8.5, cellHeight: 17, scale: 2, terminal: "iTerm.app")))
     XCTAssertEqual(EventDecoder.decode(#"{"t": 6, "event": "caption", "text": "Copy with F5", "sub": "Other panel"}"#)?.event,
                    .caption(text: "Copy with F5", sub: "Other panel"))
+    XCTAssertEqual(EventDecoder.decode(#"{"t": 6, "event": "drag", "rect": {"row": 9, "col": 4}, "to": {"row": 9, "col": 30}, "ms": 800}"#)?.event,
+                   .drag(from: CellRect(row: 9, col: 4), to: CellRect(row: 9, col: 30), milliseconds: 800))
     XCTAssertEqual(EventDecoder.decode(#"{"t": 7, "event": "calibrate_key", "key": "left", "big": true}"#)?.event,
                    .calibrateKey(.move(dx: -10, dy: 0)))
     XCTAssertEqual(EventDecoder.decode(#"{"t": 8, "event": "calibrate_key", "key": "taller"}"#)?.event,
@@ -23,6 +25,7 @@ final class EventDecoderTests: XCTestCase {
   func testRejectsUnknownAndMalformedLines() {
     XCTAssertNil(EventDecoder.decode(#"{"t": 1, "event": "teleport"}"#))
     XCTAssertNil(EventDecoder.decode(#"{"t": 1, "event": "highlight"}"#), "a highlight needs a rect")
+    XCTAssertNil(EventDecoder.decode(#"{"t": 1, "event": "drag", "rect": {"row": 1, "col": 1}}"#), "a drag needs an end")
     XCTAssertNil(EventDecoder.decode(#"{"t": 1, "event": "start", "cols": 0, "rows": 3}"#))
     XCTAssertNil(EventDecoder.decode(#"{"t": 1, "event": "calibrate_key", "key": "sideways"}"#))
     XCTAssertNil(EventDecoder.decode("not json"))

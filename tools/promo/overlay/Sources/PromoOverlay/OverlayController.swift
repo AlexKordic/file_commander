@@ -106,6 +106,8 @@ final class OverlayController {
       highlight.hide()
     case let .pointer(rect, milliseconds, click):
       pointer.move(to: grid.center(rect), duration: Double(milliseconds) / 1000, click: click, bounds: bounds)
+    case let .drag(from, to, milliseconds):
+      pointer.drag(from: grid.center(from), to: grid.center(to), duration: Double(milliseconds) / 1000, bounds: bounds)
     case let .key(label):
       badges.key(label, at: timed.time, anchor: badgeAnchor)
     case let .type(text):

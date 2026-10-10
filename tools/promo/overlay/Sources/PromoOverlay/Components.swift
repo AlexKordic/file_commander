@@ -272,6 +272,29 @@ final class PointerComponent {
     }
   }
 
+  /// Presses at `start`, slides in a straight line to `target` and releases there.
+  func drag(from start: CGPoint, to target: CGPoint, duration: Double, bounds: CGRect) {
+    if !shown { move(to: start, duration: 0, click: false, bounds: bounds) }
+    token += 1
+    let mine = token
+    CALayer.immediately { ripple.position = start }
+    ripple.tween("transform.scale", to: 1, duration: 0.2, from: 0.3)
+    ripple.tween("opacity", to: 0.6, duration: 0.2, from: 0)
+    arrow.tween("transform.scale", to: 0.85, duration: 0.12)
+    arrow.tween("position", to: NSValue(point: target), duration: duration, easing: .linear, from: NSValue(point: start))
+    ripple.tween("position", to: NSValue(point: target), duration: duration, easing: .linear, from: NSValue(point: start))
+    scheduler.after(duration) { [weak self] in
+      guard let self else { return }
+      self.arrow.tween("transform.scale", to: 1, duration: 0.15)
+      self.ripple.tween("transform.scale", to: 1.6, duration: 0.45)
+      self.ripple.tween("opacity", to: 0, duration: 0.45)
+    }
+    scheduler.after(duration + theme.pointerLinger) { [weak self] in
+      guard let self, self.token == mine else { return }
+      self.hide()
+    }
+  }
+
   func hide() {
     guard shown else { return }
     shown = false

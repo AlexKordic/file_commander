@@ -41,7 +41,7 @@ KEYS = {
 }
 KEYS.update({f'Ctrl+{c}': bytes([ord(c) - 64]) for c in 'ABCDEFGHIJKLNOPQRSTUVWXYZ'})
 STEP_KINDS = {'clear', 'shell', 'launch', 'wait', 'wait_gone', 'keys', 'type', 'pause', 'caption', 'uncaption',
-              'highlight', 'point', 'click', 'crash', 'quit', 'print'}
+              'highlight', 'point', 'click', 'drag', 'crash', 'quit', 'print'}
 # Restores the terminal after FC is killed: mouse modes off, cursor on, main screen.
 TERMINAL_RESET = b'\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1006l\x1b[?1015l\x1b[?2004l\x1b[?25h\x1b[?1049l\x1b[0m'
 # Keys typed during --pattern; the overlay never takes the keyboard from the terminal.
@@ -80,7 +80,7 @@ def validate(story):
             for key in step.get('keys', []) + step.get('fallback', []):
                 if key not in KEYS and len(key) != 1:
                     raise StoryError(f'{where}: unknown key {key!r}')
-            for pattern in (step.get('wait'), step.get('wait_gone'), *(step.get(k, {}).get('text') for k in ('highlight', 'point', 'click'))):
+            for pattern in (step.get('wait'), step.get('wait_gone'), *(step.get(k, {}).get('text') for k in ('highlight', 'point', 'click', 'drag'))):
                 if isinstance(pattern, str):
                     re.compile(pattern)
     return seen
@@ -350,6 +350,23 @@ class Player:
             (self.send if to_fc else self.out)(char.encode())
             self.sleep(self.random.randint(*self.type_ms))
 
+    def drag(self, target):
+        """Select the matched text with the mouse: press on its first cell, drag to
+        the cell after its last one, release."""
+        rect = self.find(target)
+        first = dict(rect, cols=1)
+        after = dict(rect, col=rect['col'] + rect['cols'], cols=1)
+        approach, duration = target.get('approach_ms', 700), target.get('ms', 900)
+        self.events.emit('pointer', rect=first, ms=approach, click=False)
+        self.sleep(approach)
+        self.events.emit('drag', rect=first, to=after, ms=duration)
+        y = rect['row'] + 1
+        self.send(f'\x1b[<0;{first["col"] + 1};{y}M'.encode())
+        for col in range(first['col'] + 1, after['col'] + 1):
+            self.sleep(duration / rect['cols'])
+            self.send(f'\x1b[<32;{col + 1};{y}M'.encode())
+        self.send(f'\x1b[<0;{after["col"] + 1};{y}m'.encode())
+
     def run_step(self, step):
         timeout = step.get('timeout', 15)
         if 'clear' in step:
@@ -406,6 +423,8 @@ class Player:
                 self.send(f'\x1b[<0;{x};{y}M'.encode())
                 self.sleep(90)
                 self.send(f'\x1b[<0;{x};{y}m'.encode())
+        elif 'drag' in step:
+            self.drag(step['drag'])
         elif 'crash' in step:
             self.crash(step['crash'])
         elif 'quit' in step:
