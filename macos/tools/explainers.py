@@ -391,15 +391,22 @@ E['editor_basics'] = dict(
            {'editor_keys': ['F10']}, wait({'editor': {'running': False}}, timeout=10), {'uncaption': True}])
 
 E['editor_window'] = dict(
-    title='Files and editor in one window', order=19, duration=65, chapter='editor', needs={'editor': True},
+    title='Files and editor in one window', order=19, duration=80, chapter='editor', needs={'editor': True, 'idle_queue': True},
     summary="F4 turns the window into the editor: Fresh's menus in the menu bar, tabs, the command palette and the file sidebar.",
-    covers={'anchors': ['editor.tabs', 'editor.status', 'editor.palette', 'editor.explorer', 'toolbar.mode']},
-    steps=[tabs('{home}/projects/website', '{home}/projects/notes'), {'chapter': 'Editor'},
-           cursor('left', 'index.html'), keys('@open_in_editor'), wait({'editor': {'contains': 'Field Notes'}}, timeout=25),
+    covers={'anchors': ['editor.tabs', 'editor.status', 'editor.palette', 'editor.explorer', 'toolbar.mode', 'jobs.bar']},
+    steps=[tabs('{home}/photos', '{home}/backup'), {'chapter': 'Editor'},
+           cap('Start a copy first', 'At 1 MiB/s it is still running when the editor opens'), {'set_transfer_speed': '1 MiB'},
+           cursor('left', '2026'), keys('@copy'), *copy_sheet('photos'), wait({'running_job': True}, timeout=10),
+           {'navigate': {'side': 'left', 'to': '{home}/projects/website'}}, cursor('left', 'index.html'),
+           keys('@open_in_editor'), wait({'editor': {'contains': 'Field Notes'}}, timeout=25),
            wait({'editor': {'window': 'main'}}, timeout=5),
            cap('One window', 'The editor takes the place of the panes; Fresh edits, the window draws its tabs and status bar'),
            hl('editor.tabs', 'editor.status', hold=2200),
+           cap('Jobs keep going', 'The job bar stays below the editor, with its Pause and Cancel buttons'),
+           hl('jobs.bar', hold=1800), wait({'running_job': False}, timeout=60),
            cap("Fresh's menus", 'While the editor is shown, the menu bar holds its menus, with \u2318 shortcuts'), {'pause': 2400},
+           # The copy ended while the editor was shown; the app's menus must not have come back meanwhile.
+           wait({'all': [{'menubar': 'Selection'}, {'not': {'menubar': 'Transfers'}}]}, timeout=5),
            cap('Command palette', '\u21e7\u2318P finds any editor command by name'),
            {'editor_keys': ['Cmd+Shift+P']}, wait({'editor': {'shows': 'palette'}}, timeout=10),
            {'editor_type': 'toggle line'}, hl('editor.palette', hold=2000), {'pause': 2000}, {'editor_keys': ['Esc']},
@@ -412,6 +419,7 @@ E['editor_window'] = dict(
            {'editor_keys': ['Cmd+P']}, wait({'editor': {'shows': 'palette'}}, timeout=10), {'editor_keys': ['Backspace']},
            {'editor_type': 'style'}, {'pause': 900},
            {'editor_keys': ['Enter']}, wait({'editor': {'contains': 'max-width'}}, timeout=10), {'pause': 1200},
+           wait({'all': [{'menubar': 'Selection'}, {'not': {'menubar': 'Transfers'}}]}, timeout=5),
            cap('Files or the editor', 'The switch in the toolbar goes back and forth, as F10 does; the panes stay as you left them'),
            hl('toolbar.mode', hold=1600), {'click': 'toolbar.mode'}, wait({'editor': {'running': False}}, timeout=10),
            wait({'cursor': {'side': 'left', 'name': 'index.html'}}), {'pause': 1400},
@@ -473,8 +481,26 @@ E['editor_restart'] = dict(
            cap('Your text is still there', 'Fresh saved its recovery data before stopping'), {'pause': 1800},
            {'editor_keys': ['F10']}, wait({'editor': {'running': False}}, timeout=10), {'uncaption': True}])
 
+E['editor_terminal'] = dict(
+    title='The editor as a terminal', order=23, duration=45, chapter='editor', needs={'editor': True},
+    summary="Settings \u203a Editor can show Fresh's own terminal interface in place of the native editor.",
+    covers={'anchors': ['settings.editor.terminal']},
+    steps=[tabs('{home}/projects/notes', '{home}'), {'chapter': 'Editor'},
+           cap("Fresh's own look", 'Settings \u203a Editor \u203a Show the editor as a terminal runs its terminal interface instead'),
+           {'open_window': 'settings', 'note': 'editor'}, wait({'window': 'settings'}), hl('settings.editor.terminal', hold=2000),
+           {'set_preference': {'terminal_editor': True}}, {'pause': 1200}, {'close_window': 'settings'},
+           cursor('left', 'ideas.md'), keys('@open_in_editor'), wait({'editor': {'contains': 'Ideas'}}, timeout=25),
+           wait({'editor': {'window': 'main'}}, timeout=5),
+           cap('Same place, same Fresh', "It takes the panes' place too, with the same tabs and unsaved text"), {'pause': 1500},
+           cap('Its own keys', "Typing, F-keys and Control keys go to Fresh, ahead of File Commander's menus"),
+           {'editor_keys': ['End']}, {'type': ' (typed)'}, wait({'editor': {'contains': '\\(typed\\)'}}, timeout=10), {'pause': 900},
+           cap('F10 comes back', "Fresh's own switch key detaches it, and the panes return"),
+           keys('F10'), wait({'editor': {'running': False}}, timeout=10),
+           wait({'cursor': {'side': 'left', 'name': 'ideas.md'}}), {'set_preference': {'terminal_editor': False}},
+           {'pause': 600}, {'uncaption': True}])
+
 E['palette_keys'] = dict(
-    title='Commands and keys', order=23, duration=55, chapter='yours',
+    title='Commands and keys', order=24, duration=55, chapter='yours',
     summary='Find any command in the palette, rebind its key, and pick a key preset.',
     covers={'commands': ['command_palette'], 'anchors': ['palette.field']},
     steps=[tabs('{home}', '{home}/camera'), {'chapter': 'Make It Yours'},
@@ -488,7 +514,7 @@ E['palette_keys'] = dict(
            {'open_window': 'settings', 'note': 'keys'}, {'pause': 2600}, {'close_window': 'settings'}, {'uncaption': True}])
 
 E['themes'] = dict(
-    title='Themes, colors and fonts', order=24, duration=60, chapter='yours', needs={'settings': True},
+    title='Themes, colors and fonts', order=25, duration=60, chapter='yours', needs={'settings': True},
     summary='Light and dark, colors for both, and a font and size for every element.',
     covers={'commands': ['edit_theme_colors'], 'anchors': ['settings.appearance.preview', 'settings.appearance.font.bigger']},
     steps=[tabs('{home}/camera', '{home}/music'), {'chapter': 'Make It Yours'},
@@ -509,7 +535,7 @@ E['themes'] = dict(
            {'uncaption': True}])
 
 E['scripting'] = dict(
-    title='Lua scripts', order=25, duration=40, chapter='yours', needs={'idle_queue': True},
+    title='Lua scripts', order=26, duration=40, chapter='yours', needs={'idle_queue': True},
     summary="Automate File Commander with Lua: a script copies the camera's photos.",
     covers={'commands': ['run_script']},
     steps=[tabs('{home}/projects/tools', '{home}/backup'), {'chapter': 'Make It Yours'},
@@ -523,7 +549,7 @@ E['scripting'] = dict(
            {'uncaption': True}])
 
 E['workspace_restore'] = dict(
-    title='Quit and come back', order=26, duration=40, chapter='recovery', needs={'restart': True},
+    title='Quit and come back', order=27, duration=40, chapter='recovery', needs={'restart': True},
     summary='Tabs, folders, selections and filters come back after a quit.',
     covers={'anchors': ['pane.left.tabs']},
     steps=[tabs('{home}/camera', '{home}/music'), {'chapter': 'Recovery'},
@@ -536,7 +562,7 @@ E['workspace_restore'] = dict(
            keys(*['Backspace'] * 2, gap=120), keys('@clear_selection'), {'uncaption': True}])
 
 E['crash_recovery'] = dict(
-    title='Crash recovery', order=27, duration=75, chapter='recovery', needs={'crash': True, 'idle_queue': True},
+    title='Crash recovery', order=28, duration=75, chapter='recovery', needs={'crash': True, 'idle_queue': True},
     summary='A real crash in the middle of a copy: what comes back, and how the copy continues.',
     covers={'commands': ['simulate_crash'], 'anchors': ['activity.recovery', 'activity.resume']},
     steps=[tabs('{home}/music', '{home}/backup'), {'chapter': 'Recovery'}, {'set_transfer_speed': '3 MiB'},

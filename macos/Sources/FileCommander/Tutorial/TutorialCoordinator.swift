@@ -208,6 +208,7 @@ final class TutorialCoordinator: ExplainerHost {
     var focusedSide: Int
     var paneSplit: Double
     var bookmarks: [String] = []
+    var terminalEditor: Bool?
   }
 
   private func takeSnapshot() -> Snapshot {
@@ -215,7 +216,7 @@ final class TutorialCoordinator: ExplainerHost {
     return Snapshot(transferRate: app.engine.transferRate, keyPreset: p.keyPreset, keyOverrides: p.keyOverrides,
                     selectionStyle: p.selectionStyle, theme: p.theme, appearance: p.appearance, zoom: p.zoom,
                     singlePane: app.engine.singlePane, focusedSide: app.engine.focusedSide, paneSplit: p.paneSplit,
-                    bookmarks: app.engine.bookmarks.map(\.encoded))
+                    bookmarks: app.engine.bookmarks.map(\.encoded), terminalEditor: p.terminalEditor)
   }
 
   private func restore(closeTabs: Bool) {
@@ -229,6 +230,7 @@ final class TutorialCoordinator: ExplainerHost {
       app.preferences.appearance = s.appearance
       app.preferences.zoom = s.zoom
       app.preferences.paneSplit = s.paneSplit
+      if let terminalEditor = s.terminalEditor { app.preferences.terminalEditor = terminalEditor }
       app.theme.zoom = s.zoom
       if app.preferences.theme != s.theme || app.theme.active.name != s.theme {
         app.preferences.theme = s.theme
@@ -495,6 +497,7 @@ final class TutorialCoordinator: ExplainerHost {
         case "zoom":
           app.preferences.zoom = value.number ?? 1
           app.theme.zoom = app.preferences.zoom
+        case "terminal_editor": app.preferences.terminalEditor = value.bool ?? false
         default: break
         }
       }
@@ -685,6 +688,9 @@ final class TutorialCoordinator: ExplainerHost {
     case "hud": return app.hud?.contains(value.string ?? "") ?? false
     case "errors_at_least": return app.engine.errorCount >= Int64(value.number ?? 1)
     case "no_errors": return app.engine.errorCount == 0
+    case "menubar":
+      // A top-level menu of that title is in the menu bar (Fresh's "Selection", the app's "Transfers").
+      return NSApp.mainMenu?.items.contains { $0.title == value.string } ?? false
     case "window":
       let id = value.string ?? ""
       return NSApp.windows.contains { $0.isVisible && TutorialCoordinator.matches($0, id) }

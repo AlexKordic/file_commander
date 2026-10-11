@@ -2,10 +2,11 @@
   "id": "editor_window",
   "title": "Files and editor in one window",
   "order": 19,
-  "duration": 65,
+  "duration": 80,
   "chapter": "editor",
   "needs": {
-    "editor": true
+    "editor": true,
+    "idle_queue": true
   },
   "summary": "F4 turns the window into the editor: Fresh's menus in the menu bar, tabs, the command palette and the file sidebar.",
   "covers": {
@@ -14,19 +15,70 @@
       "editor.status",
       "editor.palette",
       "editor.explorer",
-      "toolbar.mode"
+      "toolbar.mode",
+      "jobs.bar"
     ]
   },
   "steps": [
     {
       "open_tabs": {
-        "left": "{home}/projects/website",
-        "right": "{home}/projects/notes",
+        "left": "{home}/photos",
+        "right": "{home}/backup",
         "focus": "left"
       }
     },
     {
       "chapter": "Editor"
+    },
+    {
+      "caption": "Start a copy first",
+      "sub": "At 1 MiB/s it is still running when the editor opens"
+    },
+    {
+      "set_transfer_speed": "1 MiB"
+    },
+    {
+      "cursor": {
+        "side": "left",
+        "name": "2026"
+      }
+    },
+    {
+      "keys": [
+        "@copy"
+      ]
+    },
+    {
+      "wait": {
+        "sheet": "copy"
+      }
+    },
+    {
+      "wait": {
+        "anchor": "sheet.copy.start"
+      }
+    },
+    {
+      "click": "sheet.copy.start",
+      "as_job": "photos"
+    },
+    {
+      "wait": {
+        "sheet": null
+      },
+      "timeout": 30
+    },
+    {
+      "wait": {
+        "running_job": true
+      },
+      "timeout": 10
+    },
+    {
+      "navigate": {
+        "side": "left",
+        "to": "{home}/projects/website"
+      }
     },
     {
       "cursor": {
@@ -67,11 +119,40 @@
       "hold": 2200
     },
     {
+      "caption": "Jobs keep going",
+      "sub": "The job bar stays below the editor, with its Pause and Cancel buttons"
+    },
+    {
+      "highlight": "jobs.bar",
+      "hold": 1800
+    },
+    {
+      "wait": {
+        "running_job": false
+      },
+      "timeout": 60
+    },
+    {
       "caption": "Fresh's menus",
       "sub": "While the editor is shown, the menu bar holds its menus, with ⌘ shortcuts"
     },
     {
       "pause": 2400
+    },
+    {
+      "wait": {
+        "all": [
+          {
+            "menubar": "Selection"
+          },
+          {
+            "not": {
+              "menubar": "Transfers"
+            }
+          }
+        ]
+      },
+      "timeout": 5
     },
     {
       "caption": "Command palette",
@@ -201,6 +282,21 @@
     },
     {
       "pause": 1200
+    },
+    {
+      "wait": {
+        "all": [
+          {
+            "menubar": "Selection"
+          },
+          {
+            "not": {
+              "menubar": "Transfers"
+            }
+          }
+        ]
+      },
+      "timeout": 5
     },
     {
       "caption": "Files or the editor",

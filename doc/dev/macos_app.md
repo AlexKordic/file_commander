@@ -189,7 +189,9 @@ each plus `chapters.json`. They are written with
   `keys`, `type`, `pause`, `wait`, `wait_not`, `expect`, `try` (Guided mode).
   Options: `hold`, `timeout`, `gap`, `ms`, `as_job`.
 - **Host steps** (the app): `open_tabs`, `navigate`, `focus`, `cursor`,
-  `command`, `set_transfer_speed`, `set_preference`, `open_window`,
+  `command`, `set_transfer_speed`, `set_preference` (`selection`, `keys`,
+  `appearance`, `theme`, `zoom`, `terminal_editor`; restored when the
+  explainer ends), `open_window`,
   `close_window`, `front`, `touch`, `remember`, `crash`, `relaunch`,
   `editor_type`, `editor_keys`, `run_script`, `remove_bookmark`, `notice`.
 - **Conditions**: `rows`, `selected`, `cursor`, `path`, `filter`, `loaded`,
@@ -200,7 +202,10 @@ each plus `chapters.json`. They are written with
   regex, `shows` or `hides` a native surface, `window`: the editor has the
   keyboard in that window), `bookmark`, `transfer_rate`,
   `file` (`exists`, `missing`, or `path` with `contains`), `theme`,
-  `font_size`, and `all`, `any`, `not`.
+  `font_size`, `menubar` (a top-level menu of that title is in the menu bar),
+  and `all`, `any`, `not`. A `wait` passes as soon as its condition holds, so
+  a check for something that could go wrong later (the menu bar after a job
+  ends) comes after a pause, or again later in the explainer.
 - **Needs**: `idle_queue` refuses to start while the user's own job runs;
   `editor` gives the explainer a new Fresh session; `restart` and `crash` keep
   the tutorial tabs in the workspace checkpoint; `crash` asks first.

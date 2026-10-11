@@ -30,7 +30,7 @@ OPTIONS = {'hold', 'timeout', 'gap', 'ms', 'as_job', 'sub', 'nth', 'approach_ms'
 CONDITIONS = {'all', 'any', 'not', 'rows', 'listing', 'selected', 'cursor', 'path', 'filter', 'loaded', 'loading', 'tabs', 'focused',
               'single', 'sort', 'columns', 'sheet', 'palette', 'glob', 'text_focus', 'anchor', 'job', 'running_job', 'queued_at_least',
               'event', 'clipboard', 'hud', 'errors_at_least', 'no_errors', 'window', 'editor', 'bookmark', 'no_bookmark',
-              'transfer_rate', 'file', 'theme', 'font_size', 'cursor_visible'}
+              'transfer_rate', 'file', 'theme', 'font_size', 'cursor_visible', 'menubar'}
 RESOLVERS = ['pane.left.row', 'pane.right.row', 'editor.text', 'editor.tabs', 'editor.status', 'editor.palette', 'editor.popup',
              'editor.explorer']
 NAMED_KEYS = {f'F{n}' for n in range(1, 13)} | {'Enter', 'Esc', 'Tab', 'Space', 'Backspace', 'Delete', 'Up', 'Down', 'Left',

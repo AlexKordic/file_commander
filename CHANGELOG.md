@@ -41,7 +41,7 @@
   [doc/macos_app.md](doc/macos_app.md).
 - Help explains every feature with an explainer that runs real operations on
   demo files, with captions, highlights, a pointer and key badges; **Entire
-  tutorial** runs all 27. ExplainerKit, the annotation engine, also records
+  tutorial** runs all 28. ExplainerKit, the annotation engine, also records
   explainers to video, captions and Markdown pages.
 - The macOS app draws Fresh natively in its main window: `F4` shows the editor
   in place of the panes and `F10` (or the toolbar's Files | Editor switch)
