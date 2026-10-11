@@ -24,6 +24,9 @@ public final class SceneSocket: @unchecked Sendable {
     }
   }
 
+  /// The socket's send and receive buffers.
+  static let bufferSize: Int32 = 4 << 20
+
   public let path: String
   /// Called on the main queue with each parsed message.
   public var onMessage: (@MainActor (SceneMessage) -> Void)?
@@ -73,6 +76,12 @@ public final class SceneSocket: @unchecked Sendable {
     }
     var on: Int32 = 1
     setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &on, socklen_t(MemoryLayout<Int32>.size))
+    // macOS gives a Unix socket 8 KiB each way, a fraction of one frame: Fresh
+    // would trickle each frame out and queue the next ones behind it. Fresh
+    // raises its end too. Best effort; a smaller buffer only makes it slower.
+    var size = SceneSocket.bufferSize
+    setsockopt(fd, SOL_SOCKET, SO_RCVBUF, &size, socklen_t(MemoryLayout<Int32>.size))
+    setsockopt(fd, SOL_SOCKET, SO_SNDBUF, &size, socklen_t(MemoryLayout<Int32>.size))
     var timeout = timeval(tv_sec: 5, tv_usec: 0)
     setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &timeout, socklen_t(MemoryLayout<timeval>.size))
     self.fd = fd
@@ -137,8 +146,10 @@ public final class SceneSocket: @unchecked Sendable {
     var chunk = [UInt8](repeating: 0, count: 262_144)
     var reason: String?
     loop: while true {
-      while let (opcode, payload, used) = SceneSocket.decode(buffer) {
-        buffer.removeFirst(used)
+      // One read can bring many frames; what they used is dropped once, after.
+      var start = 0
+      while let (opcode, payload, used) = SceneSocket.decode(buffer, from: start) {
+        start += used
         switch opcode {
         case 0x1:
           let started = ProcessInfo.processInfo.systemUptime
@@ -160,6 +171,7 @@ public final class SceneSocket: @unchecked Sendable {
           break
         }
       }
+      buffer.removeFirst(start)
       let n = read(fd, &chunk, chunk.count)
       if n > 0 {
         buffer.append(contentsOf: chunk[0..<n])
@@ -221,21 +233,21 @@ public final class SceneSocket: @unchecked Sendable {
     return frame
   }
 
-  /// One server frame from the front of `buffer`, or nil until it has all arrived.
-  static func decode(_ buffer: [UInt8]) -> (opcode: UInt8, payload: [UInt8], used: Int)? {
-    guard buffer.count >= 2 else { return nil }
-    let opcode = buffer[0] & 0x0F
-    let masked = buffer[1] & 0x80 != 0
-    var length = Int(buffer[1] & 0x7F)
-    var offset = 2
+  /// One server frame from `start` in `buffer`, or nil until it has all arrived.
+  static func decode(_ buffer: [UInt8], from start: Int = 0) -> (opcode: UInt8, payload: [UInt8], used: Int)? {
+    guard buffer.count >= start + 2 else { return nil }
+    let opcode = buffer[start] & 0x0F
+    let masked = buffer[start + 1] & 0x80 != 0
+    var length = Int(buffer[start + 1] & 0x7F)
+    var offset = start + 2
     if length == 126 {
-      guard buffer.count >= 4 else { return nil }
-      length = Int(buffer[2]) << 8 | Int(buffer[3])
-      offset = 4
+      guard buffer.count >= start + 4 else { return nil }
+      length = Int(buffer[start + 2]) << 8 | Int(buffer[start + 3])
+      offset = start + 4
     } else if length == 127 {
-      guard buffer.count >= 10 else { return nil }
-      length = buffer[2..<10].reduce(0) { $0 << 8 | Int($1) }
-      offset = 10
+      guard buffer.count >= start + 10 else { return nil }
+      length = buffer[(start + 2)..<(start + 10)].reduce(0) { $0 << 8 | Int($1) }
+      offset = start + 10
     }
     var mask: [UInt8] = []
     if masked {
@@ -246,6 +258,6 @@ public final class SceneSocket: @unchecked Sendable {
     guard buffer.count >= offset + length else { return nil }
     var payload = Array(buffer[offset..<(offset + length)])
     if masked { for i in payload.indices { payload[i] ^= mask[i % 4] } }
-    return (opcode, payload, offset + length)
+    return (opcode, payload, offset + length - start)
   }
 }
