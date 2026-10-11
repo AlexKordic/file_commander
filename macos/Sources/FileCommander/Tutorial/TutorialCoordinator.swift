@@ -36,6 +36,9 @@ final class TutorialCoordinator: ExplainerHost {
   var quitWhenDone = false
   private(set) var lastFailure: String?
   private let editorAnchors = EditorAnchors()
+  /// Scroll benchmarks: gestures played into the editor or a plain text view.
+  private let scrollInjector = ScrollInjector()
+  private let textBench = TextViewBench()
   private var rememberedTabs = [0, 0]
   private var lastEditorTrace = ""
 
@@ -84,6 +87,17 @@ final class TutorialCoordinator: ExplainerHost {
   // MARK: Starting and stopping
 
   func start(_ id: String) {
+    var id = id
+    // A script file outside the catalog, such as a benchmark in macos/bench.
+    if id.hasSuffix(".json"), let data = FileManager.default.contents(atPath: id) {
+      do {
+        let script = try JSONDecoder().decode(ExplainerScript.self, from: data)
+        catalog = ExplainerCatalog(chapters: catalog.chapters, scripts: catalog.scripts.filter { $0.id != script.id } + [script])
+        id = script.id
+      } catch {
+        NSLog("File Commander: can't read \(id): \(error)")
+      }
+    }
     let queue: [String]
     if id == TutorialCoordinator.entireID {
       let all = catalog.scripts.map(\.id)
@@ -214,6 +228,7 @@ final class TutorialCoordinator: ExplainerHost {
     var terminalEditor: Bool?
     var collapsedSidebarSections: [String]?
     var sidebarShown: Bool?
+    var editorTelemetry: Bool?
   }
 
   private func takeSnapshot() -> Snapshot {
@@ -222,7 +237,8 @@ final class TutorialCoordinator: ExplainerHost {
                     selectionStyle: p.selectionStyle, theme: p.theme, appearance: p.appearance, zoom: p.zoom,
                     singlePane: app.engine.singlePane, focusedSide: app.engine.focusedSide, paneSplit: p.paneSplit,
                     bookmarks: app.engine.bookmarks.map(\.encoded), terminalEditor: p.terminalEditor,
-                    collapsedSidebarSections: p.collapsedSidebarSections, sidebarShown: p.sidebarShown)
+                    collapsedSidebarSections: p.collapsedSidebarSections, sidebarShown: p.sidebarShown,
+                    editorTelemetry: p.editorTelemetry)
   }
 
   private func restore(closeTabs: Bool) {
@@ -239,6 +255,7 @@ final class TutorialCoordinator: ExplainerHost {
       if let terminalEditor = s.terminalEditor { app.preferences.terminalEditor = terminalEditor }
       if let collapsed = s.collapsedSidebarSections { app.preferences.collapsedSidebarSections = collapsed }
       if let shown = s.sidebarShown { app.setSidebarShown(shown) }
+      if let telemetry = s.editorTelemetry { app.preferences.editorTelemetry = telemetry }
       app.theme.zoom = s.zoom
       if app.preferences.theme != s.theme || app.theme.active.name != s.theme {
         app.preferences.theme = s.theme
@@ -506,6 +523,7 @@ final class TutorialCoordinator: ExplainerHost {
           app.preferences.zoom = value.number ?? 1
           app.theme.zoom = app.preferences.zoom
         case "terminal_editor": app.preferences.terminalEditor = value.bool ?? false
+        case "editor_telemetry": app.preferences.editorTelemetry = value.bool ?? false
         default: break
         }
       }
@@ -557,6 +575,30 @@ final class TutorialCoordinator: ExplainerHost {
       }
     case "remove_bookmark":
       if let bookmark = app.engine.bookmarks.first(where: { $0.title == v.string }) { app.engine.removeBookmark(bookmark.encoded) }
+    case "window_frame":
+      // The main window's size, for benchmarks that need a known grid.
+      if let window = mainWindow, let w = v["w"]?.number, let h = v["h"]?.number {
+        let frame = window.frame
+        window.setFrame(NSRect(x: frame.minX, y: frame.maxY - h, width: w, height: h), display: true)
+      }
+    case "textview_open":
+      textBench.open(path: world.expand(v.string ?? ""), font: app.theme.nsFont("editor.terminal"), frame: mainWindow?.frame ?? .zero)
+      try await Task.sleep(for: .milliseconds(500))
+    case "textview_close":
+      textBench.close()
+      mainWindow?.makeKeyAndOrderFront(nil)
+    case "scroll":
+      // A trackpad flick: {"target": "editor"|"textview", "speed": points/s (negative scrolls down), "finger_ms", "decay"}.
+      let target = v["target"]?.string ?? "editor"
+      guard let view: NSView = target == "textview" ? textBench.scrollView : app.editor.native.grid, view.window != nil else {
+        throw ExplainerFailure(script: runner.script?.id ?? "", step: runner.stepIndex, message: "Nothing to scroll in \(target)")
+      }
+      var gesture = ScrollGesture(speed: v["speed"]?.number ?? -3000)
+      if let ms = v["finger_ms"]?.number { gesture.fingerSeconds = ms / 1000 }
+      if let decay = v["decay"]?.number { gesture.decay = decay }
+      EditorTelemetry.shared.record(["ev": "gesture", "to": target, "speed": gesture.speed, "decay": gesture.decay,
+                                     "events": gesture.events.count, "distance": gesture.distance])
+      await scrollInjector.play(gesture, into: view, record: target)
     case "remember":
       rememberedTabs = [app.engine.left.tabs.count, app.engine.right.tabs.count]
     case "run_script":

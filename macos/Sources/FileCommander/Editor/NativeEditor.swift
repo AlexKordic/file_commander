@@ -56,7 +56,12 @@ final class NativeEditor: NSObject, CellGridDelegate {
     Trace.write("editor: connecting to \(path)")
     disconnect()
     let socket = SceneSocket(path: path)
-    socket.onMessage = { [weak self] message in self?.store.apply(message) }
+    socket.onMessage = { [weak self] message in self?.received(message) }
+    socket.onSent = { number, type, kind, bytes, at in
+      var fields: [String: Any] = ["ev": "send", "t": EditorTelemetry.ms(at), "n": number, "type": type, "bytes": bytes]
+      if let kind { fields["kind"] = kind }
+      EditorTelemetry.shared.record(fields)
+    }
     socket.onClose = { [weak self, weak socket] reason in
       guard let self, let socket, self.socket === socket else { return }
       self.connectionEnded(reason)
@@ -67,7 +72,7 @@ final class NativeEditor: NSObject, CellGridDelegate {
     applyTheme()
     Task.detached {
       do {
-        try socket.open(query: "?grid=1&menus=native")
+        try socket.open(query: "?grid=1&menus=native" + (EditorTelemetry.shared.isOn ? "&telemetry=1" : ""))
         await MainActor.run { [weak self] in
           Trace.write("editor: connected")
           guard let self, self.socket === socket else { return }
@@ -163,6 +168,36 @@ final class NativeEditor: NSObject, CellGridDelegate {
   }
 
   // MARK: Scene
+
+  private func received(_ message: SceneMessage) {
+    guard EditorTelemetry.shared.isOn else {
+      store.apply(message)
+      return
+    }
+    let started = ProcessInfo.processInfo.systemUptime
+    store.apply(message)
+    grid?.shownSequence = message.sequence
+    var fields: [String: Any] = [
+      "ev": "frame", "t": EditorTelemetry.ms(message.receivedAt), "seq": message.sequence, "bytes": message.bytes,
+      "parse": EditorTelemetry.ms(message.parseSeconds), "applied": EditorTelemetry.ms(started),
+      "apply": EditorTelemetry.ms(ProcessInfo.processInfo.systemUptime - started), "rows": message.gridRows.count,
+    ]
+    if let timing = message.timing {
+      fields["ack"] = timing.ack
+      fields["build"] = timing.buildMs
+      fields["diff"] = timing.diffMs
+      fields["queued"] = timing.queued
+      fields["owed"] = timing.owed
+      fields["top"] = timing.top
+    }
+    EditorTelemetry.shared.record(fields)
+  }
+
+  /// Asks Fresh for frame timing, or to stop sending it, after the setting changed.
+  func telemetryChanged() {
+    socket?.send(["type": "configure", "grid": true, "nativeMenus": true, "telemetry": EditorTelemetry.shared.isOn])
+  }
+
 
   private func sceneChanged(_ change: SceneChange) {
     if change.themeChanged { applyTheme() }

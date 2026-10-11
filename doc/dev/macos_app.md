@@ -250,6 +250,50 @@ and VTT captions, a still per caption, a preview GIF and a `README.md`, plus
 `DIR/index.md`. With `both`, the pages use `<picture>` so GitHub shows the
 reader's appearance. Recording asks for the Screen Recording permission.
 
+## Editor timing
+
+Settings › Editor › **Record editor timing** writes the native editor's timing
+to `<profile>/telemetry/editor-<date>.jsonl` (`EditorTelemetry`), one JSON
+object per line, times in milliseconds of system uptime (the clock of
+`NSEvent.timestamp`):
+
+| Record | When | Fields |
+| --- | --- | --- |
+| `wheel` | A scroll event reaches the editor | `et` (the event's own time), deltas, phases, `steps` sent, `at` (cell) |
+| `send` | A message to Fresh is written | `n` (its number, what a frame's `ack` counts), `type`, `kind` |
+| `frame` | The main thread applies a frame | `t` (read off the socket), `parse`, `applied`, `apply`, `rows` changed, and Fresh's `ack`, `build`, `diff`, `queued`, `owed`, `top` |
+| `draw` | The cells are drawn | `ms`, `rows`, `seq` (the last frame shown) |
+
+The app asks Fresh for its part with the scene channel's `telemetry` option
+([fresh_integration.md](fresh_integration.md#scene-channel)), so a session
+started by an older Fresh records only the app's side.
+
+`macos/tools/editor_telemetry.py <file>` summarizes a recording per scroll
+gesture: how long input waited for the main thread, the round trip from a
+scroll message to the frame that applied it (by `ack`) and to its draw,
+Fresh's build and queue, the app's parse, apply and draw, how far the shown
+line trails the asked one, and how long the view keeps moving after the input
+stops. `--timeline N` prints gesture N event by event.
+
+**Benchmark.** `macos/bench/scroll_flicks.json` plays six trackpad flicks
+(`ScrollGesture`: a finger phase, then decaying momentum, at 120 events a
+second) into the editor showing `file_io_jobs.cpp`, then into a plain AppKit
+text view of the same file, with timing recorded:
+
+```sh
+open -n "build-macos/File Commander.app" --args --profile /tmp/fc-bench \
+  --run-explainer "$PWD/macos/bench/scroll_flicks.json" --speed 1
+macos/tools/editor_telemetry.py /tmp/fc-bench/telemetry/editor-*.jsonl
+```
+
+`--run-explainer` takes a script file as well as an explainer ID. Bench steps
+are host steps like the explainers': `scroll` (`target` `editor` or
+`textview`, `speed` in points per second, negative scrolling down, optional
+`finger_ms` and `decay`), `textview_open` and `textview_close`,
+`window_frame` (`w`, `h`), and `{repo}` in paths for the checkout the build
+lives in. Gestures go to the view on the main queue from a timer of their own,
+so a busy main thread delays them as it would a trackpad's.
+
 ## ExplainerKit in other projects
 
 ExplainerKit (`macos/Package.swift`, library product `ExplainerKit`) has no

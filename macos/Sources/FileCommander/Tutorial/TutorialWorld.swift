@@ -33,6 +33,13 @@ struct TutorialWorld {
       .replacingOccurrences(of: "{server}", with: server.path)
       .replacingOccurrences(of: "{world}", with: root.path)
       .replacingOccurrences(of: "{demo}", with: "ssh://\(TutorialWorld.demoHost)\(server.path)")
+      .replacingOccurrences(of: "{repo}", with: TutorialWorld.repo)
+  }
+
+  /// The source checkout a development build lives in (`build-macos/File
+  /// Commander.app` inside it), for benchmarks in macos/bench that open its files.
+  static var repo: String {
+    Bundle.main.bundleURL.deletingLastPathComponent().deletingLastPathComponent().path
   }
 
   func contains(_ path: String) -> Bool {

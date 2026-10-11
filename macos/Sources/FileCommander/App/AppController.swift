@@ -67,6 +67,7 @@ final class AppController {
       savePreferences()
       if preferences.appearance != oldValue.appearance { applyAppearance() }
       if preferences.zoom != oldValue.zoom { editor.applyTheme() }
+      if preferences.editorTelemetry != oldValue.editorTelemetry { applyTelemetry() }
       if preferences.terminalEditor != oldValue.terminalEditor {
         // The next attach takes the other route; close the editor shown the old way.
         engine.setEditorSceneAttach(!preferences.terminalEditor)
@@ -163,6 +164,7 @@ final class AppController {
     preferencesURL = profile.appendingPathComponent("app_settings.json")
     preferences = AppPreferences.load(from: preferencesURL!)
     sidebarVisible = preferences.sidebarShown ? .all : .detailOnly
+    applyTelemetry()
     theme.zoom = preferences.zoom
     theme.load(profile: profile, activeName: preferences.theme)
     applyAppearance()
@@ -190,6 +192,7 @@ final class AppController {
     tutorial.stopForQuit()
     if !CommandLine.arguments.contains("--run-explainer") { preferences.editorWasOpen = editor.running }
     editor.detachAll()
+    EditorTelemetry.shared.stop()
     engine.stop()
     askpass.stop()
   }
@@ -302,6 +305,21 @@ final class AppController {
       try? await Task.sleep(for: .seconds(2.2))
       if !Task.isCancelled { self?.hud = nil }
     }
+  }
+
+  // MARK: Telemetry
+
+  /// Where editor timing recordings go.
+  var telemetryDirectory: URL { URL(fileURLWithPath: engine.profileDirectory).appendingPathComponent("telemetry") }
+
+  /// Starts or stops recording the editor's timing, as Settings asks.
+  private func applyTelemetry() {
+    if preferences.editorTelemetry {
+      if !EditorTelemetry.shared.isOn { EditorTelemetry.shared.start(directory: telemetryDirectory) }
+    } else {
+      EditorTelemetry.shared.stop()
+    }
+    editor.native.telemetryChanged()
   }
 
   // MARK: Menus

@@ -29,11 +29,17 @@ public final class SceneSocket: @unchecked Sendable {
   public var onMessage: (@MainActor (SceneMessage) -> Void)?
   /// Called on the main queue once, when the connection ends; the argument says why.
   public var onClose: (@MainActor (String?) -> Void)?
+  /// Called on the write queue after each message is written, for telemetry:
+  /// its number in sending order (what a frame's `ack` counts), its `type` and
+  /// `kind`, its size, and when the write finished (system uptime).
+  public var onSent: (@Sendable (_ number: Int, _ type: String, _ kind: String?, _ bytes: Int, _ at: TimeInterval) -> Void)?
 
   private var fd: Int32 = -1
   private let writes = DispatchQueue(label: "fc.scene.write")
   private let state = NSLock()
   private var closed = false
+  /// Messages written so far; touched only on the write queue.
+  private var written = 0
 
   public init(path: String) { self.path = path }
 
@@ -101,7 +107,12 @@ public final class SceneSocket: @unchecked Sendable {
   public func send(_ message: [String: Any]) {
     guard let data = try? JSONSerialization.data(withJSONObject: message) else { return }
     let frame = SceneSocket.encode(opcode: 0x1, payload: Array(data))
-    writes.async { [weak self] in try? self?.writeAll(frame) }
+    let type = message["type"] as? String ?? "", kind = message["kind"] as? String
+    writes.async { [weak self] in
+      guard let self, (try? self.writeAll(frame)) != nil else { return }
+      self.written += 1
+      self.onSent?(self.written, type, kind, data.count, ProcessInfo.processInfo.systemUptime)
+    }
   }
 
   /// Ends the connection. `onClose` follows on the main queue.
@@ -130,7 +141,11 @@ public final class SceneSocket: @unchecked Sendable {
         buffer.removeFirst(used)
         switch opcode {
         case 0x1:
-          if let message = SceneMessage(json: payload) {
+          let started = ProcessInfo.processInfo.systemUptime
+          if var message = SceneMessage(json: payload) {
+            message.receivedAt = started
+            message.parseSeconds = ProcessInfo.processInfo.systemUptime - started
+            message.bytes = payload.count
             DispatchQueue.main.async { [weak self] in
               MainActor.assumeIsolated { self?.onMessage?(message) }
             }

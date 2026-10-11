@@ -115,6 +115,30 @@ public struct SceneTheme: Equatable, Sendable {
   }
 }
 
+/// Fresh's timing for one frame, sent while telemetry is on (`t`).
+public struct FrameTiming: Sendable {
+  /// How many of this client's messages Fresh had applied when it built the frame.
+  public var ack: Int
+  /// Building the scene, and diffing and encoding it for this client, in ms.
+  public var buildMs, diffMs: Double
+  /// Bytes of earlier frames still queued for the socket ahead of this one.
+  public var queued: Int
+  /// Wheel lines Fresh's smooth scrolling still owes.
+  public var owed: Int
+  /// The line at the top of the active view (0-based).
+  public var top: Int
+
+  init?(json: Any?) {
+    guard let t = json as? [String: Any], let ack = t["ack"] as? Int else { return nil }
+    self.ack = ack
+    buildMs = t["build_ms"] as? Double ?? 0
+    diffMs = t["diff_ms"] as? Double ?? 0
+    queued = t["queued"] as? Int ?? 0
+    owed = t["owed"] as? Int ?? 0
+    top = t["top"] as? Int ?? 0
+  }
+}
+
 /// One message from the bridge, parsed off the main thread. A hello carries the
 /// whole scene, flattened into the same paths a frame uses, so the store
 /// applies both the same way.
@@ -131,12 +155,20 @@ public struct SceneMessage: @unchecked Sendable {
   /// Changed panes by index, and the new pane count when it changed.
   public let panes: [Int: Any]
   public let paneCount: Int?
+  /// Fresh's timing, when the client asked for telemetry.
+  public let timing: FrameTiming?
+  /// When the reader had the whole message (system uptime, as `NSEvent.timestamp`),
+  /// how long parsing it took, and its size: for telemetry.
+  public internal(set) var receivedAt: TimeInterval = 0
+  public internal(set) var parseSeconds: TimeInterval = 0
+  public internal(set) var bytes = 0
 
   init?(json data: [UInt8]) {
     guard let object = try? JSONSerialization.jsonObject(with: Data(data)) as? [String: Any], let type = object["type"] as? String else {
       return nil
     }
     sequence = object["seq"] as? Int ?? 0
+    timing = FrameTiming(json: object["t"])
     var values: [String: Any] = [:]
     var rows: [Int: [CellRun]] = [:]
     var panes: [Int: Any] = [:]

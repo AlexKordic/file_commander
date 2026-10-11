@@ -142,6 +142,15 @@ struct EditorSettings: View {
         Text("Runs Fresh's terminal interface in a terminal view instead. File Commander uses it anyway for a Fresh without the native editor's channel, such as an older version set in fresh_binary_path.")
           .font(.callout).foregroundStyle(.secondary)
       }
+      Section("Diagnostics") {
+        Toggle("Record editor timing", isOn: $app.preferences.editorTelemetry)
+        Text("Writes scroll input, Fresh's frames and redraws, with their times, to a file in the profile's telemetry folder, for finding where the editor's latency comes from.")
+          .font(.callout).foregroundStyle(.secondary)
+        Button("Show Recordings in Finder") {
+          try? FileManager.default.createDirectory(at: app.telemetryDirectory, withIntermediateDirectories: true)
+          NSWorkspace.shared.open(app.telemetryDirectory)
+        }
+      }
       Section {
         Button("Restart Editor Backend…") { app.sheet = .restartEditor }
       }

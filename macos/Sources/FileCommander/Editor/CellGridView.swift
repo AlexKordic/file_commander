@@ -24,6 +24,8 @@ final class CellGridView: NSView, @preconcurrency NSTextInputClient {
   let store: SceneStore
   /// What VoiceOver calls the editor: the active tab's name.
   var title = "Editor"
+  /// The last frame applied, for telemetry's draw records.
+  var shownSequence = 0
 
   // Metrics.
   private(set) var cellWidth: CGFloat = 8
@@ -138,6 +140,16 @@ final class CellGridView: NSView, @preconcurrency NSTextInputClient {
   // MARK: Drawing
 
   override func draw(_ dirtyRect: NSRect) {
+    guard EditorTelemetry.shared.isOn else { return drawCells(dirtyRect) }
+    let started = ProcessInfo.processInfo.systemUptime
+    drawCells(dirtyRect)
+    EditorTelemetry.shared.record([
+      "ev": "draw", "t": EditorTelemetry.ms(started), "ms": EditorTelemetry.ms(ProcessInfo.processInfo.systemUptime - started),
+      "rows": Int((dirtyRect.height / cellHeight).rounded(.up)), "seq": shownSequence,
+    ])
+  }
+
+  private func drawCells(_ dirtyRect: NSRect) {
     guard let context = NSGraphicsContext.current?.cgContext else { return }
     defaultBackground.setFill()
     dirtyRect.fill()
@@ -392,11 +404,18 @@ final class CellGridView: NSView, @preconcurrency NSTextInputClient {
   }
 
   private func sendMouse(_ kind: String, _ event: NSEvent, button: String = "left", extra: [String: Any] = [:]) {
-    let (column, row) = cell(at: convert(event.locationInWindow, from: nil))
+    let (column, row) = cell(at: point(of: event))
     var message: [String: Any] = ["type": "mouse", "kind": kind, "button": button, "col": column, "row": row]
     message.merge(modifiers(event)) { a, _ in a }
     message.merge(extra) { _, b in b }
     delegate?.grid(self, send: message)
+  }
+
+  /// Where an event happened in this view. A synthesized event (a scroll
+  /// benchmark's) has no window, and its location is on the screen.
+  private func point(of event: NSEvent) -> NSPoint {
+    guard event.window == nil, let window else { return convert(event.locationInWindow, from: nil) }
+    return convert(window.convertPoint(fromScreen: event.locationInWindow), from: nil)
   }
 
   override func mouseDown(with event: NSEvent) {
@@ -437,6 +456,14 @@ final class CellGridView: NSView, @preconcurrency NSTextInputClient {
     horizontalRemainder += event.scrollingDeltaX
     let vertical = Int(scrollRemainder / step)
     let horizontal = Int(horizontalRemainder / (precise ? cellWidth * 3 : 1))
+    if EditorTelemetry.shared.isOn {
+      EditorTelemetry.shared.record([
+        "ev": "wheel", "et": EditorTelemetry.ms(event.timestamp), "dy": Double(event.scrollingDeltaY),
+        "dx": Double(event.scrollingDeltaX), "precise": precise, "phase": Int(event.phase.rawValue),
+        "mom": Int(event.momentumPhase.rawValue), "steps": vertical, "cell": Double(cellHeight),
+        "at": [cell(at: point(of: event)).column, cell(at: point(of: event)).row], "win": event.window != nil,
+      ])
+    }
     if vertical != 0 {
       scrollRemainder -= CGFloat(vertical) * step
       sendMouse(vertical > 0 ? "scrollup" : "scrolldown", event, extra: ["n": min(8, abs(vertical))])
