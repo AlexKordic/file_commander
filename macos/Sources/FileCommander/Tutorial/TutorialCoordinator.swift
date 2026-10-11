@@ -114,6 +114,9 @@ final class TutorialCoordinator: ExplainerHost {
   private func run(queue: [String], entire: Bool, resume: ResumeRecord?) async {
     entireRun = entire
     if snapshot == nil { snapshot = resume?.snapshot ?? takeSnapshot() }
+    // Explainers point at sidebar rows, so the sidebar and its sections are open while they run.
+    app.preferences.collapsedSidebarSections = []
+    if !app.editorShown { app.sidebarVisible = .all }
     // After a restart, jobs restored from the journal are the user's unless the explainer adopts them.
     if jobFloor == nil { jobFloor = app.engine.jobs.map(\.id).max() ?? 0 }
     if observer == nil {
@@ -209,6 +212,8 @@ final class TutorialCoordinator: ExplainerHost {
     var paneSplit: Double
     var bookmarks: [String] = []
     var terminalEditor: Bool?
+    var collapsedSidebarSections: [String]?
+    var sidebarShown: Bool?
   }
 
   private func takeSnapshot() -> Snapshot {
@@ -216,7 +221,8 @@ final class TutorialCoordinator: ExplainerHost {
     return Snapshot(transferRate: app.engine.transferRate, keyPreset: p.keyPreset, keyOverrides: p.keyOverrides,
                     selectionStyle: p.selectionStyle, theme: p.theme, appearance: p.appearance, zoom: p.zoom,
                     singlePane: app.engine.singlePane, focusedSide: app.engine.focusedSide, paneSplit: p.paneSplit,
-                    bookmarks: app.engine.bookmarks.map(\.encoded), terminalEditor: p.terminalEditor)
+                    bookmarks: app.engine.bookmarks.map(\.encoded), terminalEditor: p.terminalEditor,
+                    collapsedSidebarSections: p.collapsedSidebarSections, sidebarShown: p.sidebarShown)
   }
 
   private func restore(closeTabs: Bool) {
@@ -231,6 +237,8 @@ final class TutorialCoordinator: ExplainerHost {
       app.preferences.zoom = s.zoom
       app.preferences.paneSplit = s.paneSplit
       if let terminalEditor = s.terminalEditor { app.preferences.terminalEditor = terminalEditor }
+      if let collapsed = s.collapsedSidebarSections { app.preferences.collapsedSidebarSections = collapsed }
+      if let shown = s.sidebarShown { app.setSidebarShown(shown) }
       app.theme.zoom = s.zoom
       if app.preferences.theme != s.theme || app.theme.active.name != s.theme {
         app.preferences.theme = s.theme

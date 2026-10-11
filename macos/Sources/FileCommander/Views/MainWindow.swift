@@ -135,7 +135,7 @@ struct Sidebar: View {
 
   var body: some View {
     List {
-      Section("Bookmarks") {
+      Section(isExpanded: expanded("bookmarks")) {
         ForEach(app.engine.bookmarks) { bookmark in
           SidebarRow(title: bookmark.title, subtitle: bookmark.path, icon: icon(bookmark.kind, fallback: "bookmark")) {
             app.engine.navigate(app.engine.focusedSide, to: bookmark.encoded)
@@ -159,19 +159,23 @@ struct Sidebar: View {
         .buttonStyle(.borderless)
         .foregroundStyle(.secondary)
         .explainerAnchor("sidebar.add_bookmark") { app.run("add_bookmark") }
+      } header: {
+        sectionHeader("Bookmarks", id: "bookmarks")
       }
       .explainerAnchor("sidebar.bookmarks")
       let servers = recentServers
       if !servers.isEmpty {
-        Section("Servers") {
+        Section(isExpanded: expanded("servers")) {
           ForEach(servers, id: \.encoded) { tab in
             SidebarRow(title: tab.title, subtitle: tab.path, icon: "server.rack") {
               app.engine.newTab(app.engine.focusedSide, location: tab.encoded)
             }
           }
+        } header: {
+          sectionHeader("Servers", id: "servers")
         }
       }
-      Section("Locations") {
+      Section(isExpanded: expanded("locations")) {
         SidebarRow(title: "Home", subtitle: NSHomeDirectory(), icon: "house") {
           app.engine.navigate(app.engine.focusedSide, to: NSHomeDirectory())
         }
@@ -181,9 +185,24 @@ struct Sidebar: View {
             app.engine.navigate(app.engine.focusedSide, to: volume.path)
           }
         }
+      } header: {
+        sectionHeader("Locations", id: "locations")
       }
     }
     .listStyle(.sidebar)
+  }
+
+  /// Whether a section is expanded. Collapsing one is remembered across launches.
+  private func expanded(_ id: String) -> Binding<Bool> {
+    Binding(get: { !app.preferences.collapsedSidebarSections.contains(id) }, set: { expand in
+      var collapsed = app.preferences.collapsedSidebarSections.filter { $0 != id }
+      if !expand { collapsed.append(id) }
+      app.preferences.collapsedSidebarSections = collapsed
+    })
+  }
+
+  private func sectionHeader(_ title: String, id: String) -> some View {
+    Text(title).explainerAnchor("sidebar.section[name=\(title)]") { expanded(id).wrappedValue.toggle() }
   }
 
   private var recentServers: [TabInfo] {

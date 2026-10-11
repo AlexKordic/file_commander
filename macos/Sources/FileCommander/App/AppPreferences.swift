@@ -48,6 +48,10 @@ struct AppPreferences: Codable, Equatable {
   var terminalEditor = false
   /// The editor was shown when the app quit; it is shown again at launch.
   var editorWasOpen = false
+  /// The sidebar is shown (the user can hide it with the toolbar button).
+  var sidebarShown = true
+  /// Sidebar sections the user collapsed: "bookmarks", "servers", "locations".
+  var collapsedSidebarSections: [String] = []
 
   init() {}
 
@@ -72,6 +76,8 @@ struct AppPreferences: Codable, Equatable {
     optionAsAlt = try c.decodeIfPresent(Bool.self, forKey: .optionAsAlt) ?? d.optionAsAlt
     terminalEditor = try c.decodeIfPresent(Bool.self, forKey: .terminalEditor) ?? d.terminalEditor
     editorWasOpen = try c.decodeIfPresent(Bool.self, forKey: .editorWasOpen) ?? d.editorWasOpen
+    sidebarShown = try c.decodeIfPresent(Bool.self, forKey: .sidebarShown) ?? d.sidebarShown
+    collapsedSidebarSections = try c.decodeIfPresent([String].self, forKey: .collapsedSidebarSections) ?? d.collapsedSidebarSections
   }
 
   static func load(from url: URL) -> AppPreferences {

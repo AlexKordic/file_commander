@@ -44,7 +44,8 @@ It needs macOS 14 or later. To build it, see
   opens the Activity window, an error badge, the command palette and Help.
 - **Sidebar**: your bookmarks, the SSH servers in your tabs, Home and the
   mounted volumes. A click opens the item in the focused pane; right-click a
-  bookmark to open it elsewhere or remove it.
+  bookmark to open it elsewhere or remove it. Whether the sidebar is shown,
+  and which of its sections are collapsed, is kept across launches.
 - **Panes**: each has its own tabs, path bar, filter and list. The focused
   pane has an accent line at the top. Drag the line between the panes to
   resize them. A tab with a graduation cap belongs to the tutorial. In

@@ -90,7 +90,13 @@ final class AppController {
   var glob: GlobRequest?
   var hud: String?
   var startError: String?
-  var sidebarVisible = NavigationSplitViewVisibility.all
+  var sidebarVisible = NavigationSplitViewVisibility.all {
+    // Remembered across launches, except the fold while the editor is shown.
+    didSet {
+      let shown = sidebarVisible != .detailOnly
+      if !editorShown, preferences.sidebarShown != shown { preferences.sidebarShown = shown }
+    }
+  }
   @ObservationIgnored private var sidebarBeforeEditor: NavigationSplitViewVisibility?
   var findRoot = ""
   /// Bumped to ask a pane to take keyboard focus (after the focused side changes).
@@ -156,6 +162,7 @@ final class AppController {
     let profile = URL(fileURLWithPath: engine.profileDirectory)
     preferencesURL = profile.appendingPathComponent("app_settings.json")
     preferences = AppPreferences.load(from: preferencesURL!)
+    sidebarVisible = preferences.sidebarShown ? .all : .detailOnly
     theme.zoom = preferences.zoom
     theme.load(profile: profile, activeName: preferences.theme)
     applyAppearance()
@@ -336,6 +343,17 @@ final class AppController {
 
   /// The main window, where the panes and the editor are shown.
   var mainWindow: NSWindow? { NSApp.windows.first { $0.identifier?.rawValue.hasPrefix("main") == true } }
+
+  /// Shows or hides the sidebar of the files view; while the editor is shown,
+  /// it takes effect when the files come back.
+  func setSidebarShown(_ shown: Bool) {
+    if editorShown {
+      sidebarBeforeEditor = shown ? .all : .detailOnly
+      preferences.sidebarShown = shown
+    } else {
+      sidebarVisible = shown ? .all : .detailOnly
+    }
+  }
 
   /// The main window switches between the panes and the editor.
   func editorShownChanged(_ shown: Bool) {
