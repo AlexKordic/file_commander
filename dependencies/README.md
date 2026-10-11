@@ -16,7 +16,7 @@ are in [doc/dev/building.md](../doc/dev/building.md) and licenses in
 | Boost.Filesystem | Modified subtree `boost/filesystem` in the FC repository | The same FC commit |
 | FTXUI (FC fork) | `https://github.com/AlexKordic/FTXUI.git`, branch `fc-integration` | `ff94e7a1008d41e11ce040702654eed6aff1e52c` |
 | LuaJIT | `https://github.com/LuaJIT/LuaJIT.git` | `233ad24035944ece5367157e824e8357df3417d9` |
-| Fresh (FC fork) | `https://github.com/sinelaw/fresh.git` plus `dependencies/fresh-fc.bundle`; also branch `fc-editor-workflow` of `https://github.com/AlexKordic/fresh` | `5b14853bce456c80b62f5f1f9ff3f42d7bb53e20` on upstream base `b10f9084f5eae571e9b8dac1a0f3694384bcb53d`; bundle SHA-256 `1508a95cfc03f2587939380edddc74616e0c556cd6b6f5ab6b31c5e547553007` |
+| Fresh (FC fork) | `https://github.com/sinelaw/fresh.git` plus `dependencies/fresh-fc.bundle`; also branch `fc-editor-workflow` of `https://github.com/AlexKordic/fresh` | `95dffcd458e086fafb4ae3af1ee0b6ac9343058c` on upstream base `b10f9084f5eae571e9b8dac1a0f3694384bcb53d`; bundle SHA-256 `758feaff325d10a0ec09e95a777934fcb572955e0c678b5bc354a7db2359a21a` |
 | LZMA SDK | `dependencies/lzma-sdk-26.00.tar.gz` in the FC repository | 26.00; archive SHA-256 `282b4d32b47e83a4b4215b174988d967ba02407e243a46b963779cde38931cc6`; source fingerprint `744ef6617d606d78676e06d3ab30784072c8a936a4c629c76d5877b93710e66c` over 606 files |
 
 FTXUI and Fresh carry FC changes; LuaJIT and Boost come from their public
@@ -57,7 +57,7 @@ pinned revision is FC's fork of it:
   `b10f9084f5eae571e9b8dac1a0f3694384bcb53d`, which is Fresh 0.5.2 plus 40
   upstream commits. It includes the upstream fix that makes daemon sessions run
   the shared editor tick, so recovery saves happen in the background.
-- **Pinned revision** (`revision`): `5b14853bce456c80b62f5f1f9ff3f42d7bb53e20`,
+- **Pinned revision** (`revision`): `95dffcd458e086fafb4ae3af1ee0b6ac9343058c`,
   the base plus FC's commits on the `fc-editor-workflow` branch.
 - **Bundle** (`fresh-fc.bundle`): a Git bundle holding exactly the commits from
   the base to the pinned revision, with the branch head
@@ -146,7 +146,7 @@ bundle at `share/file-commander/fresh-fc.bundle`:
 
 ```sh
 BASE=b10f9084f5eae571e9b8dac1a0f3694384bcb53d   # git.fresh.base_revision
-REV=5b14853bce456c80b62f5f1f9ff3f42d7bb53e20    # git.fresh.revision
+REV=95dffcd458e086fafb4ae3af1ee0b6ac9343058c    # git.fresh.revision
 BUNDLE=/path/to/share/file-commander/fresh-fc.bundle
 git clone --no-checkout https://github.com/sinelaw/fresh.git fresh
 git -C fresh cat-file -e "$BASE^{commit}"       # the clone must contain the base

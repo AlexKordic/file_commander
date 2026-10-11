@@ -24,7 +24,7 @@ recovery. FC never closes a tab or writes a file on the editor's behalf.
 
 ## Pinned revision
 
-FC builds Fresh from revision `5b14853bce456c80b62f5f1f9ff3f42d7bb53e20` on
+FC builds Fresh from revision `95dffcd458e086fafb4ae3af1ee0b6ac9343058c` on
 the `fc-editor-workflow` branch of the FC fork. Its upstream base is
 `b10f9084f5eae571e9b8dac1a0f3694384bcb53d`, which is Fresh 0.5.2 plus 40
 upstream commits; FC's integration commits sit on top. The pinned Rust
@@ -244,9 +244,10 @@ A session an FC client started (`FC_EDITOR_SWITCH_KEY` set, so the backend has
 `FRESH_FC_DATA_DIR`) also hosts Fresh's web bridge, on a Unix socket instead
 of a TCP port: `<socket dir>/<id>.scene.sock`, next to the session's own
 sockets, in the owner-only socket directory, with the socket itself at mode
-`0600`. Nothing listens on the network. The backend binds it under the startup
-lock, replaces a stale file, and removes it on exit. Its path is `fc_scene` in
-every handshake and what `ensure` prints.
+`0600`. Nothing listens on the network. The backend binds it during the first
+handshake, once that handshake has built the editor (so a failed restore is
+still reported in place of the hello), replaces a stale file, and removes it on
+exit. Its path is `fc_scene` in every handshake and what `ensure` prints.
 
 The protocol is the web front end's (`crates/fresh-editor/src/webui/mod.rs`),
 unchanged by the transport:

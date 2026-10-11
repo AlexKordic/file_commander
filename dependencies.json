@@ -18,12 +18,12 @@
       "default_path": "../luajit"
     },
     "fresh": {
-      "revision": "5b14853bce456c80b62f5f1f9ff3f42d7bb53e20",
+      "revision": "95dffcd458e086fafb4ae3af1ee0b6ac9343058c",
       "source": "https://github.com/sinelaw/fresh.git",
       "default_path": "../editor-fresh",
       "base_revision": "b10f9084f5eae571e9b8dac1a0f3694384bcb53d",
       "bundle": "dependencies/fresh-fc.bundle",
-      "bundle_sha256": "1508a95cfc03f2587939380edddc74616e0c556cd6b6f5ab6b31c5e547553007"
+      "bundle_sha256": "758feaff325d10a0ec09e95a777934fcb572955e0c678b5bc354a7db2359a21a"
     }
   },
   "lzma": {
