@@ -16,7 +16,7 @@ are in [doc/dev/building.md](../doc/dev/building.md) and licenses in
 | Boost.Filesystem | Modified subtree `boost/filesystem` in the FC repository | The same FC commit |
 | FTXUI (FC fork) | `https://github.com/AlexKordic/FTXUI.git`, branch `fc-integration` | `ff94e7a1008d41e11ce040702654eed6aff1e52c` |
 | LuaJIT | `https://github.com/LuaJIT/LuaJIT.git` | `233ad24035944ece5367157e824e8357df3417d9` |
-| Fresh (FC fork) | `https://github.com/sinelaw/fresh.git` plus `dependencies/fresh-fc.bundle`; also branch `fc-editor-workflow` of `https://github.com/AlexKordic/fresh` | `39a8f267c2b1934e8316923e025d035ecf5601f9` on upstream base `b10f9084f5eae571e9b8dac1a0f3694384bcb53d`; bundle SHA-256 `6f74db1381a812b30dce9639ca8b904b01918ec03019b083fe5df3a3989adabc` |
+| Fresh (FC fork) | `https://github.com/sinelaw/fresh.git` plus `dependencies/fresh-fc.bundle`; also branch `fc-editor-workflow` of `https://github.com/AlexKordic/fresh` | `5b14853bce456c80b62f5f1f9ff3f42d7bb53e20` on upstream base `b10f9084f5eae571e9b8dac1a0f3694384bcb53d`; bundle SHA-256 `1508a95cfc03f2587939380edddc74616e0c556cd6b6f5ab6b31c5e547553007` |
 | LZMA SDK | `dependencies/lzma-sdk-26.00.tar.gz` in the FC repository | 26.00; archive SHA-256 `282b4d32b47e83a4b4215b174988d967ba02407e243a46b963779cde38931cc6`; source fingerprint `744ef6617d606d78676e06d3ab30784072c8a936a4c629c76d5877b93710e66c` over 606 files |
 
 FTXUI and Fresh carry FC changes; LuaJIT and Boost come from their public
@@ -57,7 +57,7 @@ pinned revision is FC's fork of it:
   `b10f9084f5eae571e9b8dac1a0f3694384bcb53d`, which is Fresh 0.5.2 plus 40
   upstream commits. It includes the upstream fix that makes daemon sessions run
   the shared editor tick, so recovery saves happen in the background.
-- **Pinned revision** (`revision`): `39a8f267c2b1934e8316923e025d035ecf5601f9`,
+- **Pinned revision** (`revision`): `5b14853bce456c80b62f5f1f9ff3f42d7bb53e20`,
   the base plus FC's commits on the `fc-editor-workflow` branch.
 - **Bundle** (`fresh-fc.bundle`): a Git bundle holding exactly the commits from
   the base to the pinned revision, with the branch head
@@ -68,10 +68,11 @@ Build with the pinned checkout's toolchain (Rust 1.95, from its
 `rust-toolchain.toml`):
 
 ```sh
-cargo build --release --locked -p fresh-editor --bin fresh
+cargo build --release --locked -p fresh-editor --bin fresh --features web
 ```
 
-How FC drives Fresh, and the rules for changing the pin, are in
+The `web` feature gives FC sessions the scene channel; without it the macOS app
+falls back to a terminal view. How FC drives Fresh, and the rules for changing the pin, are in
 [doc/dev/fresh_integration.md](../doc/dev/fresh_integration.md) in the FC
 source tree.
 
@@ -95,6 +96,12 @@ source tree.
 - Open FC remote workspaces without starting a remote shell.
 - Decide remote write access under the SSH login (the remote agent reports
   `os.access`), instead of comparing remote owners with local UIDs.
+- Serve an FC session's scene over an owner-only Unix socket (`fc_scene` in
+  the handshake) for the macOS app's native editor window: the whole frame as
+  cells when asked, native menus without Fresh's menu row, `Cmd` chords through
+  the `macos-gui` keymap, and the scene pushed right after the window's input.
+- Add `ensure`: start the session without routing anything and print its scene
+  socket. FC's command clients never size the shared grid.
 
 ### Update an existing checkout
 
@@ -139,7 +146,7 @@ bundle at `share/file-commander/fresh-fc.bundle`:
 
 ```sh
 BASE=b10f9084f5eae571e9b8dac1a0f3694384bcb53d   # git.fresh.base_revision
-REV=39a8f267c2b1934e8316923e025d035ecf5601f9    # git.fresh.revision
+REV=5b14853bce456c80b62f5f1f9ff3f42d7bb53e20    # git.fresh.revision
 BUNDLE=/path/to/share/file-commander/fresh-fc.bundle
 git clone --no-checkout https://github.com/sinelaw/fresh.git fresh
 git -C fresh cat-file -e "$BASE^{commit}"       # the clone must contain the base
