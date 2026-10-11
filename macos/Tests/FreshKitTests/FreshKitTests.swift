@@ -75,6 +75,13 @@ final class SceneTests: XCTestCase {
     }
   }
 
+  func testHelloSaysWhetherToReportAppliedFrames() {
+    XCTAssertTrue(message(#"{"type":"hello","seq":0,"scene":{"w":1,"h":1,"regions":{}},"acks":true}"#).wantsApplied)
+    XCTAssertFalse(message(#"{"type":"hello","seq":0,"scene":{"w":1,"h":1,"regions":{}}}"#).wantsApplied, "an older Fresh doesn't ask")
+    let frame = message(#"{"type":"frame","seq":3,"changed":{},"t":{"ack":7,"ahead":2}}"#)
+    XCTAssertEqual(frame.timing?.ahead, 2)
+  }
+
   func testRunsCountCellsByCharacter() {
     let run = CellRun(text: "日 👨‍👩‍👧 a")
     XCTAssertEqual(run.cells, 5, "one cell per character, the wide one followed by its blank")

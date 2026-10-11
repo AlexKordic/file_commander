@@ -16,6 +16,13 @@ final class NativeEditor: NSObject, CellGridDelegate {
   var grid: CellGridView? { view?.grid }
   private var chrome: ChromeView? { view?.chrome }
   private var socket: SceneSocket?
+  /// The session's Fresh asked to be told each frame that was applied.
+  private var sendsApplied = false
+  /// The scroll benchmark's stand-ins for a slow app: extra main-thread time
+  /// each frame takes, and not reporting applied frames (Fresh then sends
+  /// every frame, as it does to a browser).
+  var benchFrameDelay: TimeInterval = 0
+  var benchWithoutApplied = false
   private weak var app: AppController?
   private var menus: FreshMenus?
   private var clipboardSequence: Int?
@@ -170,12 +177,14 @@ final class NativeEditor: NSObject, CellGridDelegate {
   // MARK: Scene
 
   private func received(_ message: SceneMessage) {
-    guard EditorTelemetry.shared.isOn else {
-      store.apply(message)
-      return
-    }
     let started = ProcessInfo.processInfo.systemUptime
     store.apply(message)
+    if benchFrameDelay > 0 { Thread.sleep(forTimeInterval: benchFrameDelay) }
+    // Fresh sends only a couple of frames ahead of what was applied, so a slow
+    // moment here gets the newest scene next rather than every one in between.
+    if message.isHello { sendsApplied = message.wantsApplied }
+    if sendsApplied, !benchWithoutApplied { socket?.send(["type": "applied", "seq": message.sequence]) }
+    guard EditorTelemetry.shared.isOn else { return }
     grid?.shownSequence = message.sequence
     var fields: [String: Any] = [
       "ev": "frame", "t": EditorTelemetry.ms(message.receivedAt), "seq": message.sequence, "bytes": message.bytes,
@@ -187,6 +196,7 @@ final class NativeEditor: NSObject, CellGridDelegate {
       fields["build"] = timing.buildMs
       fields["diff"] = timing.diffMs
       fields["queued"] = timing.queued
+      fields["ahead"] = timing.ahead
       fields["owed"] = timing.owed
       fields["top"] = timing.top
     }

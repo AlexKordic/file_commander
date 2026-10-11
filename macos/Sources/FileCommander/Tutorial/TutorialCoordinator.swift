@@ -347,6 +347,8 @@ final class TutorialCoordinator: ExplainerHost {
       if let job = app.engine.jobs.first(where: { $0.id == id }), !job.stopped || job.isPaused { app.engine.cancelJob(id) }
     }
     app.engine.setTransferRate(snapshot?.transferRate ?? 0, persist: false)
+    app.editor.native.benchFrameDelay = 0
+    app.editor.native.benchWithoutApplied = false
     if app.editor.running && script.needs("editor") { app.editor.detachAll() }
     for id in ["activity", "errors", "find"] {
       NSApp.windows.first { $0.identifier?.rawValue.hasPrefix(id) == true }?.close()
@@ -584,6 +586,12 @@ final class TutorialCoordinator: ExplainerHost {
     case "textview_open":
       textBench.open(path: world.expand(v.string ?? ""), font: app.theme.nsFont("editor.terminal"), frame: mainWindow?.frame ?? .zero)
       try await Task.sleep(for: .milliseconds(500))
+    case "editor_bench":
+      // A slow editor, until changed or the script ends: {"apply_ms": extra main-thread time per frame,
+      // "applied": false to stop telling Fresh which frames were applied (set it before the editor
+      // connects for Fresh to send every frame, as it does to a client that never reports)}.
+      if let ms = v["apply_ms"]?.number { app.editor.native.benchFrameDelay = ms / 1000 }
+      if let applied = v["applied"]?.bool { app.editor.native.benchWithoutApplied = !applied }
     case "textview_close":
       textBench.close()
       mainWindow?.makeKeyAndOrderFront(nil)
@@ -596,8 +604,10 @@ final class TutorialCoordinator: ExplainerHost {
       var gesture = ScrollGesture(speed: v["speed"]?.number ?? -3000)
       if let ms = v["finger_ms"]?.number { gesture.fingerSeconds = ms / 1000 }
       if let decay = v["decay"]?.number { gesture.decay = decay }
+      let native = app.editor.native
       EditorTelemetry.shared.record(["ev": "gesture", "to": target, "speed": gesture.speed, "decay": gesture.decay,
-                                     "events": gesture.events.count, "distance": gesture.distance])
+                                     "events": gesture.events.count, "distance": gesture.distance,
+                                     "apply_ms": native.benchFrameDelay * 1000, "applied": !native.benchWithoutApplied])
       await scrollInjector.play(gesture, into: view, record: target)
     case "remember":
       rememberedTabs = [app.engine.left.tabs.count, app.engine.right.tabs.count]

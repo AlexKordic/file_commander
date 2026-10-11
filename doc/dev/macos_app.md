@@ -261,7 +261,7 @@ object per line, times in milliseconds of system uptime (the clock of
 | --- | --- | --- |
 | `wheel` | A scroll event reaches the editor | `et` (the event's own time), deltas, phases, `steps` sent, `at` (cell) |
 | `send` | A message to Fresh is written | `n` (its number, what a frame's `ack` counts), `type`, `kind` |
-| `frame` | The main thread applies a frame | `t` (read off the socket), `parse`, `applied`, `apply`, `rows` changed, and Fresh's `ack`, `build`, `diff`, `queued`, `owed`, `top` |
+| `frame` | The main thread applies a frame | `t` (read off the socket), `parse`, `applied`, `apply`, `rows` changed, and Fresh's `ack`, `build`, `diff`, `queued`, `ahead`, `owed`, `top` |
 | `draw` | The cells are drawn | `ms`, `rows`, `seq` (the last frame shown) |
 
 The app asks Fresh for its part with the scene channel's `telemetry` option
@@ -286,13 +286,34 @@ open -n "build-macos/File Commander.app" --args --profile /tmp/fc-bench \
 macos/tools/editor_telemetry.py /tmp/fc-bench/telemetry/editor-*.jsonl
 ```
 
+`macos/bench/scroll_slow_app.json` scrolls an editor whose frames each take
+25 ms longer on the main thread, as a slow redraw would: first without telling
+Fresh which frames were applied, so Fresh sends every frame, then telling it,
+so Fresh holds newer frames back and sends the newest scene once the app
+catches up (see [Frames and the app](#frames-and-the-app)).
+
 `--run-explainer` takes a script file as well as an explainer ID. Bench steps
 are host steps like the explainers': `scroll` (`target` `editor` or
 `textview`, `speed` in points per second, negative scrolling down, optional
 `finger_ms` and `decay`), `textview_open` and `textview_close`,
-`window_frame` (`w`, `h`), and `{repo}` in paths for the checkout the build
-lives in. Gestures go to the view on the main queue from a timer of their own,
-so a busy main thread delays them as it would a trackpad's.
+`window_frame` (`w`, `h`), `editor_bench` (`apply_ms`, extra main-thread time
+for each frame, and `applied: false` to stop reporting applied frames; set it
+before the editor connects for Fresh to send every frame), and `{repo}` in
+paths for the checkout the build lives in. Gestures go to the view on the main
+queue from a timer of their own, so a busy main thread delays them as it would
+a trackpad's.
+
+### Frames and the app
+
+The scene socket has 4 MiB buffers on both ends; macOS's default of 8 KiB per
+direction is a fraction of one frame, and frames queued up behind it in
+Fresh while scrolling, up to 1.4 s behind the trackpad. When Fresh's hello
+carries `acks`, the app reports each message it applied (`applied` with its
+`seq`) and Fresh keeps at most two frames unapplied: while the app is behind,
+Fresh builds nothing, and once it catches up it gets one frame with the newest
+scene. With frames slowed by 25 ms, that keeps a frame from input to screen at
+p50 64 ms instead of 142 ms. An older Fresh sends no `acks`, and the app then
+reports nothing.
 
 ## ExplainerKit in other projects
 

@@ -10,7 +10,8 @@ benchmark played), it reports how the editor kept up:
 - round trip: from a scroll message being sent to the first frame that applied
   it (Fresh's `ack`), to the main thread applying that frame, and to it being drawn
 - Fresh: building and diffing each frame, bytes of earlier frames still queued
-  for the socket ahead of it, wheel lines still owed
+  for the socket ahead of it, frames sent ahead of it that the app had not yet
+  applied, wheel lines still owed
 - app: parsing, waiting for the main thread, applying, drawing
 - position: how far the shown line trails the line the input asked for, in
   lines and in milliseconds, and how long the view keeps moving after the input
@@ -132,6 +133,8 @@ def editor_report(mark, seg, rows_before):
     report['frame size'] = fmt([f['bytes'] / 1024 for f in frames], 'KiB')
     if any('queued' in f for f in frames):
         report['queued ahead in Fresh'] = fmt([f.get('queued', 0) / 1024 for f in frames], 'KiB')
+    if any('ahead' in f for f in frames):
+        report['frames not yet applied ahead'] = f"max {max(f.get('ahead', 0) for f in frames)}"
     report['app parse'] = fmt([f['parse'] for f in frames])
     report['wait for main thread'] = fmt([f['applied'] - f['t'] for f in frames])
     report['app apply'] = fmt([f['apply'] for f in frames])
@@ -145,13 +148,17 @@ def editor_report(mark, seg, rows_before):
         if shown is not None:
             behind.append(abs(line - shown))
     report['lines behind the input'] = fmt(behind, 'lines')
-    # In time: when each shown line was first asked for.
+    # In time: for each frame that moved the view, when its line was first asked for.
+    down = asked[-1][1] >= start_top
     time_behind = []
+    shown = start_top
     for f in frames:
-        if f.get('top') is None:
+        top = f.get('top')
+        if top is None or top == shown:
             continue
-        when = next((t for t, line in asked if (line >= f['top'] if line >= start_top else line <= f['top'])), None)
-        if when is not None and f['top'] != start_top:
+        shown = top
+        when = next((t for t, line in asked if line != start_top and (line >= top if down else line <= top)), None)
+        if when is not None:
             time_behind.append(f['applied'] - when)
     report['shown line, after it was asked'] = fmt(time_behind)
     moving = [f for f in frames if f.get('top') is not None]
@@ -210,6 +217,10 @@ def main():
         if not report:
             continue
         speed = f", flick {mark['speed']:+.0f} pt/s" if mark.get('speed') else ''
+        if mark.get('apply_ms'):
+            speed += f", frames take {mark['apply_ms']:.0f} ms longer"
+        if mark.get('applied') is False:
+            speed += ', applied frames not reported'
         print(f"#{i} {target}{speed}")
         for key, value in report.items():
             print(f"  {key:34} {value}")

@@ -123,6 +123,8 @@ public struct FrameTiming: Sendable {
   public var buildMs, diffMs: Double
   /// Bytes of earlier frames still queued for the socket ahead of this one.
   public var queued: Int
+  /// Earlier frames this client had not yet applied when this one was sent.
+  public var ahead: Int
   /// Wheel lines Fresh's smooth scrolling still owes.
   public var owed: Int
   /// The line at the top of the active view (0-based).
@@ -134,6 +136,7 @@ public struct FrameTiming: Sendable {
     buildMs = t["build_ms"] as? Double ?? 0
     diffMs = t["diff_ms"] as? Double ?? 0
     queued = t["queued"] as? Int ?? 0
+    ahead = t["ahead"] as? Int ?? 0
     owed = t["owed"] as? Int ?? 0
     top = t["top"] as? Int ?? 0
   }
@@ -145,6 +148,10 @@ public struct FrameTiming: Sendable {
 public struct SceneMessage: @unchecked Sendable {
   public let isHello: Bool
   public let sequence: Int
+  /// A hello's promise that Fresh holds newer frames back while the client
+  /// has not applied the ones sent, if the client says what it applied
+  /// (`applied` with the frame's `seq`), and then sends the newest scene.
+  public let wantsApplied: Bool
   /// Changed top-level values (`w`, `h`, `theme`, `clipboard`, `windowId`) and
   /// regions (`regions.<key>`), except panes and grid rows.
   public let values: [String: Any]
@@ -168,6 +175,7 @@ public struct SceneMessage: @unchecked Sendable {
       return nil
     }
     sequence = object["seq"] as? Int ?? 0
+    wantsApplied = object["acks"] as? Bool ?? false
     timing = FrameTiming(json: object["t"])
     var values: [String: Any] = [:]
     var rows: [Int: [CellRun]] = [:]
