@@ -12,8 +12,9 @@ import FreshKit
 final class NativeEditor: NSObject, NSWindowDelegate, CellGridDelegate {
   let store = SceneStore()
   private(set) var window: NSWindow?
-  private(set) var grid: CellGridView?
-  private var chrome: ChromeView?
+  private(set) var view: EditorHostView?
+  var grid: CellGridView? { view?.grid }
+  private var chrome: ChromeView? { view?.chrome }
   private var socket: SceneSocket?
   private weak var app: AppController?
   private var menus: FreshMenus?
@@ -126,32 +127,26 @@ final class NativeEditor: NSObject, NSWindowDelegate, CellGridDelegate {
     window.tabbingMode = .disallowed
     window.setFrameAutosaveName("FileCommanderNativeEditor")
     if window.frame.origin == .zero { window.center() }
-    let content = NSView(frame: window.contentView!.bounds)
-    content.autoresizingMask = [.width, .height]
-    let grid = CellGridView(store: store)
-    grid.frame = content.bounds
-    grid.autoresizingMask = [.width, .height]
-    grid.delegate = self
-    content.addSubview(grid)
-    let chrome = ChromeView(store: store, grid: grid)
-    chrome.frame = content.bounds
-    chrome.autoresizingMask = [.width, .height]
-    content.addSubview(chrome)
-    let modals = ModalHost(rootView: FreshModals(store: store) { [weak self] message in self?.sendFromPanel(message) })
-    modals.frame = content.bounds
-    modals.autoresizingMask = [.width, .height]
-    modals.isShowing = { [weak self] in self.map { FreshModals.showing($0.store) } ?? false }
-    content.addSubview(modals)
-    window.contentView = content
-    window.initialFirstResponder = grid
+    let host = makeView()
+    host.frame = window.contentView!.bounds
+    host.autoresizingMask = [.width, .height]
+    window.contentView = host
+    window.initialFirstResponder = host.grid
     self.window = window
-    self.grid = grid
-    self.chrome = chrome
+    return window
+  }
+
+  /// The editor's view, made once and kept.
+  private func makeView() -> EditorHostView {
+    if let view { return view }
+    let view = EditorHostView(store: store) { [weak self] message in self?.sendFromPanel(message) }
+    view.grid.delegate = self
+    self.view = view
     let menus = FreshMenus(store: store) { [weak self] action, args in self?.runAction(action, args: args) }
     menus.openSettings = { [weak self] in self?.app?.openSettings(tab: .editor) }
     menus.switchBack = { [weak self] in self?.switchBack() }
     self.menus = menus
-    return window
+    return view
   }
 
   /// Fonts and colors: the text font is the theme's editor font; colors come
@@ -164,7 +159,7 @@ final class NativeEditor: NSObject, NSWindowDelegate, CellGridDelegate {
     grid.defaultForeground = theme.foreground.map(NSColor.init(scene:)) ?? app.theme.nsColor("editor.text")
     grid.caretColor = theme.accent.map(NSColor.init(scene:)) ?? .controlAccentColor
     window?.backgroundColor = grid.defaultBackground
-    window?.appearance = NSAppearance(named: theme.isDark ? .darkAqua : .aqua)
+    view?.applyLook(dark: theme.isDark)
     chrome?.themeChanged()
     grid.needsDisplay = true
   }
@@ -195,6 +190,7 @@ final class NativeEditor: NSObject, NSWindowDelegate, CellGridDelegate {
       (pane["tabs"] as? [[String: Any]])?.first { $0["active"] as? Bool == true }?["label"] as? String
     }.first
     window?.title = active.map { "\($0) — Editor" } ?? "Editor"
+    grid?.title = active ?? "Editor"
   }
 
   private func runAction(_ action: String, args: [String: Any]) {

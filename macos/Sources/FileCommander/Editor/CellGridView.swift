@@ -22,6 +22,8 @@ protocol CellGridDelegate: AnyObject {
 final class CellGridView: NSView, @preconcurrency NSTextInputClient {
   weak var delegate: CellGridDelegate?
   let store: SceneStore
+  /// What VoiceOver calls the editor: the active tab's name.
+  var title = "Editor"
 
   // Metrics.
   private(set) var cellWidth: CGFloat = 8
@@ -255,7 +257,7 @@ final class CellGridView: NSView, @preconcurrency NSTextInputClient {
   override func isAccessibilityElement() -> Bool { true }
   override func accessibilityRole() -> NSAccessibility.Role? { .textArea }
   override func accessibilityRoleDescription() -> String? { "editor" }
-  override func accessibilityLabel() -> String? { window?.title ?? "Editor" }
+  override func accessibilityLabel() -> String? { title }
   override func accessibilityValue() -> Any? { store.lines.joined(separator: "\n") }
 
   override func accessibilitySelectedTextRange() -> NSRange {
