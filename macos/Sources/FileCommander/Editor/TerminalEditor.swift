@@ -2,26 +2,30 @@ import AppKit
 import FCKit
 import SwiftTerm
 
-/// Runs Fresh's attach command in a terminal view in its own window: the
-/// fallback for a Fresh session without a scene channel (an older Fresh, or a
-/// `fresh_binary_path` override). The backend lives on in its own session;
-/// closing the window or pressing the switch key detaches, just as the terminal
-/// interface does.
+/// Runs Fresh's attach command in a terminal view, shown in the main window in
+/// place of the panes: the fallback for a Fresh session without a scene
+/// channel (an older Fresh, or a `fresh_binary_path` override), or when
+/// Settings asks for the terminal. The backend lives on in its own session;
+/// the switch key detaches, just as the terminal interface does, and the files
+/// come back when the attach client exits.
 @MainActor
-final class TerminalEditor: NSObject, LocalProcessTerminalViewDelegate, NSWindowDelegate {
-  private(set) var terminal: LocalProcessTerminalView?
-  private(set) var window: NSWindow?
+final class TerminalEditor: NSObject, LocalProcessTerminalViewDelegate {
+  private(set) var terminal: EditorTerminalView?
   private(set) var running = false
   private weak var app: AppController?
   private var monitor: Any?
+  /// Called when the terminal wants to be shown (true) or hidden (false).
+  var onPresent: ((Bool) -> Void)?
+  /// Called with the terminal's title when Fresh sets it.
+  var onTitle: ((String) -> Void)?
 
   func attach(_ request: AttachRequest, app: AppController?) {
     self.app = app
-    let window = self.window ?? makeWindow()
-    guard let terminal else { return }
+    let terminal = self.terminal ?? makeView()
+    terminal.showingEvent = NSApp.currentEvent.flatMap { $0.type == .keyDown ? $0.timestamp : nil }
     if running {
       // Already attached: Fresh shows the newly opened files itself.
-      window.makeKeyAndOrderFront(nil)
+      onPresent?(true)
       return
     }
     applyTheme()
@@ -35,8 +39,7 @@ final class TerminalEditor: NSObject, LocalProcessTerminalViewDelegate, NSWindow
                           execName: nil, currentDirectory: request.cwd)
     running = true
     watch(pid: terminal.process.shellPid)
-    window.makeKeyAndOrderFront(nil)
-    window.makeFirstResponder(terminal)
+    onPresent?(true)
   }
 
   func applyTheme() {
@@ -46,44 +49,35 @@ final class TerminalEditor: NSObject, LocalProcessTerminalViewDelegate, NSWindow
     terminal.nativeForegroundColor = app.theme.nsColor("editor.text")
   }
 
-  /// Brings File Commander's window back to the front.
-  func showFileCommander() {
-    NSApp.windows.first { $0.identifier?.rawValue.hasPrefix("main") == true }?.makeKeyAndOrderFront(nil)
-    if let app { app.focusPane(app.engine.focusedSide) }
+  /// Gives the terminal the keyboard, once it is in the window.
+  func focus() {
+    guard running, let terminal, let window = terminal.window, window.firstResponder !== terminal else { return }
+    window.makeFirstResponder(terminal)
   }
 
   func detachAll() {
-    if running, let terminal {
-      kill(terminal.process.shellPid, SIGTERM)
-    }
+    guard running else { return }
+    if let terminal { kill(terminal.process.shellPid, SIGTERM) }
     running = false
+    watcher?.invalidate()
+    onPresent?(false)
   }
 
-  private func makeWindow() -> NSWindow {
-    let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 980, height: 640),
-                          styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
-    window.title = "Editor — Fresh"
-    window.identifier = NSUserInterfaceItemIdentifier("editor")
-    window.isReleasedWhenClosed = false
-    window.delegate = self
-    window.setFrameAutosaveName("FileCommanderEditor")
-    if window.frame.origin == .zero { window.center() }
-    let terminal = LocalProcessTerminalView(frame: window.contentView!.bounds)
-    terminal.autoresizingMask = [.width, .height]
+  private func makeView() -> EditorTerminalView {
+    let terminal = EditorTerminalView(frame: NSRect(x: 0, y: 0, width: 980, height: 640))
     terminal.processDelegate = self
-    window.contentView = terminal
-    self.window = window
     self.terminal = terminal
     monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
       MainActor.assumeIsolated {
-        guard let self, let app = self.app, event.window === self.window, let chord = KeyChord(event: event),
+        guard let self, let app = self.app, self.running, let terminal = self.terminal, event.window === terminal.window,
+              event.window?.firstResponder === terminal, let chord = KeyChord(event: event),
               chord.modifiers.contains(.command), app.keymap.command(for: chord) == "switch_to_file_commander" else { return event }
         // Fresh never sees Cmd chords, so the app detaches for it.
         self.detachAll()
         return nil
       }
     }
-    return window
+    return terminal
   }
 
   /// Notices when the attach client exits. SwiftTerm's own exit callback doesn't
@@ -109,31 +103,19 @@ final class TerminalEditor: NSObject, LocalProcessTerminalViewDelegate, NSWindow
     guard running else { return }
     running = false
     watcher?.invalidate()
-    window?.orderOut(nil)
     if let code, code != 0 { app?.engine.reportError("The editor exited with status \(code)") }
-    showFileCommander()
+    onPresent?(false)
   }
 
   // MARK: LocalProcessTerminalViewDelegate
 
   nonisolated func sizeChanged(source: LocalProcessTerminalView, newCols: Int, newRows: Int) {}
   nonisolated func setTerminalTitle(source: LocalProcessTerminalView, title: String) {
-    MainActor.assumeIsolated { window?.title = title.isEmpty ? "Editor — Fresh" : "\(title) — Fresh" }
+    MainActor.assumeIsolated { onTitle?(title) }
   }
   nonisolated func hostCurrentDirectoryUpdate(source: TerminalView, directory: String?) {}
   nonisolated func processTerminated(source: TerminalView, exitCode: Int32?) {
     MainActor.assumeIsolated { clientExited(code: exitCode) }
-  }
-
-  // MARK: NSWindowDelegate
-
-  nonisolated func windowShouldClose(_ sender: NSWindow) -> Bool {
-    MainActor.assumeIsolated {
-      detachAll()
-      sender.orderOut(nil)
-      showFileCommander()
-    }
-    return false
   }
 
   // MARK: Explainer access
@@ -147,7 +129,7 @@ final class TerminalEditor: NSObject, LocalProcessTerminalViewDelegate, NSWindow
 
   /// The screen rectangle of columns [col, col+count) on a row.
   func screenRect(row: Int, col: Int, count: Int) -> CGRect? {
-    guard let terminal, let window = terminal.window else { return nil }
+    guard running, let terminal, let window = terminal.window else { return nil }
     let t = terminal.getTerminal()
     guard t.cols > 0, t.rows > 0 else { return nil }
     let cellWidth = terminal.bounds.width / CGFloat(t.cols)
@@ -158,4 +140,21 @@ final class TerminalEditor: NSObject, LocalProcessTerminalViewDelegate, NSWindow
   }
 
   func send(_ text: String) { terminal?.send(txt: text) }
+}
+
+/// The terminal editor's view. Keys typed into it go to Fresh ahead of the
+/// menus, whose shortcuts would otherwise take F-keys and Control chords; ⌘
+/// chords, which Fresh never sees, still reach the menus.
+final class EditorTerminalView: LocalProcessTerminalView {
+  /// The key press that showed the editor. AppKit can deliver it here again
+  /// (as a menu key equivalent), so it is swallowed.
+  var showingEvent: TimeInterval?
+
+  override func performKeyEquivalent(with event: NSEvent) -> Bool {
+    guard event.type == .keyDown, window?.firstResponder === self, !event.modifierFlags.contains(.command) else {
+      return super.performKeyEquivalent(with: event)
+    }
+    if event.timestamp != showingEvent { keyDown(with: event) }
+    return true
+  }
 }

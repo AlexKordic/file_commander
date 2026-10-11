@@ -458,7 +458,7 @@ struct RestartEditorSheet: View {
   }
 
   private func restart() {
-    // Fresh restarts only with no other client attached, the editor window included.
+    // Fresh restarts only with no other client attached, the app's editor included.
     app.editor.detachAll()
     let result = app.engine.restartEditor(allowLegacy: needsLegacy)
     switch result.status {

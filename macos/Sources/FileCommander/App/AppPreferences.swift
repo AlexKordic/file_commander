@@ -46,7 +46,7 @@ struct AppPreferences: Codable, Equatable {
   var optionAsAlt = false
   /// Show the editor in a terminal view instead of drawing it natively.
   var terminalEditor = false
-  /// The editor window was open when the app quit; it opens again at launch.
+  /// The editor was shown when the app quit; it is shown again at launch.
   var editorWasOpen = false
 
   init() {}

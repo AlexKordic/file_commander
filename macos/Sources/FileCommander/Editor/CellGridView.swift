@@ -452,7 +452,7 @@ final class CellGridView: NSView, @preconcurrency NSTextInputClient {
   }
 }
 
-/// App shortcuts the editor window leaves to the menus.
+/// App shortcuts the editor leaves to the menus.
 enum AppChords {
   static func reserved(_ event: NSEvent) -> Bool {
     let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)

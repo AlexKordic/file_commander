@@ -25,8 +25,9 @@ final class EditorController {
 
   init() {
     native.onPresent = { [weak self] shown in self?.present(shown, native: true) }
-    // Set only on a change: the main window redraws its title bar for each.
-    native.onTitle = { [weak self] title in if self?.title != title { self?.title = title } }
+    native.onTitle = { [weak self] title in self?.setTitle(title) }
+    terminal.onPresent = { [weak self] shown in self?.present(shown, native: false) }
+    terminal.onTitle = { [weak self] title in self?.setTitle(title) }
   }
 
   func attach(_ request: AttachRequest, app: AppController?) {
@@ -43,7 +44,7 @@ final class EditorController {
   }
 
   private func present(_ shown: Bool, native: Bool) {
-    if shown, let view = native ? self.native.view : nil, view !== self.view {
+    if shown, let view = native ? self.native.view : terminal.terminal, view !== self.view {
       self.view = view
     }
     guard self.shown != shown else { return }
@@ -51,8 +52,13 @@ final class EditorController {
     app?.editorShownChanged(shown)
   }
 
+  /// Set only on a change: the main window redraws its title bar for each.
+  private func setTitle(_ title: String) {
+    if self.title != title { self.title = title }
+  }
+
   /// The editor is showing.
-  var running: Bool { showingNative ? native.shown : terminal.running }
+  var running: Bool { shown }
 
   /// Shown natively rather than in a terminal view.
   var isNative: Bool { showingNative }
@@ -60,14 +66,15 @@ final class EditorController {
   /// The window the editor is shown in.
   var window: NSWindow? { shown ? view?.window : nil }
 
-  /// Shows the files again; the editor keeps running.
+  /// Shows the files again. The native editor stays connected; the terminal
+  /// detaches, as the switch key does in it.
   func showFiles() {
-    if showingNative { native.switchBack() }
+    if showingNative { native.switchBack() } else { terminal.detachAll() }
   }
 
   /// Gives the editor the keyboard, once its view is on screen.
   func focus() {
-    if showingNative { native.focus() }
+    if showingNative { native.focus() } else { terminal.focus() }
   }
 
   func detachAll() {
