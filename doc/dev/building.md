@@ -62,7 +62,7 @@ The build produces:
 | Path | Contents |
 | --- | --- |
 | `build-release/fc` | The FC executable. |
-| `build-release/third_party/fresh/bin/fresh` | Fresh, copied from Cargo's output in the Fresh checkout's `target/release/`. |
+| `build-release/third_party/fresh/bin/fresh` | Fresh, copied from Cargo's output in the Fresh checkout's `target/fc-release/`. |
 | `build-release/third_party/lzma/_o/7zr` | The 7z command-line tool used for archives. |
 | `build-release/fc_*_tests`, `build-release/fc_render_benchmarks` | Test executables (the presets enable `BUILD_TESTING`). |
 | `build-release/compile_commands.json` | Compile commands for clangd and similar tools. |
@@ -168,7 +168,7 @@ those exact revisions, never moving branch tips.
 | Boost 1.90.0 | Release archive, downloaded by CMake | SHA-256 | CMake `FetchContent`. Boost.Filesystem is built from the modified subtree in `boost/filesystem/`. |
 | FTXUI | FC's fork | Git revision | Added as a CMake subdirectory. |
 | LuaJIT | Upstream | Git revision | Copied into the build tree and built there as a static library with `make`, so the checkout stays clean. |
-| Fresh | Upstream plus FC's changes in `dependencies/fresh-fc.bundle` | Git revision and bundle SHA-256 | `cargo build --release --locked --features web` in the Fresh checkout (the feature gives the macOS app's native editor its channel), then copied into the build tree. |
+| Fresh | Upstream plus FC's changes in `dependencies/fresh-fc.bundle` | Git revision and bundle SHA-256 | `cargo build --locked --features web` with FC's `fc-release` profile (Fresh's release profile at `opt-level` 3; see [fresh_integration.md](fresh_integration.md#building-and-packaging)) in the Fresh checkout, then copied into the build tree. The feature gives the macOS app's native editor its channel. |
 | LZMA SDK 26.00 | Snapshot in `dependencies/lzma-sdk-26.00.tar.gz` | Archive SHA-256 and a fingerprint of the SDK's source files | The SDK's `makefile.gcc`, with objects in the build tree. |
 
 How FC drives Fresh at run time is in
@@ -397,8 +397,10 @@ git -C build-deps/fresh archive "$fresh_rev" \
   cd build-fresh-source/fresh-source
   mkdir .cargo
   cargo vendor --locked --versioned-dirs vendor > .cargo/vendor-config.toml
-  cargo --config .cargo/vendor-config.toml build --release --frozen \
-    -p fresh-editor --bin fresh
+  cargo --config .cargo/vendor-config.toml build --frozen \
+    -p fresh-editor --bin fresh --features web --profile fc-release \
+    --config 'profile.fc-release.inherits="release"' \
+    --config 'profile.fc-release.opt-level=3'
   rm -rf target
 )
 tar -czf build-fresh-source/fresh-corresponding-source.tar.gz \

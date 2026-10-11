@@ -127,7 +127,8 @@ again each time.
 `--release`), puts them into the existing bundle, installs `fc`, `fresh` and
 `7zr` from `build-macos` when they are newer than the bundle's, and signs
 again; `--fresh <path>` installs another Fresh build, such as one from the
-fork's checkout. Executables are copied next to the old file and moved over
+fork's checkout (`target/fc-release/fresh` when built with FC's profile, see
+[fresh_integration.md](fresh_integration.md#building-and-packaging)). Executables are copied next to the old file and moved over
 it: macOS kills a signed program whose file was changed in place ("Code
 Signature Invalid") at its next launch. A failed Swift build leaves the bundle
 as it was.
@@ -324,6 +325,12 @@ default colors out of them. A scroll frame is 4–10 KiB instead of 55–88 KiB,
 the app parses it in 0.3 ms instead of 1.5–2 ms, and Fresh builds it in
 5–6 ms instead of 7–8 ms. An older Fresh ignores `copies` and sends every
 changed row.
+
+FC builds Fresh with its own `fc-release` profile, at `opt-level` 3 where
+Fresh's release profile has `"z"`
+([fresh_integration.md](fresh_integration.md#building-and-packaging)): a
+scroll frame then builds in 2–3 ms, reaches the app 5–6 ms after the wheel
+event (p50) and is on screen after 10–15 ms (p95 under 20 ms).
 
 ## ExplainerKit in other projects
 

@@ -45,13 +45,24 @@ With `FC_BUILD_FRESH=ON` (the default), CMake builds Fresh from
 `FC_FRESH_SOURCE_DIR` with:
 
 ```sh
-cargo build --release --locked -p fresh-editor --bin fresh --features web
+cargo build --locked -p fresh-editor --bin fresh --features web \
+  --profile fc-release --config 'profile.fc-release.inherits="release"' \
+  --config 'profile.fc-release.opt-level=3'
 ```
 
 The `web` feature builds Fresh's scene bridge, which an FC session serves to the
 macOS app's native editor ([Scene channel](#scene-channel)). A Fresh
 built without it still works with FC: the app then runs `fresh -a` in a
 terminal view.
+
+`fc-release` is FC's own Cargo profile, defined on the command line: Fresh's
+release profile (fat LTO, one codegen unit) with `opt-level` 3 in place of
+Fresh's `"z"`, which optimizes for size. Building a scroll frame for the
+native editor takes 2–3 ms instead of 5–6 ms, and a frame reaches the app in
+5–7 ms instead of 10–12 ms; the binary is about 45 MB instead of 34 MB. The
+output goes to `target/fc-release/fresh`, so FC's builds and a plain
+`cargo build --release` in the same checkout don't rebuild each other's
+output.
 
 `FC_FRESH_SOURCE_DIR` defaults to the sibling checkout `../editor-fresh`; the
 bootstrap layout passes `build-deps/fresh`. The binary is staged at

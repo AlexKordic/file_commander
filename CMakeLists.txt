@@ -313,7 +313,15 @@ if(FC_BUILD_FRESH)
     message(FATAL_ERROR "Fresh cross-compilation requires a separately configured Rust target; use FC_BUILD_FRESH=OFF and provide a target-built editor when packaging.")
   endif()
   set(_fresh_manifest "${FC_FRESH_SOURCE_DIR}/Cargo.toml")
-  set(_fresh_built_bin "${FC_FRESH_SOURCE_DIR}/target/release/fresh")
+  # FC builds Fresh for speed: Fresh's release profile optimizes for size
+  # (opt-level "z"), which doubles the time each frame of the macOS app's
+  # native editor takes to build. FC's own profile, `fc-release`, is release
+  # with opt-level 3; it builds into target/fc-release, so a plain
+  # `cargo build --release` in the checkout keeps its own output.
+  set(_fresh_profile_args --profile fc-release
+    --config "profile.fc-release.inherits=\"release\""
+    --config "profile.fc-release.opt-level=3")
+  set(_fresh_built_bin "${FC_FRESH_SOURCE_DIR}/target/fc-release/fresh")
   set(_fresh_stage_dir "${CMAKE_BINARY_DIR}/third_party/fresh/bin")
   set(_fresh_stage_bin "${_fresh_stage_dir}/fresh")
 
@@ -325,7 +333,7 @@ if(FC_BUILD_FRESH)
     add_custom_target(fresh_bin ALL
       BYPRODUCTS "${_fresh_stage_bin}"
       COMMAND ${CMAKE_COMMAND} -E make_directory "${_fresh_stage_dir}"
-      COMMAND cargo build --release --locked -p fresh-editor --bin fresh --features web --manifest-path "${_fresh_manifest}"
+      COMMAND cargo build ${_fresh_profile_args} --locked -p fresh-editor --bin fresh --features web --manifest-path "${_fresh_manifest}"
       # Replace the executable atomically: a detached editor may still have
       # the previous binary mapped while a new build is being staged.
       COMMAND ${CMAKE_COMMAND} -E copy_if_different "${_fresh_built_bin}" "${_fresh_stage_bin}.new"

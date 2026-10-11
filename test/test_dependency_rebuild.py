@@ -44,4 +44,4 @@ require((original_object.stat().st_mtime_ns if original_object.exists() else Non
 rebuild('7zr', Path(cache['FC_LZMA_SOURCE_DIR']) / 'C/Alloc.c', 'lzma_7zr', 'Alloc.c', build / 'third_party/lzma/_o/Alloc.o')
 if cache.get('FC_BUILD_FRESH') == 'ON':
     fresh = Path(cache['FC_FRESH_SOURCE_DIR'])
-    rebuild('Fresh', fresh / 'crates/fresh-core/src/lib.rs', 'fresh_bin', 'Compiling fresh-core', fresh / 'target/release/fresh')
+    rebuild('Fresh', fresh / 'crates/fresh-core/src/lib.rs', 'fresh_bin', 'Compiling fresh-core', fresh / 'target/fc-release/fresh')

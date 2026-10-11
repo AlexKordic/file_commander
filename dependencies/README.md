@@ -68,11 +68,15 @@ Build with the pinned checkout's toolchain (Rust 1.95, from its
 `rust-toolchain.toml`):
 
 ```sh
-cargo build --release --locked -p fresh-editor --bin fresh --features web
+cargo build --locked -p fresh-editor --bin fresh --features web \
+  --profile fc-release --config 'profile.fc-release.inherits="release"' \
+  --config 'profile.fc-release.opt-level=3'
 ```
 
 The `web` feature gives FC sessions the scene channel; without it the macOS app
-falls back to a terminal view. How FC drives Fresh, and the rules for changing the pin, are in
+falls back to a terminal view. The `fc-release` profile is Fresh's release
+profile with `opt-level` 3 instead of `"z"`, so frames of the macOS app's
+native editor build in half the time; the binary is in `target/fc-release/`. How FC drives Fresh, and the rules for changing the pin, are in
 [doc/dev/fresh_integration.md](../doc/dev/fresh_integration.md) in the FC
 source tree.
 
