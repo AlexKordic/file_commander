@@ -99,6 +99,7 @@ fc_core              unchanged                     locations, plans, jobs, journ
 macos/build_app.sh            # release build: build-macos/File Commander.app
 macos/build_app.sh --debug    # faster Swift compile
 macos/build_app.sh --open     # build, then open the app
+macos/tools/update_app.sh     # after Swift-only changes: update the bundle in seconds
 ```
 
 The script configures the `macos-app` CMake preset once (deployment target
@@ -114,7 +115,24 @@ Swift package in `macos/`, and assembles the bundle:
 | `Contents/Resources/FileCommander_FileCommander.bundle` | explainers and themes |
 | `Contents/Resources/AppIcon.icns` | drawn by `macos/tools/make_icon.swift` |
 
-The bundle is signed ad hoc. The Swift package links the engine with
+`macos/tools/sign_app.sh` signs the bundle, inside out (helpers and resource
+bundles, then the app). It uses `FC_CODESIGN_IDENTITY` when that is set (`-`
+for ad hoc), else the first valid Apple Development identity in the keychain,
+else an ad hoc signature. A real identity keeps the app's code identity the
+same across builds, so macOS asks for a permission (such as files on network
+volumes) once; an ad hoc signature changes with every build, and macOS asks
+again each time.
+
+`macos/tools/update_app.sh` rebuilds only the Swift products (debug unless
+`--release`), puts them into the existing bundle, installs `fc`, `fresh` and
+`7zr` from `build-macos` when they are newer than the bundle's, and signs
+again; `--fresh <path>` installs another Fresh build, such as one from the
+fork's checkout. Executables are copied next to the old file and moved over
+it: macOS kills a signed program whose file was changed in place ("Code
+Signature Invalid") at its next launch. A failed Swift build leaves the bundle
+as it was.
+
+The Swift package links the engine with
 `-L build-macos`, so build the CMake side first; `swift build --package-path
 macos` alone works once `build-macos/libfc_engine_bundle.a` exists. SwiftTerm
 is pinned to 1.11.2, the last release without Metal shaders, so the build

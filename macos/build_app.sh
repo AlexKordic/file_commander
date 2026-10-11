@@ -88,6 +88,7 @@ if [[ ! -f build-macos/AppIcon.icns || macos/tools/make_icon.swift -nt build-mac
   iconutil -c icns build-macos/AppIcon.iconset -o build-macos/AppIcon.icns
 fi
 cp build-macos/AppIcon.icns "$app/Contents/Resources/AppIcon.icns"
-codesign --force --deep --sign - "$app" 2> /dev/null || say "warning: ad-hoc signing failed"
+signed="$(macos/tools/sign_app.sh "$app")"
+say "$signed"
 say "done: $app"
 if [[ $open_app == 1 ]]; then open "$app"; fi
