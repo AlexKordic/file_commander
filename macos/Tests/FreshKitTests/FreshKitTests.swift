@@ -75,6 +75,22 @@ final class SceneTests: XCTestCase {
     }
   }
 
+  func testCopiedRowsComeFromThePreviousFrame() {
+    let store = MainActor.assumeIsolated { SceneStore() }
+    MainActor.assumeIsolated {
+      store.apply(message(#"{"type":"hello","seq":0,"scene":{"w":1,"h":4,"regions":{"grid":[[{"t":"a"}],[{"t":"b"}],[{"t":"c"}],[{"t":"d"}]]}}}"#))
+      var seen = SceneChange()
+      store.onChange = { seen = $0 }
+      // Scrolled by two: rows 0-1 are the previous 2-3, rows 2-3 came into view.
+      store.apply(message(#"{"type":"frame","seq":1,"changed":{"regions.grid.copy":[[0,2,2]],"regions.grid.2":[{"t":"e"}],"regions.grid.3":[{"t":"f"}]}}"#))
+      XCTAssertEqual(store.lines, ["c", "d", "e", "f"])
+      XCTAssertEqual(seen.rows, IndexSet(0..<4))
+      // Back up by one, with a row the grid grows by: copies read the rows as they were.
+      store.apply(message(#"{"type":"frame","seq":2,"changed":{"regions.grid.len":5,"regions.grid.copy":[[1,0,4]],"regions.grid.0":[{"t":"b"}]}}"#))
+      XCTAssertEqual(store.lines, ["b", "c", "d", "e", "f"])
+    }
+  }
+
   func testHelloSaysWhetherToReportAppliedFrames() {
     XCTAssertTrue(message(#"{"type":"hello","seq":0,"scene":{"w":1,"h":1,"regions":{}},"acks":true}"#).wantsApplied)
     XCTAssertFalse(message(#"{"type":"hello","seq":0,"scene":{"w":1,"h":1,"regions":{}}}"#).wantsApplied, "an older Fresh doesn't ask")

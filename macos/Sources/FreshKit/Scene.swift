@@ -121,6 +121,8 @@ public struct FrameTiming: Sendable {
   public var ack: Int
   /// Building the scene, and diffing and encoding it for this client, in ms.
   public var buildMs, diffMs: Double
+  /// Of building: rendering the editor into cells, and hashing the grid's rows, in ms.
+  public var renderMs, gridMs: Double
   /// Bytes of earlier frames still queued for the socket ahead of this one.
   public var queued: Int
   /// Earlier frames this client had not yet applied when this one was sent.
@@ -135,6 +137,8 @@ public struct FrameTiming: Sendable {
     self.ack = ack
     buildMs = t["build_ms"] as? Double ?? 0
     diffMs = t["diff_ms"] as? Double ?? 0
+    renderMs = t["render_ms"] as? Double ?? 0
+    gridMs = t["grid_ms"] as? Double ?? 0
     queued = t["queued"] as? Int ?? 0
     ahead = t["ahead"] as? Int ?? 0
     owed = t["owed"] as? Int ?? 0
@@ -157,6 +161,12 @@ public struct SceneMessage: @unchecked Sendable {
   public let values: [String: Any]
   /// Changed grid rows, decoded, by row index.
   public let gridRows: [Int: [CellRun]]
+  /// Grid rows the client already has, by where they were in its previous
+  /// frame (`regions.grid.copy`, asked for with `copies=1`): rows
+  /// `to..<to+count` become the previous `from..<from+count`. A scroll sends
+  /// these for the rows that moved and full rows only for those that came
+  /// into view.
+  public let gridCopies: [(to: Int, from: Int, count: Int)]
   /// The new number of grid rows, when it changed.
   public let gridCount: Int?
   /// Changed panes by index, and the new pane count when it changed.
@@ -179,6 +189,7 @@ public struct SceneMessage: @unchecked Sendable {
     timing = FrameTiming(json: object["t"])
     var values: [String: Any] = [:]
     var rows: [Int: [CellRun]] = [:]
+    var copies: [(to: Int, from: Int, count: Int)] = []
     var panes: [Int: Any] = [:]
     var gridCount: Int?
     var paneCount: Int?
@@ -208,7 +219,13 @@ public struct SceneMessage: @unchecked Sendable {
       for (key, value) in object["changed"] as? [String: Any] ?? [:] {
         if key.hasPrefix("regions.grid.") {
           let rest = key.dropFirst("regions.grid.".count)
-          if rest == "len" { gridCount = value as? Int } else if let index = Int(rest) { rows[index] = CellRun.row(value) }
+          if rest == "len" {
+            gridCount = value as? Int
+          } else if rest == "copy" {
+            copies = (value as? [[Int]] ?? []).compactMap { $0.count == 3 ? (to: $0[0], from: $0[1], count: $0[2]) : nil }
+          } else if let index = Int(rest) {
+            rows[index] = CellRun.row(value)
+          }
         } else if key.hasPrefix("regions.panes.") {
           let rest = key.dropFirst("regions.panes.".count)
           if rest == "len" { paneCount = value as? Int } else if let index = Int(rest) { panes[index] = value }
@@ -221,6 +238,7 @@ public struct SceneMessage: @unchecked Sendable {
     }
     self.values = values
     self.gridRows = rows
+    self.gridCopies = copies
     self.gridCount = gridCount
     self.panes = panes
     self.paneCount = paneCount
@@ -283,10 +301,19 @@ public final class SceneStore {
     if let copy = message.values["clipboard"] as? [String: Any], let text = copy["text"] as? String {
       clipboard = (copy["seq"] as? Int ?? 0, text)
     }
+    let previous = grid
     if let count = message.gridCount {
       if count < grid.count { grid.removeLast(grid.count - count) }
       while grid.count < count { grid.append([]) }
       change.sizeChanged = change.sizeChanged || message.isHello
+    }
+    for copy in message.gridCopies {
+      for offset in 0..<max(0, copy.count) {
+        let to = copy.to + offset, from = copy.from + offset
+        guard to >= 0, to < grid.count, from >= 0, from < previous.count else { continue }
+        grid[to] = previous[from]
+        change.rows.insert(to)
+      }
     }
     for (index, row) in message.gridRows where index < grid.count {
       grid[index] = row

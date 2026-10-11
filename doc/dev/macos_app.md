@@ -261,7 +261,7 @@ object per line, times in milliseconds of system uptime (the clock of
 | --- | --- | --- |
 | `wheel` | A scroll event reaches the editor | `et` (the event's own time), deltas, phases, `steps` sent, `at` (cell) |
 | `send` | A message to Fresh is written | `n` (its number, what a frame's `ack` counts), `type`, `kind` |
-| `frame` | The main thread applies a frame | `t` (read off the socket), `parse`, `applied`, `apply`, `rows` changed, and Fresh's `ack`, `build`, `diff`, `queued`, `ahead`, `owed`, `top` |
+| `frame` | The main thread applies a frame | `t` (read off the socket), `parse`, `applied`, `apply`, `rows` sent and `copied`, and Fresh's `ack`, `build` (of it `render` and `grid`), `diff`, `queued`, `ahead`, `owed`, `top` |
 | `draw` | The cells are drawn | `ms`, `rows`, `seq` (the last frame shown) |
 
 The app asks Fresh for its part with the scene channel's `telemetry` option
@@ -314,6 +314,16 @@ Fresh builds nothing, and once it catches up it gets one frame with the newest
 scene. With frames slowed by 25 ms, that keeps a frame from input to screen at
 p50 64 ms instead of 142 ms. An older Fresh sends no `acks`, and the app then
 reports nothing.
+
+The app connects with `copies=1`: a frame names grid rows the app already has
+by where they were in its previous frame (`regions.grid.copy`, `[to, from,
+count]` runs, applied to the previous rows before the rows sent in full), so a
+scroll sends only the rows that came into view and the scrollbar's. Fresh
+builds a row's runs only when it sends the row and leaves `false` flags and
+default colors out of them. A scroll frame is 4–10 KiB instead of 55–88 KiB,
+the app parses it in 0.3 ms instead of 1.5–2 ms, and Fresh builds it in
+5–6 ms instead of 7–8 ms. An older Fresh ignores `copies` and sends every
+changed row.
 
 ## ExplainerKit in other projects
 

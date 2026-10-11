@@ -9,9 +9,10 @@ benchmark played), it reports how the editor kept up:
 - input: wheel events, how long each waited for the main thread
 - round trip: from a scroll message being sent to the first frame that applied
   it (Fresh's `ack`), to the main thread applying that frame, and to it being drawn
-- Fresh: building and diffing each frame, bytes of earlier frames still queued
-  for the socket ahead of it, frames sent ahead of it that the app had not yet
-  applied, wheel lines still owed
+- Fresh: building each frame (rendering the editor, hashing the grid's rows) and
+  diffing it, rows sent in full and as copies of rows the app had, bytes of
+  earlier frames still queued for the socket ahead of it, frames sent ahead
+  of it that the app had not yet applied, wheel lines still owed
 - app: parsing, waiting for the main thread, applying, drawing
 - position: how far the shown line trails the line the input asked for, in
   lines and in milliseconds, and how long the view keeps moving after the input
@@ -129,8 +130,13 @@ def editor_report(mark, seg, rows_before):
     report['send -> frame applied'] = fmt(to_apply)
     report['send -> frame drawn'] = fmt(to_draw)
     report['Fresh build'] = fmt([f['build'] for f in frames])
+    if any('render' in f for f in frames):
+        report['  render into cells'] = fmt([f['render'] for f in frames])
+        report['  hash grid rows'] = fmt([f['grid'] for f in frames])
     report['Fresh diff+encode'] = fmt([f['diff'] for f in frames])
     report['frame size'] = fmt([f['bytes'] / 1024 for f in frames], 'KiB')
+    if any('copied' in f for f in frames):
+        report['rows sent / copied'] = f"p50 {pct([f['rows'] for f in frames], 50)} / {pct([f['copied'] for f in frames], 50)}"
     if any('queued' in f for f in frames):
         report['queued ahead in Fresh'] = fmt([f.get('queued', 0) / 1024 for f in frames], 'KiB')
     if any('ahead' in f for f in frames):

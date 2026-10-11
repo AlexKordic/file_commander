@@ -79,7 +79,7 @@ final class NativeEditor: NSObject, CellGridDelegate {
     applyTheme()
     Task.detached {
       do {
-        try socket.open(query: "?grid=1&menus=native" + (EditorTelemetry.shared.isOn ? "&telemetry=1" : ""))
+        try socket.open(query: "?grid=1&menus=native&copies=1" + (EditorTelemetry.shared.isOn ? "&telemetry=1" : ""))
         await MainActor.run { [weak self] in
           Trace.write("editor: connected")
           guard let self, self.socket === socket else { return }
@@ -190,10 +190,13 @@ final class NativeEditor: NSObject, CellGridDelegate {
       "ev": "frame", "t": EditorTelemetry.ms(message.receivedAt), "seq": message.sequence, "bytes": message.bytes,
       "parse": EditorTelemetry.ms(message.parseSeconds), "applied": EditorTelemetry.ms(started),
       "apply": EditorTelemetry.ms(ProcessInfo.processInfo.systemUptime - started), "rows": message.gridRows.count,
+      "copied": message.gridCopies.reduce(0) { $0 + $1.count },
     ]
     if let timing = message.timing {
       fields["ack"] = timing.ack
       fields["build"] = timing.buildMs
+      fields["render"] = timing.renderMs
+      fields["grid"] = timing.gridMs
       fields["diff"] = timing.diffMs
       fields["queued"] = timing.queued
       fields["ahead"] = timing.ahead
@@ -205,7 +208,7 @@ final class NativeEditor: NSObject, CellGridDelegate {
 
   /// Asks Fresh for frame timing, or to stop sending it, after the setting changed.
   func telemetryChanged() {
-    socket?.send(["type": "configure", "grid": true, "nativeMenus": true, "telemetry": EditorTelemetry.shared.isOn])
+    socket?.send(["type": "configure", "grid": true, "nativeMenus": true, "rowCopies": true, "telemetry": EditorTelemetry.shared.isOn])
   }
 
 
