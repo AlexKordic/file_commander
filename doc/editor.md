@@ -27,10 +27,10 @@ closes an editor tab. To stop the editor, quit Fresh from its own menu.
 If you rebind the switch command in FC's palette, the editor uses the same key
 to switch back. See [rebinding keys](keys.md#rebinding-keys).
 
-In the macOS app, the editor is a native window instead of a terminal: Fresh's
-menus fill the menu bar, its tabs, sidebar, palette and status bar are Mac
-controls, and the usual `⌘` shortcuts work. It is the same Fresh session, so
-everything on this page applies. See [the editor in the macOS
+In the macOS app, the editor is drawn natively in the main window, in place of
+the panes, instead of in a terminal: Fresh's menus fill the menu bar, its tabs,
+sidebar, palette and status bar are Mac controls, and the usual `⌘` shortcuts
+work. It is the same Fresh session, so everything on this page applies. See [the editor in the macOS
 app](macos_app.md#the-editor).
 
 Remote files from [SSH tabs](ssh.md) open in the same editor. The same path

@@ -29,7 +29,7 @@
     },
     {
       "caption": "Open files in the editor",
-      "sub": "Open in Editor shows them in Fresh, in its own window"
+      "sub": "Open in Editor shows them in Fresh, in place of the panes"
     },
     {
       "cursor": {
@@ -49,6 +49,14 @@
         }
       },
       "timeout": 25
+    },
+    {
+      "wait": {
+        "editor": {
+          "window": "main"
+        }
+      },
+      "timeout": 5
     },
     {
       "wait": {

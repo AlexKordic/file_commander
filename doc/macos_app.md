@@ -158,16 +158,22 @@ key, File Commander asks in a sheet instead of a terminal. See
 
 ## The editor
 
-Open in Editor (`F4`) shows the files in [Fresh](editor.md) in the Editor
-window. Fresh keeps running as its own program; the window draws it with Mac
-controls:
+Open in Editor (`F4`) shows the files in [Fresh](editor.md), in the main window
+in place of the panes. Fresh keeps running as its own program; the window draws
+it with Mac controls:
 
-- **Menus**: while the Editor window is in front, the menu bar holds Fresh's
-  menus (File, Edit, View, Selection, Go, LSP, Help and any a plugin adds),
-  with their `⌘` shortcuts. File Commander's menus come back when you switch.
+- **One window**: while the editor is shown, the title names the file, the
+  sidebar folds away and the toolbar keeps only the **Files | Editor** switch,
+  Activity and Errors. The error lines and the job bar stay below the editor,
+  so a copy's progress and its Pause and Cancel buttons stay in view. Sheets,
+  such as an SSH password prompt, appear over the editor.
+- **Menus**: while the editor is shown and the window is in front, the menu bar
+  holds Fresh's menus (File, Edit, View, Selection, Go, LSP, Help and any a
+  plugin adds), with their `⌘` shortcuts. File Commander's menus come back when
+  you switch to the files or to another window.
 - **Tabs, sidebar, status bar, palette and popups** are drawn natively over the
   places Fresh puts them; clicks on them go to Fresh. Fresh's Settings and its
-  key binding editor open as native panels over the window; keys still go to
+  key binding editor open as native panels over the editor; keys still go to
   Fresh, so its keyboard shortcuts work in them. The text itself is
   Fresh's, in the theme's editor font (Settings › Appearance › Editor › Font),
   with Fresh's syntax colors.
@@ -178,18 +184,19 @@ controls:
   goes to it. Option types its character (é, ü); turn on **Use Option as Alt**
   in Settings › Editor for Fresh's Alt shortcuts. Input methods such as
   Japanese work as usual.
-- **Switching**: `F10` (or your switch key) in the editor comes back to File
-  Commander and hides the window; Switch to Editor shows it again, instantly.
-  The editor's tabs and unsaved text stay when you switch, quit or crash. The
-  window opens again at launch when it was open when you quit.
-- **Server files**: a file in an [SSH tab](ssh.md) opens in the same window.
+- **Switching**: `F10` (or your switch key) in the editor, or **Files** in the
+  toolbar, shows the panes again exactly as you left them; Switch to Editor
+  (`F10` in the files) or **Editor** shows the editor again, instantly. The
+  editor's tabs and unsaved text stay when you switch, quit or crash. The app
+  starts with the editor shown when it was shown when you quit.
+- **Server files**: a file in an [SSH tab](ssh.md) opens in the editor too.
   Fresh works on the server (saving, searching, language servers), and the
   status bar names it.
 
 Window › Restart Editor Backend restarts Fresh after an upgrade. **Show the
-editor in a terminal window** (Settings › Editor) runs Fresh's terminal
-interface in a terminal view instead; File Commander does that by itself for a
-Fresh that can't show the native window, such as an older version set in
+editor as a terminal** (Settings › Editor) runs Fresh's terminal interface in a
+terminal view in the same place instead; File Commander does that by itself for
+a Fresh that can't be drawn natively, such as an older version set in
 `fresh_binary_path`.
 
 ## Lua scripts

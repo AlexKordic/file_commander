@@ -36,20 +36,22 @@
 - A native macOS app (`macos/`, built with `macos/build_app.sh`) with the
   terminal interface's features: menus, a sidebar, sheets, Activity, Errors and
   Find windows, Commander and Mac key presets, Commander and Finder selection
-  styles, Fresh in its own window, SSH password prompts in sheets, and light
+  styles, Fresh in the main window, SSH password prompts in sheets, and light
   and dark themes with a color and a font for every element. See
   [doc/macos_app.md](doc/macos_app.md).
 - Help explains every feature with an explainer that runs real operations on
   demo files, with captions, highlights, a pointer and key badges; **Entire
   tutorial** runs all 27. ExplainerKit, the annotation engine, also records
   explainers to video, captions and Markdown pages.
-- The macOS app shows Fresh in a native Editor window instead of a terminal
-  view: Fresh's menus in the menu bar, native tabs, sidebar, command palette,
-  popups and status bar, Mac shortcuts (`⌘S`, `⌘Z`, `⇧⌘P`, ...), the Mac
-  clipboard, input methods and VoiceOver, about 10 ms from key to screen. Files
-  of SSH tabs open there too, and Fresh edits them on the server. The window
-  talks to the same Fresh session over an owner-only Unix socket (the Fresh
-  fork's new scene channel); the terminal interface is unchanged.
+- The macOS app draws Fresh natively in its main window: `F4` shows the editor
+  in place of the panes and `F10` (or the toolbar's Files | Editor switch)
+  brings them back as they were. Fresh's menus fill the menu bar, its tabs,
+  sidebar, command palette, popups and status bar are native, and Mac
+  shortcuts (`⌘S`, `⌘Z`, `⇧⌘P`, ...), the Mac clipboard, input methods and
+  VoiceOver work, about 10 ms from key to screen. Files of SSH tabs open there
+  too, and Fresh edits them on the server. The app talks to the same Fresh
+  session over an owner-only Unix socket (the Fresh fork's new scene channel);
+  the terminal interface is unchanged.
 - **Transfer Speed** in the palette changes the speed limit while a copy runs;
   the new limit applies within the running file.
 - The application model shared by both interfaces is now its own library,

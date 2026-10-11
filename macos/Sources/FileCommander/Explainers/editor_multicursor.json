@@ -93,6 +93,14 @@
       "timeout": 25
     },
     {
+      "wait": {
+        "editor": {
+          "window": "main"
+        }
+      },
+      "timeout": 5
+    },
+    {
       "caption": "Paste them as an array",
       "sub": ""
     },

@@ -1,19 +1,20 @@
 {
   "id": "editor_window",
-  "title": "The editor window",
+  "title": "Files and editor in one window",
   "order": 19,
-  "duration": 55,
+  "duration": 65,
   "chapter": "editor",
   "needs": {
     "editor": true
   },
-  "summary": "Fresh in a Mac window: its menus in the menu bar, tabs, the command palette and the file sidebar.",
+  "summary": "F4 turns the window into the editor: Fresh's menus in the menu bar, tabs, the command palette and the file sidebar.",
   "covers": {
     "anchors": [
       "editor.tabs",
       "editor.status",
       "editor.palette",
-      "editor.explorer"
+      "editor.explorer",
+      "toolbar.mode"
     ]
   },
   "steps": [
@@ -47,8 +48,16 @@
       "timeout": 25
     },
     {
-      "caption": "A Mac window",
-      "sub": "Fresh edits the text; the window draws its tabs, sidebar and status bar"
+      "wait": {
+        "editor": {
+          "window": "main"
+        }
+      },
+      "timeout": 5
+    },
+    {
+      "caption": "One window",
+      "sub": "The editor takes the place of the panes; Fresh edits, the window draws its tabs and status bar"
     },
     {
       "highlight": [
@@ -59,7 +68,7 @@
     },
     {
       "caption": "Fresh's menus",
-      "sub": "While the editor is in front, the menu bar holds its menus, with ⌘ shortcuts"
+      "sub": "While the editor is shown, the menu bar holds its menus, with ⌘ shortcuts"
     },
     {
       "pause": 2400
@@ -189,6 +198,58 @@
         }
       },
       "timeout": 10
+    },
+    {
+      "pause": 1200
+    },
+    {
+      "caption": "Files or the editor",
+      "sub": "The switch in the toolbar goes back and forth, as F10 does; the panes stay as you left them"
+    },
+    {
+      "highlight": "toolbar.mode",
+      "hold": 1600
+    },
+    {
+      "click": "toolbar.mode"
+    },
+    {
+      "wait": {
+        "editor": {
+          "running": false
+        }
+      },
+      "timeout": 10
+    },
+    {
+      "wait": {
+        "cursor": {
+          "side": "left",
+          "name": "index.html"
+        }
+      }
+    },
+    {
+      "pause": 1400
+    },
+    {
+      "click": "toolbar.mode"
+    },
+    {
+      "wait": {
+        "editor": {
+          "running": true
+        }
+      },
+      "timeout": 10
+    },
+    {
+      "wait": {
+        "editor": {
+          "window": "main"
+        }
+      },
+      "timeout": 5
     },
     {
       "pause": 1200

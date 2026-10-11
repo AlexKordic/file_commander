@@ -47,6 +47,14 @@
       "timeout": 25
     },
     {
+      "wait": {
+        "editor": {
+          "window": "main"
+        }
+      },
+      "timeout": 5
+    },
+    {
       "editor_keys": [
         "End"
       ]

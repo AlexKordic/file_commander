@@ -14,7 +14,7 @@ the layers below the app are in [architecture.md](architecture.md).
 
 ```
 File Commander.app   macos/Sources/FileCommander   SwiftUI views, menus, sheets, settings,
-                                                   key router, themes, editor window, tutorial
+                                                   key router, themes, native editor, tutorial
 ExplainerKit         macos/Sources/ExplainerKit    anchors, annotation window, runner, recorder
 FreshKit             macos/Sources/FreshKit        client of a Fresh session's scene: socket, store, keys
 FCKit                macos/Sources/FCKit           Engine: Swift values, drain on the main actor
@@ -56,21 +56,39 @@ fc_core              unchanged                     locations, plans, jobs, journ
   a minimal WebSocket client over the Unix socket (frames parsed on a thread of
   its own, delivered in order on the main actor), `SceneStore` applies `hello`
   and `frame` messages, and `SceneKeys` maps Mac keys to Fresh's key names. In
-  the app, `NativeEditor` owns the window and the connection;
+  the app, `NativeEditor` owns the connection and one `EditorHostView` for
+  the life of the app (the grid, the chrome and the panels);
   `CellGridView` draws the frame's cells with Core Text (every glyph on its
   cell, box-drawing lines as lines) and turns keys, mouse, scrolling and
   `NSTextInputClient` text into messages; `ChromeView` draws Fresh's tabs,
   status bar, dividers, scrollbars, sidebar, palette, popups, context menus and
   trust dialog natively over the exact cells Fresh laid them out on, and
   passes clicks through to the grid, so Fresh's own hit-testing answers them;
-  `FreshMenus` builds Fresh's menus into the menu bar while the window is key;
+  `FreshMenus` builds Fresh's menus into the menu bar while the editor is
+  shown and the main window is key;
   `FreshModals` shows Fresh's Settings and key binding editor as SwiftUI panels
   that never take the keyboard and send clicks as `settings` and `kbedit`
   messages, and steps aside for Fresh's own small dialogs (unsaved-changes
   confirmation, the binding edit dialog).
-  `EditorController` is the one interface explainers use for either window.
-  Switching back hides the window and keeps the connection; Restart Editor
-  Backend disconnects first, because Fresh restarts only with no client.
+  `EditorController` is the one interface explainers use for either editor.
+  Restart Editor Backend disconnects first, because Fresh restarts only with
+  no client.
+- **One window.** `MainWindow` keeps the panes and `EditorPane` (which places
+  `EditorController.view`, the native editor's or the terminal's) on top of
+  each other and shows one; both stay in the hierarchy, so the panes keep
+  their scroll position and selection and Fresh keeps its grid size. While
+  `AppController.editorShown`, `KeyRouter` leaves the main window's keys to the
+  editor, focus requests don't move the keyboard to a pane, the sidebar folds
+  (restored afterwards) and the toolbar trims to the Files | Editor switch,
+  Activity and Errors. Switching back hides the editor and keeps the
+  connection.
+- **Menu bar ownership.** SwiftUI writes changes to the app's commands into
+  whatever `NSApp.mainMenu` is installed, including Fresh's. So the commands
+  read nothing that changes while Fresh's menus are up: the Transfers menu
+  follows `AppController.menuJob` (the running job's identity and paused
+  state, not its progress), held still while `menusHeld`. Should a change get
+  through anyway, `FreshMenus` sees items added to or removed from its bar and
+  rebuilds it.
 - **The profile.** The app shares the TUI's profile. Its own settings are in
   `app_settings.json`; it writes `settings.json` back with the TUI's key
   bindings untouched.
@@ -179,7 +197,8 @@ each plus `chapters.json`. They are written with
   `text_focus`, `anchor`, `job` (by `as_job` name, `running` or `paused`),
   `running_job`, `queued_at_least`, `event`, `clipboard`, `hud`,
   `errors_at_least`, `no_errors`, `window`, `editor` (`running`, `contains` a
-  regex, `shows` or `hides` a native surface), `bookmark`, `transfer_rate`,
+  regex, `shows` or `hides` a native surface, `window`: the editor has the
+  keyboard in that window), `bookmark`, `transfer_rate`,
   `file` (`exists`, `missing`, or `path` with `contains`), `theme`,
   `font_size`, and `all`, `any`, `not`.
 - **Needs**: `idle_queue` refuses to start while the user's own job runs;

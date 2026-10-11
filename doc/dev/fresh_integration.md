@@ -49,7 +49,7 @@ cargo build --release --locked -p fresh-editor --bin fresh --features web
 ```
 
 The `web` feature builds Fresh's scene bridge, which an FC session serves to the
-macOS app's native editor window ([Scene channel](#scene-channel)). A Fresh
+macOS app's native editor ([Scene channel](#scene-channel)). A Fresh
 built without it still works with FC: the app then runs `fresh -a` in a
 terminal view.
 
@@ -182,7 +182,7 @@ successful `open-location` or restart.
 `ensure` starts the backend if it is not running, routes nothing, and prints one
 JSON line: `{"scene":"<socket path>","pid":N}`, or `"scene":null` when the
 backend serves no scene. The macOS app runs it where the terminal interface
-attaches, and connects its editor window to the socket; with no scene it falls
+attaches, and connects its native editor to the socket; with no scene it falls
 back to `-a` in a terminal view.
 
 The commands FC runs to completion (`open-location`, `ensure`,
