@@ -158,10 +158,37 @@ key, File Commander asks in a sheet instead of a terminal. See
 
 ## The editor
 
-Open in Editor (`F4`) shows the files in [Fresh](editor.md) in its own window.
-`F10` in the editor comes back; Switch to Editor goes there again. The editor's
-tabs and unsaved text stay when you switch, quit or crash. Window › Restart
-Editor Backend restarts Fresh after an upgrade.
+Open in Editor (`F4`) shows the files in [Fresh](editor.md) in the Editor
+window. Fresh keeps running as its own program; the window draws it with Mac
+controls:
+
+- **Menus**: while the Editor window is in front, the menu bar holds Fresh's
+  menus (File, Edit, View, Selection, Go, LSP, Help and any a plugin adds),
+  with their `⌘` shortcuts. File Commander's menus come back when you switch.
+- **Tabs, sidebar, status bar, palette and popups** are drawn natively over the
+  places Fresh puts them; clicks on them go to Fresh. The text itself is
+  Fresh's, in the theme's editor font (Settings › Appearance › Editor › Font),
+  with Fresh's syntax colors.
+- **Keys**: `⌘S`, `⌘Z`, `⇧⌘Z`, `⌘C`, `⌘X`, `⌘V`, `⌘A`, `⌘F`, `⌘P` (open by
+  name), `⇧⌘P` (command palette), `⌘B` (sidebar), `⌘W` (close tab) and the
+  other shortcuts of Fresh's Mac keymap work as in a Mac editor; Fresh's own
+  keys work too. `⌘V` pastes the Mac clipboard, and what you copy in the editor
+  goes to it. Option types its character (é, ü); turn on **Use Option as Alt**
+  in Settings › Editor for Fresh's Alt shortcuts. Input methods such as
+  Japanese work as usual.
+- **Switching**: `F10` (or your switch key) in the editor comes back to File
+  Commander and hides the window; Switch to Editor shows it again, instantly.
+  The editor's tabs and unsaved text stay when you switch, quit or crash. The
+  window opens again at launch when it was open when you quit.
+- **Server files**: a file in an [SSH tab](ssh.md) opens in the same window.
+  Fresh works on the server (saving, searching, language servers), and the
+  status bar names it.
+
+Window › Restart Editor Backend restarts Fresh after an upgrade. **Show the
+editor in a terminal window** (Settings › Editor) runs Fresh's terminal
+interface in a terminal view instead; File Commander does that by itself for a
+Fresh that can't show the native window, such as an older version set in
+`fresh_binary_path`.
 
 ## Lua scripts
 
@@ -176,7 +203,7 @@ terminal too.
 A theme has a color for light and one for dark appearance for every element,
 and a font, size and weight for every element: names, sizes and dates in the
 list, tabs, the path bar, the status line, the job bar, dialogs, the palette,
-the editor's terminal and the tutorial's captions.
+the editor's text and the tutorial's captions.
 
 - **Appearance**: System, Light or Dark (Settings › General, or View).
 - **Text size**: View › Bigger Text and Smaller Text (`⌘+`, `⌘-`, `⌘0`)

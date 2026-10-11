@@ -168,7 +168,7 @@ those exact revisions, never moving branch tips.
 | Boost 1.90.0 | Release archive, downloaded by CMake | SHA-256 | CMake `FetchContent`. Boost.Filesystem is built from the modified subtree in `boost/filesystem/`. |
 | FTXUI | FC's fork | Git revision | Added as a CMake subdirectory. |
 | LuaJIT | Upstream | Git revision | Copied into the build tree and built there as a static library with `make`, so the checkout stays clean. |
-| Fresh | Upstream plus FC's changes in `dependencies/fresh-fc.bundle` | Git revision and bundle SHA-256 | `cargo build --release --locked` in the Fresh checkout, then copied into the build tree. |
+| Fresh | Upstream plus FC's changes in `dependencies/fresh-fc.bundle` | Git revision and bundle SHA-256 | `cargo build --release --locked --features web` in the Fresh checkout (the feature gives the macOS app's native editor window its channel), then copied into the build tree. |
 | LZMA SDK 26.00 | Snapshot in `dependencies/lzma-sdk-26.00.tar.gz` | Archive SHA-256 and a fingerprint of the SDK's source files | The SDK's `makefile.gcc`, with objects in the build tree. |
 
 How FC drives Fresh at run time is in

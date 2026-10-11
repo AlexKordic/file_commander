@@ -41,8 +41,15 @@
   [doc/macos_app.md](doc/macos_app.md).
 - Help explains every feature with an explainer that runs real operations on
   demo files, with captions, highlights, a pointer and key badges; **Entire
-  tutorial** runs all 25. ExplainerKit, the annotation engine, also records
+  tutorial** runs all 27. ExplainerKit, the annotation engine, also records
   explainers to video, captions and Markdown pages.
+- The macOS app shows Fresh in a native Editor window instead of a terminal
+  view: Fresh's menus in the menu bar, native tabs, sidebar, command palette,
+  popups and status bar, Mac shortcuts (`⌘S`, `⌘Z`, `⇧⌘P`, ...), the Mac
+  clipboard, input methods and VoiceOver, about 10 ms from key to screen. Files
+  of SSH tabs open there too, and Fresh edits them on the server. The window
+  talks to the same Fresh session over an owner-only Unix socket (the Fresh
+  fork's new scene channel); the terminal interface is unchanged.
 - **Transfer Speed** in the palette changes the speed limit while a copy runs;
   the new limit applies within the running file.
 - The application model shared by both interfaces is now its own library,

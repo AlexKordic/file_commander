@@ -16,6 +16,7 @@ the layers below the app are in [architecture.md](architecture.md).
 File Commander.app   macos/Sources/FileCommander   SwiftUI views, menus, sheets, settings,
                                                    key router, themes, editor window, tutorial
 ExplainerKit         macos/Sources/ExplainerKit    anchors, annotation window, runner, recorder
+FreshKit             macos/Sources/FreshKit        client of a Fresh session's scene: socket, store, keys
 FCKit                macos/Sources/FCKit           Engine: Swift values, drain on the main actor
 fc_engine            fc_engine.hpp/.cpp            the facade Swift imports (value types only)
 fc_model             pane_model, app_model,        panes, tabs, commands, dialogs' workers,
@@ -41,12 +42,31 @@ fc_core              unchanged                     locations, plans, jobs, journ
   `AppController.run` ignores a second run of one key press, so a command runs
   once even when a menu sees the key too. Menu items skip chords without `⌘`,
   `⌃` or an F-key, and the standard text-editing chords.
-- **The editor.** `EditorManager` hands the attach command to the app
-  (`set_attach_handler`), which runs it in a SwiftTerm view in its own window.
-  Fresh detaches on its switch key; the app watches the client's PID.
+- **The editor.** Before attaching, `EditorManager` asks the session for its
+  scene socket (`fresh --cmd session ensure`) and hands the app an attach with
+  `scene_socket` set; the app connects and draws the editor natively (below).
+  When the session serves no scene (an older Fresh), the attach is the
+  `fresh -a` command instead, run in a SwiftTerm view (`TerminalEditor`); Fresh
+  detaches on its switch key and the app watches the client's PID.
 - **SSH prompts.** The app starts a Unix-socket server and sets `SSH_ASKPASS`
   to the bundled `fc-askpass` with `SSH_ASKPASS_REQUIRE=force`; each prompt
   becomes a sheet.
+- **The native editor.** `FreshKit` speaks the scene protocol described in
+  [fresh_integration.md](fresh_integration.md#scene-channel): `SceneSocket` is
+  a minimal WebSocket client over the Unix socket (frames parsed on a thread of
+  its own, delivered in order on the main actor), `SceneStore` applies `hello`
+  and `frame` messages, and `SceneKeys` maps Mac keys to Fresh's key names. In
+  the app, `NativeEditor` owns the window and the connection;
+  `CellGridView` draws the frame's cells with Core Text (every glyph on its
+  cell, box-drawing lines as lines) and turns keys, mouse, scrolling and
+  `NSTextInputClient` text into messages; `ChromeView` draws Fresh's tabs,
+  status bar, dividers, scrollbars, sidebar, palette, popups, context menus and
+  trust dialog natively over the exact cells Fresh laid them out on, and
+  passes clicks through to the grid, so Fresh's own hit-testing answers them;
+  `FreshMenus` builds Fresh's menus into the menu bar while the window is key.
+  `EditorController` is the one interface explainers use for either window.
+  Switching back hides the window and keeps the connection; Restart Editor
+  Backend disconnects first, because Fresh restarts only with no client.
 - **The profile.** The app shares the TUI's profile. Its own settings are in
   `app_settings.json`; it writes `settings.json` back with the TUI's key
   bindings untouched.
@@ -68,7 +88,7 @@ Swift package in `macos/`, and assembles the bundle:
 | --- | --- |
 | `Contents/MacOS/FileCommander` | Swift package, product `FileCommander` |
 | `Contents/MacOS/fc-relaunch`, `fc-askpass` | Swift package helpers |
-| `Contents/MacOS/fc`, `fresh`, `7zr` | CMake (`build-macos/`); found next to the app as for `fc` |
+| `Contents/MacOS/fc`, `fresh`, `7zr` | CMake (`build-macos/`, Fresh with its `web` feature); found next to the app as for `fc` |
 | `Contents/Resources/FileCommander_FileCommander.bundle` | explainers and themes |
 | `Contents/Resources/AppIcon.icns` | drawn by `macos/tools/make_icon.swift` |
 
@@ -85,8 +105,14 @@ needs no Metal toolchain.
 | `fc.model.panes`, `fc.model.commands` | `PaneModel` and `AppModel`: listing, filter, glob, cursor, sort, tutorial tabs, the command catalog, palette ranking, dialog requests, settings |
 | `fc.model.rate` | A raised transfer limit applies within a running file |
 | `fc.model.engine` | The facade end to end: start, rows, glob, jobs, profile lock |
+| `fc.model.editor` | Attaching hands the app the session's scene socket, or the terminal command when there is none |
 | `fc.macos.explainers` | `macos/tools/check_explainers.py`: every step, key, command and anchor in the explainers exists, and every visible command is covered |
-| `swift test --package-path macos` | FCKit drives the real engine; ExplainerKit decodes every explainer and builds captions |
+| `swift test --package-path macos` | FCKit drives the real engine; ExplainerKit decodes every explainer and builds captions; FreshKit frames WebSocket messages, applies scenes, maps keys, and replays a scene recorded from a real Fresh session |
+
+`Tests/FreshKitTests/Fixtures/scene.json` comes from
+`macos/tools/record_scene.py`, which starts a throwaway Fresh session, connects
+to its scene socket as the app does, types a few keys and opens the palette.
+Rerun it after bumping the Fresh pin, then run the tests.
 
 The explainers are end-to-end tests of the app. Run one, or all of them, in a
 throwaway profile; the app quits with status 0 when the explainer finished and
@@ -148,16 +174,20 @@ each plus `chapters.json`. They are written with
   `tabs`, `focused`, `single`, `sort`, `columns`, `sheet`, `palette`, `glob`,
   `text_focus`, `anchor`, `job` (by `as_job` name, `running` or `paused`),
   `running_job`, `queued_at_least`, `event`, `clipboard`, `hud`,
-  `errors_at_least`, `no_errors`, `window`, `editor`, `bookmark`,
-  `transfer_rate`, `file`, `theme`, `font_size`, and `all`, `any`, `not`.
+  `errors_at_least`, `no_errors`, `window`, `editor` (`running`, `contains` a
+  regex, `shows` or `hides` a native surface), `bookmark`, `transfer_rate`,
+  `file` (`exists`, `missing`, or `path` with `contains`), `theme`,
+  `font_size`, and `all`, `any`, `not`.
 - **Needs**: `idle_queue` refuses to start while the user's own job runs;
   `editor` gives the explainer a new Fresh session; `restart` and `crash` keep
   the tutorial tabs in the workspace checkpoint; `crash` asks first.
 
 **Anchors** are declared in the views with `.explainerAnchor("id")`, optionally
 with the action a scripted click runs (the same closure as a real click).
-Table rows (`pane.left.row[name=…]`) and the editor's text
-(`editor.text[<regex>]`) are found by resolvers. `pane.focused` and
+Table rows (`pane.left.row[name=…]`), the editor's text
+(`editor.text[<regex>]`) and its native surfaces (`editor.tabs`,
+`editor.status`, `editor.palette`, `editor.popup`, `editor.explorer`) are found
+by resolvers. `pane.focused` and
 `pane.other` resolve to the left or right pane. The checker reads the anchor
 IDs from the Swift sources, so a renamed anchor fails the test.
 

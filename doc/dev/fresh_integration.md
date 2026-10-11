@@ -24,7 +24,7 @@ recovery. FC never closes a tab or writes a file on the editor's behalf.
 
 ## Pinned revision
 
-FC builds Fresh from revision `39a8f267c2b1934e8316923e025d035ecf5601f9` on
+FC builds Fresh from revision `5b14853bce456c80b62f5f1f9ff3f42d7bb53e20` on
 the `fc-editor-workflow` branch of the FC fork. Its upstream base is
 `b10f9084f5eae571e9b8dac1a0f3694384bcb53d`, which is Fresh 0.5.2 plus 40
 upstream commits; FC's integration commits sit on top. The pinned Rust
@@ -34,9 +34,10 @@ bundle and the source-reconstruction steps are described in
 [dependencies/README.md](../../dependencies/README.md); licensing is in
 [THIRD_PARTY_NOTICES.md](../../THIRD_PARTY_NOTICES.md).
 
-A backend at this revision reports IPC protocol 4, FC integration level 1, and
-the `fc_restart` and `fc_locations` capabilities (see
-[Handshake and capabilities](#handshake-and-capabilities)).
+A backend at this revision reports IPC protocol 4, FC integration level 1, the
+`fc_restart` and `fc_locations` capabilities, and, for an FC session, its scene
+socket in `fc_scene` (see [Handshake and capabilities](#handshake-and-capabilities)
+and [Scene channel](#scene-channel)).
 
 ## Building and packaging
 
@@ -44,8 +45,13 @@ With `FC_BUILD_FRESH=ON` (the default), CMake builds Fresh from
 `FC_FRESH_SOURCE_DIR` with:
 
 ```sh
-cargo build --release --locked -p fresh-editor --bin fresh
+cargo build --release --locked -p fresh-editor --bin fresh --features web
 ```
+
+The `web` feature builds Fresh's scene bridge, which an FC session serves to the
+macOS app's native editor window ([Scene channel](#scene-channel)). A Fresh
+built without it still works with FC: the app then runs `fresh -a` in a
+terminal view.
 
 `FC_FRESH_SOURCE_DIR` defaults to the sibling checkout `../editor-fresh`; the
 bootstrap layout passes `build-deps/fresh`. The binary is staged at
@@ -144,6 +150,7 @@ told to shut down while a client runs, it sends that client `SIGTERM`, then
 ```text
 fresh --cmd session open-location <id> <target> <root> <control-path> [files...]
 fresh -a <id>
+fresh --cmd session ensure <id>
 fresh --cmd session prepare-restart <id> [--allow-legacy-checkpoint]
 ```
 
@@ -169,8 +176,19 @@ workspace then connects asynchronously; connection errors appear inside Fresh,
 not in FC.
 
 `-a` attaches the terminal, starting the backend first if it is not running.
-FC uses it for every switch to the editor and after each successful
-`open-location` or restart.
+The terminal interface uses it for every switch to the editor and after each
+successful `open-location` or restart.
+
+`ensure` starts the backend if it is not running, routes nothing, and prints one
+JSON line: `{"scene":"<socket path>","pid":N}`, or `"scene":null` when the
+backend serves no scene. The macOS app runs it where the terminal interface
+attaches, and connects its editor window to the socket; with no scene it falls
+back to `-a` in a terminal view.
+
+The commands FC runs to completion (`open-location`, `ensure`,
+`prepare-restart`) say `fc_control` in their hello. Such a client never becomes
+the terminal that sizes the shared grid, so opening a file doesn't briefly
+shrink the editor someone is looking at.
 
 `prepare-restart` is described under [Backend restart](#backend-restart).
 
@@ -180,6 +198,7 @@ FC uses it for every switch to the editor and after each successful
 | --- | --- | --- |
 | 0 | `open-location` | Location routed and opens queued. |
 | 0 | `prepare-restart` | The old backend has stopped, or was not running. |
+| 0 | `ensure` | The backend runs; stdout names its scene socket or `null`. |
 | 0 | `-a` | The client detached or the editor quit. |
 | 20 | `prepare-restart` | The backend cannot confirm a restart checkpoint. Nothing was stopped; FC asks for legacy consent. Returned only without `--allow-legacy-checkpoint`. |
 | 124 | FC | FC killed a noninteractive command after 25 s. |
@@ -201,6 +220,7 @@ message. At the pinned revision the backend's hello carries:
 | `fc_integration` | 1 | The backend honors `FC_EDITOR_SWITCH_KEY` per client. Upstream backends report 0. |
 | `fc_restart` | true | The backend supports a checkpoint-confirmed restart. Independent of the protocol version. |
 | `fc_locations` | true | The backend accepts `open-location` routing. |
+| `fc_scene` | socket path, or absent | The Unix socket this session serves its scene on. Only sessions an FC client started have one, and only in builds with the `web` feature. |
 
 FC itself never reads these fields; the Fresh client enforces them and FC
 interprets the exit code:
@@ -218,6 +238,51 @@ interprets the exit code:
 
 FC never kills an incompatible backend or removes its sockets.
 
+## Scene channel
+
+A session an FC client started (`FC_EDITOR_SWITCH_KEY` set, so the backend has
+`FRESH_FC_DATA_DIR`) also hosts Fresh's web bridge, on a Unix socket instead
+of a TCP port: `<socket dir>/<id>.scene.sock`, next to the session's own
+sockets, in the owner-only socket directory, with the socket itself at mode
+`0600`. Nothing listens on the network. The backend binds it under the startup
+lock, replaces a stale file, and removes it on exit. Its path is `fc_scene` in
+every handshake and what `ensure` prints.
+
+The protocol is the web front end's (`crates/fresh-editor/src/webui/mod.rs`),
+unchanged by the transport:
+
+- **Connect** with an HTTP/1.1 WebSocket upgrade, `GET /ws`, over the Unix
+  socket. Options can ride on the query: `?grid=1&menus=native`.
+- **Server to client**: one `{"type":"hello","seq":0,"scene":{...}}` with the
+  whole scene, then `{"type":"frame","seq":N,"changed":{...}}` only when
+  something changed. Each changed path replaces its value: `w`, `h`, `theme`,
+  `clipboard`, `windowId`, `regions.<key>`, `regions.panes.<i>` and
+  `regions.panes.len`, and with the grid option `regions.grid.<row>` and
+  `regions.grid.len`.
+- **Client to server**: JSON text frames `{"type":...}`: `key` (browser key
+  names with `ctrl`, `alt`, `meta`, `shift`), `mouse` (cell `col` and `row`),
+  `action` (a Fresh action by name, with `args`), `paste`, `resize` (`cols`,
+  `rows`), `widget`, `settings`, `kbedit`, and `configure`.
+- **Options** (`configure` with `grid` and `nativeMenus`, or the query): with
+  `grid`, the frame comes as cells, chrome included, one array of styled runs
+  per row (`{t, fg, bg, b, i, u, r}`; a wide character is followed by the blank
+  cell it covers), and panes keep their geometry without cells of their own.
+  With `nativeMenus`, the frame has no menu row while no menu is open. Options
+  end with the last client.
+- **Keys**: a `meta` (`⌘`) chord resolves through Fresh's `macos-gui` keymap
+  in the current key context, so `⌘S` saves and `⇧⌘P` opens the palette, while
+  the user's keymap keeps every other key for this client and the terminals.
+- **Pacing**: a frame answering the client's own input is pushed in the same
+  pass (about 10 ms from key to frame); time-driven frames go at most every
+  40 ms. While a client is connected the loop polls every 3 ms.
+- **Sizing and liveness**: the shared grid fits the smallest viewport among
+  the primary terminal and the scene clients. The server pings every 15 s and
+  drops a client silent for 45 s.
+
+A connected scene client counts as attached: the session does not shut down
+idle, and `prepare-restart` refuses while one is connected, so the app
+disconnects its window before Restart Editor Backend and reconnects after.
+
 ## Timeouts
 
 | Bound | Enforced by | On expiry |
@@ -228,7 +293,7 @@ FC never kills an incompatible backend or removes its sockets.
 | 10 s for a backend this client spawned to become ready | Fresh client | `SIGKILL` to that spawned backend only, so a late start cannot replace a retry's sockets; error naming its log |
 | 10 s for each handshake or acknowledgement read | Fresh client | Error |
 | 10 s for the old backend to exit after `prepare-restart` | Fresh client | Error; the backend is never force-killed |
-| None for interactive editing (`-a`) | | |
+| None for interactive editing (`-a`) or a connected scene client | | |
 
 ## Session data isolation
 
