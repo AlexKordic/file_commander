@@ -68,7 +68,7 @@ final class AppController {
       if preferences.appearance != oldValue.appearance { applyAppearance() }
       if preferences.zoom != oldValue.zoom { editor.applyTheme() }
       if preferences.terminalEditor != oldValue.terminalEditor {
-        // The next attach takes the other route; close the window shown the old way.
+        // The next attach takes the other route; close the editor shown the old way.
         engine.setEditorSceneAttach(!preferences.terminalEditor)
         editor.detachAll()
       }
@@ -91,6 +91,7 @@ final class AppController {
   var hud: String?
   var startError: String?
   var sidebarVisible = NavigationSplitViewVisibility.all
+  @ObservationIgnored private var sidebarBeforeEditor: NavigationSplitViewVisibility?
   var findRoot = ""
   /// Bumped to ask a pane to take keyboard focus (after the focused side changes).
   var focusRequest = 0
@@ -171,7 +172,7 @@ final class AppController {
     } else if !preferences.welcomeShown && !arguments.contains("--run-explainer") && !arguments.contains("--export-explainer") {
       sheet = .welcome
     } else if preferences.editorWasOpen && !arguments.contains("--run-explainer") && !arguments.contains("--export-explainer") {
-      // The editor window comes back as it was left, like the app's other windows.
+      // The editor comes back as it was left at quit.
       DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { [weak self] in
         if let error = self?.engine.switchToEditor() { self?.engine.reportError(error) }
       }
@@ -211,6 +212,8 @@ final class AppController {
     Trace.write("run \(id) sheet \(sheet?.id ?? "-") palette \(String(describing: paletteMode))")
     // A menu shortcut while the palette is open or a key is being captured: those keys are theirs.
     if NSApp.currentEvent?.type == .keyDown, paletteMode != nil || rebinding != nil { return false }
+    // Keys typed into the editor are the editor's, even when a menu has the same shortcut.
+    if let event = NSApp.currentEvent, event.type == .keyDown, let window = editor.window, event.window === window { return false }
     // One key press runs a command once, even when both the key router and a menu see it.
     if let event = NSApp.currentEvent, event.type == .keyDown {
       if lastKeyRun?.time == event.timestamp && lastKeyRun?.id == id { return true }
@@ -336,11 +339,23 @@ final class AppController {
 
   /// The main window switches between the panes and the editor.
   func editorShownChanged(_ shown: Bool) {
+    // The sidebar folds away while editing: Fresh has its own, and bookmarks
+    // would move panes that can't be seen. No animation, so Fresh is resized once.
+    var instant = Transaction()
+    instant.disablesAnimations = true
     if shown {
       paletteMode = nil
       glob = nil
+      withTransaction(instant) {
+        sidebarBeforeEditor = sidebarVisible
+        sidebarVisible = .detailOnly
+      }
       if let window = mainWindow, !window.isKeyWindow { window.makeKeyAndOrderFront(nil) }
     } else {
+      withTransaction(instant) {
+        if let before = sidebarBeforeEditor { sidebarVisible = before }
+        sidebarBeforeEditor = nil
+      }
       focusPane(engine.focusedSide)
     }
   }

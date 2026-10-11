@@ -113,6 +113,7 @@ final class FreshMenus: NSObject, NSMenuDelegate {
     bar.addItem(appItem)
 
     installedLabels = []
+    var helpItem: NSMenuItem?
     for (index, entry) in entries.enumerated() {
       let label = entry["label"] as? String ?? ""
       installedLabels.append(label)
@@ -122,19 +123,23 @@ final class FreshMenus: NSObject, NSMenuDelegate {
       menu.delegate = self
       menu.identifier = NSUserInterfaceItemIdentifier("fresh.\(index)")
       top.submenu = menu
-      bar.addItem(top)
+      // Help goes last, after Window, as in every Mac app.
+      if label == "Help" { helpItem = top } else { bar.addItem(top) }
     }
 
     let windowItem = NSMenuItem(title: "Window", action: nil, keyEquivalent: "")
     let windowMenu = NSMenu(title: "Window")
     windowMenu.addItem(withTitle: "Minimize", action: #selector(NSWindow.performMiniaturize(_:)), keyEquivalent: "m")
     windowMenu.addItem(withTitle: "Zoom", action: #selector(NSWindow.performZoom(_:)), keyEquivalent: "")
+    let fullScreen = windowMenu.addItem(withTitle: "Enter Full Screen", action: #selector(NSWindow.toggleFullScreen(_:)), keyEquivalent: "f")
+    fullScreen.keyEquivalentModifierMask = [.command, .control]
     windowMenu.addItem(.separator())
     windowMenu.addItem(item("Show Files", key: "", action: #selector(files)))
     windowMenu.addItem(.separator())
     windowMenu.addItem(withTitle: "Bring All to Front", action: #selector(NSApplication.arrangeInFront(_:)), keyEquivalent: "")
     windowItem.submenu = windowMenu
     bar.addItem(windowItem)
+    if let helpItem { bar.addItem(helpItem) }
     NSApp.windowsMenu = windowMenu
     return bar
   }

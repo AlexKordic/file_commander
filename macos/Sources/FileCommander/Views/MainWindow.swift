@@ -12,6 +12,7 @@ struct MainWindow: View {
     NavigationSplitView(columnVisibility: $app.sidebarVisible) {
       Sidebar()
         .navigationSplitViewColumnWidth(min: 170, ideal: 200, max: 280)
+        .toolbar(removing: app.editorShown ? .sidebarToggle : nil)
     } detail: {
       VStack(spacing: 0) {
         if let error = app.startError {
@@ -33,12 +34,12 @@ struct MainWindow: View {
           JobBar()
         }
       }
-      .overlay(alignment: .top) { PaletteOverlay() }
+      .overlay(alignment: .top) { if !app.editorShown { PaletteOverlay() } }
       .overlay(alignment: .bottom) { Hud() }
     }
     .toolbar { MainToolbar() }
-    .navigationTitle(windowTitle)
-    .navigationSubtitle(app.engine.focusedPane.path)
+    .navigationTitle(app.editorShown ? editorTitle : windowTitle)
+    .navigationSubtitle(app.editorShown ? editorSubtitle : app.engine.focusedPane.path)
     .sheet(item: $app.sheet) { sheet in SheetHost(kind: sheet) }
     .onAppear {
       app.openWindowAction = openWindow
@@ -49,6 +50,10 @@ struct MainWindow: View {
 }
 
 extension MainWindow {
+  /// The editor's active tab while the editor is shown.
+  var editorTitle: String { app.editor.title.isEmpty ? "Editor" : app.editor.title }
+  var editorSubtitle: String { app.editor.title.isEmpty ? "" : "Editor" }
+
   /// The focused pane's folder, as Finder titles its windows.
   var windowTitle: String {
     let path = app.engine.focusedPane.path
@@ -217,12 +222,16 @@ struct MainToolbar: ToolbarContent {
   @Environment(AppController.self) private var app
 
   var body: some ToolbarContent {
+    ToolbarItem(placement: .principal) { ModeSwitch() }
+    // While the editor is shown, the file actions step aside; jobs and errors stay.
     ToolbarItemGroup(placement: .primaryAction) {
-      ToolbarButton(id: "copy", title: "Copy", icon: "doc.on.doc")
-      ToolbarButton(id: "move", title: "Move", icon: "arrow.right.doc.on.clipboard")
-      ToolbarButton(id: "mkdir", title: "New Folder", icon: "folder.badge.plus")
-      ToolbarButton(id: "delete", title: "Delete", icon: "trash")
-      ToolbarButton(id: "find", title: "Find", icon: "magnifyingglass")
+      if !app.editorShown {
+        ToolbarButton(id: "copy", title: "Copy", icon: "doc.on.doc")
+        ToolbarButton(id: "move", title: "Move", icon: "arrow.right.doc.on.clipboard")
+        ToolbarButton(id: "mkdir", title: "New Folder", icon: "folder.badge.plus")
+        ToolbarButton(id: "delete", title: "Delete", icon: "trash")
+        ToolbarButton(id: "find", title: "Find", icon: "magnifyingglass")
+      }
     }
     ToolbarItemGroup(placement: .primaryAction) {
       ActivityButton()
@@ -236,9 +245,35 @@ struct MainToolbar: ToolbarContent {
         .help("Show the errors from file operations")
         .explainerAnchor("toolbar.errors") { app.run("toggle_errors") }
       }
-      ToolbarButton(id: "command_palette", title: "Commands", icon: "command")
-      ToolbarButton(id: "help", title: "Help", icon: "graduationcap")
+      if !app.editorShown {
+        ToolbarButton(id: "command_palette", title: "Commands", icon: "command")
+        ToolbarButton(id: "help", title: "Help", icon: "graduationcap")
+      }
     }
+  }
+}
+
+/// The files or the editor in the main window, as the switch key toggles them.
+struct ModeSwitch: View {
+  @Environment(AppController.self) private var app
+
+  var body: some View {
+    Picker("Show", selection: Binding(get: { app.editorShown }, set: { editing in
+      if editing != app.editorShown { toggle() }
+    })) {
+      Text("Files").tag(false)
+      Text("Editor").tag(true)
+    }
+    .pickerStyle(.segmented)
+    .labelsHidden()
+    .fixedSize()
+    .disabled(!app.engine.isStarted)
+    .help("Show the files or the editor" + (app.keymap.chord(for: "switch_to_file_commander").map { " (\($0.symbols))" } ?? ""))
+    .explainerAnchor("toolbar.mode") { toggle() }
+  }
+
+  private func toggle() {
+    if app.editorShown { app.editor.showFiles() } else { app.run("switch_to_file_commander") }
   }
 }
 
