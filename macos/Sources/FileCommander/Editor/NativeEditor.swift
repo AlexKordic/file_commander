@@ -137,6 +137,11 @@ final class NativeEditor: NSObject, NSWindowDelegate, CellGridDelegate {
     chrome.frame = content.bounds
     chrome.autoresizingMask = [.width, .height]
     content.addSubview(chrome)
+    let modals = ModalHost(rootView: FreshModals(store: store) { [weak self] message in self?.sendFromPanel(message) })
+    modals.frame = content.bounds
+    modals.autoresizingMask = [.width, .height]
+    modals.isShowing = { [weak self] in self.map { FreshModals.showing($0.store) } ?? false }
+    content.addSubview(modals)
     window.contentView = content
     window.initialFirstResponder = grid
     self.window = window
@@ -248,6 +253,12 @@ final class NativeEditor: NSObject, NSWindowDelegate, CellGridDelegate {
   }
 
   func send(_ message: [String: Any]) { socket?.send(message) }
+
+  /// A click on a native panel: sent to Fresh, and the keyboard stays with the editor.
+  private func sendFromPanel(_ message: [String: Any]) {
+    socket?.send(message)
+    if let grid, window?.firstResponder !== grid { window?.makeFirstResponder(grid) }
+  }
 
   /// The cells a native surface covers: "tabs", "status", "palette", "popup" or "explorer".
   func surfaceCells(_ surface: String) -> [CellRect] {

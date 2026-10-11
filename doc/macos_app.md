@@ -166,7 +166,9 @@ controls:
   menus (File, Edit, View, Selection, Go, LSP, Help and any a plugin adds),
   with their `⌘` shortcuts. File Commander's menus come back when you switch.
 - **Tabs, sidebar, status bar, palette and popups** are drawn natively over the
-  places Fresh puts them; clicks on them go to Fresh. The text itself is
+  places Fresh puts them; clicks on them go to Fresh. Fresh's Settings and its
+  key binding editor open as native panels over the window; keys still go to
+  Fresh, so its keyboard shortcuts work in them. The text itself is
   Fresh's, in the theme's editor font (Settings › Appearance › Editor › Font),
   with Fresh's syntax colors.
 - **Keys**: `⌘S`, `⌘Z`, `⇧⌘Z`, `⌘C`, `⌘X`, `⌘V`, `⌘A`, `⌘F`, `⌘P` (open by

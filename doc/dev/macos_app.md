@@ -63,7 +63,11 @@ fc_core              unchanged                     locations, plans, jobs, journ
   status bar, dividers, scrollbars, sidebar, palette, popups, context menus and
   trust dialog natively over the exact cells Fresh laid them out on, and
   passes clicks through to the grid, so Fresh's own hit-testing answers them;
-  `FreshMenus` builds Fresh's menus into the menu bar while the window is key.
+  `FreshMenus` builds Fresh's menus into the menu bar while the window is key;
+  `FreshModals` shows Fresh's Settings and key binding editor as SwiftUI panels
+  that never take the keyboard and send clicks as `settings` and `kbedit`
+  messages, and steps aside for Fresh's own small dialogs (unsaved-changes
+  confirmation, the binding edit dialog).
   `EditorController` is the one interface explainers use for either window.
   Switching back hides the window and keeps the connection; Restart Editor
   Backend disconnects first, because Fresh restarts only with no client.

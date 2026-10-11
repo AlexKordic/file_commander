@@ -19,7 +19,7 @@ protocol CellGridDelegate: AnyObject {
 /// keyboard, mouse and text input into scene messages. Every glyph sits on its
 /// cell column; box-drawing lines are drawn as lines so they join across rows.
 @MainActor
-final class CellGridView: NSView, NSTextInputClient {
+final class CellGridView: NSView, @preconcurrency NSTextInputClient {
   weak var delegate: CellGridDelegate?
   let store: SceneStore
 
@@ -148,7 +148,7 @@ final class CellGridView: NSView, NSTextInputClient {
       let top = CGFloat(row) * cellHeight
       var column = 0
       for run in store.grid[row] {
-        let (fg, bg) = colors(run)
+        let (_, bg) = colors(run)
         if let bg {
           let x0 = (CGFloat(column) * cellWidth * scale).rounded() / scale
           let x1 = (CGFloat(column + run.cells) * cellWidth * scale).rounded() / scale
