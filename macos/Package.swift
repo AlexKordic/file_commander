@@ -39,7 +39,7 @@ let package = Package(
     .executableTarget(name: "fc-askpass"),
     .testTarget(name: "FCKitTests", dependencies: ["FCKit"], swiftSettings: [.interoperabilityMode(.Cxx)]),
     .testTarget(name: "ExplainerKitTests", dependencies: ["ExplainerKit"]),
-    .testTarget(name: "FreshKitTests", dependencies: ["FreshKit"]),
+    .testTarget(name: "FreshKitTests", dependencies: ["FreshKit"], resources: [.copy("Fixtures")]),
   ],
   swiftLanguageModes: [.v5],
   cxxLanguageStandard: .cxx20

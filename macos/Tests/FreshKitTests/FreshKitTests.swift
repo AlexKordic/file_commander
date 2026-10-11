@@ -113,3 +113,45 @@ final class SceneKeysTests: XCTestCase {
     XCTAssertEqual(SceneKeys.typing("a\nb").compactMap { $0["key"] as? String }, ["a", "Enter", "b"])
   }
 }
+
+/// Messages recorded from a real Fresh session by macos/tools/record_scene.py.
+/// Rerun the recorder after bumping the Fresh pin: if Fresh changed what it
+/// sends, this fails here instead of in the app.
+final class RecordedSceneTests: XCTestCase {
+  private func recorded() throws -> [SceneMessage] {
+    let url = try XCTUnwrap(Bundle.module.url(forResource: "Fixtures/scene", withExtension: "json"))
+    let all = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(contentsOf: url)) as? [Any])
+    return try all.map { item in
+      let data = try JSONSerialization.data(withJSONObject: item)
+      return try XCTUnwrap(SceneMessage(json: Array(data)), "a recorded message didn't parse")
+    }
+  }
+
+  func testRecordedSessionReplays() throws {
+    let messages = try recorded()
+    XCTAssertTrue(messages.first?.isHello == true)
+    MainActor.assumeIsolated {
+      let store = SceneStore()
+      var sawPalette = false
+      for message in messages {
+        store.apply(message)
+        if store.regions["palette"] is [String: Any] { sawPalette = true }
+      }
+      XCTAssertEqual(store.width, 80)
+      XCTAssertEqual(store.height, 24)
+      XCTAssertEqual(store.grid.count, 24, "one row of runs per terminal row")
+      XCTAssertTrue(store.lines.allSatisfy { $0.count == 80 }, "every row covers the frame's width in cells")
+      XCTAssertTrue(store.lines.contains { $0.contains("First line. (recorded)") }, "typed keys reached the buffer")
+      XCTAssertNotNil(store.cursor)
+      XCTAssertNotNil(store.theme.background)
+      let tabs = store.panes.first?["tabs"] as? [[String: Any]]
+      XCTAssertEqual(tabs?.first?["label"] as? String, "notes.md*", "the edited file's tab says it is modified")
+      XCTAssertEqual(tabs?.first?["modified"] as? Bool, true)
+      XCTAssertNotNil(CellRect((store.regions["statusbar"] as? [String: Any])?["rect"]), "the status bar has its rectangle")
+      let menus = store.regions["menus"] as? [[String: Any]] ?? []
+      XCTAssertTrue(menus.contains { $0["label"] as? String == "File" }, "the menu model is in the scene")
+      XCTAssertTrue(sawPalette, "the command palette appeared as a region")
+      XCTAssertNil(store.regions["palette"] as? [String: Any], "and closed again")
+    }
+  }
+}
