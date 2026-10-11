@@ -353,7 +353,8 @@ final class TutorialCoordinator: ExplainerHost {
        let record = try? JSONSerialization.jsonObject(with: data) as? [String: Any], let id = record["id"] as? String, !id.isEmpty {
       let pkill = Process()
       pkill.executableURL = URL(fileURLWithPath: "/usr/bin/pkill")
-      pkill.arguments = ["-f", "--session-name \(id)"]
+      // "--" first: pkill would read a pattern starting with dashes as options.
+      pkill.arguments = ["-f", "--", "--session-name \(id)"]
       try? pkill.run()
       pkill.waitUntilExit()
     }
