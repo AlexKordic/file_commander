@@ -73,7 +73,7 @@ struct AppCommands: Commands {
       item("transfer_speed")
       item("toggle_job_list")
       Divider()
-      if let job = app.engine.runningJob {
+      if let job = app.menuJob {
         Button(job.isPaused ? "Resume \(job.title)" : "Pause \(job.title)") {
           if job.isPaused { app.engine.resumeJob(job.id) } else { app.engine.pauseJob(job.id) }
         }

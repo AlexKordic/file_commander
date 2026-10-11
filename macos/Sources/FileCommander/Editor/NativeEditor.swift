@@ -3,15 +3,15 @@ import ExplainerKit
 import FCKit
 import FreshKit
 
-/// The editor window: Fresh's session drawn natively, over the session's scene
-/// channel. Fresh lays out and renders; this window draws the cells and Fresh's
-/// chrome with native controls, shows Fresh's menus in the menu bar, and sends
-/// keys, mouse and menu choices back. Switching back to File Commander hides
-/// the window and keeps the connection, so the next switch is instant.
+/// The native editor: Fresh's session drawn by the app, over the session's
+/// scene channel. Fresh lays out and renders; this view draws the cells and
+/// Fresh's chrome with native controls, puts Fresh's menus in the menu bar
+/// while it is shown, and sends keys, mouse and menu choices back. It is shown
+/// in the main window in place of the panes; switching back to the files hides
+/// it and keeps the connection, so the next switch is instant.
 @MainActor
-final class NativeEditor: NSObject, NSWindowDelegate, CellGridDelegate {
+final class NativeEditor: NSObject, CellGridDelegate {
   let store = SceneStore()
-  private(set) var window: NSWindow?
   private(set) var view: EditorHostView?
   var grid: CellGridView? { view?.grid }
   private var chrome: ChromeView? { view?.chrome }
@@ -20,15 +20,27 @@ final class NativeEditor: NSObject, NSWindowDelegate, CellGridDelegate {
   private var menus: FreshMenus?
   private var clipboardSequence: Int?
   private var pendingShow = false
+  private var menusWanted = false
+  private var observers: [NSObjectProtocol] = []
 
   /// Connected to the session's scene.
   var connected: Bool { socket?.isOpen == true }
-  /// The window is on screen.
-  var visible: Bool { window?.isVisible == true }
+  /// Shown in the main window.
+  private(set) var shown = false
+  /// Called when the editor wants to be shown (true) or hidden (false).
+  var onPresent: ((Bool) -> Void)?
+  /// Called with the active tab's name when it changes.
+  var onTitle: ((String) -> Void)?
 
   override init() {
     super.init()
     store.onChange = { [weak self] change in self?.sceneChanged(change) }
+    let center = NotificationCenter.default
+    for name in [NSWindow.didBecomeKeyNotification, NSWindow.didResignKeyNotification] {
+      observers.append(center.addObserver(forName: name, object: nil, queue: nil) { [weak self] _ in
+        MainActor.assumeIsolated { self?.updateMenus() }
+      })
+    }
   }
 
   // MARK: Attaching
@@ -37,7 +49,7 @@ final class NativeEditor: NSObject, NSWindowDelegate, CellGridDelegate {
   func attach(socketPath path: String, app: AppController?) {
     self.app = app
     if let socket, socket.isOpen, socket.path == path {
-      Trace.write("editor: showing the connected window")
+      Trace.write("editor: showing the connected editor")
       show()
       return
     }
@@ -51,7 +63,7 @@ final class NativeEditor: NSObject, NSWindowDelegate, CellGridDelegate {
     }
     self.socket = socket
     pendingShow = true
-    let window = self.window ?? makeWindow()
+    _ = makeView()
     applyTheme()
     Task.detached {
       do {
@@ -66,7 +78,7 @@ final class NativeEditor: NSObject, NSWindowDelegate, CellGridDelegate {
         await MainActor.run { [weak self] in
           guard let self, self.socket === socket else { return }
           self.socket = nil
-          window.orderOut(nil)
+          self.pendingShow = false
           Trace.write("editor: connect failed: \(error)")
           self.app?.engine.reportError("Can't connect to the editor: \(error)")
         }
@@ -76,25 +88,38 @@ final class NativeEditor: NSObject, NSWindowDelegate, CellGridDelegate {
 
   func show() {
     pendingShow = false
-    guard let window else { return }
     grid?.showingEvent = NSApp.currentEvent.flatMap { $0.type == .keyDown ? $0.timestamp : nil }
-    window.makeKeyAndOrderFront(nil)
-    if let grid { window.makeFirstResponder(grid) }
-    Trace.write("editor: shown, visible \(window.isVisible) key \(window.isKeyWindow)")
+    shown = true
+    onPresent?(true)
+    updateMenus()
+    Trace.write("editor: shown")
   }
 
-  /// Hides the window and brings File Commander back; the session stays connected.
+  /// Shows the files again; the session stays connected.
   func switchBack() {
     pendingShow = false
-    window?.orderOut(nil)
-    showFileCommander()
+    hide()
   }
 
-  /// Disconnects and hides the window. The session keeps running on its own.
+  /// Disconnects and hides the editor. The session keeps running on its own.
   func detachAll() {
     pendingShow = false
     disconnect()
-    window?.orderOut(nil)
+    hide()
+  }
+
+  private func hide() {
+    guard shown else { return }
+    shown = false
+    onPresent?(false)
+    updateMenus()
+  }
+
+  /// Gives the editor the keyboard, once its view is in the window.
+  func focus() {
+    defer { updateMenus() }
+    guard shown, let grid, let window = grid.window, window.firstResponder !== grid else { return }
+    window.makeFirstResponder(grid)
   }
 
   private func disconnect() {
@@ -104,37 +129,11 @@ final class NativeEditor: NSObject, NSWindowDelegate, CellGridDelegate {
 
   private func connectionEnded(_ reason: String?) {
     socket = nil
-    let wasVisible = visible
-    window?.orderOut(nil)
-    if wasVisible { showFileCommander() }
+    hide()
     if let reason { Trace.write("editor connection ended: \(reason)") }
   }
 
-  private func showFileCommander() {
-    NSApp.windows.first { $0.identifier?.rawValue.hasPrefix("main") == true }?.makeKeyAndOrderFront(nil)
-    if let app { app.focusPane(app.engine.focusedSide) }
-  }
-
-  // MARK: Window
-
-  private func makeWindow() -> NSWindow {
-    let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1040, height: 700),
-                          styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
-    window.title = "Editor"
-    window.identifier = NSUserInterfaceItemIdentifier("editor")
-    window.isReleasedWhenClosed = false
-    window.delegate = self
-    window.tabbingMode = .disallowed
-    window.setFrameAutosaveName("FileCommanderNativeEditor")
-    if window.frame.origin == .zero { window.center() }
-    let host = makeView()
-    host.frame = window.contentView!.bounds
-    host.autoresizingMask = [.width, .height]
-    window.contentView = host
-    window.initialFirstResponder = host.grid
-    self.window = window
-    return window
-  }
+  // MARK: View
 
   /// The editor's view, made once and kept.
   private func makeView() -> EditorHostView {
@@ -144,7 +143,7 @@ final class NativeEditor: NSObject, NSWindowDelegate, CellGridDelegate {
     self.view = view
     let menus = FreshMenus(store: store) { [weak self] action, args in self?.runAction(action, args: args) }
     menus.openSettings = { [weak self] in self?.app?.openSettings(tab: .editor) }
-    menus.switchBack = { [weak self] in self?.switchBack() }
+    menus.showFiles = { [weak self] in self?.switchBack() }
     self.menus = menus
     return view
   }
@@ -158,7 +157,6 @@ final class NativeEditor: NSObject, NSWindowDelegate, CellGridDelegate {
     grid.defaultBackground = theme.background.map(NSColor.init(scene:)) ?? app.theme.nsColor("editor.background")
     grid.defaultForeground = theme.foreground.map(NSColor.init(scene:)) ?? app.theme.nsColor("editor.text")
     grid.caretColor = theme.accent.map(NSColor.init(scene:)) ?? .controlAccentColor
-    window?.backgroundColor = grid.defaultBackground
     view?.applyLook(dark: theme.isDark)
     chrome?.themeChanged()
     grid.needsDisplay = true
@@ -184,13 +182,13 @@ final class NativeEditor: NSObject, NSWindowDelegate, CellGridDelegate {
     }
   }
 
-  /// "name — Editor", from the active tab of the focused pane.
+  /// The active tab of the focused pane, for the window title.
   private func updateTitle() {
     let active = store.panes.compactMap { pane -> String? in
       (pane["tabs"] as? [[String: Any]])?.first { $0["active"] as? Bool == true }?["label"] as? String
     }.first
-    window?.title = active.map { "\($0) — Editor" } ?? "Editor"
     grid?.title = active ?? "Editor"
+    onTitle?(active ?? "")
   }
 
   private func runAction(_ action: String, args: [String: Any]) {
@@ -223,20 +221,23 @@ final class NativeEditor: NSObject, NSWindowDelegate, CellGridDelegate {
 
   var optionAsAlt: Bool { app?.preferences.optionAsAlt ?? false }
 
-  // MARK: NSWindowDelegate
+  // MARK: Menus
 
-  func windowShouldClose(_ sender: NSWindow) -> Bool {
-    switchBack()
-    return false
-  }
-
-  func windowDidBecomeKey(_ notification: Notification) {
-    menus?.install()
-    applyTheme()  // picks up font changes made in Settings meanwhile
-  }
-  func windowDidResignKey(_ notification: Notification) {
-    menus?.uninstall()
-    grid?.needsDisplay = true
+  /// Fresh's menus are in the menu bar while the editor is shown in the key window.
+  private func updateMenus() {
+    let wanted = shown && view?.window?.isKeyWindow == true
+    grid?.needsDisplay = true  // The caret shows whether the editor has the keyboard.
+    guard wanted != menusWanted else { return }
+    menusWanted = wanted
+    Trace.write(wanted ? "menus: Fresh's" : "menus: the app's")
+    if wanted {
+      app?.menusHeld = true
+      menus?.install()
+      applyTheme()  // picks up font changes made in Settings meanwhile
+    } else {
+      menus?.uninstall()
+      app?.menusHeld = false
+    }
   }
 
   // MARK: Explainer access
@@ -244,7 +245,7 @@ final class NativeEditor: NSObject, NSWindowDelegate, CellGridDelegate {
   var screenLines: [String] { store.lines }
 
   func screenRect(row: Int, col: Int, count: Int) -> CGRect? {
-    guard let grid, let window = grid.window else { return nil }
+    guard shown, let grid, let window = grid.window else { return nil }
     return window.convertToScreen(grid.convert(grid.rect(column: col, row: row, count: count), to: nil))
   }
 
@@ -253,7 +254,7 @@ final class NativeEditor: NSObject, NSWindowDelegate, CellGridDelegate {
   /// A click on a native panel: sent to Fresh, and the keyboard stays with the editor.
   private func sendFromPanel(_ message: [String: Any]) {
     socket?.send(message)
-    if let grid, window?.firstResponder !== grid { window?.makeFirstResponder(grid) }
+    focus()
   }
 
   /// The cells a native surface covers: "tabs", "status", "palette", "popup" or "explorer".

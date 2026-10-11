@@ -17,7 +17,18 @@ struct MainWindow: View {
         if let error = app.startError {
           StartFailure(message: error)
         } else {
-          PanesView()
+          let editing = app.editorShown
+          ZStack {
+            // Both stay in place, so the panes keep their scroll position and
+            // selection, and the editor keeps its size, while the other shows.
+            PanesView()
+              .opacity(editing ? 0 : 1)
+              .allowsHitTesting(!editing)
+              .accessibilityHidden(editing)
+            EditorPane(view: app.editor.view, shown: editing) { app.editor.focus() }
+              .allowsHitTesting(editing)
+              .accessibilityHidden(!editing)
+          }
           ErrorLines()
           JobBar()
         }
@@ -416,6 +427,40 @@ struct Hud: View {
 }
 
 /// Hands the hosting NSWindow to a closure once the view is in a window.
+/// The editor's view in the main window. The editor keeps one view for the
+/// life of the app; this only places it and shows or hides it.
+struct EditorPane: NSViewRepresentable {
+  let view: NSView?
+  let shown: Bool
+  let focus: () -> Void
+
+  final class Slot: NSView {
+    /// Clicks reach the panes underneath while the editor is hidden.
+    override func hitTest(_ point: NSPoint) -> NSView? {
+      let hit = super.hitTest(point)
+      return hit === self ? nil : hit
+    }
+  }
+
+  func makeNSView(context: Context) -> Slot { Slot() }
+
+  func updateNSView(_ slot: Slot, context: Context) {
+    var revealed = false
+    if let view, view.superview !== slot {
+      slot.subviews.forEach { $0.removeFromSuperview() }
+      view.frame = slot.bounds
+      view.autoresizingMask = [.width, .height]
+      slot.addSubview(view)
+      revealed = shown
+    }
+    if let view, view.isHidden == shown {
+      view.isHidden = !shown
+      revealed = revealed || shown
+    }
+    if revealed { focus() }
+  }
+}
+
 struct WindowAccessor: NSViewRepresentable {
   let found: (NSWindow) -> Void
   func makeNSView(context: Context) -> NSView {

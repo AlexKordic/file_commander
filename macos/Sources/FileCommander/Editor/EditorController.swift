@@ -2,16 +2,32 @@ import AppKit
 import ExplainerKit
 import FCKit
 import FreshKit
+import Observation
 
-/// The editor, whichever way it is shown: natively over the session's scene
+/// The editor, whichever way it runs: natively over the session's scene
 /// channel (`NativeEditor`), or in a terminal view running `fresh -a`
 /// (`TerminalEditor`) when the session has no scene channel or Settings asks
-/// for the terminal. Explainers drive either through this one interface.
-@MainActor
+/// for the terminal. The main window shows `view` in place of the panes while
+/// `shown`; explainers drive either editor through this one interface.
+@MainActor @Observable
 final class EditorController {
-  let native = NativeEditor()
-  let terminal = TerminalEditor()
-  private var showingNative = true
+  @ObservationIgnored let native = NativeEditor()
+  @ObservationIgnored let terminal = TerminalEditor()
+  @ObservationIgnored weak var app: AppController?
+  @ObservationIgnored private var showingNative = true
+
+  /// The editor is shown in the main window in place of the panes.
+  private(set) var shown = false
+  /// The active tab's name, for the window title; empty when unknown.
+  private(set) var title = ""
+  /// The view the main window shows for the editor.
+  private(set) var view: NSView?
+
+  init() {
+    native.onPresent = { [weak self] shown in self?.present(shown, native: true) }
+    // Set only on a change: the main window redraws its title bar for each.
+    native.onTitle = { [weak self] title in if self?.title != title { self?.title = title } }
+  }
 
   func attach(_ request: AttachRequest, app: AppController?) {
     Trace.write("editor attach: " + (request.sceneSocket.isEmpty ? "terminal \(request.argv.joined(separator: " "))" : "scene \(request.sceneSocket)"))
@@ -26,11 +42,33 @@ final class EditorController {
     }
   }
 
-  /// The editor window is showing.
-  var running: Bool { showingNative ? native.visible : terminal.running }
+  private func present(_ shown: Bool, native: Bool) {
+    if shown, let view = native ? self.native.view : nil, view !== self.view {
+      self.view = view
+    }
+    guard self.shown != shown else { return }
+    self.shown = shown
+    app?.editorShownChanged(shown)
+  }
+
+  /// The editor is showing.
+  var running: Bool { showingNative ? native.shown : terminal.running }
 
   /// Shown natively rather than in a terminal view.
   var isNative: Bool { showingNative }
+
+  /// The window the editor is shown in.
+  var window: NSWindow? { shown ? view?.window : nil }
+
+  /// Shows the files again; the editor keeps running.
+  func showFiles() {
+    if showingNative { native.switchBack() }
+  }
+
+  /// Gives the editor the keyboard, once its view is on screen.
+  func focus() {
+    if showingNative { native.focus() }
+  }
 
   func detachAll() {
     native.detachAll()
@@ -64,7 +102,7 @@ final class EditorController {
   @discardableResult
   func press(_ chord: String, app: AppController) -> Bool {
     if let parsed = KeyChord(chord), app.keymap.command(for: parsed) == "switch_to_file_commander", showingNative {
-      native.switchBack()
+      showFiles()
       return true
     }
     if showingNative {

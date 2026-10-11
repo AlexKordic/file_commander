@@ -40,6 +40,13 @@ enum PaletteMode: Equatable {
   case help
 }
 
+/// The running job as the Transfers menu shows it.
+struct MenuJob: Equatable {
+  var id: UInt64
+  var title: String
+  var isPaused: Bool
+}
+
 /// What a glob popover is for.
 struct GlobRequest: Equatable {
   var side: Int
@@ -153,6 +160,8 @@ final class AppController {
     applyAppearance()
     engine.onDialog = { [weak self] in self?.handle($0) }
     engine.onNotice = { [weak self] in self?.flash($0) }
+    editor.app = self
+    watchJobForMenus()
     engine.onAttach = { [weak self] in self?.editor.attach($0, app: self) }
     engine.setEditorSwitchKey(editorSwitchKey)
     engine.setEditorSceneAttach(!preferences.terminalEditor)
@@ -222,7 +231,7 @@ final class AppController {
     let before = engine.focusedSide
     let ran = engine.execute(id)
     // The keyboard goes with the focused pane, unless a text field is being edited.
-    if engine.focusedSide != before, let table = listing(engine.focusedSide), let window = table.window,
+    if engine.focusedSide != before, !editorShown, let table = listing(engine.focusedSide), let window = table.window,
        window.firstResponder is ListingTableView || !(window.firstResponder is NSText) {
       window.makeFirstResponder(table)
     }
@@ -282,6 +291,57 @@ final class AppController {
     hudTask = Task { @MainActor [weak self] in
       try? await Task.sleep(for: .seconds(2.2))
       if !Task.isCancelled { self?.hud = nil }
+    }
+  }
+
+  // MARK: Menus
+
+  /// The running job for the Transfers menu. It changes when a job starts,
+  /// ends or pauses, not with its progress, and holds still while `menusHeld`.
+  private(set) var menuJob: MenuJob?
+
+  /// The editor's menus are in the menu bar. SwiftUI writes changes to the
+  /// app's commands into whatever menu bar is installed, so they wait until
+  /// the app's own menus are back.
+  @ObservationIgnored var menusHeld = false {
+    didSet { if !menusHeld { refreshMenuJob() } }
+  }
+
+  private func watchJobForMenus() {
+    withObservationTracking {
+      _ = engine.runningJob
+    } onChange: { [weak self] in
+      DispatchQueue.main.async {
+        MainActor.assumeIsolated {
+          self?.refreshMenuJob()
+          self?.watchJobForMenus()
+        }
+      }
+    }
+  }
+
+  private func refreshMenuJob() {
+    guard !menusHeld else { return }
+    let job = engine.runningJob.map { MenuJob(id: $0.id, title: $0.title, isPaused: $0.isPaused) }
+    if job != menuJob { menuJob = job }
+  }
+
+  // MARK: Editor
+
+  /// The editor is shown in the main window in place of the panes.
+  var editorShown: Bool { editor.shown }
+
+  /// The main window, where the panes and the editor are shown.
+  var mainWindow: NSWindow? { NSApp.windows.first { $0.identifier?.rawValue.hasPrefix("main") == true } }
+
+  /// The main window switches between the panes and the editor.
+  func editorShownChanged(_ shown: Bool) {
+    if shown {
+      paletteMode = nil
+      glob = nil
+      if let window = mainWindow, !window.isKeyWindow { window.makeKeyAndOrderFront(nil) }
+    } else {
+      focusPane(engine.focusedSide)
     }
   }
 

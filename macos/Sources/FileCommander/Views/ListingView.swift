@@ -148,7 +148,8 @@ struct ListingView: NSViewRepresentable {
       }
       if focusRequest != app.focusRequest {
         focusRequest = app.focusRequest
-        if engine.focusedSide == side, let window = table.window, window.firstResponder !== table {
+        // While the editor is shown, it keeps the keyboard.
+        if engine.focusedSide == side, !app.editorShown, let window = table.window, window.firstResponder !== table {
           window.makeFirstResponder(table)
         }
       }

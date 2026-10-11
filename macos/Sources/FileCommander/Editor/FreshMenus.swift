@@ -1,10 +1,11 @@
 import AppKit
+import ExplainerKit
 import FreshKit
 
-/// Fresh's menus in the macOS menu bar while the editor window is key. The menu
-/// bar becomes the app menu, Fresh's own menus (File, Edit, View, ... and any a
-/// plugin adds) and Window; File Commander's menus come back when the editor
-/// window resigns key. Items are built from the scene each time a menu opens,
+/// Fresh's menus in the macOS menu bar while the editor is shown in the key
+/// window. The menu bar becomes the app menu, Fresh's own menus (File, Edit,
+/// View, ... and any a plugin adds) and Window; File Commander's menus come
+/// back when the files are shown or another window becomes key. Items are built from the scene each time a menu opens,
 /// so enabled and checked states are always current, and choosing one sends
 /// the action to Fresh.
 @MainActor
@@ -13,9 +14,12 @@ final class FreshMenus: NSObject, NSMenuDelegate {
   private let run: (String, [String: Any]) -> Void
   /// Opens File Commander's Settings window.
   var openSettings: (() -> Void)?
-  /// Hides the editor and shows File Commander.
-  var switchBack: (() -> Void)?
+  /// Hides the editor and shows the files.
+  var showFiles: (() -> Void)?
   private var saved: NSMenu?
+  private var installed: NSMenu?
+  private var repairPending = false
+  private var observers: [NSObjectProtocol] = []
   private var installedLabels: [String] = []
 
   /// Cmd shortcuts Fresh's macos-gui keymap gives these actions; shown on the
@@ -34,6 +38,12 @@ final class FreshMenus: NSObject, NSMenuDelegate {
   init(store: SceneStore, run: @escaping (String, [String: Any]) -> Void) {
     self.store = store
     self.run = run
+    super.init()
+    for name in [NSMenu.didAddItemNotification, NSMenu.didRemoveItemNotification] {
+      observers.append(NotificationCenter.default.addObserver(forName: name, object: nil, queue: nil) { [weak self] note in
+        MainActor.assumeIsolated { self?.barEdited(note.object as? NSMenu) }
+      })
+    }
   }
 
   private var entries: [[String: Any]] {
@@ -45,20 +55,44 @@ final class FreshMenus: NSObject, NSMenuDelegate {
   func install() {
     guard saved == nil else { return }
     saved = NSApp.mainMenu
-    NSApp.mainMenu = buildMainMenu()
+    let bar = buildMainMenu()
+    installed = bar
+    NSApp.mainMenu = bar
   }
 
   func uninstall() {
     guard let saved else { return }
     NSApp.mainMenu = saved
     self.saved = nil
+    installed = nil
+  }
+
+  /// SwiftUI writes changes to the app's commands into whatever menu bar is
+  /// installed, so a change while Fresh's bar is up lands in it. The app holds
+  /// its commands still meanwhile (`AppController.menusHeld`); should one get
+  /// through anyway, Fresh's bar is rebuilt.
+  private func barEdited(_ menu: NSMenu?) {
+    guard let menu, menu === installed, !repairPending else { return }
+    repairPending = true
+    DispatchQueue.main.async { [weak self] in
+      guard let self else { return }
+      self.repairPending = false
+      guard self.saved != nil else { return }
+      Trace.write("menus: the app's commands changed in Fresh's menu bar; rebuilding it")
+      let bar = self.buildMainMenu()
+      self.installed = bar
+      NSApp.mainMenu = bar
+    }
   }
 
   /// Rebuilds the bar when Fresh's top-level menus change (a plugin added one).
   func menusChanged() {
     guard saved != nil else { return }
     let labels = entries.map { $0["label"] as? String ?? "" }
-    if labels != installedLabels { NSApp.mainMenu = buildMainMenu() }
+    guard labels != installedLabels else { return }
+    let bar = buildMainMenu()
+    installed = bar
+    NSApp.mainMenu = bar
   }
 
   private func buildMainMenu() -> NSMenu {
@@ -96,7 +130,7 @@ final class FreshMenus: NSObject, NSMenuDelegate {
     windowMenu.addItem(withTitle: "Minimize", action: #selector(NSWindow.performMiniaturize(_:)), keyEquivalent: "m")
     windowMenu.addItem(withTitle: "Zoom", action: #selector(NSWindow.performZoom(_:)), keyEquivalent: "")
     windowMenu.addItem(.separator())
-    windowMenu.addItem(item("Switch to File Commander", key: "", action: #selector(back)))
+    windowMenu.addItem(item("Show Files", key: "", action: #selector(files)))
     windowMenu.addItem(.separator())
     windowMenu.addItem(withTitle: "Bring All to Front", action: #selector(NSApplication.arrangeInFront(_:)), keyEquivalent: "")
     windowItem.submenu = windowMenu
@@ -112,7 +146,7 @@ final class FreshMenus: NSObject, NSMenuDelegate {
   }
 
   @objc private func settings() { openSettings?() }
-  @objc private func back() { switchBack?() }
+  @objc private func files() { showFiles?() }
 
   // MARK: Fresh's items
 

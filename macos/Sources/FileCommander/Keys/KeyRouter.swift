@@ -37,6 +37,8 @@ final class KeyRouter {
       return nil
     }
     if app.tutorial.handleKey(event) { return nil }
+    // The editor in the main window takes its own keys.
+    if let window = app.editor.window, event.window === window { return event }
     // In the palette, ⌃K rebinds the highlighted command, as in the terminal interface.
     // It must win over a menu shortcut on the same key.
     if app.paletteMode == .commands, let chord = KeyChord(event: event), chord == KeyChord("Ctrl+K"), let id = app.paletteSelection {

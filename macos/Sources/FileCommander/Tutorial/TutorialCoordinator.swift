@@ -694,6 +694,11 @@ final class TutorialCoordinator: ExplainerHost {
         if summary != lastEditorTrace { lastEditorTrace = summary; Trace.write(summary) }
       }
       if let running = value["running"]?.bool { return app.editor.running == running }
+      // The editor has the keyboard in this window ("main").
+      if let id = value["window"]?.string {
+        guard let window = app.editor.window else { return false }
+        return window.isKeyWindow && TutorialCoordinator.matches(window, id)
+      }
       if let surface = value["shows"]?.string { return app.editor.shows(surface) }
       if let surface = value["hides"]?.string { return !app.editor.shows(surface) }
       guard let pattern = value["contains"]?.string, let regex = try? NSRegularExpression(pattern: pattern) else { return false }
