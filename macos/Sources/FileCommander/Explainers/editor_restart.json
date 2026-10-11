@@ -1,7 +1,7 @@
 {
   "id": "editor_restart",
   "title": "Restart the editor",
-  "order": 21,
+  "order": 22,
   "duration": 35,
   "chapter": "editor",
   "needs": {

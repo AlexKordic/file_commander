@@ -1,7 +1,7 @@
 {
   "id": "scripting",
   "title": "Lua scripts",
-  "order": 24,
+  "order": 25,
   "duration": 40,
   "chapter": "yours",
   "needs": {

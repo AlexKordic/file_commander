@@ -304,8 +304,9 @@ final class TutorialCoordinator: ExplainerHost {
     try world.build(sevenZip: sevenZip)
     Engine.setEndpointCommand(host: TutorialWorld.demoHost, command: world.demoSSH.path)
     if script.needs("editor") {
+      let path = world.bin.path + ":" + (ProcessInfo.processInfo.environment["PATH"] ?? "/usr/bin:/bin")
       app.engine.setEditorSession(store: world.profile.appendingPathComponent("editor_session.json").path,
-                                  environment: ["HOME=\(world.profile.path)"])
+                                  environment: ["HOME=\(world.profile.path)", "PATH=\(path)"])
     }
     app.engine.setKeepTutorialTabs(script.needs("crash") || script.needs("restart"))
     app.engine.setTransferRate(0, persist: false)
@@ -702,6 +703,10 @@ final class TutorialCoordinator: ExplainerHost {
     case "no_bookmark": return !app.engine.bookmarks.contains { $0.title == value.string }
     case "transfer_rate": return app.engine.transferRate == TutorialCoordinator.parseRate(value.string ?? "\(Int(value.number ?? 0))")
     case "file":
+      if let text = value["contains"]?.string {
+        let path = world.expand(value["path"]?.string ?? "")
+        return (try? String(contentsOfFile: path, encoding: .utf8))?.contains(world.expand(text)) ?? false
+      }
       let path = world.expand(value["exists"]?.string ?? value["missing"]?.string ?? "")
       return FileManager.default.fileExists(atPath: path) == (value["exists"] != nil)
     case "theme": return app.theme.active.name == value.string

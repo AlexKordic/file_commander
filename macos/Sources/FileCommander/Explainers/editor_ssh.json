@@ -1,0 +1,164 @@
+{
+  "id": "editor_ssh",
+  "title": "Edit files on a server",
+  "order": 20,
+  "duration": 55,
+  "chapter": "editor",
+  "needs": {
+    "editor": true
+  },
+  "summary": "Open a file of an SSH tab in the editor; Fresh works on the server and saves there.",
+  "covers": {
+    "anchors": [
+      "editor.status"
+    ]
+  },
+  "steps": [
+    {
+      "open_tabs": {
+        "left": "{home}",
+        "right": "{home}/projects",
+        "focus": "left"
+      }
+    },
+    {
+      "chapter": "Editor"
+    },
+    {
+      "caption": "Edit on a server",
+      "sub": "Files in an SSH tab open in the editor too"
+    },
+    {
+      "keys": [
+        "@connect_ssh"
+      ]
+    },
+    {
+      "wait": {
+        "sheet": "ssh"
+      }
+    },
+    {
+      "wait": {
+        "text_focus": true
+      }
+    },
+    {
+      "type": "demo-server"
+    },
+    {
+      "keys": [
+        "Tab"
+      ]
+    },
+    {
+      "keys": [
+        "Cmd+A"
+      ]
+    },
+    {
+      "type": "{server}"
+    },
+    {
+      "pause": 400
+    },
+    {
+      "click": "sheet.ssh.connect"
+    },
+    {
+      "wait": {
+        "sheet": null
+      },
+      "timeout": 25
+    },
+    {
+      "wait": {
+        "rows": {
+          "side": "left",
+          "contains": "index.html"
+        }
+      },
+      "timeout": 25
+    },
+    {
+      "cursor": {
+        "side": "left",
+        "name": "index.html"
+      }
+    },
+    {
+      "keys": [
+        "@open_in_editor"
+      ]
+    },
+    {
+      "wait": {
+        "editor": {
+          "contains": "Coming soon"
+        }
+      },
+      "timeout": 30
+    },
+    {
+      "caption": "Fresh works on the server",
+      "sub": "Saving, searching and language servers run there; the status bar names it"
+    },
+    {
+      "highlight": "editor.status",
+      "hold": 2200
+    },
+    {
+      "pause": 1600
+    },
+    {
+      "editor_keys": [
+        "Down",
+        "Down",
+        "End"
+      ]
+    },
+    {
+      "editor_type": " (draft)"
+    },
+    {
+      "pause": 500
+    },
+    {
+      "caption": "Save on the server",
+      "sub": "⌘S writes the file on the server, over the same connection"
+    },
+    {
+      "editor_keys": [
+        "Cmd+S"
+      ]
+    },
+    {
+      "wait": {
+        "file": {
+          "path": "{server}/index.html",
+          "contains": "(draft)"
+        }
+      },
+      "timeout": 15
+    },
+    {
+      "pause": 1400
+    },
+    {
+      "editor_keys": [
+        "F10"
+      ]
+    },
+    {
+      "wait": {
+        "editor": {
+          "running": false
+        }
+      },
+      "timeout": 10
+    },
+    {
+      "uncaption": true
+    }
+  ]
+}

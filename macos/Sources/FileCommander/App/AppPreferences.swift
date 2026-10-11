@@ -46,6 +46,8 @@ struct AppPreferences: Codable, Equatable {
   var optionAsAlt = false
   /// Show the editor in a terminal view instead of drawing it natively.
   var terminalEditor = false
+  /// The editor window was open when the app quit; it opens again at launch.
+  var editorWasOpen = false
 
   init() {}
 
@@ -69,6 +71,7 @@ struct AppPreferences: Codable, Equatable {
     scrollMargin = min(10, max(0, try c.decodeIfPresent(Int.self, forKey: .scrollMargin) ?? d.scrollMargin))
     optionAsAlt = try c.decodeIfPresent(Bool.self, forKey: .optionAsAlt) ?? d.optionAsAlt
     terminalEditor = try c.decodeIfPresent(Bool.self, forKey: .terminalEditor) ?? d.terminalEditor
+    editorWasOpen = try c.decodeIfPresent(Bool.self, forKey: .editorWasOpen) ?? d.editorWasOpen
   }
 
   static func load(from url: URL) -> AppPreferences {

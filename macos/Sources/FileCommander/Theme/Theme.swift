@@ -163,7 +163,7 @@ struct Theme: Codable, Equatable {
     f("palette.input", "Palette search", "Dialogs"); f("palette.row", "Palette rows", "Dialogs")
     c("palette.selection", "Palette selection", "Dialogs"); c("hud.background", "Confirmation background", "Dialogs")
     c("hud.text", "Confirmation text", "Dialogs")
-    f("editor.terminal", "Terminal", "Editor"); c("editor.background", "Background", "Editor"); c("editor.text", "Text", "Editor")
+    f("editor.terminal", "Font", "Editor"); c("editor.background", "Background", "Editor"); c("editor.text", "Text", "Editor")
     f("caption.title", "Caption title", "Explainers"); f("caption.subtitle", "Caption subtitle", "Explainers")
     f("badge", "Key badges", "Explainers")
     c("caption.background", "Caption card", "Explainers"); c("caption.title", "Caption title", "Explainers")

@@ -1,7 +1,7 @@
 {
   "id": "palette_keys",
   "title": "Commands and keys",
-  "order": 22,
+  "order": 23,
   "duration": 55,
   "chapter": "yours",
   "summary": "Find any command in the palette, rebind its key, and pick a key preset.",

@@ -59,6 +59,12 @@ final class AppController {
       guard preferences != oldValue else { return }
       savePreferences()
       if preferences.appearance != oldValue.appearance { applyAppearance() }
+      if preferences.zoom != oldValue.zoom { editor.applyTheme() }
+      if preferences.terminalEditor != oldValue.terminalEditor {
+        // The next attach takes the other route; close the window shown the old way.
+        engine.setEditorSceneAttach(!preferences.terminalEditor)
+        editor.detachAll()
+      }
     }
   }
 
@@ -155,11 +161,17 @@ final class AppController {
       tutorial.resumeAfterRelaunch()
     } else if !preferences.welcomeShown && !arguments.contains("--run-explainer") && !arguments.contains("--export-explainer") {
       sheet = .welcome
+    } else if preferences.editorWasOpen && !arguments.contains("--run-explainer") && !arguments.contains("--export-explainer") {
+      // The editor window comes back as it was left, like the app's other windows.
+      DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { [weak self] in
+        if let error = self?.engine.switchToEditor() { self?.engine.reportError(error) }
+      }
     }
   }
 
   func stop() {
     tutorial.stopForQuit()
+    if !CommandLine.arguments.contains("--run-explainer") { preferences.editorWasOpen = editor.running }
     editor.detachAll()
     engine.stop()
     askpass.stop()

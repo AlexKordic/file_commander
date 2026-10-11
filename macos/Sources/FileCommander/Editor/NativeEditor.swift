@@ -229,7 +229,10 @@ final class NativeEditor: NSObject, NSWindowDelegate, CellGridDelegate {
     return false
   }
 
-  func windowDidBecomeKey(_ notification: Notification) { menus?.install() }
+  func windowDidBecomeKey(_ notification: Notification) {
+    menus?.install()
+    applyTheme()  // picks up font changes made in Settings meanwhile
+  }
   func windowDidResignKey(_ notification: Notification) {
     menus?.uninstall()
     grid?.needsDisplay = true

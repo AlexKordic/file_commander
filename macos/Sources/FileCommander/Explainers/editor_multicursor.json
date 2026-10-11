@@ -1,7 +1,7 @@
 {
   "id": "editor_multicursor",
   "title": "Multiple cursors",
-  "order": 20,
+  "order": 21,
   "duration": 60,
   "chapter": "editor",
   "needs": {

@@ -12,6 +12,8 @@ struct TutorialWorld {
   /// in them, because Fresh's backend keeps running and writing after a tutorial.
   var profile: URL { root.deletingLastPathComponent().appendingPathComponent("TutorialEditor") }
   var demoSSH: URL { root.appendingPathComponent("demo-ssh") }
+  /// Put first on the tutorial editor's PATH: its `ssh` sends the demo server to the stand-in.
+  var bin: URL { root.appendingPathComponent("bin") }
   static let demoHost = "demo-server"
 
   static let photos = ["cathedral-steps", "cliff-path-at-sunset", "fishing-boats", "harbour-at-dawn", "lighthouse",
@@ -133,6 +135,22 @@ struct TutorialWorld {
 
     """.write(to: demoSSH, atomically: true, encoding: .utf8)
     chmod(demoSSH.path, 0o755)
+
+    // Fresh runs ssh by name for remote files. In the tutorial's editor session
+    // this one comes first on PATH: the demo server goes to the stand-in above,
+    // any other host to the real ssh.
+    try fm.createDirectory(at: bin, withIntermediateDirectories: true)
+    let ssh = bin.appendingPathComponent("ssh")
+    try """
+    #!/bin/sh
+    # File Commander tutorial: the demo server runs locally; other hosts use ssh.
+    for arg in "$@"; do
+      [ "$arg" = "\(TutorialWorld.demoHost)" ] && exec "\(demoSSH.path)" "$@"
+    done
+    exec /usr/bin/ssh "$@"
+
+    """.write(to: ssh, atomically: true, encoding: .utf8)
+    chmod(ssh.path, 0o755)
 
     // Fresh reads $HOME/.config/fresh: no auto-closing brackets or auto-indent,
     // so the editor explainer types every character itself.

@@ -123,10 +123,27 @@ struct TransferSettings: View {
 struct EditorSettings: View {
   @Environment(AppController.self) private var app
   var body: some View {
+    @Bindable var app = app
     Form {
-      Text("Files open in Fresh, which runs as its own program in the Editor window. Its tabs and unsaved text survive switching back, quitting File Commander and crashes.")
-      LabeledContent("Switch key") { Text(app.keymap.chord(for: "switch_to_file_commander")?.symbols ?? "F10") }
-      Button("Restart Editor Backend…") { app.sheet = .restartEditor }
+      Section {
+        Text("Files open in Fresh, which keeps running as its own program. The Editor window draws it natively: while the window is in front, Fresh's menus fill the menu bar, and its tabs, sidebar, palette and status bar are Mac controls. Its tabs and unsaved text survive switching back, quitting File Commander and crashes.")
+        LabeledContent("Switch key") { Text(app.keymap.chord(for: "switch_to_file_commander")?.symbols ?? "F10") }
+        LabeledContent("Text font") { Text("Appearance › Editor › Font") }
+      }
+      Section("Keyboard") {
+        Toggle("Use Option as Alt", isOn: $app.preferences.optionAsAlt)
+          .explainerAnchor("settings.editor.option")
+        Text("Option types its character (é, ü, ∑) by default. With this on, Option sends Alt instead, for Fresh's Alt shortcuts. ⌘ shortcuts work either way.")
+          .font(.callout).foregroundStyle(.secondary)
+      }
+      Section("Window") {
+        Toggle("Show the editor in a terminal window", isOn: $app.preferences.terminalEditor)
+        Text("Runs Fresh's terminal interface in a terminal view instead. File Commander uses it anyway for a Fresh without the native window's channel, such as an older version set in fresh_binary_path.")
+          .font(.callout).foregroundStyle(.secondary)
+      }
+      Section {
+        Button("Restart Editor Backend…") { app.sheet = .restartEditor }
+      }
     }
     .formStyle(.grouped)
   }

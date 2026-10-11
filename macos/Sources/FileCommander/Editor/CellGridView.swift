@@ -122,7 +122,11 @@ final class CellGridView: NSView, NSTextInputClient {
       return
     }
     for row in change.rows { setNeedsDisplay(rowRect(row)) }
-    if change.cursorChanged { restartBlink() }
+    if change.cursorChanged {
+      restartBlink()
+      NSAccessibility.post(element: self, notification: .selectedTextChanged)
+    }
+    if !change.rows.isEmpty { NSAccessibility.post(element: self, notification: .valueChanged) }
   }
 
   private func rowRect(_ row: Int) -> NSRect {
@@ -244,6 +248,25 @@ final class CellGridView: NSView, NSTextInputClient {
       context.fill(CGRect(x: cell.minX, y: cell.minY, width: 2, height: cellHeight))
     }
   }
+
+  // MARK: Accessibility
+
+  /// VoiceOver reads the visible text, one line per row, with the caret's place.
+  override func isAccessibilityElement() -> Bool { true }
+  override func accessibilityRole() -> NSAccessibility.Role? { .textArea }
+  override func accessibilityRoleDescription() -> String? { "editor" }
+  override func accessibilityLabel() -> String? { window?.title ?? "Editor" }
+  override func accessibilityValue() -> Any? { store.lines.joined(separator: "\n") }
+
+  override func accessibilitySelectedTextRange() -> NSRange {
+    guard let cursor = store.cursor else { return NSRange(location: 0, length: 0) }
+    let before = store.lines.prefix(cursor.row).reduce(0) { $0 + ($1 as NSString).length + 1 }
+    let line = cursor.row < store.grid.count ? store.text(row: cursor.row) : ""
+    let column = (String(line.prefix(cursor.column)) as NSString).length
+    return NSRange(location: before + column, length: 0)
+  }
+
+  override func accessibilityInsertionPointLineNumber() -> Int { store.cursor?.row ?? 0 }
 
   // MARK: Caret blink
 

@@ -412,8 +412,25 @@ E['editor_window'] = dict(
            {'editor_keys': ['Enter']}, wait({'editor': {'contains': 'max-width'}}, timeout=10), {'pause': 1200},
            {'editor_keys': ['F10']}, wait({'editor': {'running': False}}, timeout=10), {'uncaption': True}])
 
+E['editor_ssh'] = dict(
+    title='Edit files on a server', order=20, duration=55, chapter='editor', needs={'editor': True},
+    summary='Open a file of an SSH tab in the editor; Fresh works on the server and saves there.',
+    covers={'anchors': ['editor.status']},
+    steps=[tabs('{home}', '{home}/projects'), {'chapter': 'Editor'},
+           cap('Edit on a server', 'Files in an SSH tab open in the editor too'),
+           keys('@connect_ssh'), wait({'sheet': 'ssh'}), wait({'text_focus': True}), {'type': 'demo-server'}, keys('Tab'),
+           keys('Cmd+A'), {'type': '{server}'}, {'pause': 400}, {'click': 'sheet.ssh.connect'}, wait({'sheet': None}, timeout=25),
+           wait({'rows': {'side': 'left', 'contains': 'index.html'}}, timeout=25),
+           cursor('left', 'index.html'), keys('@open_in_editor'), wait({'editor': {'contains': 'Coming soon'}}, timeout=30),
+           cap('Fresh works on the server', 'Saving, searching and language servers run there; the status bar names it'),
+           hl('editor.status', hold=2200), {'pause': 1600},
+           {'editor_keys': ['Down', 'Down', 'End']}, {'editor_type': ' (draft)'}, {'pause': 500},
+           cap('Save on the server', '\u2318S writes the file on the server, over the same connection'),
+           {'editor_keys': ['Cmd+S']}, wait({'file': {'path': '{server}/index.html', 'contains': '(draft)'}}, timeout=15),
+           {'pause': 1400}, {'editor_keys': ['F10']}, wait({'editor': {'running': False}}, timeout=10), {'uncaption': True}])
+
 E['editor_multicursor'] = dict(
-    title='Multiple cursors', order=20, duration=60, chapter='editor', needs={'editor': True},
+    title='Multiple cursors', order=21, duration=60, chapter='editor', needs={'editor': True},
     summary='Paste photo paths into code, then edit every line at once with multiple cursors.',
     covers={'anchors': ['editor.text']},
     steps=[tabs('{home}/camera', '{home}/projects/website'), {'chapter': 'Editor'},
@@ -434,7 +451,7 @@ E['editor_multicursor'] = dict(
            {'uncaption': True}])
 
 E['editor_restart'] = dict(
-    title='Restart the editor', order=21, duration=35, chapter='editor', needs={'editor': True},
+    title='Restart the editor', order=22, duration=35, chapter='editor', needs={'editor': True},
     summary='After upgrading Fresh, restart its backend; unsaved text survives.',
     covers={'commands': ['restart_editor_backend'], 'anchors': ['sheet.restart.confirm']},
     steps=[tabs('{home}/projects/notes', '{home}'), {'chapter': 'Editor'},
@@ -447,7 +464,7 @@ E['editor_restart'] = dict(
            {'editor_keys': ['F10']}, wait({'editor': {'running': False}}, timeout=10), {'uncaption': True}])
 
 E['palette_keys'] = dict(
-    title='Commands and keys', order=22, duration=55, chapter='yours',
+    title='Commands and keys', order=23, duration=55, chapter='yours',
     summary='Find any command in the palette, rebind its key, and pick a key preset.',
     covers={'commands': ['command_palette'], 'anchors': ['palette.field']},
     steps=[tabs('{home}', '{home}/camera'), {'chapter': 'Make It Yours'},
@@ -461,7 +478,7 @@ E['palette_keys'] = dict(
            {'open_window': 'settings', 'note': 'keys'}, {'pause': 2600}, {'close_window': 'settings'}, {'uncaption': True}])
 
 E['themes'] = dict(
-    title='Themes, colors and fonts', order=23, duration=60, chapter='yours', needs={'settings': True},
+    title='Themes, colors and fonts', order=24, duration=60, chapter='yours', needs={'settings': True},
     summary='Light and dark, colors for both, and a font and size for every element.',
     covers={'commands': ['edit_theme_colors'], 'anchors': ['settings.appearance.preview', 'settings.appearance.font.bigger']},
     steps=[tabs('{home}/camera', '{home}/music'), {'chapter': 'Make It Yours'},
@@ -482,7 +499,7 @@ E['themes'] = dict(
            {'uncaption': True}])
 
 E['scripting'] = dict(
-    title='Lua scripts', order=24, duration=40, chapter='yours', needs={'idle_queue': True},
+    title='Lua scripts', order=25, duration=40, chapter='yours', needs={'idle_queue': True},
     summary="Automate File Commander with Lua: a script copies the camera's photos.",
     covers={'commands': ['run_script']},
     steps=[tabs('{home}/projects/tools', '{home}/backup'), {'chapter': 'Make It Yours'},
@@ -496,7 +513,7 @@ E['scripting'] = dict(
            {'uncaption': True}])
 
 E['workspace_restore'] = dict(
-    title='Quit and come back', order=25, duration=40, chapter='recovery', needs={'restart': True},
+    title='Quit and come back', order=26, duration=40, chapter='recovery', needs={'restart': True},
     summary='Tabs, folders, selections and filters come back after a quit.',
     covers={'anchors': ['pane.left.tabs']},
     steps=[tabs('{home}/camera', '{home}/music'), {'chapter': 'Recovery'},
@@ -509,7 +526,7 @@ E['workspace_restore'] = dict(
            keys(*['Backspace'] * 2, gap=120), keys('@clear_selection'), {'uncaption': True}])
 
 E['crash_recovery'] = dict(
-    title='Crash recovery', order=26, duration=75, chapter='recovery', needs={'crash': True, 'idle_queue': True},
+    title='Crash recovery', order=27, duration=75, chapter='recovery', needs={'crash': True, 'idle_queue': True},
     summary='A real crash in the middle of a copy: what comes back, and how the copy continues.',
     covers={'commands': ['simulate_crash'], 'anchors': ['activity.recovery', 'activity.resume']},
     steps=[tabs('{home}/music', '{home}/backup'), {'chapter': 'Recovery'}, {'set_transfer_speed': '3 MiB'},
