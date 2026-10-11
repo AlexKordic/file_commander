@@ -693,6 +693,8 @@ final class TutorialCoordinator: ExplainerHost {
         if summary != lastEditorTrace { lastEditorTrace = summary; Trace.write(summary) }
       }
       if let running = value["running"]?.bool { return app.editor.running == running }
+      if let surface = value["shows"]?.string { return app.editor.shows(surface) }
+      if let surface = value["hides"]?.string { return !app.editor.shows(surface) }
       guard let pattern = value["contains"]?.string, let regex = try? NSRegularExpression(pattern: pattern) else { return false }
       let text = app.editor.screenLines.joined(separator: "\n")
       return regex.firstMatch(in: text, range: NSRange(text.startIndex..., in: text)) != nil
@@ -879,7 +881,9 @@ final class EditorAnchors: AnchorResolver {
   }
 
   func screenRect(for id: String) -> CGRect? {
-    guard let app, let start = cell(id), let end = cell(id, after: true) else { return nil }
+    guard let app else { return nil }
+    if !id.contains("["), id.hasPrefix("editor.") { return app.editor.surfaceRect(String(id.dropFirst("editor.".count))) }
+    guard let start = cell(id), let end = cell(id, after: true) else { return nil }
     return app.editor.screenRect(row: start.row, col: start.col, count: max(1, end.col - start.col))
   }
 

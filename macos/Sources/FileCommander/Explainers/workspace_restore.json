@@ -1,7 +1,7 @@
 {
   "id": "workspace_restore",
   "title": "Quit and come back",
-  "order": 24,
+  "order": 25,
   "duration": 40,
   "chapter": "recovery",
   "needs": {

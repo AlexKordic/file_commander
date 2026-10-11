@@ -389,8 +389,31 @@ E['editor_basics'] = dict(
            wait({'editor': {'contains': 'draft'}}, timeout=15), {'pause': 1500},
            {'editor_keys': ['F10']}, wait({'editor': {'running': False}}, timeout=10), {'uncaption': True}])
 
+E['editor_window'] = dict(
+    title='The editor window', order=19, duration=55, chapter='editor', needs={'editor': True},
+    summary="Fresh in a Mac window: its menus in the menu bar, tabs, the command palette and the file sidebar.",
+    covers={'anchors': ['editor.tabs', 'editor.status', 'editor.palette', 'editor.explorer']},
+    steps=[tabs('{home}/projects/website', '{home}/projects/notes'), {'chapter': 'Editor'},
+           cursor('left', 'index.html'), keys('@open_in_editor'), wait({'editor': {'contains': 'Field Notes'}}, timeout=25),
+           cap('A Mac window', 'Fresh edits the text; the window draws its tabs, sidebar and status bar'),
+           hl('editor.tabs', 'editor.status', hold=2200),
+           cap("Fresh's menus", 'While the editor is in front, the menu bar holds its menus, with \u2318 shortcuts'), {'pause': 2400},
+           cap('Command palette', '\u21e7\u2318P finds any editor command by name'),
+           {'editor_keys': ['Cmd+Shift+P']}, wait({'editor': {'shows': 'palette'}}, timeout=10),
+           {'editor_type': 'toggle line'}, hl('editor.palette', hold=2000), {'pause': 2000}, {'editor_keys': ['Esc']},
+           wait({'editor': {'hides': 'palette'}}, timeout=10),
+           cap('Files beside the text', '\u2318B shows the folder in a sidebar'),
+           {'editor_keys': ['Cmd+B']}, wait({'editor': {'shows': 'explorer'}}, timeout=10), hl('editor.explorer', hold=2000),
+           {'pause': 2000},
+           {'editor_keys': ['Cmd+B']}, {'pause': 300}, {'editor_keys': ['Cmd+B']}, wait({'editor': {'hides': 'explorer'}}, timeout=10),
+           cap('Open another file', 'Without the > the palette finds files of the folder by name'),
+           {'editor_keys': ['Cmd+P']}, wait({'editor': {'shows': 'palette'}}, timeout=10), {'editor_keys': ['Backspace']},
+           {'editor_type': 'style'}, {'pause': 900},
+           {'editor_keys': ['Enter']}, wait({'editor': {'contains': 'max-width'}}, timeout=10), {'pause': 1200},
+           {'editor_keys': ['F10']}, wait({'editor': {'running': False}}, timeout=10), {'uncaption': True}])
+
 E['editor_multicursor'] = dict(
-    title='Multiple cursors', order=19, duration=60, chapter='editor', needs={'editor': True},
+    title='Multiple cursors', order=20, duration=60, chapter='editor', needs={'editor': True},
     summary='Paste photo paths into code, then edit every line at once with multiple cursors.',
     covers={'anchors': ['editor.text']},
     steps=[tabs('{home}/camera', '{home}/projects/website'), {'chapter': 'Editor'},
@@ -411,7 +434,7 @@ E['editor_multicursor'] = dict(
            {'uncaption': True}])
 
 E['editor_restart'] = dict(
-    title='Restart the editor', order=20, duration=35, chapter='editor', needs={'editor': True},
+    title='Restart the editor', order=21, duration=35, chapter='editor', needs={'editor': True},
     summary='After upgrading Fresh, restart its backend; unsaved text survives.',
     covers={'commands': ['restart_editor_backend'], 'anchors': ['sheet.restart.confirm']},
     steps=[tabs('{home}/projects/notes', '{home}'), {'chapter': 'Editor'},
@@ -424,7 +447,7 @@ E['editor_restart'] = dict(
            {'editor_keys': ['F10']}, wait({'editor': {'running': False}}, timeout=10), {'uncaption': True}])
 
 E['palette_keys'] = dict(
-    title='Commands and keys', order=21, duration=55, chapter='yours',
+    title='Commands and keys', order=22, duration=55, chapter='yours',
     summary='Find any command in the palette, rebind its key, and pick a key preset.',
     covers={'commands': ['command_palette'], 'anchors': ['palette.field']},
     steps=[tabs('{home}', '{home}/camera'), {'chapter': 'Make It Yours'},
@@ -438,7 +461,7 @@ E['palette_keys'] = dict(
            {'open_window': 'settings', 'note': 'keys'}, {'pause': 2600}, {'close_window': 'settings'}, {'uncaption': True}])
 
 E['themes'] = dict(
-    title='Themes, colors and fonts', order=22, duration=60, chapter='yours', needs={'settings': True},
+    title='Themes, colors and fonts', order=23, duration=60, chapter='yours', needs={'settings': True},
     summary='Light and dark, colors for both, and a font and size for every element.',
     covers={'commands': ['edit_theme_colors'], 'anchors': ['settings.appearance.preview', 'settings.appearance.font.bigger']},
     steps=[tabs('{home}/camera', '{home}/music'), {'chapter': 'Make It Yours'},
@@ -459,7 +482,7 @@ E['themes'] = dict(
            {'uncaption': True}])
 
 E['scripting'] = dict(
-    title='Lua scripts', order=23, duration=40, chapter='yours', needs={'idle_queue': True},
+    title='Lua scripts', order=24, duration=40, chapter='yours', needs={'idle_queue': True},
     summary="Automate File Commander with Lua: a script copies the camera's photos.",
     covers={'commands': ['run_script']},
     steps=[tabs('{home}/projects/tools', '{home}/backup'), {'chapter': 'Make It Yours'},
@@ -473,7 +496,7 @@ E['scripting'] = dict(
            {'uncaption': True}])
 
 E['workspace_restore'] = dict(
-    title='Quit and come back', order=24, duration=40, chapter='recovery', needs={'restart': True},
+    title='Quit and come back', order=25, duration=40, chapter='recovery', needs={'restart': True},
     summary='Tabs, folders, selections and filters come back after a quit.',
     covers={'anchors': ['pane.left.tabs']},
     steps=[tabs('{home}/camera', '{home}/music'), {'chapter': 'Recovery'},
@@ -486,7 +509,7 @@ E['workspace_restore'] = dict(
            keys(*['Backspace'] * 2, gap=120), keys('@clear_selection'), {'uncaption': True}])
 
 E['crash_recovery'] = dict(
-    title='Crash recovery', order=25, duration=75, chapter='recovery', needs={'crash': True, 'idle_queue': True},
+    title='Crash recovery', order=26, duration=75, chapter='recovery', needs={'crash': True, 'idle_queue': True},
     summary='A real crash in the middle of a copy: what comes back, and how the copy continues.',
     covers={'commands': ['simulate_crash'], 'anchors': ['activity.recovery', 'activity.resume']},
     steps=[tabs('{home}/music', '{home}/backup'), {'chapter': 'Recovery'}, {'set_transfer_speed': '3 MiB'},

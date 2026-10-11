@@ -1,7 +1,7 @@
 {
   "id": "crash_recovery",
   "title": "Crash recovery",
-  "order": 25,
+  "order": 26,
   "duration": 75,
   "chapter": "recovery",
   "needs": {

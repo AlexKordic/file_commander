@@ -47,6 +47,12 @@ final class EditorController {
   /// The editor's visible text, one string per row.
   var screenLines: [String] { showingNative ? native.screenLines : terminal.screenLines }
 
+  /// Whether a native surface ("palette", "explorer", "popup", ...) is showing.
+  func shows(_ surface: String) -> Bool { showingNative && running && !native.surfaceCells(surface).isEmpty }
+
+  /// The screen rectangle around a native surface.
+  func surfaceRect(_ surface: String) -> CGRect? { showingNative ? native.surfaceRect(surface) : nil }
+
   /// The screen rectangle of columns [col, col+count) on a row.
   func screenRect(row: Int, col: Int, count: Int) -> CGRect? {
     showingNative ? native.screenRect(row: row, col: col, count: count) : terminal.screenRect(row: row, col: col, count: count)

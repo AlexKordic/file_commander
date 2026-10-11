@@ -245,4 +245,30 @@ final class NativeEditor: NSObject, NSWindowDelegate, CellGridDelegate {
   }
 
   func send(_ message: [String: Any]) { socket?.send(message) }
+
+  /// The cells a native surface covers: "tabs", "status", "palette", "popup" or "explorer".
+  func surfaceCells(_ surface: String) -> [CellRect] {
+    let regions = store.regions
+    switch surface {
+    case "tabs": return store.panes.compactMap { CellRect($0["tabBar"]) }
+    case "status": return [CellRect((regions["statusbar"] as? [String: Any])?["rect"])].compactMap { $0 }
+    case "palette":
+      let palette = regions["palette"] as? [String: Any]
+      return [CellRect(palette?["outerRect"]) ?? CellRect(palette?["listRect"])].compactMap { $0 }
+    case "popup": return (regions["popups"] as? [[String: Any]] ?? []).compactMap { CellRect($0["rect"]) }
+    case "explorer": return [CellRect((regions["fileExplorer"] as? [String: Any])?["rect"])].compactMap { $0 }
+    default: return []
+    }
+  }
+
+  /// The screen rectangle around a native surface, for explainer highlights.
+  func surfaceRect(_ surface: String) -> CGRect? {
+    let rects = surfaceCells(surface).compactMap { cells -> CGRect? in
+      guard let row = screenRect(row: cells.y, col: cells.x, count: cells.width) else { return nil }
+      let height = row.height * CGFloat(cells.height)
+      return CGRect(x: row.minX, y: row.maxY - height, width: row.width, height: height)
+    }
+    guard let first = rects.first else { return nil }
+    return rects.dropFirst().reduce(first) { $0.union($1) }
+  }
 }
