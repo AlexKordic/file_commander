@@ -6,9 +6,11 @@
 FRESH defaults to build-macos/third_party/fresh/bin/fresh; OUT to
 macos/Tests/FreshKitTests/Fixtures/scene.json. The script starts a throwaway
 File Commander session in a temporary HOME, opens a small file, connects to the
-session's scene socket at 80x24 the way the app does, types a few keys and
-writes the hello and the frames that answered them. Rerun it after bumping the
-Fresh pin; the FreshKit tests then check the app still reads what Fresh sends.
+session's scene socket at 80x24 the way the app does, types a few keys,
+scrolls down and back up, and writes the hello and the frames that answered
+them, then the hello a second connection gets, for the tests to compare with
+the replayed frames. Rerun it after bumping the Fresh pin; the FreshKit tests
+then check the app still reads what Fresh sends.
 """
 import base64
 import json
@@ -40,7 +42,7 @@ class Scene:
         self.sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         self.sock.connect(path)
         key = base64.b64encode(os.urandom(16)).decode()
-        self.sock.sendall((f'GET /ws?grid=1&menus=native HTTP/1.1\r\nHost: localhost\r\nUpgrade: websocket\r\n'
+        self.sock.sendall((f'GET /ws?grid=1&menus=native&copies=1 HTTP/1.1\r\nHost: localhost\r\nUpgrade: websocket\r\n'
                            f'Connection: Upgrade\r\nSec-WebSocket-Key: {key}\r\nSec-WebSocket-Version: 13\r\n\r\n').encode())
         buf = b''
         while b'\r\n\r\n' not in buf:
@@ -99,7 +101,7 @@ def main():
         work = Path(home) / 'work'
         work.mkdir()
         sample = work / 'notes.md'
-        sample.write_text('# Notes\n\nFirst line.\n')
+        sample.write_text('# Notes\n\nFirst line.\n' + ''.join(f'Line {n} of the notes.\n' for n in range(4, 80)))
         env = dict(os.environ, HOME=home, FC_EDITOR_SWITCH_KEY='f10')
         name = f'fc-record-{os.getpid()}'
         run = lambda *args: subprocess.run([str(FRESH), '--cmd', 'session', *args], env=env, cwd=work,
@@ -125,13 +127,22 @@ def main():
             messages += scene.drain(0.8)
             scene.send({'type': 'key', 'key': 'Escape'})
             messages += scene.drain(0.6)
+            for kind in ['scrolldown'] * 4 + ['scrollup'] * 4:
+                scene.send({'type': 'mouse', 'kind': kind, 'button': 'left', 'col': 40, 'row': 10, 'n': 1})
+                messages += scene.drain(0.2)
+            messages += scene.drain(0.6)
+            reference = Scene(ensured['scene'])
+            messages.append(reference.message(10))
+            reference.sock.close()
             scene.sock.close()
         finally:
             subprocess.run([str(FRESH), '--cmd', 'session', 'kill', name], env=env, stdin=subprocess.DEVNULL, capture_output=True)
     OUT.parent.mkdir(parents=True, exist_ok=True)
     OUT.write_text(json.dumps([m for m in messages if m], separators=(',', ':')) + '\n')
     hello = messages[0]['scene']
-    print(f'{OUT}: hello {hello["w"]}x{hello["h"]}, {len(messages) - 1} frames, {OUT.stat().st_size} bytes')
+    copies = sum(1 for m in messages if 'regions.grid.copy' in m.get('changed', {}))
+    print(f'{OUT}: hello {hello["w"]}x{hello["h"]}, {len(messages) - 2} frames ({copies} with row copies), '
+          f'{OUT.stat().st_size} bytes')
 
 
 if __name__ == '__main__':

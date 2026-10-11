@@ -151,8 +151,12 @@ final class RecordedSceneTests: XCTestCase {
   }
 
   func testRecordedSessionReplays() throws {
-    let messages = try recorded()
+    var messages = try recorded()
     XCTAssertTrue(messages.first?.isHello == true)
+    // The last message is the hello a second connection got at the end.
+    let reference = try XCTUnwrap(messages.popLast())
+    XCTAssertTrue(reference.isHello)
+    XCTAssertTrue(messages.contains { !$0.gridCopies.isEmpty }, "scrolling sent rows that moved as copies")
     MainActor.assumeIsolated {
       let store = SceneStore()
       var sawPalette = false
@@ -175,6 +179,9 @@ final class RecordedSceneTests: XCTestCase {
       XCTAssertTrue(menus.contains { $0["label"] as? String == "File" }, "the menu model is in the scene")
       XCTAssertTrue(sawPalette, "the command palette appeared as a region")
       XCTAssertNil(store.regions["palette"] as? [String: Any], "and closed again")
+      let fresh = SceneStore()
+      fresh.apply(reference)
+      XCTAssertEqual(store.grid, fresh.grid, "the frames, copies and all, rebuilt the scene a new connection gets")
     }
   }
 }

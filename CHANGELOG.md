@@ -52,6 +52,11 @@
   too, and Fresh edits them on the server. The app talks to the same Fresh
   session over an owner-only Unix socket (the Fresh fork's new scene channel);
   the terminal interface is unchanged.
+- Fixed: trackpad scrolling in the macOS editor no longer falls behind the
+  fingers. Frames queued up behind macOS's 8 KiB socket buffer, up to 1.4 s
+  behind a fast flick; now a frame reaches the screen in about 20 ms, a scroll
+  sends only the rows that came into view, and an editor that falls behind
+  skips to the newest frame instead of playing every one.
 - **Transfer Speed** in the palette changes the speed limit while a copy runs;
   the new limit applies within the running file.
 - The application model shared by both interfaces is now its own library,

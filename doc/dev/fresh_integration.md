@@ -24,7 +24,7 @@ recovery. FC never closes a tab or writes a file on the editor's behalf.
 
 ## Pinned revision
 
-FC builds Fresh from revision `9b2f8d6593b0cdddefbc419453a6c51cc130fcfb` on
+FC builds Fresh from revision `1dedacf118f18b78681690f64874f65f4b97e2a3` on
 the `fc-editor-workflow` branch of the FC fork. Its upstream base is
 `b10f9084f5eae571e9b8dac1a0f3694384bcb53d`, which is Fresh 0.5.2 plus 40
 upstream commits; FC's integration commits sit on top. The pinned Rust
@@ -253,25 +253,33 @@ The protocol is the web front end's (`crates/fresh-editor/src/webui/mod.rs`),
 unchanged by the transport:
 
 - **Connect** with an HTTP/1.1 WebSocket upgrade, `GET /ws`, over the Unix
-  socket. Options can ride on the query: `?grid=1&menus=native&telemetry=1`.
-- **Server to client**: one `{"type":"hello","seq":0,"scene":{...}}` with the
-  whole scene, then `{"type":"frame","seq":N,"changed":{...}}` only when
-  something changed. Each changed path replaces its value: `w`, `h`, `theme`,
-  `clipboard`, `windowId`, `regions.<key>`, `regions.panes.<i>` and
+  socket. Options can ride on the query:
+  `?grid=1&menus=native&copies=1&telemetry=1`.
+- **Server to client**: one `{"type":"hello","seq":0,"scene":{...},"acks":true}`
+  with the whole scene, then `{"type":"frame","seq":N,"changed":{...}}` only
+  when something changed. Each changed path replaces its value: `w`, `h`,
+  `theme`, `clipboard`, `windowId`, `regions.<key>`, `regions.panes.<i>` and
   `regions.panes.len`, and with the grid option `regions.grid.<row>` and
-  `regions.grid.len`.
+  `regions.grid.len`. With `copies`, `regions.grid.copy` names rows the client
+  already has: `[to, from, count]` runs, rows `to..to+count` becoming its
+  previous rows `from..from+count`, applied before the rows sent in full.
 - **Client to server**: JSON text frames `{"type":...}`: `key` (browser key
   names with `ctrl`, `alt`, `meta`, `shift`), `mouse` (cell `col` and `row`),
   `action` (a Fresh action by name, with `args`), `paste`, `resize` (`cols`,
-  `rows`), `widget`, `settings`, `kbedit`, and `configure`.
-- **Options** (`configure` with `grid` and `nativeMenus`, or the query): with
-  `grid`, the frame comes as cells, chrome included, one array of styled runs
-  per row (`{t, fg, bg, b, i, u, r}`; a wide character is followed by the blank
-  cell it covers), and panes keep their geometry without cells of their own.
-  With `nativeMenus`, the frame has no menu row while no menu is open. With
-  `telemetry`, each frame carries `t`: `ack` (how many of this client's
-  messages were applied before it was built), `build_ms` and `diff_ms`,
-  `queued` (bytes of earlier frames still waiting for the socket ahead of it),
+  `rows`), `widget`, `settings`, `kbedit`, `configure`, and `applied` (`seq`,
+  the last message the client applied; see Pacing).
+- **Options** (`configure` with `grid`, `nativeMenus`, `rowCopies` and
+  `telemetry`, or the query): with `grid`, the frame comes as cells, chrome
+  included, one array of styled runs per row (`{t, fg, bg, b, i, u, r}`, with
+  only the flags that are set and only colors that aren't the default; a wide
+  character is followed by the blank cell it covers), and panes keep their
+  geometry without cells of their own. With `nativeMenus`, the frame has no
+  menu row while no menu is open. With `rowCopies` (`copies=1`), scrolled rows
+  come as copies. With `telemetry`, each frame carries `t`: `ack` (how many of
+  this client's messages were applied before it was built), `build_ms` (of it
+  `render_ms`, rendering the editor, and `grid_ms`, hashing the grid's rows)
+  and `diff_ms`, `queued` (bytes of earlier frames still waiting for the
+  socket ahead of it), `ahead` (earlier frames the client had not applied),
   `owed` (wheel lines smooth scrolling still owes) and `top` (the active
   view's top line, 0-based). Options end with the last client.
 - **Keys**: a `meta` (`⌘`) chord resolves through Fresh's `macos-gui` keymap
@@ -279,10 +287,13 @@ unchanged by the transport:
   the user's keymap keeps every other key for this client and the terminals.
 - **Pacing**: a frame answering the client's own input is pushed in the same
   pass (about 10 ms from key to frame); time-driven frames go at most every
-  40 ms. While a client is connected the loop polls every 3 ms. Every frame is
-  queued for the socket, which takes only about 8 KB at a time on macOS, so
-  large frames sent faster than the client drains them queue up (see
-  [macos_app.md](macos_app.md#editor-timing)).
+  40 ms. While a client is connected the loop polls every 3 ms. The socket
+  has 4 MiB buffers each way (macOS's 8 KiB default made frames queue up). A
+  client that reports `applied` has at most two frames unapplied: while it is
+  behind, Fresh builds nothing, and when it catches up it gets one frame with
+  the newest scene. One that stops reporting gets frames again after 500 ms;
+  one that never reports, such as a browser, gets every frame (see
+  [macos_app.md](macos_app.md#frames-and-the-app)).
 - **Sizing and liveness**: the shared grid fits the smallest viewport among
   the primary terminal and the scene clients. The server pings every 15 s and
   drops a client silent for 45 s.
