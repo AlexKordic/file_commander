@@ -228,9 +228,9 @@ if(BUILD_TESTING)
   endforeach()
   add_test(NAME fc.model.large COMMAND fc_model_tests large)
   set_tests_properties(fc.model.large PROPERTIES LABELS "extended;benchmark;model" TIMEOUT 120)
-  # The macOS app's explainers: steps, anchors, commands and coverage, checked without the app.
+  # The macOS app's explainers: steps, anchors, commands and coverage, checked without the app (it reads only the scripts and the Swift sources, so it runs on every platform).
   find_package(Python3 COMPONENTS Interpreter)
-  if(APPLE AND Python3_FOUND)
+  if(Python3_FOUND)
     add_test(NAME fc.macos.explainers COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/macos/tools/check_explainers.py")
     set_tests_properties(fc.macos.explainers PROPERTIES LABELS "unit;macos" TIMEOUT 30)
   endif()

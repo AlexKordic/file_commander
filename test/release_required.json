@@ -17,7 +17,8 @@
     "fc.remote.filesystem",
     "fc.remote.transfers",
     "fc.remote.panels",
-    "fc.extended.ssh_editor"
+    "fc.extended.ssh_editor",
+    "fc.macos.explainers"
   ],
   "groups": {
     "recovery": [
@@ -101,6 +102,14 @@
       "damaged",
       "limits",
       "create"
+    ],
+    "model": [
+      "panes",
+      "commands",
+      "rate",
+      "engine",
+      "editor",
+      "large"
     ]
   },
   "manual": [
