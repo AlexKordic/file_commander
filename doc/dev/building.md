@@ -15,7 +15,7 @@ inotify on Linux for directory notifications. Windows is not supported.
 | C++20 compiler whose standard library has `std::format` | FC itself. |
 | CMake 3.21 or later | The presets in `CMakePresets.json`. Plain `cmake -S . -B` configuration works from 3.19. |
 | Ninja | The generator used by every preset. |
-| Make and a C compiler | LuaJIT and 7-Zip's archive library (`7z.so`) and `7zr` are built with their own makefiles. |
+| Make and a C compiler | LuaJIT and 7-Zip's archive library (`7z.so`) are built with their own makefiles. |
 | Git | Dependency bootstrap, dependency validation and the LuaJIT version stamp. |
 | Python 3.12 or later | Bootstrap, the dependency check that runs at configure and build time, and every test driver. |
 | Cargo, with the Rust toolchain from Fresh's `rust-toolchain.toml` (currently 1.95) | Builds the bundled Fresh editor. rustup selects this toolchain when Cargo runs in the Fresh checkout; install it with `rustup toolchain install 1.95` if it is missing. |
@@ -63,7 +63,6 @@ The build produces:
 | `build-release/fc` | The FC executable. |
 | `build-release/third_party/fresh/bin/fresh` | Fresh, copied from Cargo's output in the Fresh checkout's `target/fc-release/`. |
 | `build-release/third_party/7zip/_o/7z.so` | 7-Zip's archive library, which `fc` loads at run time. |
-| `build-release/third_party/lzma/_o/7zr` | The 7z command-line tool used for archives. |
 | `build-release/fc_*_tests`, `build-release/fc_render_benchmarks` | Test executables (the presets enable `BUILD_TESTING`). |
 | `build-release/compile_commands.json` | Compile commands for clangd and similar tools. |
 
@@ -73,11 +72,9 @@ To check the build, run the fast tests:
 python3 tools/run_test_lane.py fast --build build-release
 ```
 
-### How fc finds Fresh and 7zr
+### How fc finds Fresh and 7-Zip
 
-There is no install step: FC defines no install rules, so `cmake --install`
-does nothing useful. Instead, CMake compiles the absolute paths of the
-build-tree Fresh and 7zr into `fc` as defaults.
+There is no install step: FC defines no install rules, so `cmake --install` does nothing useful. Instead, CMake compiles the absolute paths of the build-tree Fresh and `7z.so` into `fc` as defaults.
 
 FC looks for the editor in this order:
 
@@ -88,26 +85,24 @@ FC looks for the editor in this order:
 4. The build-tree Fresh, or `fresh` on `PATH` if this build did not build
    Fresh.
 
-For archives, FC uses `7zr` from its own directory if present, then the
-build-tree `7zr`, or `7zr` on `PATH` if this build did not build it.
+For archives, FC loads 7-Zip's library `7z.so` from its own directory if present, then from `../lib/file-commander/` beside it, then the build tree's. The library must be the 7-Zip version FC was built against (26.04); otherwise archives are unavailable, and opening one says why.
 
 FC resolves its own directory through symlinks, and resolves relative override
 paths against that directory rather than the current one. So
 `build-release/fc` works in place, a symlink to it works, and a copy works as
-long as the build tree still exists. The [release package](#release-packages)
-puts all three executables in one `bin/` directory.
+long as the build tree still exists. The [release package](#release-packages) puts `fc` and `fresh` in `bin/` and `7z.so` in `lib/file-commander/`.
 
 ## Presets
 
 | Configure preset | Build directory | Build type | Builds |
 | --- | --- | --- | --- |
-| `native` | `build-native` | Debug | Everything, including FTXUI, LuaJIT, Fresh and 7zr. |
-| `core` | `build-core` | Debug | `fc_core` and its tests only (`FC_CORE_ONLY=ON`). |
+| `native` | `build-native` | Debug | Everything, including FTXUI, LuaJIT, Fresh and `7z.so`. |
+| `core` | `build-core` | Debug | `fc_core`, `7z.so` and their tests only (`FC_CORE_ONLY=ON`). |
 | `release` | `build-release` | Release | Everything, with the slow dependency rebuild test enabled (`FC_TEST_DEPENDENCY_REBUILDS=ON`). |
 | `asan-ubsan` | `build-asan-ubsan` | Debug | `core` with AddressSanitizer and UndefinedBehaviorSanitizer. |
 | `ubsan` | `build-ubsan` | Debug | `core` with UndefinedBehaviorSanitizer. |
 | `tsan` | `build-tsan` | Debug | `core` with ThreadSanitizer. |
-| `macos-app` | `build-macos` | Release | The macOS app's engine (`fc_engine_bundle`), `fc`, `fresh`, `7zr` and `fc_model_tests`, for macOS 14 and later. `macos/build_app.sh` configures and builds it, then the app; see [macos_app.md](macos_app.md#build). |
+| `macos-app` | `build-macos` | Release | The macOS app's engine (`fc_engine_bundle`), `fc`, `fresh`, `7z.so` and `fc_model_tests`, for macOS 14 and later. `macos/build_app.sh` configures and builds it, then the app; see [macos_app.md](macos_app.md#build). |
 
 Every configure preset uses Ninja and sets `BUILD_TESTING=ON`. Each has a
 build preset of the same name that runs 6 jobs, and a test preset of the same
@@ -169,7 +164,7 @@ those exact revisions, never moving branch tips.
 | FTXUI | FC's fork | Git revision | Added as a CMake subdirectory. |
 | LuaJIT | Upstream | Git revision | Copied into the build tree and built there as a static library with `make`, so the checkout stays clean. |
 | Fresh | Upstream plus FC's changes in `dependencies/fresh-fc.bundle` | Git revision and bundle SHA-256 | `cargo build --locked --features web` with FC's `fc-release` profile (Fresh's release profile at `opt-level` 3; see [fresh_integration.md](fresh_integration.md#building-and-packaging)) in the Fresh checkout, then copied into the build tree. The feature gives the macOS app's native editor its channel. |
-| 7-Zip 26.04 | Source tarball in `dependencies/7zip-26.04-src.tar.xz` | Archive SHA-256 and a fingerprint of the source files | 7-Zip's `makefile.gcc`: `Bundles/Format7zF` with `DISABLE_RAR=1` builds `7z.so`, and `Bundles/Alone7z` builds `7zr`, with objects in the build tree. |
+| 7-Zip 26.04 | Source tarball in `dependencies/7zip-26.04-src.tar.xz` | Archive SHA-256 and a fingerprint of the source files | 7-Zip's `makefile.gcc`: `Bundles/Format7zF` with `DISABLE_RAR=1` builds `7z.so`, with objects in the build tree. |
 
 How FC drives Fresh at run time is in
 [fresh_integration.md](fresh_integration.md).
@@ -233,7 +228,7 @@ refuses it.
 
 ### Building without Fresh or 7-Zip
 
-`-DFC_BUILD_FRESH=OFF` and `-DFC_BUILD_SEVENZIP=OFF` skip those builds and their validation. FC then looks for `fresh` or `7zr` next to `fc` and then on `PATH`, and for `7z.so` next to `fc` or in `../lib/file-commander/`. Tests that need the real tool are not registered or skip, and the release lane requires both options to be `ON`.
+`-DFC_BUILD_FRESH=OFF` and `-DFC_BUILD_SEVENZIP=OFF` skip those builds and their validation. FC then looks for `fresh` next to `fc` and then on `PATH`, and for `7z.so` next to `fc` or in `../lib/file-commander/`. Tests that need the real tool are not registered or skip, and the release lane requires both options to be `ON`.
 
 ### Boost archive
 
@@ -293,16 +288,13 @@ cmake --build build-release --target package_dist
 This writes `build-release/dist/fc-<system>-<processor>.tar.gz`, for example
 `fc-Darwin-arm64.tar.gz` or `fc-Linux-x86_64.tar.gz`, next to an unpacked
 copy. The name comes from CMake's system name and processor, so 64-bit Arm
-Linux gives `fc-Linux-aarch64`. The `fc.package_build` test runs the same
-target and then checks that the archive's `fc`, `fresh` and `7zr` have the
-same SHA-256 as the build outputs and that the required license files are
-present.
+Linux gives `fc-Linux-aarch64`. The `fc.package_build` test runs the same target and then checks that the archive's `fc`, `fresh` and `7z.so` have the same SHA-256 as the build outputs and that the required license files are present.
 
 | Path in the archive | Contents |
 | --- | --- |
 | `bin/fc` | FC. |
 | `bin/fresh` | Fresh, when this build built it. |
-| `bin/7zr` | 7zr, when this build built it. |
+| `lib/file-commander/7z.so` | 7-Zip's archive library, when this build built it. |
 | `README.md` | FC's README. |
 | `share/licenses/file-commander/LICENSE` | FC's MIT license. |
 | `share/licenses/boost/`, `ftxui/`, `luajit/`, `7zip/` | Dependency licenses, copied from `licenses/`. |
@@ -311,11 +303,7 @@ present.
 | `share/file-commander/dependencies.json` | The pinned dependency revisions. |
 | `share/file-commander/fresh-fc.bundle`, `share/file-commander/README.md` | FC's Fresh changes and the dependency README that explains how to rebuild Fresh's source from them. Present when Fresh was built. |
 
-The package is relocatable: unpack it anywhere and run `bin/fc`. FC finds
-`fresh` and `7zr` next to itself. The manual `fc.package` test checks this: it
-unpacks the archive in a temporary directory, creates and extracts a real 7z
-archive and runs the bundled Fresh, while reads of the source tree and
-dependency checkouts are denied.
+The package is relocatable: unpack it anywhere and run `bin/fc`. FC finds `fresh` next to itself and `7z.so` in `../lib/file-commander/`. The manual `fc.package` test checks this: it unpacks the archive in a temporary directory, creates a real 7z archive and copies its contents back out, and runs the bundled Fresh, while reads of the source tree, the build tree and dependency checkouts are denied.
 
 Linux packages are built natively on the Linux system they are for, with its compiler and glibc, and link dynamically. A package runs on that distribution and on systems with the same or a newer glibc.
 

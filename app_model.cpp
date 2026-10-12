@@ -245,7 +245,6 @@ std::vector<std::string> AppModel::palette(const std::string& query) {
 
 void AppModel::add_bookmark(const Filepath& path) {
   auto location = Location::decode(path.native());
-  if (!location.read_only() && !location.remote()) location = archive_service().logical_location(location.local);
   if (std::find(_bookmarks.begin(), _bookmarks.end(), location) != _bookmarks.end()) return;
   _bookmarks.push_back(std::move(location));
   std::sort(_bookmarks.begin(), _bookmarks.end(), [](const auto& a, const auto& b) { return a.display() < b.display(); });

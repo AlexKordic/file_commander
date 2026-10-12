@@ -30,11 +30,11 @@ issues commands. Slow work never runs on the UI thread.
 |                 3 s rescan thread for SSH tabs                             |
 | timer           ScheduledUpdates (fc run only)                             |
 +------+------------------------------+-------------------------------+------+
-       | posix_spawn /bin/sh -c       | posix_spawnp ssh              | fork
+       | posix_spawn /bin/sh -c       | posix_spawnp ssh              | dlopen
        v                              v                               v
-  fresh: separate GPL program    ssh -T host python3 -c ...       7zr x / 7zr a
-  with its own backend           remote_agent.py, two channels    (extract,
-                                 per host (listing, bulk)          create)
+  fresh: separate GPL program    ssh -T host python3 -c ...       7z.so: 7-Zip's
+  with its own backend           remote_agent.py, two channels    archive library,
+                                 per host (listing, bulk)          in-process
 ```
 
 The loop in `main.cpp` is: drain `UiDispatcher`, run one FTXUI pass
@@ -71,7 +71,7 @@ not directories, defines the boundaries. Dependencies point one way only:
 The UI-free core is the boundary that matters. `fc_model` holds what both
 interfaces need above it; FTXUI-dependent orchestration stays in `fc_ui`, and
 the macOS app (`macos/`) is a second observer of `fc_model`. Configure also embeds
-`remote_agent.py` and `fc_framework.lua` into generated headers, builds `fresh` (Cargo), 7-Zip's archive library `7z.so` and `7zr` (7-Zip's makefiles) as side targets, and bakes their paths in as defaults. The Boost.Filesystem changes (cancellable, throttled, staged
+`remote_agent.py` and `fc_framework.lua` into generated headers, builds `fresh` (Cargo) and 7-Zip's archive library `7z.so` (7-Zip's makefile) as side targets, and bakes their paths in as defaults. The Boost.Filesystem changes (cancellable, throttled, staged
 `copy_file`) are described in [../../boost/changes.md](../../boost/changes.md).
 
 | Test executable | Links | CTest names |
@@ -97,13 +97,14 @@ binary in PTYs for the remaining suites; see [testing.md](testing.md).
 
 | Type | File | Role |
 | --- | --- | --- |
-| `Location` | `location.hpp` | Durable identity of a place: a local path, an archive chain plus internal path, or an SSH target plus absolute path. Encoded as a plain path, `fc-archive:<outer>!<nested>!<internal>` or `fc-ssh:<target>:<path>` (percent-escaped). SSH paths travel as a `Filepath` holding the encoded string; test them with `is_remote()`. |
+| `Location` | `location.hpp` | Durable identity of a place: a local path, an archive chain plus internal path, or an SSH target plus absolute path. Encoded as a plain path, `fc-archive:<outer>!<nested>!/<internal>` or `fc-ssh:<target>:<path>`; the archive chain and the SSH target are percent-escaped, and an archive's internal path follows `!/` as is, so `/`, `parent_path()` and `filename()` work inside an archive. SSH and archive paths travel as a `Filepath` holding the encoded string; test them with `is_remote()`, `is_archive_path()` or `is_virtual_path()`. |
 | `DirItem`, `Dir`, `DirectorySnapshot`, `PanelViewState` | `commander.hpp` | One entry, a panel listing, an immutable loader result, and the view preferences (sort, filter) that survive publication. |
 | `OperationPlan`, `Operation` | `operation.hpp` | Immutable typed steps (copy file, create directory or symlink, move, delete, rename, ...). Executors interpret only these. |
 | `CopyPlanner` | `copy_planner.hpp` | Builds a copy/move plan on its own thread using `traverse()`. |
 | `JobSpec`, `JobSnapshot`, `FileJobs` | `file_io_jobs.hpp` | A submitted job, a frame-safe copy of its state, and the job manager interface (`file_operations()` is the process instance). |
 | `TransferJournal` | `transfer_journal.hpp` | Per-job plan and progress records used for crash recovery. |
-| `ArchiveService`, `ArchiveLease` | `archive.hpp` | Extraction cache and archive creation; a lease keeps one extraction root alive. |
+| `ArchiveFS`, `create_archive` | `archive.hpp` | Archives as a read-only filesystem: `inspect`, `list` and a batched `extract` over `fc-archive:` paths, backed by a small cache of open archives; and `.7z` creation. |
+| `SevenZip::Archive`, `SevenZip::create` | `sevenzip.hpp` | 7-Zip's archive library, `7z.so`, loaded with `dlopen`: an archive's entries, extraction of chosen entries to chosen files, new archives. Only `sevenzip.cpp` sees 7-Zip's COM-style types. |
 | `RemoteFS` | `remote_fs.hpp` | SSH filesystem calls, one function per agent method. |
 | `Commands`, `KeyBindings` | `commands.hpp`, `theme.hpp` | Command catalog (stable IDs, scope, dialog, description) and the key bound to each. |
 | `FileCommander`, `Panel`, `DialogOverlay` | `app.hpp` | Application root, one side of the two-panel layout, and the overlay mechanism both use. |
@@ -129,10 +130,8 @@ binary in PTYs for the remaining suites; see [testing.md](testing.md).
 3. **One owner per state category.** Filesystem facts arrive as snapshots or
    deltas published into `Dir`; view preferences stay in `PanelViewState` and
    `PanelSharedState`; execution state lives in `ThreadedFileJobs`; disk state
-   goes through `SettingsStore`/`WorkspaceStore`; extraction roots belong to
-   `ArchiveService` leases. Observers read copies such as `JobSnapshot`.
-4. **No filesystem I/O on the UI thread.** Listings and archive extraction run
-   on the panel loader; traversals run on planner or Find threads; even mkdir,
+   goes through `SettingsStore`/`WorkspaceStore`; open archives belong to `ArchiveFS`. Observers read copies such as `JobSnapshot`.
+4. **No filesystem I/O on the UI thread.** Listings, archives included, run on the panel loader; traversals run on planner or Find threads; even mkdir,
    rename and clipboard run as jobs and report back. *Enforced by `Panel`,
    `Dialog::submit`.*
 5. **Workers never prompt.** The conflict policy (Replace, Update, Skip) is
@@ -144,8 +143,7 @@ binary in PTYs for the remaining suites; see [testing.md](testing.md).
    (replace) or `link` (no replace). Cross-device moves stage `.fc-move-*`,
    copy and verify metadata, commit, then remove the source. Archive creation
    uses `.fc-archive-*`; SSH copies also verify SHA-256. Cancellation removes
-   only owned staging, never an existing destination. *Enforced by the patched
-   `copy_file`, `move_by_copy`, `ArchiveService::create_archive`, `run_remote`.*
+   only owned staging, never an existing destination. A copy out of an archive extracts each file into its own `.fc-copy-*/data` and commits it the same way. *Enforced by the patched `copy_file`, `move_by_copy`, `create_archive`, `run_remote`, `run_archive_copy`.*
 7. **Link semantics are chosen per operation.** Listings use `symlink_status`
    and keep dangling or cyclic links visible. Delete never descends through a
    link and removes children first. Copy keeps relative link text, makes other
@@ -157,12 +155,7 @@ binary in PTYs for the remaining suites; see [testing.md](testing.md).
    depth 1,024; Find uses 100,000. Hitting a budget sets `truncated` and
    records an error instead of continuing silently. *Enforced by
    `traversal.cpp`.*
-9. **Archives are read-only; leases pin extractions.** Mutations inside an
-   extraction are rejected in the UI (`archive_mutation_error`) and again in
-   the worker (`validate_mutation_paths`). Each extraction gets a private
-   random root. Cache identity is device, inode, size and nanosecond
-   mtime/ctime, rechecked after extraction; it is not a content hash. Limits
-   (16 roots, 256 MiB) are soft: only roots without outside leases are evicted.
+9. **Archives are read-only and never extracted to be browsed.** Listing an archive reads its index; copying out extracts only the files copied, in one pass per archive. Mutations of `fc-archive:` paths are rejected in the UI (`archive_mutation_error`) and again in the worker (`validate_mutation_paths`). An open archive is reused while its file's device, inode, size and nanosecond mtime/ctime are unchanged; it is not a content hash. At most 16 archives stay open; ones in use are never closed. A nested archive is read from a private copy of its entry. *Enforced by `ArchiveFS` and `run_archive_copy`.*
 10. **One serial job worker, by design, and pause holds it.** Jobs run one at a
     time from a bounded queue. Pause blocks the worker on `JobSpec::_pause_cv`
     at item boundaries and inside the file data loop, so queued jobs wait.
@@ -210,9 +203,7 @@ The profile directory is `$XDG_CONFIG_HOME/file_commander`, or
 `fc run` skips the lock, settings, workspace and transfer journals; tests
 isolate the profile by setting `XDG_CONFIG_HOME`.
 
-Outside the profile: extractions live in
-`$TMPDIR/file_commander_archive_cache/extract-*` (owner-only, removed when
-the last lease drops); SSH control sockets in the private
+Outside the profile: private copies of nested archives live in `$TMPDIR/file_commander_archive_cache/nested-*` (owner-only, removed when the nested archive closes); SSH control sockets in the private
 `/tmp/fcmd-ssh-<uid>/`; staging directories beside destinations as described
 in rule 6.
 
@@ -287,7 +278,7 @@ constructor under a name, and open it through a command (below).
 - **Tool path lookup is executable-relative.** `fresh_binary_path` and
   `FC_FRESH_BIN` values containing a slash but not starting with one resolve
   against the directory of `fc`, not the caller's working directory. Without an
-  override, a `fresh` or `7zr` next to `fc` wins over the build-time path.
+  override, a `fresh` next to `fc` wins over the build-time path, and so does a `7z.so` next to `fc` or in `../lib/file-commander/`.
 - **Blocking system calls are not interruptible.** A hung directory read keeps
   that panel's loader busy; newer requests wait behind it.
 - **Preferences are saved only on graceful exit.** A crash keeps the 500 ms

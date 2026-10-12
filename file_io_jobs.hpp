@@ -97,7 +97,6 @@ struct JobInterface {
 // Specifies single operation to be performed on a set of files.
 // Operation steps are defined in advance and FileJobs will execute them in order
 struct JobSpec : JobInstructions, JobStats, JobInterface {
-  std::vector<ArchiveLease> _archive_leases;
   uint64_t           _job_id = 0;
   std::shared_ptr<TransferJournal> _journal;
   std::atomic<bool> _recovery_waiting{false};
@@ -165,7 +164,6 @@ struct JobRetention {
 };
 
 struct FileJobServices {
-  ArchiveService* archives = nullptr;
   std::shared_ptr<const boost::filesystem::copy_file_io_hooks> file_io;
   std::function<Err(const std::string&)> clipboard = push_to_clipboard;
 };

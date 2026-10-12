@@ -68,10 +68,7 @@ The bootstrap script downloads the exact dependency versions FC is tested with
 (listed in [`dependencies.json`](dependencies.json)) into `build-deps/`. The
 first build also downloads Boost and Rust crates, so it needs network access.
 
-There is no install step yet. Run `build-release/fc` directly, or symlink it into
-a directory on your `PATH`. To move FC to another machine, build the
-self-contained package (`fc`, `fresh`, `7zr` and the license notices) described
-in [building FC](doc/dev/building.md).
+There is no install step yet. Run `build-release/fc` directly, or symlink it into a directory on your `PATH`. To move FC to another machine, build the self-contained package (`fc`, `fresh`, 7-Zip's `7z.so` and the license notices) described in [building FC](doc/dev/building.md).
 
 More build options, such as debug and sanitizer builds or using local
 dependency checkouts, are in [building FC](doc/dev/building.md).

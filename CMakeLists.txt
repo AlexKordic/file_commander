@@ -88,9 +88,7 @@ target_include_directories(fc_core PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/generate
 target_link_libraries(fc_core PUBLIC Boost::filesystem Boost::json Threads::Threads ${CMAKE_DL_LIBS})
 
 # 7-Zip's archive library, 7z.so, built with its own makefile from the pinned
-# source and loaded by fc at run time (sevenzip.cpp); RAR is left out. 7zr is
-# built from the same source until on-demand browsing replaces it.
-set(_fc_archive_default_bin "7zr")
+# source and loaded by fc at run time (sevenzip.cpp); RAR is left out.
 set(_fc_sevenzip_lib "")
 if(FC_BUILD_SEVENZIP)
   set(_sevenzip_bundles "${FC_SEVENZIP_SOURCE_DIR}/CPP/7zip/Bundles")
@@ -126,26 +124,11 @@ if(FC_BUILD_SEVENZIP)
     )
     add_custom_target(sevenzip_lib ALL DEPENDS "${_fc_sevenzip_lib}")
     add_dependencies(fc_core sevenzip_lib)
-    set(_lzma_obj_dir "${CMAKE_BINARY_DIR}/third_party/lzma/_o")
-    set(_lzma_bin "${_lzma_obj_dir}/7zr")
-    add_custom_command(
-      OUTPUT "${_lzma_bin}"
-      COMMAND ${CMAKE_COMMAND} -E remove_directory "${_lzma_obj_dir}"
-      COMMAND ${CMAKE_COMMAND} -E make_directory "${_lzma_obj_dir}"
-      COMMAND ${CMAKE_COMMAND} -E env ${_sevenzip_env} make -f makefile.gcc O="${_lzma_obj_dir}" -C "${_sevenzip_bundles}/Alone7z"
-      DEPENDS ${_sevenzip_inputs}
-      WORKING_DIRECTORY "${_sevenzip_bundles}/Alone7z"
-      COMMENT "Building 7zr from the pinned 7-Zip source"
-      VERBATIM
-    )
-    add_custom_target(lzma_7zr ALL DEPENDS "${_lzma_bin}")
-    add_dependencies(fc_core lzma_7zr)
-    set(_fc_archive_default_bin "${_lzma_bin}")
   else()
     message(WARNING "FC_BUILD_SEVENZIP=ON but the 7-Zip source is missing at: ${FC_SEVENZIP_SOURCE_DIR}. Archives will need a 7z.so next to fc.")
   endif()
 endif()
-target_compile_definitions(fc_core PRIVATE FC_ARCHIVE_TOOL_DEFAULT="${_fc_archive_default_bin}" FC_SEVENZIP_LIB_DEFAULT="${_fc_sevenzip_lib}")
+target_compile_definitions(fc_core PRIVATE FC_SEVENZIP_LIB_DEFAULT="${_fc_sevenzip_lib}")
 # sevenzip.cpp includes 7-Zip's interface headers, and nothing else from the source.
 target_include_directories(fc_core SYSTEM PRIVATE "${FC_SEVENZIP_SOURCE_DIR}")
 if(BUILD_TESTING)
@@ -197,6 +180,12 @@ if(BUILD_TESTING)
   foreach(_case load seven solid formats failures)
     add_test(NAME fc.sevenzip.${_case} COMMAND fc_sevenzip_tests ${_case})
     set_tests_properties(fc.sevenzip.${_case} PROPERTIES LABELS "core;unit;archive" TIMEOUT 60)
+  endforeach()
+  add_executable(fc_archive_tests test/archive_contracts.cpp)
+  target_link_libraries(fc_archive_tests PRIVATE fc_core)
+  foreach(_case browse copy cancel nested)
+    add_test(NAME fc.archive.${_case} COMMAND fc_archive_tests ${_case})
+    set_tests_properties(fc.archive.${_case} PROPERTIES LABELS "core;unit;archive" TIMEOUT 120)
   endforeach()
   add_executable(fc_core_tests test/core_operations.cpp)
   target_link_libraries(fc_core_tests PRIVATE fc_core)
@@ -437,7 +426,7 @@ add_custom_target(package_dist
     -DFC_DIST_ROOT=${_fc_dist_root}
     -DFC_DIST_NAME=${_fc_dist_name}
     -DFC_DIST_FRESH=${_fc_fresh_default_bin}
-    -DFC_DIST_ARCHIVE=${_fc_archive_default_bin}
+    -DFC_DIST_SEVENZIP=${_fc_sevenzip_lib}
     -P "${_fc_pack_script}"
   COMMENT "Creating self-contained distribution tarball"
   VERBATIM

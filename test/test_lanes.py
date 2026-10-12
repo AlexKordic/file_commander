@@ -78,7 +78,7 @@ else:
     system = build / 'CMakeFiles/3.30.0/CMakeSystem.cmake'
     system.parent.mkdir(parents=True)
     system.write_text(f'set(CMAKE_SYSTEM_NAME "{platform.system()}")\nset(CMAKE_SYSTEM_PROCESSOR "{platform.machine()}")\nset(CMAKE_CROSSCOMPILING "FALSE")\n')
-    binaries = {'fc': build / 'fc', 'fresh': build / 'third_party/fresh/bin/fresh', '7zr': build / 'third_party/lzma/_o/7zr'}
+    binaries = {'bin/fc': build / 'fc', 'bin/fresh': build / 'third_party/fresh/bin/fresh', 'lib/file-commander/7z.so': build / 'third_party/7zip/_o/7z.so'}
     for path in binaries.values():
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(b'fixture executable')
@@ -104,9 +104,9 @@ else:
                 member.size = len(data); member.mode = 0o644
                 package.addfile(member, io.BytesIO(data))
             for name, path in binaries.items():
-                if missing and name == '7zr': continue
+                if missing and name == 'lib/file-commander/7z.so': continue
                 data = b'old executable' if stale else path.read_bytes()
-                member = tarfile.TarInfo(f'{package_name}/bin/{name}')
+                member = tarfile.TarInfo(f'{package_name}/{name}')
                 member.size = len(data); member.mode = 0o755
                 package.addfile(member, io.BytesIO(data))
     make_package()
@@ -195,7 +195,7 @@ raise SystemExit(97)
     make_package(missing_notice=True); run_package(valid=False)
     archive.write_bytes(b'invalid archive'); run_package(valid=False)
     archive.unlink(); run_package(valid=False); make_package()
-    binaries['fresh'].chmod(0o600); run_package(valid=False); binaries['fresh'].chmod(0o700)
+    binaries['bin/fresh'].chmod(0o600); run_package(valid=False); binaries['bin/fresh'].chmod(0o700)
     smoke_marker.unlink(missing_ok=True)
     result = subprocess.run([*package_command, '--build-only'], env=package_env,
                             capture_output=True, text=True, timeout=5)

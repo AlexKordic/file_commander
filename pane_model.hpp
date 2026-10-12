@@ -29,7 +29,6 @@ class PaneModel {
     int                          cursor = 0;  // Index into dir.items.
     std::string                  filter;
     bool                         permissions = false, owner_group = false;
-    std::vector<ResolvedArchive> archive_stack;
     std::optional<TabWorkspace>  restore;
     std::string                  remote_error;
     bool                         tutorial = false;  // Opened by an explainer; closed when it ends.
@@ -104,14 +103,12 @@ class PaneModel {
   void           restore_workspace(const PanelWorkspace&);
 
  private:
-  void load_directory(Filepath where, bool archive, bool recover, Filepath focus = {}, bool background_refresh = false);
+  void load_directory(Filepath where, bool recover, Filepath focus = {}, bool background_refresh = false);
   void load_active_tab();
   void load_delta(UpdatedFiles batch);
   void apply_changes(UpdatedFiles batch);
   void start_watcher(const Filepath& where);
   void restore_cursor(const Filepath& focused_before, int index_before);
-  void prune_archive_stack(const Filepath& path);
-  bool leave_virtual_dir();
   void changed() { ++_revision; ++_content_revision; _visible_dirty = true; }
 
   Post                               _post;

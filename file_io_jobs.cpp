@@ -404,8 +404,7 @@ class ThreadedFileJobs : public FileJobs {
   void set_event_sink(EventSink sink) override {std::lock_guard lock(_updates->mutex);_updates->event=sink?std::move(sink):[](auto,auto,auto) {};}
   JobRetention _limits;
   FileJobServices _services;
-  ArchiveService& _archives;
-  explicit ThreadedFileJobs(JobRetention limits = {},FileJobServices services = {}) : _limits(limits), _services(std::move(services)), _archives(_services.archives?*_services.archives:archive_service()), _queue(std::max(size_t{1},limits.pending_count)) {
+  explicit ThreadedFileJobs(JobRetention limits = {},FileJobServices services = {}) : _limits(limits), _services(std::move(services)), _queue(std::max(size_t{1},limits.pending_count)) {
     _thread = std::thread([this]() { this->run(); });
   }
   ~ThreadedFileJobs() override { shutdown(); }
@@ -426,11 +425,12 @@ class ThreadedFileJobs : public FileJobs {
     });
   }
   uint64_t add_job(std::shared_ptr<JobSpec> job) override {
-    for(const auto& op:job->_plan->steps) if(auto lease=_archives.lease_for_path(op.source)) job->_archive_leases.push_back(std::move(lease));
     uint64_t id    = _next_job_id.fetch_add(1);
     job->_job_id   = id;
     job->_queued_time = now();
-    try { if (!_journal_directory.empty()) job->_journal = TransferJournal::create(_journal_directory, *job); }
+    // Copies out of an archive keep no journal: after a crash they are simply extracted again.
+    const bool from_archive = std::any_of(job->_plan->steps.begin(), job->_plan->steps.end(), [](const auto& op) { return is_archive_path(op.source); });
+    try { if (!_journal_directory.empty() && !from_archive) job->_journal = TransferJournal::create(_journal_directory, *job); }
     catch (const std::exception& e) { report_error("[Transfer journal] " + std::string(e.what())); return 0; }
     bind_updates(job);
     { std::lock_guard lock(_m); _jobs_by_id[id]=job; }
@@ -652,7 +652,6 @@ class ThreadedFileJobs : public FileJobs {
     for(auto it=_job_history.rbegin();it!=_job_history.rend();++it) {
       auto& job=**it; std::lock_guard lock(job._m);
       if (!job.is_stopped()) continue;
-      job._archive_leases.clear(); // Execution is complete; details only contain display paths.
       if(job._details_expired) continue;
       size_t cost=(job._items.capacity()+job._errors.capacity())*sizeof(DirItem);
       auto measure=[&](const auto& items) {for(const auto& item:items) cost+=item.path_ref().native().size()+item.filename_ref().size()+item.symlink_ref().value_or(Filepath()).native().size()+item.warning_ref().value_or("").size();};
@@ -670,7 +669,7 @@ class ThreadedFileJobs : public FileJobs {
       if(op.kind==Operation::Kind::MoveEntry || op.kind==Operation::Kind::RenameEntry || op.kind==Operation::Kind::DeleteEntry) paths.push_back(op.source);
       if(!op.destination.empty()) paths.push_back(op.destination);
       for(const auto& path:paths) {
-        auto error=_archives.is_cached_path(path)?"Archive contents are read-only; copy files out before editing: "+path.native():std::string();if(error.empty())continue;
+        auto error=archive_mutation_error(path);if(error.empty())continue;
         report_error(error);std::lock_guard lock(job->_m);job->report_error(operation_display(op),error);
         job->_items_done=job->_items.size();job->_items_failed=job->_items_done;return false;
       }
@@ -706,6 +705,9 @@ class ThreadedFileJobs : public FileJobs {
         _active_job->_state = JobState::CANCELLED;
       } else if (validate_mutation_paths(_active_job.get())) {
         if (std::any_of(_active_job->_plan->steps.begin(), _active_job->_plan->steps.end(),
+                        [](const auto &op) { return is_archive_path(op.source); }))
+          run_archive_copy(_active_job.get());
+        else if (std::any_of(_active_job->_plan->steps.begin(), _active_job->_plan->steps.end(),
                         [](const auto &op) { return is_remote(op.source) || is_remote(op.destination); }))
           run_remote(_active_job.get());
         else
@@ -801,6 +803,189 @@ class ThreadedFileJobs : public FileJobs {
       DirItem item(e.path); update.file_found(std::max(int64_t{0},item.size()),job); files.push(std::move(item));
     };
     traverse(roots,{},cb);
+  }
+
+  // Copies out of an archive. Folders and links are made as run_copy makes them. Files are extracted in one pass per archive, each into a private staging file next to its destination, then committed as copies are: replacing, or for Skip, never replacing.
+  // An archived entry's permissions, or the usual ones when the step carries none.
+  static boost::filesystem::perms archived_mode(boost::filesystem::perms stored, bool directory) {
+    using namespace boost::filesystem;
+    const auto mode = stored & perms_mask;
+    if (mode != no_perms) return mode;
+    return owner_read | owner_write | group_read | others_read | (directory ? owner_exe | group_exe | others_exe : no_perms);
+  }
+  void run_archive_copy(JobSpec* job) {
+    if (job->_type != OperationType::COPY)
+      throw std::runtime_error("Archive contents are read-only; copy files out of the archive instead");
+    struct Pending {
+      size_t index;
+      Filepath stage_root;
+      Operation op;
+    };
+    std::vector<Pending> pending;
+    std::vector<Operation> directories;
+    auto finish = [&](size_t index, const DirItem& item, const std::string& failure, bool skipped) {
+      std::lock_guard lock(job->_m);
+      if (!failure.empty()) {
+        job->report_error(item, failure);
+        ++job->_items_failed;
+      }
+      if (skipped) {
+        ++job->_items_skipped;
+        job->_bytes_total = std::max(0.0, job->_bytes_total - double(std::max(int64_t{0}, item.size())));
+      }
+      ++job->_items_done;
+      job->_current_item_index = int(index + 1);
+      job->_total.update(int64_t(job->_bytes_processed), int64_t(job->_bytes_total));
+    };
+    auto remove_stage = [](const Filepath& root) {
+      error_code ignored;
+      boost::filesystem::remove_all(root, ignored);
+    };
+    for (size_t index = 0; index < job->_plan->steps.size(); ++index) {
+      if (job->_cancel_requested.load() || !wait_for_resume(job)) {
+        for (auto& p : pending) remove_stage(p.stage_root);
+        std::lock_guard lock(job->_m);
+        job->_state = JobState::CANCELLED;
+        return;
+      }
+      const auto& op = job->_plan->steps[index];
+      const auto item = operation_display(op);
+      if (is_virtual_path(op.destination)) {
+        finish(index, item, "Copy archive contents to a local folder", false);
+        continue;
+      }
+      if (op.kind == Operation::Kind::DiscoveryFailure) {
+        report_error("[Discovery] " + item.path_ref().native() + ": " + op.message);
+        finish(index, item, op.message, false);
+        continue;
+      }
+      if (op.kind == Operation::Kind::CreateDirectory) {
+        error_code ec;
+        boost::filesystem::create_directory(op.destination, ec);
+        if (ec && !boost::filesystem::is_directory(op.destination)) {
+          finish(index, item, "Failed to create directory: " + ec.message(), false);
+          continue;
+        }
+        directories.push_back(op);
+        finish(index, item, {}, false);
+        continue;
+      }
+      if (op.kind == Operation::Kind::CreateSymlink) {
+        error_code ec;
+        const auto present = boost::filesystem::symlink_status(op.destination, ec);
+        const bool exists = !ec && boost::filesystem::exists(present);
+        ec.clear();
+        if (exists && (job->_copy_conflict == CopyConflictMode::Skip ||
+                       (job->_copy_conflict == CopyConflictMode::Update && op.modified <= DirItem(op.destination).write_time()))) {
+          finish(index, item, {}, true);
+          continue;
+        }
+        const auto temporary = op.destination.parent_path() / boost::filesystem::unique_path(".fc-link-%%%%-%%%%-%%%%");
+        boost::filesystem::create_symlink(op.link_text, temporary, ec);
+        if (!ec) {
+          if (job->_copy_conflict == CopyConflictMode::Skip) rename_no_replace(temporary, op.destination, ec);
+          else boost::filesystem::rename(temporary, op.destination, ec);
+        }
+        error_code cleanup;
+        boost::filesystem::remove(temporary, cleanup);
+        if (job->_copy_conflict == CopyConflictMode::Skip && ec == boost::system::errc::file_exists) finish(index, item, {}, true);
+        else finish(index, item, ec ? "Failed to create symlink: " + ec.message() : std::string(), false);
+        continue;
+      }
+      if (op.kind != Operation::Kind::CopyFile) {
+        finish(index, item, "Archive contents are read-only", false);
+        continue;
+      }
+      error_code ec;
+      const auto present = boost::filesystem::symlink_status(op.destination, ec);
+      const bool exists = !ec && boost::filesystem::exists(present);
+      if (exists && (job->_copy_conflict == CopyConflictMode::Skip ||
+                     (job->_copy_conflict == CopyConflictMode::Update && op.modified <= DirItem(op.destination).write_time()))) {
+        finish(index, item, {}, true);
+        continue;
+      }
+      if (exists && boost::filesystem::is_directory(present)) {
+        finish(index, item, "Cannot replace a directory with a file", false);
+        continue;
+      }
+      const auto root = op.destination.parent_path() / boost::filesystem::unique_path(".fc-copy-%%%%-%%%%-%%%%");
+      ec.clear();
+      if (!boost::filesystem::create_directory(root, ec) || ec) {
+        finish(index, item, "Failed to create staging directory: " + ec.message(), false);
+        continue;
+      }
+      boost::filesystem::permissions(root, boost::filesystem::owner_all, ec);
+      pending.push_back({index, root, op});
+    }
+    // One extraction for every file, then each one is committed as its data is complete.
+    std::vector<ArchiveFS::Item> items;
+    std::unordered_map<std::string, size_t> by_stage;
+    for (size_t i = 0; i < pending.size(); ++i) {
+      items.push_back({pending[i].op.source, pending[i].stage_root / "data"});
+      by_stage[items.back().output.native()] = i;
+    }
+    std::vector<bool> settled(pending.size(), false);
+    const double processed_before = job->_bytes_processed;
+    auto committed = [&](const ArchiveFS::Item& extracted, Err error) {
+      const auto& p = pending.at(by_stage.at(extracted.output.native()));
+      settled[by_stage.at(extracted.output.native())] = true;
+      const auto item = operation_display(p.op);
+      std::string failure = error.ok() ? std::string() : error.steps.front();
+      bool skipped = false;
+      if (failure.empty()) {
+        error_code ec;
+        boost::filesystem::permissions(extracted.output, archived_mode(p.op.permissions, false), ec);
+        if (!ec && p.op.modified) boost::filesystem::last_write_time(extracted.output, p.op.modified, ec);
+        if (!ec) {
+          if (job->_copy_conflict == CopyConflictMode::Skip) {
+            rename_no_replace(extracted.output, p.op.destination, ec);
+            if (ec == boost::system::errc::file_exists) {
+              ec.clear();
+              skipped = true;
+            }
+          } else
+            boost::filesystem::rename(extracted.output, p.op.destination, ec);
+        }
+        if (ec) failure = "Failed to copy file: " + ec.message();
+      }
+      remove_stage(p.stage_root);
+      if (failure.empty() && !skipped) {
+        std::lock_guard lock(job->_m);
+        job->_bytes_processed += double(std::max(int64_t{0}, item.size()));
+      }
+      if (!failure.empty()) report_error("[Copy] " + item.path_ref().native() + ": " + failure);
+      finish(p.index, item, failure, skipped);
+      job->updated();
+    };
+    auto progress = [&](uint64_t bytes) {
+      wait_for_resume(job);
+      {
+        std::lock_guard lock(job->_m);
+        job->_copy_bytes = bytes;
+        job->_total.update(int64_t(processed_before + double(bytes)), int64_t(job->_bytes_total));
+      }
+      if (now() > job->_last_progress_update_time + job->_progress_update_interval) {
+        job->_last_progress_update_time = now();
+        job->updated();
+      }
+    };
+    auto error = items.empty() ? Err() : ArchiveFS::extract(items, committed, &job->_cancel_requested, progress);
+    for (size_t i = 0; i < pending.size(); ++i)
+      if (!settled[i]) {
+        remove_stage(pending[i].stage_root);
+        if (!job->_cancel_requested.load()) finish(pending[i].index, operation_display(pending[i].op), error.ok() ? "Not extracted" : error.steps.front(), false);
+      }
+    // Folders get their archived permissions and times after their contents are in place.
+    for (auto it = directories.rbegin(); it != directories.rend(); ++it) {
+      error_code ec;
+      boost::filesystem::permissions(it->destination, archived_mode(it->permissions, true), ec);
+      if (it->modified) boost::filesystem::last_write_time(it->destination, it->modified, ec);
+    }
+    if (job->_cancel_requested.load()) {
+      std::lock_guard lock(job->_m);
+      job->_state = JobState::CANCELLED;
+    } else if (!error.ok())
+      report_error("[Archive] " + error.steps.front());
   }
 
   void run_remote(JobSpec *job) {
@@ -1216,7 +1401,7 @@ class ThreadedFileJobs : public FileJobs {
     const auto conflict = job->_copy_conflict == CopyConflictMode::Skip ? ArchiveConflict::Skip
       : job->_copy_conflict == CopyConflictMode::Update ? ArchiveConflict::Update : ArchiveConflict::Replace;
     bool skipped = false;
-    Err err = _archives.create_archive(archive_path, sources, preferred_cwd, conflict, &job->_cancel_requested, &skipped);
+    Err err = create_archive(archive_path, sources, preferred_cwd, conflict, &job->_cancel_requested, &skipped);
     if (job->_cancel_requested.load()) { job->_state = JobState::CANCELLED; return; }
     if (!err.ok()) {
       report_error("[Archive create] " + err.steps.front());

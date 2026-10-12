@@ -48,7 +48,7 @@ struct TutorialWorld {
   }
 
   /// Removes and recreates every demo file.
-  func build(sevenZip: String?) throws {
+  func build() throws {
     let fm = FileManager.default
     if fm.fileExists(atPath: root.path) {
       // Only ever delete a folder this code created: the marker says so, or it is
@@ -111,10 +111,11 @@ struct TutorialWorld {
     try photo(locked, title: "locked", seed: 99, size: TutorialWorld.mib, day: 27)
     chmod(locked.path, 0o000)
 
-    if let sevenZip, fm.isExecutableFile(atPath: sevenZip) {
+    // macOS's own tar (libarchive) writes 7z archives; FC reads them through 7-Zip's library.
+    if fm.isExecutableFile(atPath: "/usr/bin/tar") {
       let process = Process()
-      process.executableURL = URL(fileURLWithPath: sevenZip)
-      process.arguments = ["a", "-bd", "-y", home.appendingPathComponent("website-2025.7z").path, "."]
+      process.executableURL = URL(fileURLWithPath: "/usr/bin/tar")
+      process.arguments = ["--format", "7zip", "-cf", home.appendingPathComponent("website-2025.7z").path, "."]
       process.currentDirectoryURL = home.appendingPathComponent("projects/website")
       process.standardOutput = FileHandle.nullDevice
       process.standardError = FileHandle.nullDevice

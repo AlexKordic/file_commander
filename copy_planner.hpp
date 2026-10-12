@@ -33,7 +33,6 @@ class CopyPlanner {
 
  private:
   CopyRequest                                             _request;
-  std::vector<ArchiveLease>                               _leases;
   std::function<void()>                                   _notify;
   std::function<void(std::string, std::string, uint64_t)> _emit;
   void                                                    run();

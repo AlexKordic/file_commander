@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Builds File Commander.app: the C++ engine with CMake (preset macos-app),
-# then the Swift package, then the bundle with fresh and 7zr inside.
+# then the Swift package, then the bundle with fresh and 7-Zip's 7z.so inside.
 #
 #   macos/build_app.sh            release build into build-macos/File Commander.app
 #   macos/build_app.sh --debug    debug Swift build (faster to compile)
@@ -51,7 +51,6 @@ rm -rf "$app"
 mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
 cp "$bin/FileCommander" "$bin/fc-relaunch" "$bin/fc-askpass" "$app/Contents/MacOS/"
 cp -R "$bin"/*.bundle "$app/Contents/Resources/"
-cp build-macos/third_party/lzma/_o/7zr "$app/Contents/MacOS/7zr"
 cp build-macos/third_party/7zip/_o/7z.so "$app/Contents/MacOS/7z.so"
 # The terminal interface, for fc run (Lua scripts) and for people who want it.
 cp build-macos/fc "$app/Contents/MacOS/fc"

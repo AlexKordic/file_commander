@@ -48,18 +48,11 @@ PaneModel::~PaneModel() {
   _pending_changes.close();
 }
 
-Location PaneModel::location() const { return archive_service().logical_location(dir().path); }
+Location PaneModel::location() const { return location_of(dir().path); }
 
-Location PaneModel::tab_location(int index) const {
-  const auto& path = _tabs.at(index).dir.path;
-  if (is_remote(path) || path.native().rfind("fc-archive:", 0) == 0) return Location::decode(path.native());
-  return archive_service().logical_location(path);
-}
+Location PaneModel::tab_location(int index) const { return location_of(_tabs.at(index).dir.path); }
 
-bool PaneModel::in_archive_view() const {
-  const auto& stack = active().archive_stack;
-  return !stack.empty() && path_is_under(stack.back().extracted_root, dir().path.lexically_normal());
-}
+bool PaneModel::in_archive_view() const { return is_archive_path(dir().path); }
 
 void PaneModel::cancel_loading() {
   ++_load_generation;
@@ -72,7 +65,7 @@ void PaneModel::cancel_loading() {
 
 void PaneModel::move_to(const Filepath& where, Filepath focus) {
   active().restore.reset();
-  load_directory(where, false, false, std::move(focus));
+  load_directory(where, false, std::move(focus));
 }
 
 void PaneModel::refresh() { move_to(dir().path); }
@@ -81,7 +74,7 @@ void PaneModel::restart_initial_load() {
   if (!_loading) move_to(dir().path);
 }
 
-void PaneModel::load_directory(Filepath where, bool archive, bool recover, Filepath focus, bool background_refresh) {
+void PaneModel::load_directory(Filepath where, bool recover, Filepath focus, bool background_refresh) {
   try {
     where = normalize_location(where);
   } catch (const std::exception& e) {
@@ -95,7 +88,7 @@ void PaneModel::load_directory(Filepath where, bool archive, bool recover, Filep
   }
   const auto generation = ++_load_generation;
   if (!background_refresh) _refresh_after_load = false;
-  if (archive || where != dir().path) {
+  if (where != dir().path) {
     ++_watch_generation;
     _funnel.reset();
     _pending_changes.erase_if([](const UpdatedFiles&) { return true; });
@@ -104,29 +97,11 @@ void PaneModel::load_directory(Filepath where, bool archive, bool recover, Filep
   _loading_unattended = background_refresh;
   changed();
   auto result  = std::make_shared<Dir>();
-  auto stack   = active().archive_stack;
   auto started = std::chrono::steady_clock::now();
-  _loader.submit([this, alive = _alive, post = _post, reader = _read_directory, generation, result, where, archive, recover, stack, focus,
+  _loader.submit([this, alive = _alive, post = _post, reader = _read_directory, generation, result, where, recover, focus,
                   background_refresh, started](const LatestWork::Token& cancelled) mutable {
     Err error;
     try {
-      if (where.native().rfind("fc-archive:", 0) == 0) {
-        ResolvedLocation resolved;
-        error = archive_service().resolve(Location::decode(where.native()), resolved, cancelled.get());
-        if (error.ok()) {
-          where = resolved.path;
-          stack = std::move(resolved.archives);
-        }
-      }
-      if (archive) {
-        Filepath     extracted;
-        ArchiveLease lease;
-        error = archive_service().extract_to_cache(where, extracted, cancelled.get(), &lease);
-        if (error.ok()) {
-          stack.push_back(ResolvedArchive{where.lexically_normal(), extracted.lexically_normal(), std::move(lease)});
-          where = extracted;
-        }
-      }
       if (recover && !is_remote(where)) {
         for (;;) {
           boost::system::error_code ec;
@@ -140,7 +115,7 @@ void PaneModel::load_directory(Filepath where, bool archive, bool recover, Filep
     } catch (const std::exception& e) { error = Err(e.what()); }
     if (cancelled->load() || !alive->load()) return;
     const double elapsed = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - started).count();
-    post([this, alive, cancelled, generation, result, where, stack, focus, error, recover, background_refresh, elapsed]() mutable {
+    post([this, alive, cancelled, generation, result, where, focus, error, recover, background_refresh, elapsed]() mutable {
       if (!alive->load() || cancelled->load() || generation != _load_generation) return;
       _loading = false;
       changed();
@@ -154,7 +129,7 @@ void PaneModel::load_directory(Filepath where, bool archive, bool recover, Filep
           start_watcher(where);
         }
         if (recover && tab.restore && Location::decode(tab.restore->path).read_only())
-          load_directory(boost::filesystem::current_path(), false, false);
+          load_directory(boost::filesystem::current_path(), false);
         return;
       }
       if (!background_refresh) _last_load_ms = elapsed;
@@ -173,15 +148,13 @@ void PaneModel::load_directory(Filepath where, bool archive, bool recover, Filep
       tab.dir.publish(DirectorySnapshot{std::move(result->path), std::move(result->items)});
       tab.dir.apply_filter(tab.filter, true);
       tab.dir.restore_selection(selected);
-      tab.archive_stack = stack;
-      prune_archive_stack(where);
       tab.dir.path_txt = location().display();
       if (tab.restore) {
         const auto&                     saved = *tab.restore;
         std::unordered_set<std::string> wanted(saved.selected.begin(), saved.selected.end());
         std::unordered_set<std::string> actual;
         for (const auto& item : tab.dir.items) {
-          auto logical = archive_service().logical_location(item.path_ref()).encode();
+          auto logical = location_of(item.path_ref()).encode();
           if (wanted.contains(logical)) actual.insert(item.path_ref().native());
           if (logical == saved.focused) old_focus = item.path_ref();
         }
@@ -192,7 +165,7 @@ void PaneModel::load_directory(Filepath where, bool archive, bool recover, Filep
       start_watcher(where);
       if (!background_refresh || !same) _emit("dir_changed", where.native());
       _emit("items_updated", "");
-      if (std::exchange(_refresh_after_load, false)) load_directory(tab.dir.path, false, true, {}, true);
+      if (std::exchange(_refresh_after_load, false)) load_directory(tab.dir.path, true, {}, true);
     });
   });
 }
@@ -201,7 +174,7 @@ void PaneModel::start_watcher(const Filepath& where) {
   const auto generation = ++_watch_generation;
   _funnel.reset();  // Stop the previous producer before draining its queue.
   _pending_changes.erase_if([](const UpdatedFiles&) { return true; });
-  if (in_archive_view()) return;
+  if (is_archive_path(where)) return;  // Archives don't change while browsed; a rewritten file is reopened on the next load.
   try {
     _funnel = FileChangeFunnel::create(where, [this, alive = _alive, post = _post, generation](UpdatedFiles changes) {
       if (!alive->load()) return;
@@ -228,7 +201,7 @@ void PaneModel::apply_changes(UpdatedFiles batch) {
   }
   if (!relevant) return;
   if (_loading) _refresh_after_load = true;
-  else if (recover || batch->size() > 512) load_directory(dir().path, false, recover, {}, true);
+  else if (recover || batch->size() > 512) load_directory(dir().path, recover, {}, true);
   else load_delta(std::move(batch));
 }
 
@@ -261,7 +234,7 @@ void PaneModel::load_delta(UpdatedFiles batch) {
       changed();
       restore_cursor(focus, index);
       _emit("items_updated", "");
-      if (std::exchange(_refresh_after_load, false)) load_directory(dir().path, false, true, {}, true);
+      if (std::exchange(_refresh_after_load, false)) load_directory(dir().path, true, {}, true);
     });
   });
 }
@@ -293,11 +266,6 @@ void PaneModel::restore_cursor(const Filepath& focused_before, int index_before)
   changed();
 }
 
-void PaneModel::prune_archive_stack(const Filepath& path) {
-  const Filepath normalized = path.lexically_normal();
-  auto&          stack      = active().archive_stack;
-  while (!stack.empty() && !path_is_under(stack.back().extracted_root, normalized)) stack.pop_back();
-}
 
 bool PaneModel::enter(int item_index) {
   auto& items = dir().items;
@@ -321,16 +289,7 @@ bool PaneModel::enter(int item_index) {
   active().filter.clear();
   dir().apply_filter("", true);
   active().restore.reset();
-  load_directory(where.path_ref(), true, false);
-  return true;
-}
-
-bool PaneModel::leave_virtual_dir() {
-  auto& stack = active().archive_stack;
-  if (stack.empty()) return false;
-  const auto top = stack.back();
-  if (dir().path.lexically_normal() != top.extracted_root.lexically_normal()) return false;
-  move_to(top.archive_file.parent_path(), top.archive_file);
+  move_to(archive_root(where.path_ref()));
   return true;
 }
 
@@ -338,15 +297,16 @@ void PaneModel::leave() {
   active().filter.clear();
   dir().apply_filter("", true);
   changed();
-  if (leave_virtual_dir()) return;
+  // Leaving an archive's root lands on the archive file itself.
   const Filepath old_path = dir().path;
-  move_to(location_parent(old_path), old_path);
+  const auto file = archive_file_of(old_path);
+  move_to(location_parent(old_path), file.empty() ? old_path : file);
 }
 
 Filepath PaneModel::focused_dir() const {
   const DirItem* focused = cursor_item();
   if (!focused) return dir().path;
-  if (is_remote(focused->path_ref())) return focused->is_dir() ? focused->path_ref() : location_parent(focused->path_ref());
+  if (is_virtual_path(focused->path_ref())) return focused->is_dir() ? focused->path_ref() : location_parent(focused->path_ref());
   boost::system::error_code ec;
   if (boost::filesystem::is_directory(focused->path_ref(), ec) && !ec) return focused->path_ref();
   return focused->path_ref().parent_path();
@@ -431,10 +391,9 @@ void PaneModel::move_tab(int from, int to) {
 
 void PaneModel::load_active_tab() {
   Tab& tab = active();
-  prune_archive_stack(tab.dir.path);
   tab.dir.apply_filter(tab.filter, true);
   changed();
-  if (!tab.dir.path.empty()) load_directory(tab.dir.path, false, tab.restore.has_value());  // Reconcile inactive or restored tabs.
+  if (!tab.dir.path.empty()) load_directory(tab.dir.path, tab.restore.has_value());  // Reconcile inactive or restored tabs.
   else _funnel.reset();
 }
 
@@ -559,15 +518,15 @@ PanelWorkspace PaneModel::capture_workspace(bool with_tutorial) const {
       continue;
     }
     TabWorkspace saved;
-    saved.path        = archive_service().logical_location(tab.dir.path).encode();
+    saved.path        = location_of(tab.dir.path).encode();
     saved.sort        = tab.dir.order_by;
     saved.filter      = tab.filter;
     saved.permissions = tab.permissions;
     saved.owner_group = tab.owner_group;
     if (tab.cursor >= 0 && size_t(tab.cursor) < tab.dir.items.size())
-      saved.focused = archive_service().logical_location(tab.dir.items[tab.cursor].path_ref()).encode();
+      saved.focused = location_of(tab.dir.items[tab.cursor].path_ref()).encode();
     for (const auto& item : tab.dir.items)
-      if (item.selected()) saved.selected.push_back(archive_service().logical_location(item.path_ref()).encode());
+      if (item.selected()) saved.selected.push_back(location_of(item.path_ref()).encode());
     out.tabs.push_back(std::move(saved));
   }
   if (out.tabs.empty()) out.active = 0;

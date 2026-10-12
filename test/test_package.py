@@ -20,7 +20,7 @@ try:
     check_package(archive, built_executables(build))
 except (OSError, ValueError, tarfile.TarError) as error:
     raise SystemExit(f'Package validation failed: {error}. Rebuild fc.package_build in the configured build environment before running manual tests.')
-print('PASS package executable hashes match the built fc, Fresh and 7zr', flush=True)
+print('PASS package executable hashes match the built fc, Fresh and 7z.so', flush=True)
 if args.build_only:
     raise SystemExit(0)
 # Manual relocation consumes the exact archive validated above. It must not

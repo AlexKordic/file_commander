@@ -43,8 +43,9 @@ def architecture(value):
 
 
 def built_executables(build):
-    binaries = {'fc': build / 'fc', 'fresh': build / 'third_party/fresh/bin/fresh',
-                '7zr': build / 'third_party/lzma/_o/7zr'}
+    # By their path inside the package.
+    binaries = {'bin/fc': build / 'fc', 'bin/fresh': build / 'third_party/fresh/bin/fresh',
+                'lib/file-commander/7z.so': build / 'third_party/7zip/_o/7z.so'}
     for path in binaries.values():
         if not path.is_file() or not os.access(path, os.X_OK) or not path.stat().st_size:
             raise ValueError(f'missing release executable: {path}')
@@ -103,7 +104,7 @@ def check_package(archive, binaries):
             if len(members) != 1 or not members[0].isfile() or not members[0].size:
                 raise ValueError(f'package missing license/source notice: {relative}')
         for name, binary in binaries.items():
-            members = [m for m in package.getmembers() if m.name == f'{archive.name[:-7]}/bin/{name}']
+            members = [m for m in package.getmembers() if m.name == f'{archive.name[:-7]}/{name}']
             if len(members) != 1 or not members[0].isfile() or not members[0].mode & 0o111:
                 raise ValueError(f'package missing executable: {name}')
             with binary.open('rb') as stream:

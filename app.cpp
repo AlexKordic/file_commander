@@ -172,16 +172,16 @@ PanelWorkspace Panel::capture_workspace() const {
     const bool active = int(i) == _active_tab;
     const auto& directory = active ? dir : tab.dir;
     TabWorkspace saved;
-    saved.path = archive_service().logical_location(directory.path).encode();
+    saved.path = location_of(directory.path).encode();
     saved.sort = directory.order_by;
     saved.filter = active ? _state->filter_txt : tab.filter_txt;
     saved.permissions = active ? _state->show_permissions_column : tab.show_permissions_column;
     saved.owner_group = active ? _state->show_owner_group_column : tab.show_owner_group_column;
     int focused = active && _state->get_focused_index ? _state->get_focused_index() : tab.focused_index;
     if (focused >= 0 && size_t(focused) < directory.items.size())
-      saved.focused = archive_service().logical_location(directory.items[focused].path_ref()).encode();
+      saved.focused = location_of(directory.items[focused].path_ref()).encode();
     for (const auto& item : directory.items)
-      if (item.selected()) saved.selected.push_back(archive_service().logical_location(item.path_ref()).encode());
+      if (item.selected()) saved.selected.push_back(location_of(item.path_ref()).encode());
     out.tabs.push_back(std::move(saved));
   }
   return out;
@@ -253,14 +253,14 @@ void Panel::switch_to_tab(int index) {
   if (on_event) on_event("tab_switched", std::to_string(_active_tab));
 }
 
-Location Panel::location() const { return archive_service().logical_location(dir.path); }
+Location Panel::location() const { return location_of(dir.path); }
 
 void Panel::move_to(const Filepath& where, Filepath focus) {
   if (!_tabs.empty()) _tabs[_active_tab].restore.reset();
-  load_directory(where, false, false, std::move(focus));
+  load_directory(where, false, std::move(focus));
 }
 
-void Panel::load_directory(Filepath where, bool archive, bool recover, Filepath focus, bool background_refresh) {
+void Panel::load_directory(Filepath where, bool recover, Filepath focus, bool background_refresh) {
   try {
     where = normalize_location(where);
   } catch (const std::exception &e) {
@@ -274,7 +274,7 @@ void Panel::load_directory(Filepath where, bool archive, bool recover, Filepath 
   }
   const auto generation = ++_load_generation;
   if (!background_refresh) _refresh_after_load = false;
-  if (archive || where != dir.path) {
+  if (where != dir.path) {
     ++_watch_generation;
     update_funnel.reset();
     pending_changes.erase_if([](const UpdatedFiles&) { return true; });
@@ -282,28 +282,10 @@ void Panel::load_directory(Filepath where, bool archive, bool recover, Filepath 
   _loading      = true;
   _loading_unattended = background_refresh;
   auto result   = std::make_shared<Dir>();
-  auto stack    = _archive_stack;
-  _loader.submit([this, alive = _callback_alive, post = run_on_ui, reader = _read_directory, generation, result, where, archive, recover, stack, focus, background_refresh](const LatestWork::Token& cancelled) mutable {
+  _loader.submit([this, alive = _callback_alive, post = run_on_ui, reader = _read_directory, generation, result, where, recover, focus, background_refresh](const LatestWork::Token& cancelled) mutable {
     Err error;
     try {
-      if (where.native().rfind("fc-archive:", 0) == 0) {
-        ResolvedLocation resolved;
-        error = archive_service().resolve(Location::decode(where.native()), resolved, cancelled.get());
-        if (error.ok()) {
-          where = resolved.path;
-          stack = std::move(resolved.archives);
-        }
-      }
-      if (archive) {
-        Filepath     extracted;
-        ArchiveLease lease;
-        error = archive_service().extract_to_cache(where, extracted, cancelled.get(), &lease);
-        if (error.ok()) {
-          stack.push_back(ArchiveView{where.lexically_normal(), extracted.lexically_normal(), std::move(lease)});
-          where = extracted;
-        }
-      }
-      if (recover && !is_remote(where)) {
+      if (recover && !is_virtual_path(where)) {
         for (;;) {
           boost::system::error_code ec;
           if (boost::filesystem::is_directory(where, ec) && !ec) break;
@@ -315,7 +297,7 @@ void Panel::load_directory(Filepath where, bool archive, bool recover, Filepath 
       if (error.ok() && !cancelled->load()) error = reader(*result, where, cancelled.get());
     } catch (const std::exception& e) { error = Err(e.what()); }
     if (cancelled->load() || !alive->load()) return;
-    post([this, alive, cancelled, generation, result, where, stack, focus, error, recover, background_refresh]() mutable {
+    post([this, alive, cancelled, generation, result, where, focus, error, recover, background_refresh]() mutable {
       if (!alive->load() || cancelled->load() || generation != _load_generation) return;
       _loading = false;
       if (!error.ok()) {
@@ -329,7 +311,7 @@ void Panel::load_directory(Filepath where, bool archive, bool recover, Filepath 
           start_watcher(where);
         }
         if (recover && !_tabs.empty() && _tabs[_active_tab].restore && Location::decode(_tabs[_active_tab].restore->path).read_only())
-          load_directory(boost::filesystem::current_path(), false, false);
+          load_directory(boost::filesystem::current_path(), false);
         return;
       }
       remote_error.clear();
@@ -349,15 +331,13 @@ void Panel::load_directory(Filepath where, bool archive, bool recover, Filepath 
       ++items_revision;
       dir.apply_filter(_state->filter_txt, true);
       dir.restore_selection(selected);
-      _archive_stack = stack;
-      _prune_archive_stack(where);
       dir.path_txt = location().display();
       if (!_tabs.empty() && _tabs[_active_tab].restore) {
         const auto& saved = *_tabs[_active_tab].restore;
         std::unordered_set<std::string> wanted(saved.selected.begin(), saved.selected.end());
         std::unordered_set<std::string> actual;
         for (const auto& item : dir.items) {
-          auto logical = archive_service().logical_location(item.path_ref()).encode();
+          auto logical = location_of(item.path_ref()).encode();
           if (wanted.contains(logical)) actual.insert(item.path_ref().native());
           if (logical == saved.focused) old_focus = item.path_ref();
         }
@@ -368,7 +348,7 @@ void Panel::load_directory(Filepath where, bool archive, bool recover, Filepath 
       start_watcher(where);
       sync_active_tab_state();
       if (on_event && (!background_refresh || !same)) on_event("dir_changed", where.native());
-      if (std::exchange(_refresh_after_load, false)) load_directory(dir.path, false, true, {}, true);
+      if (std::exchange(_refresh_after_load, false)) load_directory(dir.path, true, {}, true);
     });
   });
 }
@@ -393,7 +373,7 @@ Filepath Panel::focused_dir() {
   // get focused item, if its dir return item's path
   auto focused = _state->get_focused_item();
   if (!focused) return dir.path;
-  if (is_remote(*focused)) {
+  if (is_virtual_path(*focused)) {
     for (auto &item : dir.items)
       if (item.path_ref() == *focused)
         return item.is_dir() ? *focused : location_parent(*focused);
@@ -412,15 +392,15 @@ bool Panel::enter_archive(const Filepath& archive_candidate) {
     return false;
   }
   if (!is_archive_file_path(archive_candidate)) return false;
-  load_directory(archive_candidate, true, false);
+  move_to(archive_root(archive_candidate));
   return true;
 }
 
-bool Panel::leave_virtual_dir(int64_t& focused_id) {
-  if (_archive_stack.empty()) return false;
-  const auto top = _archive_stack.back();
-  if (dir.path.lexically_normal() != top.extracted_root.lexically_normal()) return false;
-  move_to(top.archive_file.parent_path(), top.archive_file);
+// Leaving an archive's root lands on the archive file itself.
+bool Panel::leave_virtual_dir(int64_t&) {
+  const auto file = archive_file_of(dir.path);
+  if (file.empty()) return false;
+  move_to(location_parent(dir.path), file);
   return true;
 }
 
@@ -487,7 +467,6 @@ void Panel::sync_active_tab_state() {
     tab.show_permissions_column = _state->show_permissions_column;
     tab.show_owner_group_column = _state->show_owner_group_column;
   }
-  tab.archive_stack = _archive_stack;
   tab.remote_error = remote_error;
 }
 
@@ -495,7 +474,7 @@ void Panel::start_watcher(const Filepath& where) {
   const auto generation = ++_watch_generation;
   update_funnel.reset();  // Stop the previous producer before draining its queue.
   pending_changes.erase_if([](const UpdatedFiles&) { return true; });
-  if (in_archive_view(where)) return;
+  if (in_archive_view(where)) return;  // Archives don't change while browsed; a rewritten file is reopened on the next load.
   try {
     update_funnel = FileChangeFunnel::create(where, [this, alive = _callback_alive, generation](UpdatedFiles changes) {
       if (!alive->load()) return;
@@ -524,7 +503,7 @@ void Panel::apply_changes(UpdatedFiles batch) {
   }
   if (relevant) {
     if (_loading) _refresh_after_load = true;
-    else if (recover || batch->size() > 512) load_directory(dir.path, false, recover, {}, true);
+    else if (recover || batch->size() > 512) load_directory(dir.path, recover, {}, true);
     else load_delta(std::move(batch));
   }
 }
@@ -560,7 +539,7 @@ void Panel::load_delta(UpdatedFiles batch) {
       ++items_revision;
       _loading = false;
       _restore_focus_after_update(focus, index);
-      if (std::exchange(_refresh_after_load, false)) load_directory(dir.path, false, true, {}, true);
+      if (std::exchange(_refresh_after_load, false)) load_directory(dir.path, true, {}, true);
     });
   });
 }
@@ -570,8 +549,6 @@ void Panel::load_active_tab() {
   TabState& tab  = _tabs[_active_tab];
   dir            = std::move(tab.dir);
   remote_error = tab.remote_error;
-  _archive_stack = tab.archive_stack;
-  _prune_archive_stack(dir.path);
   if (_state) {
     _state->filter_txt = tab.filter_txt.empty() ? dir.filter.phrase : tab.filter_txt;
     dir.apply_filter(_state->filter_txt);
@@ -581,7 +558,7 @@ void Panel::load_active_tab() {
   }
   if (!dir.path.empty()) {
     auto where = dir.path;
-    load_directory(where, false, tab.restore.has_value());  // Reconcile inactive/restored tabs.
+    load_directory(where, tab.restore.has_value());  // Reconcile inactive/restored tabs.
   } else {
     update_funnel.reset();
   }
@@ -615,15 +592,7 @@ void Panel::_restore_focus_after_update(const Filepath& focused_path_before, int
   _state->set_focused_index(restore_index);
 }
 
-bool Panel::in_archive_view(const Filepath& path) const {
-  if (_archive_stack.empty()) return false;
-  return path_is_under(_archive_stack.back().extracted_root, path.lexically_normal());
-}
-
-void Panel::_prune_archive_stack(const Filepath& path) {
-  const Filepath normalized = path.lexically_normal();
-  while (!_archive_stack.empty() && !path_is_under(_archive_stack.back().extracted_root, normalized)) { _archive_stack.pop_back(); }
-}
+bool Panel::in_archive_view(const Filepath& path) const { return is_archive_path(path); }
 
 JobProgressBar::JobProgressBar() {
   // One-row buttons keep the whole progress bar on a single row.
@@ -755,7 +724,7 @@ bool FileCommander::open_in_editor(std::string& error) {
   }
 
   auto is_directory = [&panel](const Filepath &p) -> bool {
-    if (is_remote(p)) {
+    if (is_virtual_path(p)) {
       for (auto &item : panel.dir.items)
         if (item.path_ref() == p)
           return item.is_dir();
@@ -943,7 +912,7 @@ std::vector<Filepath> FileCommander::list_bookmarks() const {
 void FileCommander::add_bookmark(const Filepath& path) {
   auto location = Location::decode(path.native());
   if (!location.read_only() && !location.remote())
-    location = archive_service().logical_location(location.local);
+    location = location_of(location.local);
   if (std::find(_bookmarks.begin(), _bookmarks.end(), location) == _bookmarks.end()) {
     _bookmarks.push_back(std::move(location));
     std::sort(_bookmarks.begin(), _bookmarks.end(), [](const auto& a, const auto& b) { return a.display() < b.display(); });

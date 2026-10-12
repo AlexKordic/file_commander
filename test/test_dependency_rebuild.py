@@ -42,7 +42,6 @@ original_time = original_object.stat().st_mtime_ns if original_object.exists() e
 rebuild('LuaJIT', lua / 'src/lj_api.c', 'luajit_lib', 'CC        lj_api.o', build / 'third_party/luajit/source/src/lj_api.o')
 require((original_object.stat().st_mtime_ns if original_object.exists() else None) == original_time, 'LuaJIT wrote into shared source tree')
 rebuild('7z.so', Path(cache['FC_SEVENZIP_SOURCE_DIR']) / 'C/Alloc.c', 'sevenzip_lib', 'Alloc.c', build / 'third_party/7zip/_o/Alloc.o')
-rebuild('7zr', Path(cache['FC_SEVENZIP_SOURCE_DIR']) / 'C/Alloc.c', 'lzma_7zr', 'Alloc.c', build / 'third_party/lzma/_o/Alloc.o')
 if cache.get('FC_BUILD_FRESH') == 'ON':
     fresh = Path(cache['FC_FRESH_SOURCE_DIR'])
     rebuild('Fresh', fresh / 'crates/fresh-core/src/lib.rs', 'fresh_bin', 'Compiling fresh-core', fresh / 'target/fc-release/fresh')

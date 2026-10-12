@@ -2,6 +2,7 @@
 #include "commander.hpp"
 #include "log.hpp"
 #include "remote_fs.hpp"
+#include "archive.hpp"
 
 #include <boost/filesystem/file_status.hpp>
 #include <boost/system/detail/error_code.hpp>
@@ -101,6 +102,19 @@ void DirItem::update(Type type, Perms perms) {
   _perms = perms;
   // Allow files we cant access to exist in our lists
   if (_type == boost::filesystem::status_error) return;
+  if (is_archive_path(_path)) {
+    try {
+      auto m = ArchiveFS::inspect(_path);
+      _size = int64_t(m.size);
+      _w_time = std::time_t(m.mtime_ns / 1000000000);
+      _owner.clear();
+      _group.clear();
+      _symlink = m.symlink() ? std::optional<Filepath>(m.link) : std::nullopt;
+    } catch (const std::exception&) {
+      _size = -1;
+    }
+    return;
+  }
   if (is_remote(_path)) {
     auto m = RemoteFS::inspect(_path);
     _size = m.size;
@@ -148,6 +162,15 @@ void DirItem::update(Type type, Perms perms) {
 
 DirItem::DirItem(Filepath p) : _path(std::move(p)) {
   _filename = _path.filename().native();
+  if (is_archive_path(_path)) {
+    try {
+      auto status = ArchiveFS::inspect(_path).status();
+      update(status.type(), status.permissions());
+    } catch (const std::exception&) {
+      update(boost::filesystem::status_error, boost::filesystem::no_perms);
+    }
+    return;
+  }
   if (is_remote(_path)) {
     auto m = RemoteFS::inspect(_path);
     auto status = m.status();
@@ -208,6 +231,25 @@ Err Dir::leave_dir() {
 Err Dir::refresh() { return move_to(path); }
 
 Err Dir::move_to(const Filepath p, const std::atomic<bool>* cancelled) {
+  if (is_archive_path(p)) {
+    try {
+      auto where = normalize_location(p);
+      std::vector<DirItem> loaded;
+      for (auto& e : ArchiveFS::list(where, cancelled)) {
+        const auto& m = e.metadata;
+        DirItem item(e.path, e.path.filename().native(), m.status().type(), m.status().permissions(), std::time_t(m.mtime_ns / 1000000000),
+                     m.directory ? 0 : int64_t(m.size));
+        if (m.symlink()) item._set_symlink_target(m.link);
+        loaded.push_back(std::move(item));
+      }
+      if (cancelled && cancelled->load()) return Err("Directory loading cancelled");
+      publish({where, std::move(loaded)});
+      path_txt = Location::decode(where.native()).display();
+      return {};
+    } catch (const std::exception& e) {
+      return Err(e.what());
+    }
+  }
   if (is_remote(p)) {
     try {
       auto where = normalize_location(p);

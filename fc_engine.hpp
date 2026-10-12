@@ -22,7 +22,7 @@ struct StartOptions {
   std::string left, right;      // Initial pane paths; empty restores the workspace.
   bool        restore = true;   // Restore settings paths and the workspace.
   bool        recovery = true;  // Journal transfers and restore interrupted ones.
-  std::string tool_dir;         // Folder holding fresh and 7zr; empty uses the defaults.
+  std::string tool_dir;         // Folder holding fresh and 7z.so; empty uses the defaults.
 };
 struct StartResult {
   bool        ok = false;

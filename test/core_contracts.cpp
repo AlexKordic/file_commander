@@ -3,6 +3,7 @@
 #include <map>
 #include <random>
 #include "application_events.hpp"
+#include "archive.hpp"
 #include "file_io_jobs.hpp"
 #include "location.hpp"
 #include "settings.hpp"
@@ -248,9 +249,9 @@ void retention() {
   until([&] { return jobs->idle(); }, "retained detail timeout");
   require(!job->snapshot()->_details_expired && !job->snapshot()->_errors.empty(), "positive detail budget evicted small payload");
   Fixture f;
-  fs::create_directory(f / "extracted");
-  write(f / "extracted/source", "leased bytes");
-  auto            lease = std::make_shared<ArchiveRoot>(f / "extracted");
+  fs::create_directory(f / "input");
+  write(f / "input/source", "leased bytes");
+  require(create_archive(f / "bundle.7z", {f / "input/source"}, f / "input").ok(), "archive fixture failed");
   Gate            gate;
   FileJobServices services;
   services.clipboard = [&](const auto&) {
@@ -265,15 +266,16 @@ void retention() {
   queued->add_job(std::make_shared<JobSpec>(block_plan));
   gate.await();
   auto copy_plan = std::make_shared<OperationPlan>();
-  copy_plan->steps.push_back({Operation::Kind::CopyFile, f / "extracted/source", f / "copied"});
+  copy_plan->steps.push_back({Operation::Kind::CopyFile, archive_root(f / "bundle.7z") / "source", f / "copied", {}, {}, 12});
   auto copy = std::make_shared<JobSpec>(copy_plan);
-  copy->_archive_leases.push_back(lease);
   queued->add_job(copy);
-  lease.reset();
-  require(fs::exists(f / "extracted/source"), "queued lease lost before execution");
+  // A queued copy out of an archive doesn't need the archive kept open: it opens it again when it runs.
+  ArchiveFS::close_unused();
   gate.open();
-  until([&] { return queued->idle(); }, "leased copy timeout");
-  require(read(f / "copied") == "leased bytes" && !fs::exists(f / "extracted"), "completed job did not release archive lease");
+  until([&] { return queued->idle(); }, "archive copy timeout");
+  require(copy->snapshot()->_state == JobState::COMPLETED && read(f / "copied") == "leased bytes", "queued archive copy failed");
+  for (fs::directory_iterator it(f.root), end; it != end; ++it)
+    require(it->path().filename().native().rfind(".fc-copy-", 0) != 0, "archive copy left its staging folder");
 }
 void typed() {
   Fixture f;

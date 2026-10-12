@@ -81,6 +81,19 @@
       "loop_watchdog",
       "long_sleep",
       "long_wait"
+    ],
+    "sevenzip": [
+      "load",
+      "seven",
+      "solid",
+      "formats",
+      "failures"
+    ],
+    "archive": [
+      "browse",
+      "copy",
+      "cancel",
+      "nested"
     ]
   },
   "manual": [

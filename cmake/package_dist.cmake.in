@@ -30,8 +30,9 @@ if(DEFINED FC_DIST_FRESH AND EXISTS "${FC_DIST_FRESH}")
        DESTINATION "${_stage}/share/file-commander")
 endif()
 
-if(DEFINED FC_DIST_ARCHIVE AND EXISTS "${FC_DIST_ARCHIVE}")
-  file(COPY "${FC_DIST_ARCHIVE}" DESTINATION "${_stage}/bin")
+if(DEFINED FC_DIST_SEVENZIP AND EXISTS "${FC_DIST_SEVENZIP}")
+  file(MAKE_DIRECTORY "${_stage}/lib/file-commander")
+  file(COPY "${FC_DIST_SEVENZIP}" DESTINATION "${_stage}/lib/file-commander")
 endif()
 
 execute_process(

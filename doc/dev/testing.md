@@ -226,8 +226,7 @@ often unnecessary.
 
 Run the manual lane from a normal terminal session; sandboxed environments may
 not provide directory notifications. `fc.package` never rebuilds anything: it
-first compares the package's `fc`, `fresh` and `7zr` with the build outputs and
-fails if they differ, so rerun `fc.package_build` after rebuilding. The manual
+first compares the package's `fc`, `fresh` and `7z.so` with the build outputs and fails if they differ, so rerun `fc.package_build` after rebuilding. The manual
 tests don't need Cargo or a compiler. Before running, the lane checks that all
 seven tests exist, are enabled and built, and carry the `manual` label exactly
 when the registry lists them. It also works in a `native` build.
@@ -244,7 +243,7 @@ Before running any test, the release lane checks that:
 
 - The build directory was configured from this checkout with `CMAKE_BUILD_TYPE=Release`, `BUILD_TESTING=ON`, `FC_CORE_ONLY=OFF`, `FC_ALLOW_UNPINNED_DEPENDENCIES=OFF`, `FC_BUILD_FRESH=ON`, `FC_BUILD_SEVENZIP=ON` and `FC_TEST_DEPENDENCY_REBUILDS=ON`, and without a Boost source override. The `release` preset sets all of these.
 - The build is native for the current OS and architecture.
-- `fc`, `fresh` and `7zr` exist and are executable.
+- `fc`, `fresh` and `7z.so` exist and are executable.
 - CTest's test list matches the expected list exactly. The expected list comes
   from `test/release_required.json` plus the registries
   `test/command_cases.inc`, `test/review_cases.inc`, `test/lua_suites.json`
@@ -392,7 +391,8 @@ names the first lane that runs each group: tests in `fast` also run in
 | Traversal: depth, entry and link policies, overlap, cancellation, post-order | `fc.contract.traversal`; `fc.regression.traversal_policies` and link cases in `fc.lua.test_copy.*` | fast; integration |
 | Owned workers, mailbox, queues, scheduler, paused shutdown, late delivery | `fc.lifetime.*`; `fc.regression.{terminal_mailbox,suspended_archive_delivery,paused_shutdown}`; `fc.regression.late_panel_delivery` | fast and thread; integration; manual |
 | Jobs, history retention, event cursors and expiry | `fc.contract.{retention,events}`; `fc.regression.{lua_event_expiry,resource_retention,lua_job_events}` | fast; integration |
-| Archive identity, byte budgets and leases | `fc.contract.retention`; `fc.regression.{archive_cache_identity,archive_byte_limits,archive_locations}`; `fc.lua.test_archive` | fast; integration; manual |
+| 7-Zip's library: loading, formats, listing, extracting chosen entries, writing 7z | `fc.sevenzip.*` | fast; sanitizer |
+| Archives as a read-only filesystem: browsing without extracting, copy-out, cancellation, nested archives, identity of open archives | `fc.archive.*`; `fc.contract.retention`; `fc.regression.{archive_cache_identity,archive_byte_limits,archive_locations}`; `fc.lua.test_archive` | fast; sanitizer; integration; manual |
 | Command effects, availability, events and use counts | `fc.command.*`; `fc.regression.{command_routing,archive_readonly,binding_transactions,single_panel_focus}` | integration |
 | Rendering, terminal decoding and resize | `fc.regression.tiny_unicode_rendering`, `fc.terminal.input_resize` | integration |
 | Editor handoff, backend lifetime, recovery and restart; workspace recovery | `fc.lua.test_editor_integration` (fake editor), `fc.regression.editor_sessions`; `fc.extended.{fresh_success,fresh_failure,editor_recovery,editor_restart,workspace_recovery}` | integration; extended |

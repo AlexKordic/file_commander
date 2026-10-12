@@ -229,9 +229,7 @@ contents.
 - To create an archive, copy a selection (`F5`) to a destination path that ends
   in `.7z`.
 
-FC uses the `7zr` tool built alongside it. Other archive formats and archives
-in SSH locations are not supported; copy the archive to a local directory
-first.
+Browsing an archive reads only its index, and copying out extracts only the files you copy. FC reads archives with 7-Zip's library, `7z.so`, built alongside it. Other archive formats and archives in SSH locations are not supported; copy the archive to a local directory first.
 
 ## Tabs, layout and columns
 

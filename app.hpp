@@ -67,7 +67,6 @@ class DialogOverlay {
 // DialogOverlay supports drawing overlay dialogs on top of this Panel.
 class Panel : public DialogOverlay {
  public:
-  using ArchiveView = ResolvedArchive;
 
   struct TabState {
     Dir                      dir;
@@ -75,7 +74,6 @@ class Panel : public DialogOverlay {
     std::string              filter_txt;
     bool                     show_permissions_column = false;
     bool                     show_owner_group_column = false;
-    std::vector<ArchiveView> archive_stack;
     std::optional<TabWorkspace> restore;
     std::string remote_error;
   };
@@ -125,7 +123,7 @@ class Panel : public DialogOverlay {
 
   void move_to(const Filepath& where, Filepath focus = {});
 
-  void     load_directory(Filepath where, bool archive, bool recover, Filepath focus = {}, bool background_refresh = false);
+  void     load_directory(Filepath where, bool recover, Filepath focus = {}, bool background_refresh = false);
   Element  render();
   Filepath focused_dir();
 
@@ -161,12 +159,10 @@ class Panel : public DialogOverlay {
 
   bool in_archive_view(const Filepath& path) const;
 
-  void _prune_archive_stack(const Filepath& path);
 
   PanelSharedState::P      _state;
   std::shared_ptr<Files>   _files;
   std::vector<TabState>    _tabs;
-  std::vector<ArchiveView> _archive_stack;
   mutable std::vector<Box> _tab_boxes;
   int                      _active_tab = 0;
 };

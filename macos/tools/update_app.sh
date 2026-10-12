@@ -8,7 +8,7 @@
 #   macos/tools/update_app.sh --release       release Swift build
 #   macos/tools/update_app.sh --fresh <path>  also install that fresh binary
 #
-# fc, fresh and 7zr from build-macos are installed too when they are newer
+# fc, fresh and 7z.so from build-macos are installed too when they are newer
 # than the bundle's. Executables are copied next to the old file and moved
 # over it, never written over: macOS kills a signed program whose file was
 # changed in place ("Code Signature Invalid"), at its next launch.
@@ -56,7 +56,7 @@ for bundle in "$bin"/*.bundle; do
   rm -rf "$app/Contents/Resources/$(basename "$bundle")"
   cp -R "$bundle" "$app/Contents/Resources/"
 done
-for pair in "build-macos/fc:fc" "build-macos/third_party/fresh/bin/fresh:fresh" "build-macos/third_party/lzma/_o/7zr:7zr" "build-macos/third_party/7zip/_o/7z.so:7z.so"; do
+for pair in "build-macos/fc:fc" "build-macos/third_party/fresh/bin/fresh:fresh" "build-macos/third_party/7zip/_o/7z.so:7z.so"; do
   from="${pair%%:*}" name="${pair##*:}"
   if [[ -x "$from" && "$from" -nt "$app/Contents/MacOS/$name" ]]; then
     place "$from" "$name"

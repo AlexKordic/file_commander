@@ -5,6 +5,7 @@
 #include "file_io_jobs.hpp"
 #include "location.hpp"
 #include "remote_fs.hpp"
+#include "sevenzip.hpp"
 #include "settings.hpp"
 #include "workspace.hpp"
 
@@ -258,7 +259,7 @@ StartResult start(const StartOptions& options) {
     }
   }
   if (!options.tool_dir.empty()) {
-    archive_service().set_tool_path(options.tool_dir + "/7zr");
+    if (boost::filesystem::exists(Filepath(options.tool_dir) / "7z.so")) SevenZip::set_library_path(Filepath(options.tool_dir) / "7z.so");
     if (!std::getenv("FC_FRESH_BIN")) setenv("FC_FRESH_BIN", (options.tool_dir + "/fresh").c_str(), 1);
   }
   const char* home    = std::getenv("HOME");

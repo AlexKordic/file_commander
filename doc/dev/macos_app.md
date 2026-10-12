@@ -105,16 +105,13 @@ macos/build_app.sh --open     # build, then open the app
 macos/tools/update_app.sh     # after Swift-only changes: update the bundle in seconds
 ```
 
-The script configures the `macos-app` CMake preset once (deployment target
-macOS 14, reusing the dependency checkouts from `build-release` if there is
-one), builds `libfc_engine_bundle.a`, `fc`, `fresh` and `7zr`, builds the
-Swift package in `macos/`, and assembles the bundle:
+The script configures the `macos-app` CMake preset once (deployment target macOS 14, reusing the dependency checkouts from `build-release` if there is one), builds `libfc_engine_bundle.a`, `fc`, `fresh` and 7-Zip's `7z.so`, builds the Swift package in `macos/`, and assembles the bundle:
 
 | In the bundle | Comes from |
 | --- | --- |
 | `Contents/MacOS/FileCommander` | Swift package, product `FileCommander` |
 | `Contents/MacOS/fc-relaunch`, `fc-askpass` | Swift package helpers |
-| `Contents/MacOS/fc`, `fresh`, `7zr` | CMake (`build-macos/`, Fresh with its `web` feature); found next to the app as for `fc` |
+| `Contents/MacOS/fc`, `fresh`, `7z.so` | CMake (`build-macos/`, Fresh with its `web` feature); found next to the app as for `fc`, and `7z.so` loaded by the engine |
 | `Contents/Resources/FileCommander_FileCommander.bundle` | explainers and themes |
 | `Contents/Resources/AppIcon.icns` | drawn by `macos/tools/make_icon.swift` |
 
@@ -127,8 +124,7 @@ volumes) once; an ad hoc signature changes with every build, and macOS asks
 again each time.
 
 `macos/tools/update_app.sh` rebuilds only the Swift products (debug unless
-`--release`), puts them into the existing bundle, installs `fc`, `fresh` and
-`7zr` from `build-macos` when they are newer than the bundle's, and signs
+`--release`), puts them into the existing bundle, installs `fc`, `fresh` and `7z.so` from `build-macos` when they are newer than the bundle's, and signs
 again; `--fresh <path>` installs another Fresh build, such as one from the
 fork's checkout (`target/fc-release/fresh` when built with FC's profile, see
 [fresh_integration.md](fresh_integration.md#building-and-packaging)). Executables are copied next to the old file and moved over

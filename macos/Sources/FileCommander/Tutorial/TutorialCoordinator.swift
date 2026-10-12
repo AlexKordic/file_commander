@@ -325,10 +325,9 @@ final class TutorialCoordinator: ExplainerHost {
     app.sheet = nil
     app.paletteMode = nil
     app.glob = nil
-    let sevenZip = Bundle.main.executableURL?.deletingLastPathComponent().appendingPathComponent("7zr").path
     // Each editor explainer starts with a new Fresh session, without old unsaved buffers.
     if script.needs("editor") { stopTutorialEditor(removeHome: true) }
-    try world.build(sevenZip: sevenZip)
+    try world.build()
     Engine.setEndpointCommand(host: TutorialWorld.demoHost, command: world.demoSSH.path)
     if script.needs("editor") {
       let path = world.bin.path + ":" + (ProcessInfo.processInfo.environment["PATH"] ?? "/usr/bin:/bin")
