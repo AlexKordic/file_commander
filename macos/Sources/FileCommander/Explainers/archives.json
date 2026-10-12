@@ -7,7 +7,7 @@
   "needs": {
     "idle_queue": true
   },
-  "summary": "Browse an archive, copy files out, extract a compressed tar, open any file as an archive, and create an archive.",
+  "summary": "Browse an archive, copy files out, extract a compressed tar, open any file as an archive, open an encrypted one, and create an archive.",
   "covers": {
     "anchors": [
       "pane.left.path",
@@ -240,6 +240,105 @@
     },
     {
       "pause": 1400
+    },
+    {
+      "keys": [
+        "@leave_dir"
+      ]
+    },
+    {
+      "wait": {
+        "path": {
+          "side": "left",
+          "ends_with": "/downloads"
+        }
+      }
+    },
+    {
+      "caption": "Encrypted archives ask for the password",
+      "sub": "When a file's data is read; FC remembers it until you quit"
+    },
+    {
+      "cursor": {
+        "side": "left",
+        "name": "private.zip"
+      }
+    },
+    {
+      "keys": [
+        "@enter_dir"
+      ]
+    },
+    {
+      "wait": {
+        "rows": {
+          "side": "left",
+          "contains": "backup.sh"
+        }
+      },
+      "timeout": 20
+    },
+    {
+      "cursor": {
+        "side": "left",
+        "name": "backup.sh"
+      }
+    },
+    {
+      "keys": [
+        "@copy"
+      ]
+    },
+    {
+      "wait": {
+        "sheet": "copy"
+      }
+    },
+    {
+      "wait": {
+        "anchor": "sheet.copy.start"
+      }
+    },
+    {
+      "click": "sheet.copy.start",
+      "as_job": "secret"
+    },
+    {
+      "wait": {
+        "anchor": "sheet.askpass.secret"
+      },
+      "timeout": 20
+    },
+    {
+      "wait": {
+        "text_focus": true
+      }
+    },
+    {
+      "type": "tutorial"
+    },
+    {
+      "keys": [
+        "Enter"
+      ]
+    },
+    {
+      "wait": {
+        "job": {
+          "name": "secret",
+          "state": "finished"
+        }
+      },
+      "timeout": 30
+    },
+    {
+      "wait": {
+        "rows": {
+          "side": "right",
+          "contains": "backup.sh"
+        }
+      },
+      "timeout": 20
     },
     {
       "keys": [

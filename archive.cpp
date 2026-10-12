@@ -10,6 +10,7 @@
 #include <memory>
 #include <mutex>
 #include <set>
+#include <thread>
 #include <unordered_map>
 
 #include <sys/stat.h>
@@ -115,6 +116,7 @@ struct Folder {
 
 struct Opened {
   std::unique_ptr<SevenZip::Archive> archive;  // Unless `streamed`.
+  SevenZip::PasswordSource password;
   // A compressed tar has no index: it is listed by one pass over the stream, and each extraction is another.
   bool streamed = false;
   std::string compression;
@@ -139,6 +141,68 @@ struct Opened {
 constexpr size_t kMaxOpen = 16;
 std::mutex g_mutex;
 std::map<std::string, std::shared_ptr<Opened>> g_open;  // By the archive root's path.
+
+std::string key_of(const std::vector<Filepath>& chain) {
+  Location root;
+  root.archives = chain;
+  return root.encode();
+}
+
+// Passwords that worked, by archive, for the file they worked on.
+struct Remembered {
+  SourceIdentity identity;
+  std::string password;
+};
+std::mutex g_password_mutex;
+std::map<std::string, Remembered> g_passwords;
+ArchiveFS::PasswordPrompt g_prompt;
+std::thread::id g_prompt_thread;
+std::mutex g_ask_mutex;  // One question at a time.
+
+SevenZip::PasswordSource password_source(const std::vector<Filepath>& chain, const SourceIdentity& identity) {
+  Location where;
+  where.archives = chain;
+  return [key = key_of(chain), display = where.display(), identity](bool wrong) -> std::optional<std::string> {
+    auto remembered = [&]() -> std::optional<std::string> {
+      std::lock_guard lock(g_password_mutex);
+      auto found = g_passwords.find(key);
+      if (found == g_passwords.end() || !(found->second.identity == identity)) return std::nullopt;
+      return found->second.password;
+    };
+    if (!wrong)
+      if (auto known = remembered()) return known;
+    ArchiveFS::PasswordPrompt prompt;
+    {
+      std::lock_guard lock(g_password_mutex);
+      if (wrong) g_passwords.erase(key);
+      if (std::this_thread::get_id() == g_prompt_thread) return std::nullopt;
+      prompt = g_prompt;
+    }
+    if (!prompt) return std::nullopt;
+    std::lock_guard ask(g_ask_mutex);
+    if (!wrong)
+      if (auto known = remembered()) return known;  // Answered while this one waited its turn.
+    auto answer = prompt(display, wrong);
+    if (answer) {
+      std::lock_guard lock(g_password_mutex);
+      g_passwords[key] = {identity, *answer};
+    }
+    return answer;
+  };
+}
+
+thread_local std::function<void(double)>* t_read_progress = nullptr;
+
+// Progress for a long read on this thread, reported to its ReadProgress.
+SevenZip::Progress read_progress(const std::atomic<bool>* cancelled) {
+  SevenZip::Progress progress;
+  progress.cancelled = cancelled;
+  if (auto* report = t_read_progress)
+    progress.report = [report](uint64_t done, uint64_t total) {
+      if (total > 0) (*report)(std::min(1.0, double(done) / double(total)));
+    };
+  return progress;
+}
 
 // An entry's path as FC addresses it: '/'-separated, without "." or empty elements; empty when the archive gives a path that leaves its root.
 std::string normal_entry_path(const std::string& path) {
@@ -177,8 +241,15 @@ void index_entries(Opened& opened) {
       opened.folders[parent];
       at = slash + 1;
     }
-    if (e.directory) opened.folders[path].entry = e.index;
-    else opened.files[path] = e.index;  // A later entry of the same name wins, as when a tar is extracted.
+    if (e.directory) {
+      opened.folders[path].entry = e.index;
+      continue;
+    }
+    // A later entry of the same name wins, as when a tar is extracted. A hard link reads the data of the entry it links to.
+    uint32_t data = e.index;
+    if (!e.hardlink.empty())
+      if (auto original = opened.files.find(normal_entry_path(e.hardlink)); original != opened.files.end()) data = original->second;
+    opened.files[path] = data;
   }
 }
 
@@ -189,10 +260,13 @@ ArchiveFS::Metadata metadata_of(const Opened& opened, const SevenZip::Entry& e) 
   m.size = e.size.value_or(0);
   m.mtime_ns = e.modified_ns.value_or(opened.root.mtime_ns);
   const uint32_t permissions = e.posix_mode ? (*e.posix_mode & 07777) : (e.directory ? 0755 : 0644);
+  const uint32_t type = e.posix_mode ? (*e.posix_mode & S_IFMT) : 0;
   if (!e.symlink.empty()) {
     m.mode = S_IFLNK | 0777;
     m.link = e.symlink;
-  } else
+  } else if (!e.directory && (type == S_IFIFO || type == S_IFCHR || type == S_IFBLK || type == S_IFSOCK))
+    m.mode = type | permissions;  // Listed as what it is; never extracted.
+  else
     m.mode = (e.directory ? S_IFDIR : S_IFREG) | permissions;
   return m;
 }
@@ -212,7 +286,7 @@ std::shared_ptr<Opened> open_chain(const std::vector<Filepath>& chain, const std
 // Extracts entries of an open archive to files, one pass.
 Err extract_indices(Opened& opened, const std::vector<uint32_t>& indices, const std::function<Filepath(const SevenZip::Entry&)>& output,
                     const std::function<void(const SevenZip::Entry&, Err)>& finished, const SevenZip::Progress& progress) {
-  if (!opened.streamed) return opened.archive->extract(indices, output, finished, {}, progress);
+  if (!opened.streamed) return opened.archive->extract(indices, output, finished, opened.password, progress);
   std::set<uint32_t> wanted(indices.begin(), indices.end());
   return SevenZip::read_compressed_tar(
       opened.data, opened.compression, [&](const SevenZip::Entry& e) { return wanted.count(e.index) ? output(e) : Filepath(); }, finished, progress);
@@ -239,8 +313,7 @@ std::shared_ptr<Opened> open_new(const std::vector<Filepath>& chain, const Sourc
     opened->owned = private_directory();
     file = opened->owned / Filepath(inner).filename();
     Err failure;
-    SevenZip::Progress progress;
-    progress.cancelled = cancelled;
+    auto progress = read_progress(cancelled);
     auto error = extract_indices(*outer, {found->second}, [&](const SevenZip::Entry&) { return file; },
                                  [&](const SevenZip::Entry&, Err err) { if (!err.ok()) failure = err; }, progress);
     if (!error.ok()) throw std::runtime_error(error.steps.front());
@@ -255,23 +328,34 @@ std::shared_ptr<Opened> open_new(const std::vector<Filepath>& chain, const Sourc
   if (row && row->kind == ArchiveKind::CompressedTar) {
     opened->streamed = true;
     opened->compression = row->format;
-    SevenZip::Progress progress;
-    progress.cancelled = cancelled;
+    // A tar has no count up front: listing stops at the limit, through the cancel flag the pass checks.
+    std::atomic<bool> stop{false};
+    auto progress = read_progress(&stop);
+    auto report = progress.report;
+    progress.report = [&, report](uint64_t done, uint64_t total) {
+      if (cancelled && cancelled->load()) stop = true;
+      if (report) report(done, total);
+    };
+    bool too_many = false;
     auto error = SevenZip::read_compressed_tar(
-        file, opened->compression, [&](const SevenZip::Entry& e) { opened->listed.push_back(e); return Filepath(); }, {}, progress);
+        file, opened->compression,
+        [&](const SevenZip::Entry& e) {
+          if (opened->listed.size() >= SevenZip::entry_limit()) stop = too_many = true;
+          else opened->listed.push_back(e);
+          return Filepath();
+        },
+        {}, progress);
+    if (too_many)
+      throw std::runtime_error(chain.back().native() + " holds more than " + std::to_string(SevenZip::entry_limit()) + " entries; FC opens archives of up to that many");
+    if (cancelled && cancelled->load()) throw std::runtime_error("cancelled");
     if (!error.ok()) throw std::runtime_error(error.steps.front());
   } else {
-    auto error = SevenZip::Archive::open(file, archive_format_hint(name), opened->archive);
+    opened->password = password_source(chain, identity);
+    auto error = SevenZip::Archive::open(file, archive_format_hint(name), opened->archive, opened->password, read_progress(cancelled));
     if (!error.ok()) throw std::runtime_error(error.steps.front());
   }
   index_entries(*opened);
   return opened;
-}
-
-std::string key_of(const std::vector<Filepath>& chain) {
-  Location root;
-  root.archives = chain;
-  return root.encode();
 }
 
 std::shared_ptr<Opened> open_chain(const std::vector<Filepath>& chain, const std::atomic<bool>* cancelled) {
@@ -358,7 +442,13 @@ boost::filesystem::file_status Metadata::status() const {
   const auto permissions = perms(mode & 07777);
   if (directory) return file_status(directory_file, permissions);
   if (symlink()) return file_status(symlink_file, permissions);
-  return file_status(regular_file, permissions);
+  switch (mode & S_IFMT) {
+    case S_IFIFO: return file_status(fifo_file, permissions);
+    case S_IFCHR: return file_status(character_file, permissions);
+    case S_IFBLK: return file_status(block_file, permissions);
+    case S_IFSOCK: return file_status(socket_file, permissions);
+    default: return file_status(regular_file, permissions);
+  }
 }
 
 Metadata inspect(const Filepath& path) {
@@ -439,7 +529,7 @@ Err extract(const std::vector<Item>& items, const std::function<void(const Item&
 
 Err extract_all(const Filepath& archive, const std::function<Filepath(const SevenZip::Entry&)>& output,
                 const std::function<void(const SevenZip::Entry&, Err)>& finished, const std::atomic<bool>* cancelled,
-                const std::function<void(uint64_t, uint64_t)>& progress) {
+                const std::function<void(uint64_t, uint64_t)>& progress, const std::function<std::string(uint64_t)>& room) {
   // A file inside another archive is read from a private copy.
   Filepath data = archive, owned;
   struct Cleanup {
@@ -474,11 +564,29 @@ Err extract_all(const Filepath& archive, const std::function<Filepath(const Seve
   const auto name = Filepath(archive.native()).filename();
   const auto* row = archive_format_of(name);
   if (row && row->kind == ArchiveKind::CompressedTar) return SevenZip::read_compressed_tar(data, row->format, output, finished, report);
+  std::vector<Filepath> chain{absolute_path_safe(archive)};
+  if (is_archive_path(archive)) {
+    const auto location = Location::decode(archive.native());
+    chain = location.archives;
+    chain.push_back(location.internal);
+  }
+  SevenZip::PasswordSource password;
+  try {
+    password = password_source(chain, identity_of(chain.front()));
+  } catch (const std::exception& e) {
+    return Err(e.what());
+  }
   std::unique_ptr<SevenZip::Archive> opened;
-  if (auto error = SevenZip::Archive::open(data, archive_format_hint(name), opened); !error.ok()) return error;
+  if (auto error = SevenZip::Archive::open(data, archive_format_hint(name), opened, password, report); !error.ok()) return error;
   std::vector<uint32_t> all;
-  for (const auto& e : opened->entries()) all.push_back(e.index);
-  return opened->extract(all, output, finished, {}, report);
+  uint64_t bytes = 0;
+  for (const auto& e : opened->entries()) {
+    all.push_back(e.index);
+    if (!e.directory && e.symlink.empty() && e.hardlink.empty()) bytes += e.size.value_or(0);
+  }
+  if (room)
+    if (auto refused = room(bytes); !refused.empty()) return Err(refused);
+  return opened->extract(all, output, finished, password, report);
 }
 
 void close_unused() {
@@ -492,6 +600,20 @@ size_t open_count() {
   std::lock_guard lock(g_mutex);
   return g_open.size();
 }
+
+void set_password_prompt(PasswordPrompt prompt) {
+  std::lock_guard lock(g_password_mutex);
+  g_prompt = std::move(prompt);
+  g_prompt_thread = std::this_thread::get_id();
+}
+
+void forget_passwords() {
+  std::lock_guard lock(g_password_mutex);
+  g_passwords.clear();
+}
+
+ReadProgress::ReadProgress(std::function<void(double)> report) : _report(std::move(report)), _outer(t_read_progress) { t_read_progress = &_report; }
+ReadProgress::~ReadProgress() { t_read_progress = _outer; }
 
 }  // namespace ArchiveFS
 

@@ -172,6 +172,14 @@ final class AppController {
     applyAppearance()
     engine.onDialog = { [weak self] in self?.handle($0) }
     engine.onNotice = { [weak self] in self?.flash($0) }
+    engine.onPassword = { [weak self] question in
+      guard let self else { return }
+      let name = (question.archive as NSString).lastPathComponent
+      let text = question.wrong ? "That password is wrong. Enter the password for “\(name)”." : "“\(name)” is encrypted. Enter its password."
+      self.askpass.ask(text: text, kind: .secret, title: "Archive Password", field: "Password") { [weak self] answer in
+        self?.engine.answerPassword(question.id, answer)
+      }
+    }
     editor.app = self
     watchJobForMenus()
     engine.onAttach = { [weak self] in self?.editor.attach($0, app: self) }

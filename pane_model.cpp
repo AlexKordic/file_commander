@@ -1,5 +1,6 @@
 #include "pane_model.hpp"
 
+#include "archive.hpp"
 #include "archive_formats.hpp"
 #include "file_io_jobs.hpp"
 #include "location.hpp"
@@ -99,9 +100,14 @@ void PaneModel::load_directory(Filepath where, bool recover, Filepath focus, boo
   changed();
   auto result  = std::make_shared<Dir>();
   auto started = std::chrono::steady_clock::now();
+  _load_percent->store(-1);
   _loader.submit([this, alive = _alive, post = _post, reader = _read_directory, generation, result, where, recover, focus,
-                  background_refresh, started](const LatestWork::Token& cancelled) mutable {
+                  background_refresh, started, percent = _load_percent](const LatestWork::Token& cancelled) mutable {
     Err error;
+    ArchiveFS::ReadProgress progress([this, alive, post, percent](double fraction) {
+      const int now = int(fraction * 100);
+      if (percent->exchange(now) != now) post([this, alive] { if (alive->load()) changed(); });
+    });
     try {
       if (recover && !is_remote(where)) {
         for (;;) {

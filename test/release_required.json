@@ -95,7 +95,11 @@
       "cancel",
       "nested",
       "formats",
-      "extract"
+      "extract",
+      "names",
+      "passwords",
+      "damaged",
+      "limits"
     ]
   },
   "manual": [

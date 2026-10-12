@@ -45,6 +45,8 @@ public struct PaneSnapshot: Equatable, Sendable {
   public var filter = "", remoteError = ""
   public var sort = PaneSort.nameAscending
   public var loading = false, loadingUnattended = false
+  /// A long read's progress (an archive being opened), 0 to 100, or -1.
+  public var loadPercent = -1
   public var loadMilliseconds = 0.0
   public var itemsTotal: Int64 = 0, itemsVisible: Int64 = 0, itemsSelected: Int64 = 0
   public var bytesSelected: Int64 = 0, bytesTotal: Int64 = 0, largestItem: Int64 = 0
@@ -80,6 +82,14 @@ public struct DialogRequest: Sendable {
   public var side = 0
   public var selected: [String] = []
   public var focused = "", origin = "", target = ""
+}
+
+/// An encrypted archive's reader waits on this until `Engine.answerPassword`.
+public struct PasswordQuestion: Sendable {
+  public var id: Int64 = 0
+  public var archive = ""
+  /// The last password given for it was refused.
+  public var wrong = false
 }
 
 public struct AttachRequest: Sendable {

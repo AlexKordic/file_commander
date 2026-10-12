@@ -120,7 +120,9 @@ struct TutorialWorld {
     defer { try? fm.removeItem(at: docx) }
     for (archive, arguments, folder, day) in [("website-2025.7z", ["--format", "7zip"], home.appendingPathComponent("projects/website"), 2),
                                               ("downloads/logs-2026.tar.gz", ["--format", "pax", "-z"], home.appendingPathComponent("projects/logs"), 12),
-                                              ("downloads/report.docx", ["--format", "zip"], docx, 9)] where fm.isExecutableFile(atPath: "/usr/bin/tar") {
+                                              ("downloads/report.docx", ["--format", "zip"], docx, 9),
+                                              ("downloads/private.zip", ["--format", "zip", "--options", "zip:encryption=aes256", "--passphrase", "tutorial"],
+                                               home.appendingPathComponent("projects/tools"), 11)] where fm.isExecutableFile(atPath: "/usr/bin/tar") {
       let output = home.appendingPathComponent(archive)
       try fm.createDirectory(at: output.deletingLastPathComponent(), withIntermediateDirectories: true)
       let process = Process()

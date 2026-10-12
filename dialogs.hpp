@@ -49,6 +49,8 @@ struct Dialog {
   void cancel_submission();
 
   virtual void OnShow() = 0;
+  // Called when the dialog stops showing, closed or replaced by another.
+  virtual void OnHide() {}
 };
 
 struct Files : Dialog {
@@ -375,6 +377,22 @@ struct RestartEditorDialog : Dialog {
   Component button_restart, button_cancel;
   bool legacy_confirmation = false;
   std::string error;
+};
+
+// Asks for an encrypted archive's password for a reader waiting on another thread. Closing it any other way than OK answers Cancel, so the reader never waits forever.
+struct ArchivePasswordDialog : Dialog {
+  using Answer = std::function<void(std::optional<std::string>)>;
+  ArchivePasswordDialog(std::function<void()> close);
+  void ask(const std::string& archive, bool wrong, Answer answer);
+  void OnShow() override;
+  void OnHide() override;
+  void submit();
+  std::string archive, password;
+  bool wrong = false;
+  int cursor = 0;
+  Answer answer;
+  Component input;
+  std::function<void()> close;
 };
 
 struct ConnectSSHDialog : Dialog {

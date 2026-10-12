@@ -256,6 +256,7 @@ struct StatusFooter: View {
         Label("Reconnecting", systemImage: "bolt.horizontal.circle").foregroundStyle(.orange).help(pane.remoteError)
       }
       if pane.loading && !pane.loadingUnattended {
+        if pane.loadPercent >= 0 { Text("\(pane.loadPercent)%").monospacedDigit() }
         ProgressView().controlSize(.mini)
         Button("Stop") { app.engine.stopLoading(side) }
           .buttonStyle(TintedButtonStyle(color: app.theme.color("bottom.cancel")))

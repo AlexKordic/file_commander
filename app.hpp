@@ -94,6 +94,7 @@ class Panel : public DialogOverlay {
   uint64_t        items_revision      = 0;
   bool            _loading            = false;
   bool            _loading_unattended = false;  // An automatic refresh, not a read the user started.
+  std::shared_ptr<std::atomic<int>> _load_percent = std::make_shared<std::atomic<int>>(-1);  // A long read's progress, or -1.
   bool            _refresh_after_load = false;
   bool            loading() const;
   void            cancel_loading();
@@ -208,6 +209,7 @@ class FileCommander : public DialogOverlay {
 
   std::function<void()> _close_dialog;
   std::function<int()>  _get_dimx;
+  std::shared_ptr<std::atomic<bool>> _alive = std::make_shared<std::atomic<bool>>(true);
 
  public:
   int       _left_size   = 20;
@@ -272,6 +274,7 @@ class FileCommander : public DialogOverlay {
   void                           observe_state();
 
   FileCommander(Filepath l, Filepath r, ExecuteOnUiThread exec, std::function<int()> dimx, RunWithRestoredIO run_with_restored_io = {}, bool defer_load = false);
+  ~FileCommander();
   // returns
   TargetFunc get_target();
 

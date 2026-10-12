@@ -4,6 +4,7 @@
 #include <set>
 #include <map>
 #include <random>
+#include <thread>
 #include <sys/stat.h>
 #include "archive.hpp"
 #include "archive_formats.hpp"
@@ -170,7 +171,8 @@ void formats() {
   write(f / "tree/docs/b.md", std::string(5000, 'b'));
   auto extra = make_archives(f / "tree", f / "made");
   std::vector<std::string> names{"tree.zip", "tree.tar", "tree.tar.gz", "tree.tar.bz2", "tree.tar.xz"};
-  names.insert(names.end(), extra.begin(), extra.end());
+  for (const auto& name : extra)
+    if (name != "aes.zip" && name != "zipcrypto.zip") names.push_back(name);  // Encrypted: the passwords contract opens them.
   for (const auto& name : names) {
     const auto root = archive_root(f / "made" / name);
     std::set<std::string> top;
@@ -215,9 +217,11 @@ std::shared_ptr<JobSpec> run_plan(OperationPlan plan) {
 void extract() {
   Fixture f;
   fs::create_directories(f / "tree/docs");
+  fs::create_directories(f / "tree/empty");
   write(f / "tree/a.txt", "alpha\n");
   write(f / "tree/docs/b.md", std::string(5000, 'b'));
-  make_archives(f / "tree", f / "made");
+  fs::create_symlink("b.md", f / "tree/docs/link");
+  auto extra = make_archives(f / "tree", f / "made");
   require(archive_stem("release-1.2.tar.gz") == "release-1.2" && archive_stem("log.GZ") == "log" && archive_stem("x.bin") == "x", "folder names");
   // A compressed tar, into a folder named after it.
   auto job = run_plan(extraction_plan(f / "made/tree.tar.gz", f / "out" / archive_stem("tree.tar.gz"), CopyConflictMode::Replace));
@@ -239,7 +243,158 @@ void extract() {
   require(read(f / "out/h/ok.txt") == "kept" && fs::is_symlink(f / "out/h/docs/inner"), "safe entries were dropped");
   require(!fs::exists(fs::symlink_status(f / "out/h/up")) && !fs::exists(f / "out/evil.txt") && !fs::exists(f / "evil.txt"), "an entry left the destination");
   require(fs::is_regular_file(f / "out/h/abs.txt") || !fs::exists(f / "out/h/abs.txt"), "absolute entry misplaced");
+  // Links that each stay inside but lead out together; a FIFO; a hard link to a file already written.
+  require(!fs::exists(f / "out/chained.txt") && !fs::exists(f / "chained.txt"), "a link chain led an entry out of the destination");
+  require(!fs::exists(fs::symlink_status(f / "out/h/pipe")), "a FIFO was extracted");
+  require(read(f / "out/h/hard.txt") == "kept" && fs::equivalent(f / "out/h/hard.txt", f / "out/h/ok.txt"), "hard link");
+  // Indexed archives' folders and links come out in the same pass as their files.
+  require(fs::is_symlink(f / "out/tree/docs/link") && fs::is_directory(f / "out/tree/empty"), "a tar's link and empty folder");
+  job = run_plan(extraction_plan(f / "made/tree.zip", f / "out/z", CopyConflictMode::Replace));
+  require(job->snapshot()->_state == JobState::COMPLETED && fs::is_directory(f / "out/z/empty"), "a zip's empty folder");
+  if (extra.count("tree.bsd.7z")) {
+    job = run_plan(extraction_plan(f / "made/tree.bsd.7z", f / "out/s", CopyConflictMode::Replace));
+    require(job->snapshot()->_state == JobState::COMPLETED && fs::is_directory(f / "out/s/empty") && fs::is_symlink(f / "out/s/docs/link"),
+            "a 7z's link and empty folder");
+  }
   staging_free(f / "out");
+}
+
+// Names that aren't UTF-8: a zip's legacy names are cp437, as the format says; a tar's bytes are kept as they are.
+void names() {
+  Fixture f;
+  fs::create_directories(f / "tree");
+  write(f / "tree/a.txt", "alpha\n");
+  make_archives(f / "tree", f / "made");
+  std::set<std::string> zip, tar;
+  for (auto& e : ArchiveFS::list(archive_root(f / "made/legacy-names.zip"))) zip.insert(e.path.filename().native());
+  require(zip == std::set<std::string>{"caf\xc3\xa9.txt", "na\xc3\xafve.txt"}, "zip names");
+  for (auto& e : ArchiveFS::list(archive_root(f / "made/latin1.tar"))) tar.insert(e.path.filename().native());
+  require(tar == std::set<std::string>{"caf\xe9.txt"}, "a tar name's bytes were changed");
+  fs::create_directories(f / "out");
+  auto job = copy_out({archive_root(f / "made/legacy-names.zip") / "caf\xc3\xa9.txt"}, f / "out");
+  require(job->snapshot()->_state == JobState::COMPLETED && read(f / "out/caf\xc3\xa9.txt") == "cp437", "cp437 name copied out");
+  ArchiveFS::close_unused();
+}
+
+// The password prompt is called from the reading thread; answers come from `answers`, in order.
+struct Prompter {
+  std::vector<std::optional<std::string>> answers;
+  std::vector<std::pair<std::string, bool>> asked;
+  std::mutex mutex;
+  void install() {
+    // Set from another thread: the thread that sets the prompt is never made to wait for it.
+    std::thread([this] {
+      ArchiveFS::set_password_prompt([this](const std::string& archive, bool wrong) -> std::optional<std::string> {
+        std::lock_guard lock(mutex);
+        asked.push_back({archive, wrong});
+        if (answers.empty()) return std::nullopt;
+        auto answer = answers.front();
+        answers.erase(answers.begin());
+        return answer;
+      });
+    }).join();
+  }
+};
+
+void passwords() {
+  Fixture f;
+  fs::create_directories(f / "tree/docs");
+  write(f / "tree/a.txt", "alpha\n");
+  write(f / "tree/docs/b.md", std::string(5000, 'b'));
+  auto extra = make_archives(f / "tree", f / "made");
+  SevenZip::Encryption names{"secret", true}, data{"secret", false};
+  require(SevenZip::create("7z", {{f / "tree/a.txt", "a.txt"}, {f / "tree/docs", "docs"}}, f / "made/names.7z", {}, names).ok(), "names.7z");
+  require(SevenZip::create("7z", {{f / "tree/a.txt", "a.txt"}, {f / "tree/docs", "docs"}}, f / "made/data.7z", {}, data).ok(), "data.7z");
+
+  // The thread that set the prompt fails instead of waiting.
+  ArchiveFS::set_password_prompt([](const std::string&, bool) -> std::optional<std::string> { throw std::runtime_error("asked on the prompt's thread"); });
+  bool refused = false;
+  try {
+    ArchiveFS::list(archive_root(f / "made/names.7z"));
+  } catch (const std::exception& e) { refused = std::string(e.what()).find("password") != std::string::npos; }
+  require(refused, "a read on the prompt's thread must fail without asking");
+
+  // Encrypted names: opening asks, again after a wrong answer, and remembers the one that worked.
+  Prompter prompter;
+  prompter.answers = {"wrong", "secret"};
+  prompter.install();
+  require(ArchiveFS::list(archive_root(f / "made/names.7z")).size() == 2, "listing with the password");
+  require(prompter.asked.size() == 2 && !prompter.asked[0].second && prompter.asked[1].second, "asked again after a wrong password");
+  require(prompter.asked[0].first.find("names.7z") != std::string::npos, "the question names the archive");
+  ArchiveFS::close_unused();
+  require(ArchiveFS::list(archive_root(f / "made/names.7z")).size() == 2 && prompter.asked.size() == 2, "the password is remembered");
+
+  // Encrypted data: browsing doesn't ask; copying out checks the password before writing anything.
+  prompter.asked.clear();
+  prompter.answers = {"nope", "secret"};
+  require(ArchiveFS::list(archive_root(f / "made/data.7z") / "docs").size() == 1 && prompter.asked.empty(), "listing data.7z asked");
+  fs::create_directories(f / "out");
+  auto job = copy_out({archive_root(f / "made/data.7z") / "docs/b.md", archive_root(f / "made/data.7z") / "a.txt"}, f / "out");
+  require(job->snapshot()->_state == JobState::COMPLETED && read(f / "out/b.md") == std::string(5000, 'b') && read(f / "out/a.txt") == "alpha\n",
+          "copy out of data.7z");
+  require(prompter.asked.size() == 2 && prompter.asked[1].second, "data.7z asked again after a wrong password");
+  staging_free(f / "out");
+
+  // Cancel: the copy fails and writes nothing.
+  ArchiveFS::forget_passwords();
+  ArchiveFS::close_unused();
+  prompter.answers = {std::nullopt};
+  fs::create_directories(f / "none");
+  job = copy_out({archive_root(f / "made/data.7z") / "a.txt"}, f / "none");
+  require(job->snapshot()->_state == JobState::COMPLETED_WITH_ERRORS && count_in(f / "none") == 0, "a refused password must fail the copy cleanly");
+
+  // Encrypted zips, AES and the old ZipCrypto, through the extraction popup's one pass.
+  for (const char* name : {"aes.zip", "zipcrypto.zip"}) {
+    if (!extra.count(name)) continue;
+    prompter.answers = {"bad", "secret"};
+    prompter.asked.clear();
+    auto plan = run_plan(extraction_plan(f / "made" / name, f / "zips" / name, CopyConflictMode::Replace));
+    require(plan->snapshot()->_state == JobState::COMPLETED && read(f / "zips" / name / "a.txt") == "alpha\n", std::string("extract ") + name);
+    require(prompter.asked.size() == 2, std::string("asked twice for ") + name);
+  }
+  ArchiveFS::set_password_prompt({});
+  ArchiveFS::forget_passwords();
+  ArchiveFS::close_unused();
+}
+
+// A damaged entry fails alone; the rest of the copy completes.
+void damaged() {
+  Fixture f;
+  fs::create_directories(f / "tree");
+  write(f / "tree/a.txt", "alpha\n");
+  make_archives(f / "tree", f / "made");
+  fs::create_directories(f / "out");
+  const auto root = archive_root(f / "made/damaged.zip");
+  auto job = copy_out({root / "bad.txt", root / "good.txt"}, f / "out");
+  require(job->snapshot()->_state == JobState::COMPLETED_WITH_ERRORS, "the damaged entry wasn't reported");
+  require(read(f / "out/good.txt") == "good data" && !fs::exists(f / "out/bad.txt"), "the intact entry must be copied, the damaged one not");
+  staging_free(f / "out");
+  ArchiveFS::close_unused();
+}
+
+// Too many entries are refused; long reads report progress.
+void limits() {
+  Fixture f;
+  fs::create_directories(f / "tree/docs");
+  write(f / "tree/a.txt", "alpha\n");
+  write(f / "tree/docs/b.md", std::string(5000, 'b'));
+  make_archives(f / "tree", f / "made");
+  SevenZip::set_entry_limit(2);
+  for (const char* name : {"tree.zip", "tree.tar.gz"}) {
+    bool refused = false;
+    try {
+      ArchiveFS::list(archive_root(f / "made" / name));
+    } catch (const std::exception& e) { refused = std::string(e.what()).find("entries") != std::string::npos; }
+    require(refused, std::string("too many entries in ") + name);
+  }
+  SevenZip::set_entry_limit(1'000'000);
+  std::vector<double> seen;
+  {
+    ArchiveFS::ReadProgress progress([&](double fraction) { seen.push_back(fraction); });
+    require(ArchiveFS::list(archive_root(f / "made/tree.tar.gz")).size() == 2, "listing");
+  }
+  require(!seen.empty() && seen.back() > 0.99 && std::is_sorted(seen.begin(), seen.end()), "listing progress");
+  ArchiveFS::close_unused();
 }
 
 }  // namespace
@@ -254,7 +409,7 @@ int main(int argc, char** argv) {
     n();           \
     found = true;  \
   }
-    RUN(browse) RUN(copy) RUN(cancel) RUN(nested) RUN(formats) RUN(extract) require(found, "unknown archive contract");
+    RUN(browse) RUN(copy) RUN(cancel) RUN(nested) RUN(formats) RUN(extract) RUN(names) RUN(passwords) RUN(damaged) RUN(limits) require(found, "unknown archive contract");
     std::cout << "PASS archive " << name << "\n";
   } catch (const std::exception& e) {
     std::cerr << e.what() << "\n";

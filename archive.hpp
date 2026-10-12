@@ -11,6 +11,7 @@
 #include <atomic>
 #include <cstdint>
 #include <functional>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -53,14 +54,33 @@ struct Item {
 Err extract(const std::vector<Item>& items, const std::function<void(const Item&, Err)>& finished, const std::atomic<bool>* cancelled = nullptr,
             const std::function<void(uint64_t)>& progress = {});
 
-// Extracts every entry of `archive` (a local file, or a file inside another archive) in one pass: a compressed tar's entries as they stream past, a compressed file's one file, or every entry of any other archive. `output` names the file to write each entry to, or empty to skip it (folders and links are never written); `finished` hears how each written one went. Progress counts compressed bytes read for a compressed tar.
+// Extracts every entry of `archive` (a local file, or a file inside another archive) in one pass: a compressed tar's entries as they stream past, a compressed file's one file, or every entry of any other archive. `output` is asked about every entry and names the file to write a file's data to, or empty to skip it (folders and links have no data); `finished` hears how each written one went. Progress counts compressed bytes read for a compressed tar. `room`, when the archive says how big its files are (a compressed tar doesn't), hears that total before anything is written; an answer that isn't empty refuses the extraction with that reason.
 Err extract_all(const Filepath& archive, const std::function<Filepath(const SevenZip::Entry&)>& output,
                 const std::function<void(const SevenZip::Entry&, Err)>& finished, const std::atomic<bool>* cancelled = nullptr,
-                const std::function<void(uint64_t done, uint64_t total)>& progress = {});
+                const std::function<void(uint64_t done, uint64_t total)>& progress = {},
+                const std::function<std::string(uint64_t bytes)>& room = {});
 
 // Archives stay open while browsed; these close the ones nobody is using.
 void close_unused();
 size_t open_count();
+
+// Asks the person for an encrypted archive's password, on whichever thread reads it, and waits for the answer; nullopt when they decline. `archive` is the archive as FC displays it, and `wrong` says the last password given for it was refused. Set it on the thread that shows the questions: that thread is never made to wait, and reads there needing a password fail instead. Passwords that work are kept for the session, for the same archive file.
+using PasswordPrompt = std::function<std::optional<std::string>(const std::string& archive, bool wrong)>;
+void set_password_prompt(PasswordPrompt prompt);
+void forget_passwords();
+
+// While one is alive on a thread, the long reads ArchiveFS does there (opening an archive, listing a compressed tar) report how far they are, from 0 to 1.
+class ReadProgress {
+ public:
+  explicit ReadProgress(std::function<void(double)> report);
+  ~ReadProgress();
+  ReadProgress(const ReadProgress&) = delete;
+  ReadProgress& operator=(const ReadProgress&) = delete;
+
+ private:
+  std::function<void(double)> _report;
+  std::function<void(double)>* _outer;
+};
 
 }  // namespace ArchiveFS
 

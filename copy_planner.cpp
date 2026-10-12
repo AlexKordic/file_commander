@@ -99,6 +99,10 @@ void CopyPlanner::run() {
       append(std::move(op));
       return false;
     }
+    if (is_archive_path(e.path) && !boost::filesystem::is_directory(e.status) && !boost::filesystem::is_regular_file(e.status)) {
+      error(e.path, target, "Skipped: devices, pipes and sockets aren't copied out of archives");
+      return false;
+    }
     if (e.link_text && _request.follow_links && is_remote(e.path))
       op.source = RemoteFS::canonical(e.path);
     if (boost::filesystem::is_directory(e.status)) {

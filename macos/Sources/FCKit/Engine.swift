@@ -30,6 +30,7 @@ public final class Engine {
   @ObservationIgnored public var onDialog: ((DialogRequest) -> Void)?
   @ObservationIgnored public var onNotice: ((String) -> Void)?
   @ObservationIgnored public var onAttach: ((AttachRequest) -> Void)?
+  @ObservationIgnored public var onPassword: ((PasswordQuestion) -> Void)?
   @ObservationIgnored private var eventObservers: [UUID: ([EngineEvent]) -> Void] = [:]
   @ObservationIgnored private var eventCursor: UInt64 = 0
   @ObservationIgnored private var last = fce.Changes()
@@ -114,6 +115,9 @@ public final class Engine {
                               focused: String(request.focused), origin: String(request.origin), target: String(request.target)))
     }
     for notice in changes.notices { onNotice?(String(notice)) }
+    for question in changes.passwords {
+      onPassword?(PasswordQuestion(id: question.id, archive: String(question.archive), wrong: question.wrong))
+    }
     for attach in changes.attaches {
       onAttach?(AttachRequest(cwd: String(attach.cwd), argv: Engine.strings(attach.argv), environment: Engine.strings(attach.environment),
                               sceneSocket: String(attach.scene_socket)))
@@ -253,6 +257,8 @@ public final class Engine {
     submitted(fce.submit_rename(Engine.cxx(sources), Engine.cxx(names)))
   }
   public func copyToClipboard(_ side: Int, names: Bool) { fce.copy_to_clipboard(Int32(side), names); drain() }
+  /// Answers an archive password question; nil is Cancel.
+  public func answerPassword(_ id: Int64, _ password: String?) { fce.answer_password(id, password != nil, std.string(password ?? "")) }
   /// The extraction popup: everything in `archive` into `folder`, in one pass. `conflict`: 0 replace, 1 update if newer, 2 skip.
   public func submitExtract(_ archive: String, into folder: String, conflict: Int) -> Submitted {
     submitted(fce.submit_extract(std.string(archive), std.string(folder), Int32(conflict)))
@@ -347,6 +353,7 @@ public final class Engine {
     s.sort = PaneSort(rawValue: Int(p.sort)) ?? .nameAscending
     s.loading = p.loading
     s.loadingUnattended = p.loading_unattended
+    s.loadPercent = Int(p.load_percent)
     s.loadMilliseconds = p.load_ms
     s.itemsTotal = p.items_total
     s.itemsVisible = p.items_visible

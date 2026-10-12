@@ -7,6 +7,7 @@
 #include <cerrno>
 #include <climits>
 #include <condition_variable>
+#include <cstdio>
 #include <cstring>
 #include <mutex>
 #include <thread>
@@ -80,13 +81,17 @@ struct Variant {
   Variant& operator=(const Variant&) = delete;
 };
 
+// 7-Zip passes a byte of a name that isn't UTF-8 as U+EF80..U+EFFF (0xEF00 plus the byte), so the name's bytes survive the trip through UTF-16.
+constexpr uint32_t kEscapeBase = 0xEF00;
+
 std::string utf8(const wchar_t* text, size_t length) {
   std::string out;
   out.reserve(length);
   for (size_t i = 0; i < length; ++i) {
     auto c = static_cast<uint32_t>(text[i]);
     if (c > 0x10FFFF || (c >= 0xD800 && c <= 0xDFFF)) c = 0xFFFD;
-    if (c < 0x80) out.push_back(char(c));
+    if (c >= kEscapeBase + 0x80 && c <= kEscapeBase + 0xFF) out.push_back(char(c - kEscapeBase));
+    else if (c < 0x80) out.push_back(char(c));
     else if (c < 0x800) { out.push_back(char(0xC0 | (c >> 6))); out.push_back(char(0x80 | (c & 0x3F))); }
     else if (c < 0x10000) { out.push_back(char(0xE0 | (c >> 12))); out.push_back(char(0x80 | ((c >> 6) & 0x3F))); out.push_back(char(0x80 | (c & 0x3F))); }
     else { out.push_back(char(0xF0 | (c >> 18))); out.push_back(char(0x80 | ((c >> 12) & 0x3F))); out.push_back(char(0x80 | ((c >> 6) & 0x3F))); out.push_back(char(0x80 | (c & 0x3F))); }
@@ -94,21 +99,68 @@ std::string utf8(const wchar_t* text, size_t length) {
   return out;
 }
 
+// The length of the valid UTF-8 sequence at `at`, or 0.
+size_t utf8_sequence(std::string_view text, size_t at, uint32_t& c) {
+  const auto b = static_cast<unsigned char>(text[at]);
+  size_t n = 0;
+  if (b < 0x80) { c = b; return 1; }
+  if ((b >> 5) == 0x6) { c = b & 0x1F; n = 2; }
+  else if ((b >> 4) == 0xE) { c = b & 0x0F; n = 3; }
+  else if ((b >> 3) == 0x1E) { c = b & 0x07; n = 4; }
+  else return 0;
+  if (at + n > text.size()) return 0;
+  for (size_t k = 1; k < n; ++k) {
+    const auto t = static_cast<unsigned char>(text[at + k]);
+    if ((t >> 6) != 0x2) return 0;
+    c = (c << 6) | (t & 0x3F);
+  }
+  static constexpr uint32_t kSmallest[] = {0, 0, 0x80, 0x800, 0x10000};
+  if (c < kSmallest[n] || c > 0x10FFFF || (c >= 0xD800 && c <= 0xDFFF)) return 0;
+  return n;
+}
+
+bool valid_utf8(std::string_view text) {
+  uint32_t c = 0;
+  for (size_t i = 0; i < text.size();) {
+    const size_t n = utf8_sequence(text, i, c);
+    if (n == 0) return false;
+    i += n;
+  }
+  return true;
+}
+
+// Bytes that aren't UTF-8 become 7-Zip's escapes, so a local name of any bytes is stored as those bytes.
 std::wstring wide(std::string_view text) {
   std::wstring out;
   out.reserve(text.size());
   for (size_t i = 0; i < text.size();) {
-    const auto b = static_cast<unsigned char>(text[i]);
-    uint32_t c = 0xFFFD;
-    size_t n = 1;
-    if (b < 0x80) c = b;
-    else if ((b >> 5) == 0x6 && i + 1 < text.size()) { c = ((b & 0x1F) << 6) | (text[i + 1] & 0x3F); n = 2; }
-    else if ((b >> 4) == 0xE && i + 2 < text.size()) { c = ((b & 0x0F) << 12) | ((text[i + 1] & 0x3F) << 6) | (text[i + 2] & 0x3F); n = 3; }
-    else if ((b >> 3) == 0x1E && i + 3 < text.size()) { c = ((b & 0x07) << 18) | ((text[i + 1] & 0x3F) << 12) | ((text[i + 2] & 0x3F) << 6) | (text[i + 3] & 0x3F); n = 4; }
+    uint32_t c = 0;
+    const size_t n = utf8_sequence(text, i, c);
+    if (n == 0) {
+      out.push_back(static_cast<wchar_t>(kEscapeBase + static_cast<unsigned char>(text[i])));
+      ++i;
+      continue;
+    }
     out.push_back(static_cast<wchar_t>(c));
     i += n;
   }
   return out;
+}
+
+// A zip entry's name without the UTF-8 flag is in IBM code page 437, as the zip format specifies. Names that are valid UTF-8 anyway (as many Unix tools write them) stay UTF-8.
+std::string from_cp437(std::string_view raw) {
+  static constexpr char16_t kHigh[128] = {
+      0x00C7, 0x00FC, 0x00E9, 0x00E2, 0x00E4, 0x00E0, 0x00E5, 0x00E7, 0x00EA, 0x00EB, 0x00E8, 0x00EF, 0x00EE, 0x00EC, 0x00C4, 0x00C5,
+      0x00C9, 0x00E6, 0x00C6, 0x00F4, 0x00F6, 0x00F2, 0x00FB, 0x00F9, 0x00FF, 0x00D6, 0x00DC, 0x00A2, 0x00A3, 0x00A5, 0x20A7, 0x0192,
+      0x00E1, 0x00ED, 0x00F3, 0x00FA, 0x00F1, 0x00D1, 0x00AA, 0x00BA, 0x00BF, 0x2310, 0x00AC, 0x00BD, 0x00BC, 0x00A1, 0x00AB, 0x00BB,
+      0x2591, 0x2592, 0x2593, 0x2502, 0x2524, 0x2561, 0x2562, 0x2556, 0x2555, 0x2563, 0x2551, 0x2557, 0x255D, 0x255C, 0x255B, 0x2510,
+      0x2514, 0x2534, 0x252C, 0x251C, 0x2500, 0x253C, 0x255E, 0x255F, 0x255A, 0x2554, 0x2569, 0x2566, 0x2560, 0x2550, 0x256C, 0x2567,
+      0x2568, 0x2564, 0x2565, 0x2559, 0x2558, 0x2552, 0x2553, 0x256B, 0x256A, 0x2518, 0x250C, 0x2588, 0x2584, 0x258C, 0x2590, 0x2580,
+      0x03B1, 0x00DF, 0x0393, 0x03C0, 0x03A3, 0x03C3, 0x00B5, 0x03C4, 0x03A6, 0x0398, 0x03A9, 0x03B4, 0x221E, 0x03C6, 0x03B5, 0x2229,
+      0x2261, 0x00B1, 0x2265, 0x2264, 0x2320, 0x2321, 0x00F7, 0x2248, 0x00B0, 0x2219, 0x00B7, 0x221A, 0x207F, 0x00B2, 0x25A0, 0x00A0};
+  std::wstring text;
+  for (unsigned char b : raw) text.push_back(static_cast<wchar_t>(b < 0x80 ? b : kHigh[b - 0x80]));
+  return utf8(text.data(), text.size());
 }
 
 std::string string_of(const Library& lib, const PROPVARIANT& v) {
@@ -435,18 +487,20 @@ class OutFile final : public IOutStream, public RefCounted {
   int _fd;
 };
 
-// Asks the caller's PasswordSource and hands the library a string it can free.
+// Asks the caller's PasswordSource once per pass, however often the library asks, and hands the library a string it can free. `wrong` tells the source the password it gave for the previous pass was refused.
 struct PasswordAsker {
   const PasswordSource& source;
+  bool wrong = false;
   bool refused = false;
+  std::optional<std::string> given;
   HRESULT ask(BSTR* out) {
     *out = nullptr;
-    auto password = source ? source() : std::nullopt;
-    if (!password) {
+    if (!given && !refused) given = source ? source(wrong) : std::nullopt;
+    if (!given) {
       refused = true;
       return E_ABORT;
     }
-    const auto text = wide(*password);
+    const auto text = wide(*given);
     *out = library().alloc_string(text.data(), UINT(text.size()));
     return *out ? S_OK : E_OUTOFMEMORY;
   }
@@ -460,7 +514,7 @@ HRESULT report_progress(const Progress& progress, UInt64 done, UInt64 total) {
 
 class OpenCallback final : public IArchiveOpenCallback, public ICryptoGetTextPassword, public RefCounted {
  public:
-  OpenCallback(const PasswordSource& password, const Progress& progress) : _password{password}, _progress(progress) {}
+  OpenCallback(const PasswordSource& password, bool wrong, const Progress& progress) : _password{password, wrong}, _progress(progress) {}
   STDMETHOD(QueryInterface)(REFIID iid, void** out) override {
     *out = nullptr;
     if (iid == IID_IUnknown || iid == IID_IArchiveOpenCallback) *out = static_cast<IArchiveOpenCallback*>(this);
@@ -478,6 +532,7 @@ class OpenCallback final : public IArchiveOpenCallback, public ICryptoGetTextPas
   STDMETHODIMP SetCompleted(const UInt64*, const UInt64* bytes) noexcept override { return report_progress(_progress, bytes ? *bytes : 0, _total); }
   STDMETHODIMP CryptoGetTextPassword(BSTR* password) noexcept override { return _password.ask(password); }
   bool password_refused() const { return _password.refused; }
+  bool password_given() const { return _password.given.has_value(); }
 
  private:
   PasswordAsker _password;
@@ -503,8 +558,8 @@ namespace {
 class ExtractCallback final : public IArchiveExtractCallback, public ICryptoGetTextPassword, public RefCounted {
  public:
   ExtractCallback(const std::vector<Entry>& entries, const std::function<Filepath(const Entry&)>& output,
-                  const std::function<void(const Entry&, Err)>& finished, const PasswordSource& password, const Progress& progress)
-      : _entries(entries), _output(output), _finished(finished), _password{password}, _progress(progress) {}
+                  const std::function<void(const Entry&, Err)>& finished, const PasswordSource& password, bool wrong, const Progress& progress)
+      : _entries(entries), _output(output), _finished(finished), _password{password, wrong}, _progress(progress) {}
   STDMETHOD(QueryInterface)(REFIID iid, void** out) override {
     *out = nullptr;
     if (iid == IID_IUnknown || iid == IID_IProgress || iid == IID_IArchiveExtractCallback) *out = static_cast<IArchiveExtractCallback*>(this);
@@ -523,16 +578,18 @@ class ExtractCallback final : public IArchiveExtractCallback, public ICryptoGetT
   STDMETHODIMP GetStream(UInt32 index, ISequentialOutStream** out, Int32 mode) noexcept override {
     *out = nullptr;
     finish_current(NArchive::NExtract::NOperationResult::kOK);
-    if (mode != NArchive::NExtract::NAskMode::kExtract || index >= _entries.size()) return S_OK;
+    if (index >= _entries.size()) return S_OK;
+    // A test pass decodes and checks the entry without writing it.
+    if (mode == NArchive::NExtract::NAskMode::kTest) _current = &_entries[index];
+    if (mode != NArchive::NExtract::NAskMode::kExtract) return S_OK;
     const Entry& entry = _entries[index];
-    if (entry.directory || !entry.symlink.empty()) return S_OK;
     Filepath path;
     try {
-      path = _output(entry);
+      if (_output) path = _output(entry);
     } catch (...) {
       return E_FAIL;
     }
-    if (path.empty()) return S_OK;
+    if (path.empty() || entry.directory || !entry.symlink.empty() || !entry.hardlink.empty()) return S_OK;
     int error = 0;
     auto file = OutFile::create(path, error);
     _current = &entry;
@@ -552,6 +609,8 @@ class ExtractCallback final : public IArchiveExtractCallback, public ICryptoGetT
   }
   STDMETHODIMP CryptoGetTextPassword(BSTR* password) noexcept override { return _password.ask(password); }
   bool password_refused() const { return _password.refused; }
+  const std::optional<std::string>& password_given() const { return _password.given; }
+  Int32 last_result() const { return _last_result; }
   // Reports the entry still open when the library stops early.
   void abandon(const std::string& why) {
     if (_current) {
@@ -570,6 +629,9 @@ class ExtractCallback final : public IArchiveExtractCallback, public ICryptoGetT
       _file = {};
     }
     if (why.empty()) why = operation_result_text(result);
+    if (entry.encrypted && (result == NArchive::NExtract::NOperationResult::kDataError || result == NArchive::NExtract::NOperationResult::kCRCError))
+      why += " (wrong password?)";
+    _last_result = result;
     _current = nullptr;
     _open_error.clear();
     if (_finished) {
@@ -589,6 +651,7 @@ class ExtractCallback final : public IArchiveExtractCallback, public ICryptoGetT
   const Entry* _current = nullptr;
   ComPtr<OutFile> _file;
   std::string _open_error;
+  Int32 _last_result = NArchive::NExtract::NOperationResult::kOK;
 };
 
 struct Source {
@@ -601,7 +664,8 @@ struct Source {
 
 class UpdateCallback final : public IArchiveUpdateCallback, public ICryptoGetTextPassword2, public RefCounted {
  public:
-  UpdateCallback(const std::vector<Source>& items, const Progress& progress) : _items(items), _progress(progress) {}
+  UpdateCallback(const std::vector<Source>& items, const Progress& progress, const std::string& password)
+      : _items(items), _progress(progress), _password(password) {}
   STDMETHOD(QueryInterface)(REFIID iid, void** out) override {
     *out = nullptr;
     if (iid == IID_IUnknown || iid == IID_IProgress || iid == IID_IArchiveUpdateCallback) *out = static_cast<IArchiveUpdateCallback*>(this);
@@ -672,20 +736,24 @@ class UpdateCallback final : public IArchiveUpdateCallback, public ICryptoGetTex
   }
   STDMETHODIMP SetOperationResult(Int32) noexcept override { return S_OK; }
   STDMETHODIMP CryptoGetTextPassword2(Int32* defined, BSTR* password) noexcept override {
-    *defined = 0;
+    *defined = _password.empty() ? 0 : 1;
     *password = nullptr;
-    return S_OK;
+    if (_password.empty()) return S_OK;
+    const auto text = wide(_password);
+    *password = library().alloc_string(text.data(), UINT(text.size()));
+    return *password ? S_OK : E_OUTOFMEMORY;
   }
   const std::string& error() const { return _error; }
 
  private:
   const std::vector<Source>& _items;
   const Progress& _progress;
+  const std::string& _password;
   UInt64 _total = 0;
   std::string _error;
 };
 
-Entry entry_at(const Library& lib, IInArchive* handler, UInt32 i, const Filepath& file);
+Entry entry_at(const Library& lib, IInArchive* handler, UInt32 i, const Filepath& file, bool cp437_names = false);
 
 // A bounded byte queue from one writer thread to one reader: a compressed stream's handler decodes into it while tar reads from it, so the decompressed tar is never stored.
 class Pipe {
@@ -846,7 +914,7 @@ class SequentialTarCallback final : public IArchiveExtractCallback, public RefCo
     } catch (...) {
       return E_FAIL;
     }
-    if (path.empty() || _entry.directory || !_entry.symlink.empty()) return S_OK;
+    if (path.empty() || _entry.directory || !_entry.symlink.empty() || !_entry.hardlink.empty()) return S_OK;
     _current = true;
     int error = 0;
     auto file = OutFile::create(path, error);
@@ -938,10 +1006,10 @@ std::vector<const HandlerInfo*> candidates(const Filepath& file, const std::stri
   return out;
 }
 
-Entry entry_at(const Library& lib, IInArchive* handler, UInt32 i, const Filepath& file) {
+Entry entry_at(const Library& lib, IInArchive* handler, UInt32 i, const Filepath& file, bool cp437_names) {
     Entry e;
     e.index = i;
-    Variant path(lib), dir(lib), size(lib), mtime(lib), attrib(lib), posix(lib), encrypted(lib), link(lib);
+    Variant path(lib), dir(lib), size(lib), mtime(lib), attrib(lib), posix(lib), encrypted(lib), link(lib), hardlink(lib);
     handler->GetProperty(i, kpidPath, &path.value);
     handler->GetProperty(i, kpidIsDir, &dir.value);
     handler->GetProperty(i, kpidSize, &size.value);
@@ -950,7 +1018,9 @@ Entry entry_at(const Library& lib, IInArchive* handler, UInt32 i, const Filepath
     handler->GetProperty(i, kpidPosixAttrib, &posix.value);
     handler->GetProperty(i, kpidEncrypted, &encrypted.value);
     handler->GetProperty(i, kpidSymLink, &link.value);
+    handler->GetProperty(i, kpidHardLink, &hardlink.value);
     e.path = string_of(lib, path.value);
+    if (cp437_names && !valid_utf8(e.path)) e.path = from_cp437(e.path);
     if (e.path.empty()) {
       // Single-stream formats (gzip, xz, ...) often keep no name: the archive's own name without its extension stands in, as in 7-Zip.
       e.path = file.stem().native();
@@ -965,14 +1035,28 @@ Entry entry_at(const Library& lib, IInArchive* handler, UInt32 i, const Filepath
     else if (auto a = number_of(attrib.value); a && (*a & FILE_ATTRIBUTE_UNIX_EXTENSION)) e.posix_mode = uint32_t(*a >> 16);
     if (!e.directory && e.posix_mode && S_ISDIR(*e.posix_mode)) e.directory = true;
     e.symlink = string_of(lib, link.value);
+    e.hardlink = string_of(lib, hardlink.value);
     return e;
 }
 
-void read_entries(const Library& lib, IInArchive* handler, const Filepath& file, std::vector<Entry>& entries) {
+Err read_entries(const Library& lib, IInArchive* handler, const Filepath& file, bool cp437_names, std::vector<Entry>& entries) {
   UInt32 count = 0;
-  if (handler->GetNumberOfItems(&count) != S_OK) return;
+  if (handler->GetNumberOfItems(&count) != S_OK) return Err("cannot read the entries of " + file.native());
+  if (count > entry_limit()) return Err(file.native() + " holds " + std::to_string(count) + " entries; FC opens archives of up to " + std::to_string(entry_limit()));
   entries.reserve(count);
-  for (UInt32 i = 0; i < count; ++i) entries.push_back(entry_at(lib, handler, i, file));
+  for (UInt32 i = 0; i < count; ++i) entries.push_back(entry_at(lib, handler, i, file, cp437_names));
+  return Err();
+}
+
+// Zip names without the UTF-8 flag reach FC as their raw bytes (see from_cp437) instead of through the process's locale.
+void prefer_raw_names(IInArchive* handler) {
+  ComPtr<ISetProperties> properties;
+  if (handler->QueryInterface(IID_ISetProperties, reinterpret_cast<void**>(properties.put())) != S_OK || !properties) return;
+  const wchar_t* names[] = {L"cp"};
+  PROPVARIANT value{};
+  value.vt = VT_UI4;
+  value.ulVal = 65001;  // CP_UTF8: decoded as UTF-8, with escapes for bytes that aren't
+  properties->SetProperties(names, &value, 1);
 }
 
 void collect(const Filepath& path, const std::string& name, std::vector<Source>& out, Err& error) {
@@ -1004,7 +1088,12 @@ void collect(const Filepath& path, const std::string& name, std::vector<Source>&
   }
 }
 
+std::atomic<size_t> g_entry_limit{1'000'000};
+
 }  // namespace
+
+size_t entry_limit() { return g_entry_limit.load(); }
+void set_entry_limit(size_t limit) { g_entry_limit = limit; }
 
 bool available() { return library().error.empty(); }
 std::string error() { return library().error; }
@@ -1033,28 +1122,40 @@ Err Archive::open(const Filepath& file, const std::string& format, std::unique_p
   int error = 0;
   auto stream = InFile::open(file, error);
   if (!stream) return Err("cannot open " + file.native() + ": " + std::strerror(error));
-  bool refused = false;
+  bool refused = false, rejected = false;
   for (const auto* h : candidates(file, format)) {
-    if (progress.cancelled && progress.cancelled->load()) return Err("cancelled");
-    ComPtr<IInArchive> handler;
-    if (lib.create_object(&h->class_id, &IID_IInArchive, reinterpret_cast<void**>(handler.put())) != S_OK || !handler) continue;
-    stream->Seek(0, STREAM_SEEK_SET, nullptr);
-    ComPtr<OpenCallback> callback(new OpenCallback(password, progress));
-    const UInt64 scan = 0;
-    const HRESULT hr = handler->Open(stream.get(), &scan, callback.get());
-    if (hr == S_OK) {
-      auto state = std::make_unique<State>();
-      state->handler = handler;
-      state->stream = stream;
-      state->format = h->format.name;
-      read_entries(lib, handler.get(), file, state->entries);
-      out.reset(new Archive(std::move(state)));
-      return Err();
+    // An archive whose names are encrypted asks for the password while opening; a refused one is asked for again.
+    for (bool wrong = false;;) {
+      if (progress.cancelled && progress.cancelled->load()) return Err("cancelled");
+      ComPtr<IInArchive> handler;
+      if (lib.create_object(&h->class_id, &IID_IInArchive, reinterpret_cast<void**>(handler.put())) != S_OK || !handler) break;
+      if (h->format.name == "zip") prefer_raw_names(handler.get());
+      stream->Seek(0, STREAM_SEEK_SET, nullptr);
+      ComPtr<OpenCallback> callback(new OpenCallback(password, wrong, progress));
+      const UInt64 scan = 0;
+      const HRESULT hr = handler->Open(stream.get(), &scan, callback.get());
+      if (hr == S_OK) {
+        auto state = std::make_unique<State>();
+        state->handler = handler;
+        state->stream = stream;
+        state->format = h->format.name;
+        if (auto error = read_entries(lib, handler.get(), file, h->format.name == "zip", state->entries); !error.ok()) return error;
+        out.reset(new Archive(std::move(state)));
+        out->read_link_targets(password, progress);
+        return Err();
+      }
+      handler->Close();
+      if (hr == E_ABORT && progress.cancelled && progress.cancelled->load()) return Err("cancelled");
+      if (callback->password_refused()) refused = true;
+      else if (callback->password_given()) {
+        rejected = wrong = true;
+        continue;
+      }
+      break;
     }
-    handler->Close();
-    if (callback->password_refused()) refused = true;
-    if (hr == E_ABORT && progress.cancelled && progress.cancelled->load()) return Err("cancelled");
+    if (refused) break;
   }
+  if (refused && rejected) return Err("Wrong password, or the archive is damaged: " + file.native());
   if (refused) return Err("A password is needed to open " + file.native());
   return Err("Not an archive FC can open: " + file.native());
 }
@@ -1068,7 +1169,33 @@ Err Archive::extract(const std::vector<uint32_t>& indices, const std::function<F
   for (auto i : sorted)
     if (i >= _state->entries.size()) return Err("no entry " + std::to_string(i) + " in the archive");
   if (sorted.empty()) return Err();
-  ComPtr<ExtractCallback> callback(new ExtractCallback(_state->entries, output, finished, password, progress));
+  // Encrypted entries: a test pass over the first one checks the password, asking again while it is refused, so the real pass runs with one that works and nothing is written with a wrong one.
+  std::optional<std::string> checked;
+  bool asked = false;
+  const auto first = std::find_if(sorted.begin(), sorted.end(), [&](UInt32 i) { return _state->entries[i].encrypted; });
+  if (first != sorted.end() && password) {
+    const std::function<Filepath(const Entry&)> no_output;
+    const std::function<void(const Entry&, Err)> no_report;
+    for (bool wrong = false, rejected = false;;) {
+      ComPtr<ExtractCallback> test(new ExtractCallback(_state->entries, no_output, no_report, password, wrong, progress));
+      UInt32 index = *first;
+      const HRESULT hr = _state->handler->Extract(&index, 1, 1, test.get());
+      if (hr == E_ABORT && test->password_refused())
+        return Err((rejected ? "Wrong password, or the entry is damaged: " : "A password is needed for ") + _state->entries[index].path);
+      if (hr == E_ABORT) return Err("Extraction stopped: cancelled");
+      using namespace NArchive::NExtract::NOperationResult;
+      const Int32 result = test->last_result();
+      asked = test->password_given().has_value();
+      checked = test->password_given();
+      if (hr == S_OK && asked && (result == kWrongPassword || result == kDataError || result == kCRCError)) {
+        wrong = rejected = true;
+        continue;
+      }
+      break;
+    }
+  }
+  const PasswordSource same = [&](bool) { return checked; };
+  ComPtr<ExtractCallback> callback(new ExtractCallback(_state->entries, output, finished, asked ? same : password, false, progress));
   const HRESULT hr = _state->handler->Extract(sorted.data(), UInt32(sorted.size()), 0, callback.get());
   if (hr != S_OK) {
     const std::string why = hr == E_ABORT && callback->password_refused() ? "a password is needed" : hresult_text(hr);
@@ -1076,6 +1203,38 @@ Err Archive::extract(const std::vector<uint32_t>& indices, const std::function<F
     return Err("Extraction stopped: " + why);
   }
   return Err();
+}
+
+// Zip, 7z and others keep a Unix link's target as its data, with the link's type in its mode: those small entries are read once, so the link is known by its target like a tar's.
+void Archive::read_link_targets(const PasswordSource& password, const Progress& progress) {
+  std::vector<uint32_t> links;
+  for (const auto& e : _state->entries)
+    if (!e.directory && e.symlink.empty() && e.hardlink.empty() && e.posix_mode && S_ISLNK(*e.posix_mode) && e.size.value_or(0) <= 4096)
+      links.push_back(e.index);
+  if (links.empty()) return;
+  boost::system::error_code ec;
+  auto base = boost::filesystem::temp_directory_path(ec);
+  if (ec) base = "/tmp";
+  const auto folder = base / boost::filesystem::unique_path("fc-links-%%%%-%%%%-%%%%");
+  if (!boost::filesystem::create_directory(folder, ec) || ec) return;
+  boost::filesystem::permissions(folder, boost::filesystem::owner_all, ec);
+  std::vector<std::pair<uint32_t, std::string>> targets;
+  extract(
+      links, [&](const Entry& e) { return folder / std::to_string(e.index); },
+      [&](const Entry& e, Err error) {
+        if (!error.ok()) return;
+        std::string text;
+        if (FILE* in = std::fopen((folder / std::to_string(e.index)).c_str(), "rb")) {
+          char buffer[4097];
+          const size_t n = std::fread(buffer, 1, sizeof buffer, in);
+          std::fclose(in);
+          if (n > 0 && n <= 4096) text.assign(buffer, n);
+        }
+        if (!text.empty() && text.find('\0') == std::string::npos) targets.push_back({e.index, text});
+      },
+      password, progress);
+  boost::filesystem::remove_all(folder, ec);
+  for (auto& [index, text] : targets) _state->entries[index].symlink = std::move(text);
 }
 
 Err read_compressed_tar(const Filepath& file, const std::string& compression, const std::function<Filepath(const Entry&)>& output,
@@ -1126,7 +1285,8 @@ Err read_compressed_tar(const Filepath& file, const std::string& compression, co
   return Err();
 }
 
-Err create(const std::string& format, const std::vector<NewItem>& items, const Filepath& destination, const Progress& progress) {
+Err create(const std::string& format, const std::vector<NewItem>& items, const Filepath& destination, const Progress& progress,
+           const Encryption& encryption) {
   const auto& lib = library();
   if (!lib.error.empty()) return Err("Archive support is unavailable: " + lib.error);
   const HandlerInfo* handler_info = nullptr;
@@ -1146,7 +1306,17 @@ Err create(const std::string& format, const std::vector<NewItem>& items, const F
   int open_error = 0;
   auto file = OutFile::create(destination, open_error);
   if (!file) return Err("cannot create " + destination.native() + ": " + std::strerror(open_error));
-  ComPtr<UpdateCallback> callback(new UpdateCallback(sources, progress));
+  if (encryption.encrypt_names) {
+    ComPtr<ISetProperties> properties;
+    if (handler->QueryInterface(IID_ISetProperties, reinterpret_cast<void**>(properties.put())) != S_OK || !properties)
+      return Err(format + " archives can't encrypt their names");
+    const wchar_t* names[] = {L"he"};
+    PROPVARIANT on{};
+    on.vt = VT_BOOL;
+    on.boolVal = VARIANT_TRUE;
+    if (properties->SetProperties(names, &on, 1) != S_OK) return Err(format + " archives can't encrypt their names");
+  }
+  ComPtr<UpdateCallback> callback(new UpdateCallback(sources, progress, encryption.password));
   const HRESULT hr = handler->UpdateItems(file.get(), UInt32(sources.size()), callback.get());
   const int close_error = file->close();
   if (hr != S_OK) return Err("Archive creation stopped: " + (callback->error().empty() ? hresult_text(hr) : callback->error()));

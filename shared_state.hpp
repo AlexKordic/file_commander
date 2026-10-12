@@ -60,6 +60,7 @@ struct PanelSharedState {
   std::function<int()>                    get_focused_index;
   // Whether a directory read is in flight, and stopping it.
   std::function<bool()>                   loading      = [] { return false; };
+  std::function<int()>                    load_percent = [] { return -1; };
   std::function<void()>                   stop_loading = [] {};
 
   explicit PanelSharedState(Dir* d);

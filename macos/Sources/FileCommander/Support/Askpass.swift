@@ -3,12 +3,14 @@ import ExplainerKit
 import Foundation
 import SwiftUI
 
-/// A question ssh asks: a password or passphrase, a host key to trust, or a notice.
+/// A question ssh asks: a password or passphrase, a host key to trust, or a notice. Encrypted archives ask for their passwords the same way, with their own title.
 struct AskpassPrompt: Identifiable, Sendable {
   enum Kind: Sendable { case secret, confirm, notice }
   let id: Int
   let text: String
   let kind: Kind
+  var title = ""
+  var field = "Password or passphrase"
 }
 
 /// Answers ssh's questions with native sheets. ssh runs the bundled
@@ -100,7 +102,7 @@ final class AskpassServer {
 
   private final class ReplyBox: @unchecked Sendable { var value: String? }
 
-  func ask(text: String, kind: AskpassPrompt.Kind, reply: @escaping (String?) -> Void) {
+  func ask(text: String, kind: AskpassPrompt.Kind, title: String = "", field: String = "Password or passphrase", reply: @escaping (String?) -> Void) {
     guard let app else { reply(nil); return }
     if kind == .notice {
       app.flash(text)
@@ -109,12 +111,12 @@ final class AskpassServer {
     }
     nextID += 1
     pending[nextID] = reply
-    let prompt = AskpassPrompt(id: nextID, text: text, kind: kind)
+    let prompt = AskpassPrompt(id: nextID, text: text, kind: kind, title: title, field: field)
     // A copy or other sheet may be up; ssh waits until the user answers.
     if app.sheet != nil {
       let window = NSApp.mainWindow ?? NSApp.windows.first
       let alert = NSAlert()
-      alert.messageText = kind == .confirm ? "Trust this host?" : "SSH asks"
+      alert.messageText = !title.isEmpty ? title : kind == .confirm ? "Trust this host?" : "SSH asks"
       alert.informativeText = text
       let field = NSSecureTextField(frame: NSRect(x: 0, y: 0, width: 260, height: 24))
       if kind == .secret { alert.accessoryView = field }
@@ -144,10 +146,10 @@ struct AskpassSheet: View {
   @State private var secret = ""
 
   var body: some View {
-    SheetFrame(title: prompt.kind == .confirm ? "Trust This Host?" : "SSH Needs an Answer", subtitle: "", width: 480) {
-      Text(prompt.text).font(.system(.body, design: .monospaced)).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
+    SheetFrame(title: !prompt.title.isEmpty ? prompt.title : prompt.kind == .confirm ? "Trust This Host?" : "SSH Needs an Answer", subtitle: "", width: 480) {
+      Text(prompt.text).font(prompt.title.isEmpty ? .system(.body, design: .monospaced) : .body).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
       if prompt.kind == .secret {
-        SecureField("Password or passphrase", text: $secret).textFieldStyle(.roundedBorder).onSubmit(ok)
+        SecureField(prompt.field, text: $secret).textFieldStyle(.roundedBorder).onSubmit(ok)
           .explainerAnchor("sheet.askpass.secret")
       } else {
         Label("Check the fingerprint with the server's administrator before you trust it.", systemImage: "checkmark.shield")

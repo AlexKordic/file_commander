@@ -43,6 +43,12 @@ struct DialogRequest {
   std::vector<std::string> selected;
   std::string              focused, origin, target;
 };
+// An encrypted archive's reader waits on this until answer_password.
+struct PasswordQuestion {
+  int64_t     id = 0;
+  std::string archive;        // As FC displays it.
+  bool        wrong = false;  // The last password given for it was refused.
+};
 struct AttachRequest {
   std::string              cwd;
   std::vector<std::string> argv, environment;
@@ -54,11 +60,15 @@ struct Changes {
   std::vector<DialogRequest> dialogs;
   std::vector<std::string>   notices;
   std::vector<AttachRequest> attaches;
+  std::vector<PasswordQuestion> passwords;
 };
 // Runs queued work and periodic housekeeping, then reports what changed.
 Changes drain();
 using DialogRequestList = std::vector<DialogRequest>;
 using AttachRequestList = std::vector<AttachRequest>;
+using PasswordQuestionList = std::vector<PasswordQuestion>;
+// Answers a question from Changes::passwords; `given` false is Cancel.
+void answer_password(int64_t id, bool given, const std::string& password);
 
 // Panes. Sides are 0 (left) and 1 (right). Rows are display rows (filtered, sorted).
 enum class LocationKind : int { Local = 0, Remote = 1, Archive = 2 };
@@ -75,6 +85,7 @@ struct PaneInfo {
   std::string          filter, remote_error;
   int                  sort = 0;  // 0 name, 1 name desc, 2 size, 3 size desc, 4 date, 5 date desc
   bool                 loading = false, loading_unattended = false;
+  int                  load_percent = -1;  // A long read's progress (an archive being opened), or -1
   double               load_ms = 0;
   int64_t              items_total = 0, items_visible = 0, items_selected = 0;
   int64_t              bytes_selected = 0, bytes_total = 0, largest_item = 0;

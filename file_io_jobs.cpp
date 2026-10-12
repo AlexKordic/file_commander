@@ -11,11 +11,13 @@
 #include <algorithm>
 #include <condition_variable>
 #include <cstdint>
+#include <format>
 #include <mutex>
 #include <thread>
 #include <unordered_map>
 #include <cerrno>
 #include <fcntl.h>
+#include <sys/stat.h>
 #include <unistd.h>
 #if defined(__APPLE__)
 #include <sys/stdio.h>
@@ -922,6 +924,18 @@ class ThreadedFileJobs : public FileJobs {
       boost::filesystem::permissions(root, boost::filesystem::owner_all, ec);
       pending.push_back({index, root, op});
     }
+    // The files must fit where they go, each staged next to its destination.
+    uint64_t needed = 0;
+    for (const auto& p : pending) needed += uint64_t(std::max(int64_t{0}, p.op.bytes));
+    if (!pending.empty())
+      if (auto problem = space_problem(pending.front().op.destination.parent_path(), needed); !problem.empty()) {
+        report_error("[Copy] " + problem);
+        for (auto& p : pending) {
+          remove_stage(p.stage_root);
+          finish(p.index, operation_display(p.op), problem, false);
+        }
+        pending.clear();
+      }
     // One extraction for every file, then each one is committed as its data is complete.
     std::vector<ArchiveFS::Item> items;
     std::unordered_map<std::string, size_t> by_stage;
@@ -993,6 +1007,20 @@ class ThreadedFileJobs : public FileJobs {
       report_error("[Archive] " + error.steps.front());
   }
 
+  // Why `bytes` won't fit in `folder`, or empty when they will (or the space can't be told).
+  static std::string space_problem(const Filepath& folder, uint64_t bytes) {
+    error_code ec;
+    const auto info = boost::filesystem::space(folder, ec);
+    if (ec || bytes <= info.available) return {};
+    auto size = [](double b) {
+      const char* units[] = {"B", "KB", "MB", "GB", "TB"};
+      int unit = 0;
+      while (b >= 1024 && unit < 4) b /= 1024, ++unit;
+      return unit == 0 ? std::format("{:.0f} {}", b, units[unit]) : std::format("{:.1f} {}", b, units[unit]);
+    };
+    return "Not enough free space in " + folder.native() + ": needs " + size(double(bytes)) + ", " + size(double(info.available)) + " free";
+  }
+
   // An archive entry's place under `root`, or empty when its path would leave it (absolute, or climbing with "..").
   static Filepath inside(const Filepath& root, const std::string& entry) {
     Filepath relative;
@@ -1002,7 +1030,7 @@ class ThreadedFileJobs : public FileJobs {
       if (name.empty() || name == "." || name == "/") continue;
       relative /= part;
     }
-    return relative.empty() ? Filepath() : root / relative;
+    return relative.empty() ? root : root / relative;
   }
 
   // Extracts a whole archive into a folder in one pass (the extraction popup): a compressed tar's entries as they stream past, a compressed file's one file. FC builds every destination itself under the folder; each file is staged next to it and committed as copies are.
@@ -1018,6 +1046,13 @@ class ThreadedFileJobs : public FileJobs {
       job->_items_done = job->_items_failed = 1;
       return;
     }
+    // Links the archive made inside the destination may lead out of it on disk ("b" -> "." and "a" -> "b/.." is the destination's parent), so every place written is checked with links resolved.
+    const auto real_root = boost::filesystem::canonical(root, ec);
+    auto stays_inside = [&](const Filepath& target) {
+      error_code resolve;
+      const auto parent = boost::filesystem::weakly_canonical(target.parent_path(), resolve);
+      return !resolve && !real_root.empty() && path_is_under(real_root, parent);
+    };
     auto fail = [&](const Filepath& path, const std::string& message) {
       report_error("[Extract] " + path.native() + ": " + message);
       std::lock_guard lock(job->_m);
@@ -1038,8 +1073,17 @@ class ThreadedFileJobs : public FileJobs {
     std::vector<std::pair<Filepath, SevenZip::Entry>> folders;
     auto output = [&](const SevenZip::Entry& e) -> Filepath {
       const auto target = inside(root, e.path);
-      if (target.empty()) {
+      if (target == root) {
+        if (!e.directory) fail(root, "Skipped an entry without a name");
+        return {};  // The archive's own top folder ("./").
+      }
+      if (target.empty() || !stays_inside(target)) {
         fail(root / Filepath(e.path).filename(), "Skipped: the archive puts it outside the destination (" + e.path + ")");
+        return {};
+      }
+      const auto type = e.posix_mode ? (*e.posix_mode & S_IFMT) : 0;
+      if (!e.directory && (type == S_IFIFO || type == S_IFCHR || type == S_IFBLK || type == S_IFSOCK)) {
+        fail(target, "Skipped a device, pipe or socket");
         return {};
       }
       if (e.directory) {
@@ -1068,6 +1112,26 @@ class ThreadedFileJobs : public FileJobs {
         error_code cleanup;
         boost::filesystem::remove(temporary, cleanup);
         if (ec) fail(target, "Failed to create symlink: " + ec.message());
+        return {};
+      }
+      if (!e.hardlink.empty()) {
+        // A tar's hard link names an earlier entry, already written.
+        const auto original = inside(root, e.hardlink);
+        if (original.empty() || original == root || !stays_inside(original)) {
+          fail(target, "Skipped a hard link to a file outside the destination: " + e.hardlink);
+          return {};
+        }
+        if (!newer_or_absent(target, e)) {
+          std::lock_guard lock(job->_m);
+          ++job->_items_skipped;
+          return {};
+        }
+        const auto temporary = target.parent_path() / boost::filesystem::unique_path(".fc-link-%%%%-%%%%-%%%%");
+        boost::filesystem::create_hard_link(original, temporary, ec);
+        if (!ec) boost::filesystem::rename(temporary, target, ec);
+        error_code cleanup;
+        boost::filesystem::remove(temporary, cleanup);
+        if (ec) fail(target, "Failed to create hard link to " + e.hardlink + ": " + ec.message());
         return {};
       }
       if (!newer_or_absent(target, e)) {
@@ -1129,7 +1193,8 @@ class ThreadedFileJobs : public FileJobs {
         job->updated();
       }
     };
-    auto error = ArchiveFS::extract_all(op.source, output, finished, &job->_cancel_requested, progress);
+    auto room = [&](uint64_t bytes) { return space_problem(root, bytes); };
+    auto error = ArchiveFS::extract_all(op.source, output, finished, &job->_cancel_requested, progress, room);
     if (staged) {
       error_code cleanup;
       boost::filesystem::remove_all(staged->stage_root, cleanup);

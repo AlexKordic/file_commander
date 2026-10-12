@@ -397,6 +397,7 @@ Files::Files(PanelSharedState::P s) : Dialog(std::move(s)) {
     });
     if (state->loading()) {
       children.push_back(text(" | "));
+      if (const int percent = state->load_percent(); percent >= 0) children.push_back(text(std::to_string(percent) + "% "));
       children.push_back(stop->Render());
     }
     return hbox(std::move(children));

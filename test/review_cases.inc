@@ -1,5 +1,6 @@
 FC_REVIEW_CASE(UX_palette_ranking, "palette_literal_ranking")
 FC_REVIEW_CASE(UX_ssh_dialog_keyboard, "ssh_dialog_keyboard")
+FC_REVIEW_CASE(UX_archive_password, "archive_password_dialog")
 FC_REVIEW_CASE(UX_dialog_click_through, "dialog_click_through")
 FC_REVIEW_CASE(UX_narrow_status_rows, "narrow_status_rows")
 FC_REVIEW_CASE(UX_clipboard_order, "clipboard_panel_order")

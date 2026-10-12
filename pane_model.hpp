@@ -59,6 +59,8 @@ class PaneModel {
 
   bool   loading() const { return _loading; }
   bool   loading_unattended() const { return _loading_unattended; }
+  // How far a long read (an archive being opened) is, 0 to 100, or -1 when that isn't known.
+  int    load_percent() const { return _loading ? _load_percent->load() : -1; }
   double last_load_ms() const { return _last_load_ms; }
   bool   in_archive_view() const;
   void   cancel_loading();
@@ -131,6 +133,7 @@ class PaneModel {
   uint64_t                           _marks_revision   = 1;
   bool                               _loading            = false;
   bool                               _loading_unattended = false;
+  std::shared_ptr<std::atomic<int>>  _load_percent = std::make_shared<std::atomic<int>>(-1);
   bool                               _refresh_after_load = false;
   double                             _last_load_ms       = 0;
   std::vector<int>                   _visible;

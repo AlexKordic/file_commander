@@ -570,6 +570,49 @@ static void UX_ssh_dialog_keyboard() {
   require(calls.size() == 2 && calls[1].second == "/", "an empty path did not mean /");
 }
 
+// An encrypted archive asks from the panel's loader thread through a hidden-input dialog; a wrong password asks again, Esc gives up.
+static void UX_archive_password() {
+  Fixture f; auto input = f.file("source/secret.txt", "hidden");
+  const auto archive = f.root / "locked.7z";
+  require(SevenZip::create("7z", {{input, "secret.txt"}}, archive, {}, {"pw", true}).ok(), "encrypted fixture");
+  ArchiveFS::forget_passwords();
+  ArchiveFS::close_unused();
+  UiQueue ui;
+  FileCommander app(f.root, f.root, [&](auto work) { ui.post(std::move(work)); }, [] { return 100; });
+  ui.wait(app.get_left()); ui.wait(app.get_right());
+  auto asked = [&] {
+    auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    while (app._active_dialog_name != "ArchivePassword" && std::chrono::steady_clock::now() < deadline) {
+      ui.drain(); std::this_thread::sleep_for(std::chrono::milliseconds(2));
+    }
+    require(app._active_dialog_name == "ArchivePassword", "the password wasn't asked for");
+    return std::static_pointer_cast<ArchivePasswordDialog>(app.get_overlay_dialog("ArchivePassword"));
+  };
+  auto type = [](Dialog& dialog, const std::string& text) { for (char c : text) dialog.navigation->OnEvent(Event::Character(c)); };
+  app.get_left().move_to(archive_root(archive));
+  auto dialog = asked();
+  require(!dialog->wrong && dialog->archive.find("locked.7z") != std::string::npos, "the first question");
+  type(*dialog, "bad");
+  dialog->navigation->OnEvent(Event::Return);
+  dialog = asked();
+  require(dialog->wrong && dialog->password.empty(), "a wrong password must be asked for again, with an empty field");
+  type(*dialog, "pw");
+  dialog->navigation->OnEvent(Event::Return);
+  ui.wait(app.get_left());
+  const auto& items = app.get_left().dir.items;
+  require(std::any_of(items.begin(), items.end(), [](const DirItem& i) { return i.filename_ref() == "secret.txt"; }), "the archive didn't open");
+  // Esc answers Cancel, and the panel stays where it was.
+  ArchiveFS::forget_passwords();
+  ArchiveFS::close_unused();
+  app.get_left().move_to(f.root); ui.wait(app.get_left());
+  app.get_left().move_to(archive_root(archive));
+  dialog = asked();
+  dialog->navigation->OnEvent(keys().key_cancel_dialog);
+  ui.wait(app.get_left());
+  require(app._active_dialog_name.empty() && !is_archive_path(app.get_left().dir.path), "Esc didn't give up");
+  ArchiveFS::forget_passwords();
+}
+
 static void UX_dialog_click_through() {
   Fixture f; auto left = f.dir("left"); auto right = f.dir("right");
   for (int i = 0; i < 30; ++i) { f.file("left/l" + std::to_string(i)); f.file("right/r" + std::to_string(i)); }

@@ -99,6 +99,57 @@ void ConnectSSHDialog::submit() {
   if (connect(host, path.empty() ? "/" : path, error)) close();
 }
 
+ArchivePasswordDialog::ArchivePasswordDialog(std::function<void()> close) : Dialog(nullptr), close(std::move(close)) {
+  InputOption option;
+  option.multiline       = false;
+  option.password        = true;
+  option.cursor_position = &cursor;
+  option.on_enter        = [this] { submit(); };
+  input                  = Input(&password, "Password", option) | showInputCursor(&cursor);
+  ButtonOption button_option;
+  button_option.transform = ascii_button_transform();
+  auto ok     = Button(" OK ", [this] { submit(); }, button_option);
+  auto cancel = Button(" Cancel ", [this] { this->close(); }, button_option);
+  navigation  = CatchEvent(Container::Vertical({input, Container::Horizontal({ok, cancel})}), [this](Event e) {
+    if (e == keys().key_cancel_dialog) {
+      this->close();
+      return true;
+    }
+    return false;
+  });
+  renderer = Renderer(navigation, [this, ok, cancel] {
+    return window(text(" Archive Password ") | bold,
+                  vbox({paragraph(archive), text(wrong ? "That password is wrong; try again." : "This archive is encrypted.") |
+                                                 (wrong ? color(Color::Red) : dim),
+                        input->Render(), separator(), hbox({ok->Render(), filler(), cancel->Render()})})) |
+           size(WIDTH, LESS_THAN, 72);
+  });
+}
+
+void ArchivePasswordDialog::ask(const std::string& question, bool refused, Answer reply) {
+  OnHide();  // A question still open is answered Cancel.
+  archive = question;
+  wrong   = refused;
+  answer  = std::move(reply);
+}
+
+void ArchivePasswordDialog::OnShow() {
+  password.clear();
+  cursor = 0;
+  input->TakeFocus();
+}
+
+void ArchivePasswordDialog::OnHide() {
+  if (auto reply = std::exchange(answer, {})) reply(std::nullopt);
+  password.clear();
+}
+
+void ArchivePasswordDialog::submit() {
+  if (auto reply = std::exchange(answer, {})) reply(password);
+  password.clear();
+  close();
+}
+
 namespace {
 // Presets in MiB/s; 0 is unlimited. The last entry takes the custom value.
 const uint64_t kSpeedPresets[] = {0, 100, 10, 2, 1};

@@ -8,6 +8,7 @@
 #include <cstdlib>
 #include <format>
 #include <fstream>
+#include <future>
 #include <ftxui/component/screen_interactive.hpp>
 #include <ftxui/dom/table.hpp>
 #include <regex>
@@ -51,6 +52,7 @@ bool DialogOverlay::dialog_active() { return _active_dialog > 0; }
 void DialogOverlay::close_dialog() {
   if (closing_click.press_in_flight) closing_click.swallow = true;
   std::string closed_dialog_name = _active_dialog_name;
+  if (auto shown = _overlay_dialogs.find(closed_dialog_name); shown != _overlay_dialogs.end()) shown->second->OnHide();
   // Move navigation to main document
   _active_dialog                 = 0;
   _active_dialog_name.clear();
@@ -65,6 +67,8 @@ void DialogOverlay::show_dialog(std::string name) {
     Perun::l.e("show_dialog() name not registered", name);
     return;
   }
+  if (auto shown = _overlay_dialogs.find(_active_dialog_name); _active_dialog && name != _active_dialog_name && shown != _overlay_dialogs.end())
+    shown->second->OnHide();
   _active_dialog      = 1;
   _active_dialog_name = name;
   // Remove all dialogs, child index > 0
@@ -111,6 +115,7 @@ Panel::Panel(Filepath location, TargetFunc get_target, ExecuteOnUiThread e, Dire
   _state->leave_virtual_dir   = [this](int64_t& focused_id) { return this->leave_virtual_dir(focused_id); };
   _state->action.close_dialog = [this]() { close_dialog(); };
   _state->loading             = [this] { return _loading && !_loading_unattended; };
+  _state->load_percent        = [this] { return _loading ? _load_percent->load() : -1; };
   _state->stop_loading        = [this] { cancel_loading(); };
   _state->action.show_dialog  = [this]() {
     const auto& name = _state->action.dialog;
@@ -285,8 +290,13 @@ void Panel::load_directory(Filepath where, bool recover, Filepath focus, bool ba
   _loading      = true;
   _loading_unattended = background_refresh;
   auto result   = std::make_shared<Dir>();
-  _loader.submit([this, alive = _callback_alive, post = run_on_ui, reader = _read_directory, generation, result, where, recover, focus, background_refresh](const LatestWork::Token& cancelled) mutable {
+  _load_percent->store(-1);
+  _loader.submit([this, alive = _callback_alive, post = run_on_ui, reader = _read_directory, generation, result, where, recover, focus, background_refresh, percent = _load_percent](const LatestWork::Token& cancelled) mutable {
     Err error;
+    ArchiveFS::ReadProgress progress([post, percent](double fraction) {
+      const int now = int(fraction * 100);
+      if (percent->exchange(now) != now) post([] {});  // Redraws the percentage.
+    });
     try {
       if (recover && !is_virtual_path(where)) {
         for (;;) {
@@ -1079,6 +1089,20 @@ void FileCommander::observe_state() {
 
 FileCommander::FileCommander(Filepath l, Filepath r, ExecuteOnUiThread exec, std::function<int()> dimx, RunWithRestoredIO run_with_restored_io, bool defer_load) : left(l, get_target(), exec, {}, defer_load), right(r, get_target(), exec, {}, defer_load), _get_dimx(dimx), _run_with_restored_io(std::move(run_with_restored_io)) {
   _close_dialog = [this]() { close_dialog(); };
+  // Encrypted archives: the reader's thread waits while this thread asks.
+  ArchiveFS::set_password_prompt([this, alive = _alive, exec](const std::string& archive, bool wrong) -> std::optional<std::string> {
+    auto answer  = std::make_shared<std::promise<std::optional<std::string>>>();
+    auto replied = answer->get_future();
+    exec([this, alive, answer, archive, wrong] {
+      if (!alive->load()) return answer->set_value(std::nullopt);
+      auto dialog = std::static_pointer_cast<ArchivePasswordDialog>(_overlay_dialogs.at("ArchivePassword"));
+      dialog->ask(archive, wrong, [answer](std::optional<std::string> password) { answer->set_value(std::move(password)); });
+      show_dialog("ArchivePassword");
+    });
+    while (replied.wait_for(std::chrono::milliseconds(100)) != std::future_status::ready)
+      if (!alive->load()) return std::nullopt;
+    return replied.get();
+  });
   auto emit     = [weak = std::weak_ptr<ApplicationEvents>(events)](std::string name, std::string detail, uint64_t request = 0) {
     if (auto bus = weak.lock()) bus->publish(std::move(name), std::move(detail), request);
   };
@@ -1150,6 +1174,7 @@ FileCommander::FileCommander(Filepath l, Filepath r, ExecuteOnUiThread exec, std
 
   navigation->Add(panels_with_cancel);
   _overlay_dialogs["ErrorList"]      = std::make_shared<ErrorListDialog>(_close_dialog);
+  _overlay_dialogs["ArchivePassword"] = std::make_shared<ArchivePasswordDialog>(_close_dialog);
   _overlay_dialogs["JobList"]        = std::make_shared<JobListDialog>(_close_dialog);
   _overlay_dialogs["Bookmarks"]      = std::make_shared<BookmarksDialog>(_close_dialog, [this]() { return this->list_bookmarks(); }, [this]() { this->add_current_focused_dir_bookmark(); }, [this](const Filepath& path) { this->remove_bookmark(path); }, [this](const Filepath& path) { this->open_bookmark(path); });
   _overlay_dialogs["ThemeColors"]    = std::make_shared<ThemeColorsDialog>(_close_dialog, [this]() { return this->list_theme_colors(); }, []() { return theme().available_color_tokens(); }, [this](const std::string& id, const std::string& token, std::string& error) { return this->set_theme_color(id, token, error); }, [this]() { this->reset_theme_colors(); }, [this]() { this->save_theme_colors(); });
@@ -1208,6 +1233,11 @@ FileCommander::FileCommander(Filepath l, Filepath r, ExecuteOnUiThread exec, std
     if (!_overlay_renderer) return document;
     return dbox({document, _overlay_renderer->Render() | yflex | clear_under_colors | hcenter});
   }) | yflex;  // Fill the startup container for both panels and global overlays.
+}
+
+FileCommander::~FileCommander() {
+  _alive->store(false);
+  ArchiveFS::set_password_prompt({});
 }
 
 TargetFunc FileCommander::get_target() {

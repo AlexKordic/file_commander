@@ -14,6 +14,7 @@
 #include <cstdlib>
 #include <deque>
 #include <format>
+#include <future>
 #include <map>
 #include <mutex>
 
@@ -60,8 +61,25 @@ struct Mailbox {
   }
 };
 
+// Archive passwords: a reader's thread waits on its question until the app answers it, or the engine stops.
+struct Passwords {
+  std::mutex                    mutex;
+  bool                          closed = false;
+  int64_t                       next   = 0;
+  std::map<int64_t, std::shared_ptr<std::promise<std::optional<std::string>>>> waiting;
+  std::vector<PasswordQuestion> asked;  // Not yet handed to the app.
+  void close() {
+    std::lock_guard lock(mutex);
+    closed = true;
+    for (auto& [id, answer] : waiting) answer->set_value(std::nullopt);
+    waiting.clear();
+    asked.clear();
+  }
+};
+
 struct Engine {
   std::shared_ptr<Mailbox>                      mailbox = std::make_shared<Mailbox>();
+  std::shared_ptr<Passwords>                    passwords = std::make_shared<Passwords>();
   std::unique_ptr<WorkspaceLease>               lease;
   std::unique_ptr<AppModel>                     app;
   std::map<uint64_t, std::shared_ptr<CopySession>> copies;
@@ -270,6 +288,20 @@ StartResult start(const StartOptions& options) {
   Filepath    left     = options.left.empty() ? fallback : Filepath(options.left);
   Filepath    right    = options.right.empty() ? (options.left.empty() ? fallback : Filepath(options.left)) : Filepath(options.right);
   e.app                = std::make_unique<AppModel>(left, right, poster());
+  e.passwords          = std::make_shared<Passwords>();
+  ArchiveFS::set_password_prompt([passwords = e.passwords, wm = std::weak_ptr<Mailbox>(mailbox)](const std::string& archive, bool wrong) {
+    auto answer  = std::make_shared<std::promise<std::optional<std::string>>>();
+    auto replied = answer->get_future();
+    {
+      std::lock_guard lock(passwords->mutex);
+      if (passwords->closed) return std::optional<std::string>();
+      const auto id = ++passwords->next;
+      passwords->waiting[id] = answer;
+      passwords->asked.push_back({id, archive, wrong});
+    }
+    if (auto m = wm.lock()) m->signal();
+    return replied.get();
+  });
   auto emit            = [weak = std::weak_ptr<ApplicationEvents>(e.app->events), wm = std::weak_ptr<Mailbox>(mailbox), &e](std::string name, std::string detail, uint64_t request) {
     if (name == "error_reported" || name == "errors_cleared") ++e.errors_revision;
     if (name.rfind("job_", 0) == 0) ++e.jobs_revision;
@@ -296,6 +328,9 @@ void stop() {
   e.copies.clear();
   e.app->checkpoint_workspace(true);
   e.app->save_settings();
+  // A job waiting for a password would hold up the shutdown below.
+  e.passwords->close();
+  ArchiveFS::set_password_prompt({});
   file_operations().shutdown();
   e.mailbox->closed = true;
   e.app.reset();
@@ -318,7 +353,20 @@ Changes drain() {
     out.dialogs.push_back({request.name, request.side, strings(request.selected), request.focused.native(), request.origin.native(), request.target.native()});
   out.notices  = e.app->take_notices();
   out.attaches = std::exchange(e.attaches, {});
+  {
+    std::lock_guard lock(e.passwords->mutex);
+    out.passwords = std::exchange(e.passwords->asked, {});
+  }
   return out;
+}
+
+void answer_password(int64_t id, bool given, const std::string& password) {
+  auto& passwords = *engine().passwords;
+  std::lock_guard lock(passwords.mutex);
+  auto found = passwords.waiting.find(id);
+  if (found == passwords.waiting.end()) return;
+  found->second->set_value(given ? std::optional<std::string>(password) : std::nullopt);
+  passwords.waiting.erase(found);
 }
 
 PaneInfo pane(int side) {
@@ -336,6 +384,7 @@ PaneInfo pane(int side) {
   out.sort             = int(dir.order_by);
   out.loading          = p.loading();
   out.loading_unattended = p.loading_unattended();
+  out.load_percent       = p.load_percent();
   out.load_ms          = p.last_load_ms();
   auto stats           = const_cast<Dir&>(dir).stats();
   out.items_total      = stats.items_total;
