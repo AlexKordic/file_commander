@@ -23,6 +23,13 @@ final class NativeEditor: NSObject, CellGridDelegate {
   /// every frame, as it does to a browser).
   var benchFrameDelay: TimeInterval = 0
   var benchWithoutApplied = false
+  /// The benchmark's watch for a frame that first shows some text: when one
+  /// is applied, a `bench` record with `mark` notes when.
+  var benchWatch: (text: String, mark: String)?
+  /// The last `ack` of a frame's timing (telemetry on): how many of the
+  /// messages sent Fresh had applied.
+  private(set) var lastAck = 0
+  private var ackWaiters: [UUID: (target: Int, continuation: CheckedContinuation<Bool, Never>)] = [:]
   private weak var app: AppController?
   private var menus: FreshMenus?
   private var clipboardSequence: Int?
@@ -182,15 +189,23 @@ final class NativeEditor: NSObject, CellGridDelegate {
     if benchFrameDelay > 0 { Thread.sleep(forTimeInterval: benchFrameDelay) }
     // Fresh sends only a couple of frames ahead of what was applied, so a slow
     // moment here gets the newest scene next rather than every one in between.
-    if message.isHello { sendsApplied = message.wantsApplied }
+    if message.isHello {
+      sendsApplied = message.wantsApplied
+      lastAck = 0
+    }
     if sendsApplied, !benchWithoutApplied { socket?.send(["type": "applied", "seq": message.sequence]) }
+    if let ack = message.timing?.ack { noteAck(ack) }
+    if let watch = benchWatch, store.lines.contains(where: { $0.contains(watch.text) }) {
+      benchWatch = nil
+      EditorTelemetry.shared.record(["ev": "bench", "mark": watch.mark, "t": EditorTelemetry.ms(started)])
+    }
     guard EditorTelemetry.shared.isOn else { return }
     grid?.shownSequence = message.sequence
     var fields: [String: Any] = [
       "ev": "frame", "t": EditorTelemetry.ms(message.receivedAt), "seq": message.sequence, "bytes": message.bytes,
       "parse": EditorTelemetry.ms(message.parseSeconds), "applied": EditorTelemetry.ms(started),
       "apply": EditorTelemetry.ms(ProcessInfo.processInfo.systemUptime - started), "rows": message.gridRows.count,
-      "copied": message.gridCopies.reduce(0) { $0 + $1.count },
+      "copied": message.gridCopies.reduce(0) { $0 + $1.count }, "appcpu": EditorTelemetry.processCPU(),
     ]
     if let timing = message.timing {
       fields["ack"] = timing.ack
@@ -202,8 +217,35 @@ final class NativeEditor: NSObject, CellGridDelegate {
       fields["ahead"] = timing.ahead
       fields["owed"] = timing.owed
       fields["top"] = timing.top
+      fields["cpu"] = timing.cpuMs
+      if let allocs = timing.prevAllocs { fields["pallocs"] = allocs }
+      if let bytes = timing.prevAllocBytes { fields["pbytes"] = bytes }
     }
     EditorTelemetry.shared.record(fields)
+  }
+
+  /// Messages sent to Fresh so far.
+  var requestedMessages: Int { socket?.requested ?? 0 }
+
+  /// Waits until a frame shows every message up to `target` (telemetry on),
+  /// or `timeout` passes; true for a frame.
+  func waitForAck(_ target: Int, timeout: TimeInterval) async -> Bool {
+    if lastAck >= target { return true }
+    let id = UUID()
+    return await withCheckedContinuation { continuation in
+      ackWaiters[id] = (target, continuation)
+      DispatchQueue.main.asyncAfter(deadline: .now() + timeout) { [weak self] in
+        MainActor.assumeIsolated { self?.ackWaiters.removeValue(forKey: id)?.continuation.resume(returning: false) }
+      }
+    }
+  }
+
+  private func noteAck(_ ack: Int) {
+    lastAck = ack
+    for (id, waiter) in ackWaiters where waiter.target <= ack {
+      ackWaiters.removeValue(forKey: id)
+      waiter.continuation.resume(returning: true)
+    }
   }
 
   /// Asks Fresh for frame timing, or to stop sending it, after the setting changed.

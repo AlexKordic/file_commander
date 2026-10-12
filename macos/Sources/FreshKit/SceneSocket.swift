@@ -43,6 +43,8 @@ public final class SceneSocket: @unchecked Sendable {
   private var closed = false
   /// Messages written so far; touched only on the write queue.
   private var written = 0
+  /// Messages handed to `send` so far, under `state`.
+  private var requestedCount = 0
 
   public init(path: String) { self.path = path }
 
@@ -117,6 +119,9 @@ public final class SceneSocket: @unchecked Sendable {
     guard let data = try? JSONSerialization.data(withJSONObject: message) else { return }
     let frame = SceneSocket.encode(opcode: 0x1, payload: Array(data))
     let type = message["type"] as? String ?? "", kind = message["kind"] as? String
+    state.lock()
+    requestedCount += 1
+    state.unlock()
     writes.async { [weak self] in
       guard let self, (try? self.writeAll(frame)) != nil else { return }
       self.written += 1
@@ -131,6 +136,14 @@ public final class SceneSocket: @unchecked Sendable {
     closed = true
     state.unlock()
     if !wasClosed, fd >= 0 { shutdown(fd, SHUT_RDWR) }
+  }
+
+  /// Messages handed to `send` so far. They are written in this order, so a
+  /// frame whose `ack` reaches this number shows all of them.
+  public var requested: Int {
+    state.lock()
+    defer { state.unlock() }
+    return requestedCount
   }
 
   public var isOpen: Bool {

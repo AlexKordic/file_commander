@@ -291,8 +291,12 @@ unchanged by the transport:
   `render_ms`, rendering the editor, and `grid_ms`, hashing the grid's rows)
   and `diff_ms`, `queued` (bytes of earlier frames still waiting for the
   socket ahead of it), `ahead` (earlier frames the client had not applied),
-  `owed` (wheel lines smooth scrolling still owes) and `top` (the active
-  view's top line, 0-based). Options end with the last client.
+  `owed` (wheel lines smooth scrolling still owes), `top` (the active
+  view's top line, 0-based) and `cpu_ms` (Fresh's CPU time so far). A Fresh
+  built with the `alloc-stats` feature, which counts heap allocations per
+  thread, also reports `prev_allocs` and `prev_alloc_bytes`: those of the
+  previous push, from building its scene to queueing its frames. Options end
+  with the last client.
 - **Keys**: a `meta` (`⌘`) chord resolves through Fresh's `macos-gui` keymap
   in the current key context, so `⌘S` saves and `⇧⌘P` opens the palette, while
   the user's keymap keeps every other key for this client and the terminals.

@@ -262,8 +262,10 @@ object per line, times in milliseconds of system uptime (the clock of
 | --- | --- | --- |
 | `wheel` | A scroll event reaches the editor | `et` (the event's own time), deltas, phases, `steps` sent, `at` (cell) |
 | `send` | A message to Fresh is written | `n` (its number, what a frame's `ack` counts), `type`, `kind` |
-| `frame` | The main thread applies a frame | `t` (read off the socket), `parse`, `applied`, `apply`, `rows` sent and `copied`, and Fresh's `ack`, `build` (of it `render` and `grid`), `diff`, `queued`, `ahead`, `owed`, `top` |
+| `frame` | The main thread applies a frame | `t` (read off the socket), `parse`, `applied`, `apply`, `rows` sent and `copied`, and Fresh's `ack`, `build` (of it `render` and `grid`), `diff`, `queued`, `ahead`, `owed`, `top`, `cpu` (Fresh's CPU time so far), `pallocs` and `pbytes` (allocations and bytes of Fresh's previous push, from an `alloc-stats` build), and `appcpu` (the app's CPU time so far) |
 | `draw` | The cells are drawn | `ms`, `rows`, `seq` (the last frame shown) |
+| `keys` | A benchmark key run starts and ends | `label`, `phase`, `key`, `interval`; at the end `presses`, `unanswered`, `seconds` |
+| `bench` | A benchmark mark | `mark`: `<name>-start` when armed, `<name>` when the first frame showing the watched text was applied |
 
 The app asks Fresh for its part with the scene channel's `telemetry` option
 ([fresh_integration.md](fresh_integration.md#scene-channel)), so a session
@@ -274,7 +276,10 @@ gesture: how long input waited for the main thread, the round trip from a
 scroll message to the frame that applied it (by `ack`) and to its draw,
 Fresh's build and queue, the app's parse, apply and draw, how far the shown
 line trails the asked one, and how long the view keeps moving after the input
-stops. `--timeline N` prints gesture N event by event.
+stops. `--timeline N` prints gesture N event by event. A benchmark key run
+gets the same round trip per key press, frame and press rates, Fresh's and
+the app's CPU per frame and Fresh's allocations per frame; a watch mark gets
+how long a file took to show after the key that opened it.
 
 **Benchmark.** `macos/bench/scroll_flicks.json` plays six trackpad flicks
 (`ScrollGesture`: a finger phase, then decaying momentum, at 120 events a
@@ -293,14 +298,38 @@ Fresh which frames were applied, so Fresh sends every frame, then telling it,
 so Fresh holds newer frames back and sends the newest scene once the app
 catches up (see [Frames and the app](#frames-and-the-app)).
 
+`macos/bench/page_down_large.json` opens a small file first, so the timed
+opens find the editor running, then `file_io_jobs.cpp` repeated 40 times
+(about 61,000 lines), and pages down to its end twice: at key-repeat speed
+(every 33 ms), and as fast as frames come back (the next press when the frame
+answering the last one is applied). Then it times opening the file repeated
+200 times (about 304,000 lines, 12 MB).
+
+Allocations are counted only by a Fresh built with the `alloc-stats` feature
+([fresh_integration.md](fresh_integration.md#building-and-packaging)), so a
+benchmark run for timing uses the normal build and a second run counts:
+
+```sh
+cargo build --locked -p fresh-editor --bin fresh --features web,alloc-stats \
+  --profile fc-release --config 'profile.fc-release.inherits="release"' \
+  --config 'profile.fc-release.opt-level=3' --target-dir target-alloc
+macos/tools/update_app.sh --release --fresh ../editor-fresh/target-alloc/fc-release/fresh
+```
+
 `--run-explainer` takes a script file as well as an explainer ID. Bench steps
 are host steps like the explainers': `scroll` (`target` `editor` or
 `textview`, `speed` in points per second, negative scrolling down, optional
 `finger_ms` and `decay`), `textview_open` and `textview_close`,
 `window_frame` (`w`, `h`), `editor_bench` (`apply_ms`, extra main-thread time
 for each frame, and `applied: false` to stop reporting applied frames; set it
-before the editor connects for Fresh to send every frame), and `{repo}` in
-paths for the checkout the build lives in. Gestures go to the view on the main
+before the editor connects for Fresh to send every frame), `generate_file`
+(`from`, `copies`, `to`: a large file whose first line names it and whose last
+is `// END OF LARGE FILE`), `editor_watch` (`contains`, `mark`: marks when a
+frame first shows the text), `editor_trust` (answers Fresh's prompt to trust a
+new folder with Enter, if it shows within `timeout` ms), `editor_key_repeat`
+(`key`, `until` a condition, `interval_ms`, 0 for the next press as soon as a
+frame shows the last, `max`, `label`), and `{repo}` in paths for the checkout
+the build lives in. Gestures go to the view on the main
 queue from a timer of their own, so a busy main thread delays them as it would
 a trackpad's.
 

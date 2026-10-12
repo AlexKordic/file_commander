@@ -21,6 +21,12 @@ benchmark played), it reports how the editor kept up:
 Gestures played into the benchmark's text view (tvpos/tvdraw records) get the
 same position and drawing figures, as the baseline. --timeline N prints the
 Nth gesture event by event.
+
+A key run (the benchmark's `editor_key_repeat`, between its `keys` records)
+gets the same round trip and frame figures per key press, plus presses and
+frames per second, CPU per frame for Fresh and the app, and Fresh's
+allocations per frame when it was built with `alloc-stats`. An `editor_watch`
+mark reports how long a file took to show after the key that opened it.
 """
 import json
 import statistics
@@ -89,6 +95,86 @@ def shown_top_at(frames, t):
     return top
 
 
+def round_trips(sends, frames, draws):
+    """From each message sent to the first frame that applied it (by Fresh's
+    ack): received, applied by the main thread, drawn."""
+    to_frame, to_apply, to_draw = [], [], []
+    for s in sends:
+        frame = next((f for f in frames if f['ack'] >= s['n']), None)
+        if not frame:
+            continue
+        to_frame.append(frame['t'] - s['t'])
+        to_apply.append(frame['applied'] - s['t'])
+        draw = next((d for d in draws if d['t'] >= frame['applied'] and d.get('seq', 0) >= frame['seq']), None)
+        if draw:
+            to_draw.append(draw['t'] + draw['ms'] - s['t'])
+    return to_frame, to_apply, to_draw
+
+
+def per_frame(frames, key):
+    """The growth of a cumulative figure (CPU time) per frame."""
+    values = [f[key] for f in frames if key in f]
+    if len(values) < 2:
+        return '-'
+    return f"{(values[-1] - values[0]) / (len(values) - 1):.2f} ms"
+
+
+def keys_report(start, end, rows):
+    """One `editor_key_repeat` run: its presses and the frames answering them,
+    up to two seconds after the last press."""
+    seg = [r for r in rows if start['t'] <= r['t'] <= end['t'] + 2000]
+    sends = [r for r in seg if r['ev'] == 'send' and r.get('type') == 'key' and r['t'] <= end['t']]
+    frames = [r for r in seg if r['ev'] == 'frame' and 'ack' in r]
+    draws = [r for r in seg if r['ev'] == 'draw']
+    seconds = end.get('seconds', (end['t'] - start['t']) / 1000)
+    report = {}
+    report['presses'] = f"{end.get('presses', len(sends))} in {seconds:.1f} s ({end.get('presses', len(sends)) / max(seconds, 0.001):.0f}/s)"
+    if end.get('unanswered'):
+        report['presses without a frame'] = end['unanswered']
+    report['frames'] = f"{len(frames)} ({len(frames) / max(seconds, 0.001):.0f}/s)"
+    to_frame, to_apply, to_draw = round_trips(sends, frames, draws)
+    report['key -> frame received'] = fmt(to_frame)
+    report['key -> frame applied'] = fmt(to_apply)
+    report['key -> frame drawn'] = fmt(to_draw)
+    report['frame size'] = fmt([f['bytes'] / 1024 for f in frames], 'KiB')
+    if any('copied' in f for f in frames):
+        report['rows sent / copied'] = f"p50 {pct([f['rows'] for f in frames], 50)} / {pct([f['copied'] for f in frames], 50)}"
+    report['Fresh build'] = fmt([f['build'] for f in frames])
+    if any('render' in f for f in frames):
+        report['  render into cells'] = fmt([f['render'] for f in frames])
+        report['  hash grid rows'] = fmt([f['grid'] for f in frames])
+    report['Fresh diff+encode'] = fmt([f['diff'] for f in frames])
+    report['Fresh CPU per frame'] = per_frame(frames, 'cpu')
+    if any('pallocs' in f for f in frames):
+        report['Fresh allocations per frame'] = fmt([f['pallocs'] for f in frames if 'pallocs' in f], '')
+        report['Fresh allocated per frame'] = fmt([f['pbytes'] / 1024 for f in frames if 'pbytes' in f], 'KiB')
+    report['app parse'] = fmt([f['parse'] for f in frames])
+    report['app apply'] = fmt([f['apply'] for f in frames])
+    report['app draw'] = fmt([d['ms'] for d in draws]) + f'  ({len(draws)} draws)'
+    report['app CPU per frame'] = per_frame(frames, 'appcpu')
+    return report
+
+
+def bench_reports(rows):
+    """Key runs and open marks, in order."""
+    out = []
+    starts = {}
+    for r in rows:
+        if r['ev'] == 'keys' and r.get('phase') == 'start':
+            starts[r['label']] = r
+        elif r['ev'] == 'keys' and r.get('phase') == 'end' and r['label'] in starts:
+            out.append((f"keys {r['label']}", keys_report(starts.pop(r['label']), r, rows)))
+    marks = {}
+    for r in rows:
+        if r['ev'] != 'bench':
+            continue
+        if r['mark'].endswith('-start'):
+            marks[r['mark'][:-len('-start')]] = r
+        elif r['mark'] in marks:
+            out.append((r['mark'], {'shown after the key': f"{r['t'] - marks.pop(r['mark'])['t']:.0f} ms"}))
+    return out
+
+
 def editor_report(mark, seg, rows_before):
     wheels = [r for r in seg if r['ev'] == 'wheel']
     sends = [r for r in seg if r['ev'] == 'send' and str(r.get('kind', '')).startswith('scroll')]
@@ -115,17 +201,7 @@ def editor_report(mark, seg, rows_before):
     report['scroll messages'] = len(sends)
     report['frames'] = f"{len(frames)} ({len(frames) / max(0.001, (frames[-1]['t'] - frames[0]['t']) / 1000):.0f}/s)" if len(frames) > 1 else len(frames)
 
-    # Round trip, by Fresh's ack: the first frame built after the message was applied.
-    to_frame, to_apply, to_draw = [], [], []
-    for s in sends:
-        frame = next((f for f in frames if f['ack'] >= s['n']), None)
-        if not frame:
-            continue
-        to_frame.append(frame['t'] - s['t'])
-        to_apply.append(frame['applied'] - s['t'])
-        draw = next((d for d in draws if d['t'] >= frame['applied'] and d.get('seq', 0) >= frame['seq']), None)
-        if draw:
-            to_draw.append(draw['t'] + draw['ms'] - s['t'])
+    to_frame, to_apply, to_draw = round_trips(sends, frames, draws)
     report['send -> frame received'] = fmt(to_frame)
     report['send -> frame applied'] = fmt(to_apply)
     report['send -> frame drawn'] = fmt(to_draw)
@@ -217,6 +293,11 @@ def main():
         index = int(sys.argv[sys.argv.index('--timeline') + 1])
         timeline(found[index][2])
         return
+    for name, report in bench_reports(rows):
+        print(name)
+        for key, value in report.items():
+            print(f"  {key:34} {value}")
+        print()
     for i, (target, mark, seg) in enumerate(found):
         before = [r for r in rows if r['t'] < mark['t']]
         report = editor_report(mark, seg, before) if target == 'editor' else textview_report(mark, seg)

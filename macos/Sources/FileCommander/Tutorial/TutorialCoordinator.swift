@@ -592,6 +592,33 @@ final class TutorialCoordinator: ExplainerHost {
       // connects for Fresh to send every frame, as it does to a client that never reports)}.
       if let ms = v["apply_ms"]?.number { app.editor.native.benchFrameDelay = ms / 1000 }
       if let applied = v["applied"]?.bool { app.editor.native.benchWithoutApplied = !applied }
+    case "generate_file":
+      // A large file for benchmarks: {"from": path, "copies": n, "to": path}. Its first line names it
+      // ("// <file name>: n copies of <from name>") and its last is "// END OF LARGE FILE".
+      try TutorialCoordinator.generateFile(from: world.expand(v["from"]?.string ?? ""), copies: Int(v["copies"]?.number ?? 1),
+                                           to: world.expand(v["to"]?.string ?? ""))
+    case "editor_watch":
+      // Notes when a frame first shows some text: {"contains": text, "mark": name}. Records "<name>-start"
+      // now and "<name>" with the time the frame was applied.
+      let mark = v["mark"]?.string ?? "watch"
+      EditorTelemetry.shared.record(["ev": "bench", "mark": mark + "-start"])
+      app.editor.native.benchWatch = (world.expand(v["contains"]?.string ?? ""), mark)
+    case "editor_trust":
+      // Fresh asks whether to trust a folder it hasn't seen; answers with Enter if the prompt shows
+      // within "timeout" ms (default 3000).
+      let deadline = ProcessInfo.processInfo.systemUptime + (v["timeout"]?.number ?? 3000) / 1000
+      while ProcessInfo.processInfo.systemUptime < deadline {
+        if app.editor.native.store.regions["trustDialog"] is [String: Any] {
+          app.editor.press("Enter", app: app)
+          break
+        }
+        try await Task.sleep(for: .milliseconds(20))
+      }
+    case "editor_key_repeat":
+      // Presses a key in the editor until a condition holds: {"key", "until": condition, "interval_ms":
+      // a press every so often (paced), or 0 to press again as soon as a frame shows the last press
+      // (saturating; needs editor telemetry), "max" presses, "label"}. Records "keys" marks around it.
+      try await keyRepeat(v)
     case "textview_close":
       textBench.close()
       mainWindow?.makeKeyAndOrderFront(nil)
@@ -617,6 +644,47 @@ final class TutorialCoordinator: ExplainerHost {
       return false
     }
     return true
+  }
+
+  static func generateFile(from source: String, copies: Int, to target: String) throws {
+    let body = try Data(contentsOf: URL(fileURLWithPath: source))
+    let url = URL(fileURLWithPath: target)
+    try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+    FileManager.default.createFile(atPath: target, contents: nil)
+    let handle = try FileHandle(forWritingTo: url)
+    defer { try? handle.close() }
+    let name = url.lastPathComponent, from = (source as NSString).lastPathComponent
+    try handle.write(contentsOf: Data("// \(name): \(copies) copies of \(from)\n".utf8))
+    for _ in 0..<max(1, copies) { try handle.write(contentsOf: body) }
+    try handle.write(contentsOf: Data("// END OF LARGE FILE\n".utf8))
+  }
+
+  private func keyRepeat(_ v: JSONValue) async throws {
+    let key = v["key"]?.string ?? "PageDown"
+    let interval = (v["interval_ms"]?.number ?? 33) / 1000
+    let limit = Int(v["max"]?.number ?? 20000)
+    let label = v["label"]?.string ?? key
+    guard let message = EditorController.message(for: key) else {
+      throw ExplainerFailure(script: runner.script?.id ?? "", step: runner.stepIndex, message: "Can't send \(key) to the editor")
+    }
+    let native = app.editor.native
+    let started = ProcessInfo.processInfo.systemUptime
+    EditorTelemetry.shared.record(["ev": "keys", "label": label, "phase": "start", "key": key, "interval": interval * 1000])
+    var presses = 0, unanswered = 0
+    while presses < limit {
+      if let until = v["until"], evaluate(until) { break }
+      native.send(message)
+      presses += 1
+      if interval > 0 {
+        let next = started + Double(presses) * interval
+        let wait = next - ProcessInfo.processInfo.systemUptime
+        if wait > 0 { try await Task.sleep(for: .seconds(wait)) }
+      } else if !(await native.waitForAck(native.requestedMessages, timeout: 0.5)) {
+        unanswered += 1
+      }
+    }
+    EditorTelemetry.shared.record(["ev": "keys", "label": label, "phase": "end", "presses": presses, "unanswered": unanswered,
+                                   "seconds": ProcessInfo.processInfo.systemUptime - started])
   }
 
   /// Windows by name: SwiftUI's window IDs start with the scene ID; Settings has its own.

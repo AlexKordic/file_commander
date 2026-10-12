@@ -103,6 +103,14 @@ final class EditorTelemetry: @unchecked Sendable {
     buffer.removeAll(keepingCapacity: true)
   }
 
+  /// This process's CPU time so far, user and system, in ms.
+  static func processCPU() -> Double {
+    var usage = rusage()
+    guard getrusage(RUSAGE_SELF, &usage) == 0 else { return 0 }
+    let ms = { (t: timeval) in Double(t.tv_sec) * 1000 + Double(t.tv_usec) / 1000 }
+    return ((ms(usage.ru_utime) + ms(usage.ru_stime)) * 1000).rounded() / 1000
+  }
+
   /// Milliseconds of system uptime, rounded to microseconds.
   static func now() -> Double { ms(ProcessInfo.processInfo.systemUptime) }
 

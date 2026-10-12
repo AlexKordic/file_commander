@@ -131,6 +131,10 @@ public struct FrameTiming: Sendable {
   public var owed: Int
   /// The line at the top of the active view (0-based).
   public var top: Int
+  /// Fresh's CPU time so far, in ms.
+  public var cpuMs: Double
+  /// Allocations and bytes of Fresh's previous push (an `alloc-stats` build).
+  public var prevAllocs, prevAllocBytes: Int?
 
   init?(json: Any?) {
     guard let t = json as? [String: Any], let ack = t["ack"] as? Int else { return nil }
@@ -143,6 +147,9 @@ public struct FrameTiming: Sendable {
     ahead = t["ahead"] as? Int ?? 0
     owed = t["owed"] as? Int ?? 0
     top = t["top"] as? Int ?? 0
+    cpuMs = t["cpu_ms"] as? Double ?? 0
+    prevAllocs = t["prev_allocs"] as? Int
+    prevAllocBytes = t["prev_alloc_bytes"] as? Int
   }
 }
 
