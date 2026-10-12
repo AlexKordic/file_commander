@@ -19,7 +19,7 @@ built so that the interface never waits for the disk or the network.
   restored on the next start.
 - **Search, don't memorize.** `F1` opens a command palette with every command;
   rebind any key from there. Also: bookmarks, tabs, glob selection,
-  find, 7z archive browsing and Lua scripting.
+  find, archives (browse, extract and create zip, 7z, tar and compressed tars) and Lua scripting.
 - **A native Mac app too.** The same file manager with menus, sheets, themes
   with fonts for every element, and a tutorial that explains each feature by
   doing it. See [the macOS app](doc/macos_app.md).
@@ -40,7 +40,7 @@ built so that the interface never waits for the disk or the network.
 ```
 
 **Status:** release candidate, built from source. It is tested on macOS on
-Apple silicon. Linux builds are supported but not yet fully tested. There are no
+Apple silicon. Linux builds are supported but not yet fully tested: build on the Linux system you will run FC on (it links against that system's glibc; see [release packages](doc/dev/building.md#release-packages)). There are no
 binary downloads yet, and Windows is not supported.
 
 ## Build

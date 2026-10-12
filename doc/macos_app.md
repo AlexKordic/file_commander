@@ -2,7 +2,7 @@
 
 File Commander for macOS is a native app with the same features as the
 terminal interface: two panes with tabs, background jobs that survive crashes,
-SSH and 7z locations, the Fresh editor, bookmarks, the command palette and
+SSH and archive locations, the Fresh editor, bookmarks, the command palette and
 key rebinding. It adds menus, a sidebar, sheets and windows in place of the
 terminal dialogs, light and dark themes with a font for each element, and a
 built-in tutorial that explains every feature by doing it.
@@ -72,6 +72,7 @@ Choose a key preset in the welcome sheet or in Settings › Keys:
 | --- | --- | --- |
 | Command palette | `F1` | `⇧⌘P` |
 | Open / Enclosing folder | `Enter` / `?` | `⌘↓` / `⌘↑` |
+| Open as Archive | `⌃PageDown` | `⌥⌘↓` |
 | Rename, Find, Open in Editor | `F2`, `F3`, `F4` | `Return`, `⌘F`, `⌘O` |
 | Copy, Move | `F5`, `F6` | `⇧⌘C`, `⇧⌘X` |
 | New Folder, Delete | `F7`, `F8` | `⇧⌘N`, `⌥⌘⌫` |
@@ -124,13 +125,15 @@ Copy, Move, Delete, Rename and New Folder open sheets:
 - **Copy** lists everything it is about to copy while it scans, with the
   total size. Edit the destination, follow links or keep
   relative links, and choose *Replace existing*, *Update if newer* or *Skip
-  existing* (`1`, `2`, `3`). A destination ending in `.7z` creates an archive.
+  existing* (`1`, `2`, `3`). A destination named like an archive FC writes (`.zip`, `.7z`, `.tar.gz`, ...) creates that archive; the sheet says what it will create, or why it can't.
 - **Delete** is permanent; there is no trash. Links are deleted, not what they
   point to.
 - **Rename** renames one item or every selected item.
 
 You can also drag items onto the other pane to copy them, or hold `⌘` to move
 them; the sheet still opens. Files dropped from Finder open the Copy sheet.
+
+Archives work as in the terminal interface (see [Archives](user_guide.md#archives)). **Open** browses a zip, 7z or tar as a read-only folder, and on a compressed tar or compressed file it opens the **Extract** sheet: the folder to extract into, *Into a folder named after the archive*, what to do with existing files, and **Browse Anyway**. **Go › Open as Archive** (also in the context menu) browses any file as an archive. An encrypted archive asks for its password in a sheet.
 
 Jobs run one at a time in the background. The job bar shows the running job;
 the **Activity** window (`F9`) lists every job with its details and lets you

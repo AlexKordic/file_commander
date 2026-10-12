@@ -2,18 +2,19 @@
   "id": "archives",
   "title": "Archives",
   "order": 12,
-  "duration": 60,
+  "duration": 100,
   "chapter": "files",
   "needs": {
     "idle_queue": true
   },
-  "summary": "Browse an archive, copy files out, extract a compressed tar, open any file as an archive, open an encrypted one, and create an archive.",
+  "summary": "Browse a zip, copy files out, extract a compressed tar, open any file as an archive, open an encrypted one, and create a zip.",
   "covers": {
     "anchors": [
       "pane.left.path",
       "errors.lines",
       "sheet.extract.destination",
-      "sheet.extract.folder"
+      "sheet.extract.folder",
+      "sheet.copy.archive"
     ]
   },
   "steps": [
@@ -29,12 +30,12 @@
     },
     {
       "caption": "Archives open like folders",
-      "sub": "Open on a .7z file browses it, read-only"
+      "sub": "Open on a .zip file browses it, read-only"
     },
     {
       "cursor": {
         "side": "left",
-        "name": "website-2025.7z"
+        "name": "website-2025.zip"
       }
     },
     {
@@ -355,7 +356,7 @@
     },
     {
       "caption": "Make an archive",
-      "sub": "Copy to a destination that ends in .7z, and FC creates the archive"
+      "sub": "Copy to a destination named .zip, .7z or .tar.gz, and FC creates that archive"
     },
     {
       "navigate": {
@@ -412,10 +413,22 @@
       ]
     },
     {
-      "type": "{home}/backup/photos.7z"
+      "type": "{home}/backup/photos.zip"
     },
     {
-      "pause": 600
+      "wait": {
+        "anchor": "sheet.copy.archive"
+      }
+    },
+    {
+      "highlight": "sheet.copy.archive",
+      "hold": 1600
+    },
+    {
+      "pause": 1600
+    },
+    {
+      "unhighlight": true
     },
     {
       "click": "sheet.copy.start",
@@ -440,7 +453,7 @@
       "wait": {
         "rows": {
           "side": "right",
-          "contains": "photos.7z"
+          "contains": "photos.zip"
         }
       }
     },
@@ -454,7 +467,7 @@
     {
       "cursor": {
         "side": "right",
-        "name": "photos.7z"
+        "name": "photos.zip"
       }
     },
     {

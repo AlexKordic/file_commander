@@ -69,6 +69,12 @@
   the new limit applies within the running file.
 - The application model shared by both interfaces is now its own library,
   `fc_model`, under the terminal interface.
+- **Archives in every common format.** `Enter` browses zip, 7z, tar, iso, cpio, cab, wim, xar, rpm, deb and more as read-only folders through 7-Zip 26.04's library, loaded in process: browsing reads only the archive's index, and copying out extracts only the files copied. FC no longer extracts a `.7z` into a cache to browse it, and the bundled `7zr` is gone.
+- `Enter` on a compressed tar (`.tar.gz`, `.tgz`, `.tar.xz`, ...) or a compressed file (`.gz`, `.xz`, ...) opens an extraction popup, whatever its size: it extracts everything in one pass into a folder, or **Browse anyway** lists it. Extraction never writes outside the chosen folder, links that lead out of it included.
+- **Open as Archive** (`Ctrl+PageDown`, `⌥⌘↓` in the app) browses any file as an archive, whatever its name: disk images, packages, and documents that are zips inside.
+- Copying to a destination named `.zip`, `.7z`, `.tar`, `.tar.gz`, `.tar.bz2`, `.tar.xz` (and their short forms), or `.gz`, `.bz2`, `.xz` for one file, creates that archive; the copy dialogs say what the name will create. Archives keep symbolic links as links, Unix permissions and times, and empty folders. A compressed tar is written in one pass, without a temporary `.tar`.
+- Encrypted archives (zip AES and ZipCrypto, 7z) ask for their password in a dialog or sheet, again after a wrong one, and FC remembers it until it quits. RAR isn't supported.
+- Linux is built natively against the system's glibc instead of cross-compiled with Zig and musl; a Linux package holds `bin/fc`, `bin/fresh` and `lib/file-commander/7z.so`.
 
 This is a release candidate. It is built from source; there are no binary
 releases yet.

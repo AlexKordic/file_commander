@@ -13,7 +13,7 @@ FC yet, start with the [README](../README.md). For all keys on one page, see
 - [Background jobs](#background-jobs)
 - [After a crash or quit](#after-a-crash-or-quit)
 - [Find files](#find-files)
-- [7z archives](#7z-archives)
+- [Archives](#archives)
 - [Tabs, layout and columns](#tabs-layout-and-columns)
 - [Bookmarks](#bookmarks)
 - [Command palette and keys](#command-palette-and-keys)
@@ -90,7 +90,8 @@ buttons.
 | Key | Action |
 | --- | --- |
 | Arrow keys | Move the focus. |
-| `Enter` | Open the focused directory or `.7z` archive. |
+| `Enter` | Open the focused directory, or browse an archive. On a compressed tar or compressed file, offer to extract it (see [Archives](#archives)). |
+| `Ctrl+PageDown` | Browse the focused file as an archive, whatever its name. |
 | `?` | Go to the parent directory. |
 | `Ctrl+R` | Re-read the directory. |
 | `Ctrl+→` / `Ctrl+←` | Show the focused directory in the right / left panel. |
@@ -140,8 +141,7 @@ options:
 - **When the destination exists**: *Replace existing*, *Update if newer* or
   *Skip existing*. With the option list focused, press `1`, `2` or `3`.
 
-Press **COPY** or `F5` again to start. A destination ending in `.7z` creates a
-7z archive from the selection instead.
+Press **COPY** or `F5` again to start. A destination whose name ends in an archive suffix FC writes (`.zip`, `.7z`, `.tar.gz`, ...) creates that archive from the selection instead; the dialog says what it will create. See [Archives](#archives).
 
 FC refuses to copy a directory into itself. Copies are written to a private
 temporary name next to the destination and renamed into place when complete,
@@ -222,14 +222,60 @@ half second of navigation. The editor keeps its own recovery data; see
 Find works in local and SSH locations. It searches names only, not file
 contents.
 
-## 7z archives
+## Archives
 
-- Press `Enter` on a `.7z` file to browse it like a read-only directory.
-  Copy files out of it with `F5`.
-- To create an archive, copy a selection (`F5`) to a destination path that ends
-  in `.7z`.
+FC browses, extracts and creates archives with 7-Zip's library (`7z.so`, built with FC). What `Enter` does depends on the file's name:
 
-Browsing an archive reads only its index, and copying out extracts only the files you copy. FC reads archives with 7-Zip's library, `7z.so`, built alongside it. Other archive formats and archives in SSH locations are not supported; copy the archive to a local directory first.
+| Files | `Enter` | FC creates them |
+| --- | --- | --- |
+| `.zip`, `.7z`, `.tar` | Browses it as a read-only folder | Yes |
+| `.zipx`, `.cpio`, `.iso`, `.cab`, `.wim`, `.swm`, `.esd`, `.xar`, `.rpm`, `.deb`, `.ar`, `.arj`, `.lzh`, `.lha` | Browses it | No |
+| `.tar.gz`, `.tgz`, `.tar.bz2`, `.tbz`, `.tbz2`, `.tar.xz`, `.txz` | Offers to extract it | Yes |
+| `.tar.zst`, `.tzst`, `.tar.lzma`, `.tlz`, `.tar.Z`, `.taz` | Offers to extract it | No |
+| `.gz`, `.bz2`, `.xz` | Offers to extract its one file | Yes, from one file |
+| `.zst`, `.lzma`, `.Z` | Offers to extract its one file | No |
+| Disk images and files that are archives inside: `.dmg`, `.img`, `.vhd`, `.vhdx`, `.vmdk`, `.vdi`, `.qcow2`, `.squashfs`, `.pkg`, `.msi`, `.chm`, `.jar`, `.war`, `.apk`, `.ipa`, `.whl`, `.epub`, `.docx`, `.xlsx`, `.pptx`, `.odt`, ... | Opens it as any other file | No |
+| `.rar` | Refuses: FC doesn't support RAR | No |
+
+### Browse and copy out
+
+`Enter` on an archive shows it as a read-only folder; copy files out of it with `F5`, as from any folder. Browsing reads only the archive's index, and copying out extracts only the files you copy. An archive inside an archive opens the same way.
+
+**Open as Archive** (`Ctrl+PageDown`) browses the focused file as an archive whatever its name; 7-Zip decides the format from the file's contents. Use it for disk images, packages and documents that are zips inside.
+
+### Extract a compressed tar
+
+A compressed tar has no index, so listing it means decompressing all of it. `Enter` on one (or on a compressed file such as `.gz`) therefore offers to extract it instead, whatever its size:
+
+- **Extract** writes everything in one pass into a folder: by default the other panel's folder, into a folder named after the archive (`release-1.2.tar.gz` goes to `release-1.2/`). Choose what happens to files that exist: *Replace existing*, *Update if newer* or *Skip existing*. The extraction runs as a background job.
+- **Browse anyway** lists it as a folder. Listing takes one pass over the whole archive, and each copy out another.
+
+Extraction never writes outside the folder you chose. It skips entries with absolute paths or `..`, links that point outside the folder, links that together lead out of it, and devices, pipes and sockets; each skipped entry is reported. Hard links inside the archive are recreated as hard links.
+
+### Create an archive
+
+Copy a selection (`F5`) to a destination whose name ends in a suffix FC creates (see the table): `backup.zip`, `photos.tar.gz`, `notes.7z`. The copy dialog says what the name will create, or why it can't:
+
+- `.gz`, `.bz2` and `.xz` hold exactly one file. For more, use `.tar.gz`, `.tar.bz2` or `.tar.xz`.
+- `.tar.zst` and the formats FC only reads are refused.
+- A compressed tar is written in one pass, without a temporary `.tar`.
+
+Archives keep symbolic links as links, Unix permissions and modification times, and empty folders. Devices, pipes and sockets can't be put in an archive. The archive is written to a temporary name next to the destination and renamed into place when it is complete.
+
+### Passwords
+
+An encrypted archive asks for its password when it is needed: on opening when its names are encrypted (7z can do that), otherwise when you copy or extract files. A wrong password asks again, and nothing is written with one. FC remembers a password that worked until it quits. FC doesn't create encrypted archives.
+
+### Names
+
+Zip entries whose names aren't marked as UTF-8 are read as code page 437, as the zip format specifies; names written in another code page, such as Cyrillic cp866, show as code page 437 characters. Other names that aren't UTF-8 keep their bytes, as local file names do.
+
+### Limits
+
+- Archives with more than 1,000,000 entries are refused.
+- Before an extraction or a copy out of an archive, FC checks the free space where the files go and refuses when they won't fit.
+- Opening a large archive or listing a compressed tar shows its progress next to the panel's **Stop** button.
+- Archives on SSH tabs can't be opened; copy the archive to a local folder first.
 
 ## Tabs, layout and columns
 
@@ -332,7 +378,7 @@ A move within one filesystem is a rename and keeps everything.
 - Pausing a job pauses the whole queue; queued jobs wait until it is resumed
   or cancelled.
 - Find matches names only.
-- 7z is the only archive format, and archives can't be opened over SSH.
+- Archives can't be opened over SSH, RAR isn't supported, and FC doesn't create encrypted archives.
 - Sorting is changed with the mouse; it has no key.
 - Bookmarks and key bindings are saved on a normal exit only.
 - Windows is not supported.

@@ -111,14 +111,14 @@ struct TutorialWorld {
     try photo(locked, title: "locked", seed: 99, size: TutorialWorld.mib, day: 27)
     chmod(locked.path, 0o000)
 
-    // macOS's own tar (libarchive) writes the archives; FC reads them through 7-Zip's library. A .docx is a zip, for Open as Archive.
+    // macOS's own tar (libarchive) writes the archives; FC reads them through 7-Zip's library. A .docx is a zip, for Open as Archive; private.zip's password is "tutorial".
     let docx = fm.temporaryDirectory.appendingPathComponent("fc-tutorial-docx-\(ProcessInfo.processInfo.processIdentifier)")
     try? fm.removeItem(at: docx)
     try text(docx.appendingPathComponent("[Content_Types].xml"), "<?xml version=\"1.0\"?>\n<Types/>\n", day: 9)
     try text(docx.appendingPathComponent("word/document.xml"), "<?xml version=\"1.0\"?>\n<document>Quarterly report</document>\n", day: 9)
     try text(docx.appendingPathComponent("docProps/core.xml"), "<?xml version=\"1.0\"?>\n<coreProperties/>\n", day: 9)
     defer { try? fm.removeItem(at: docx) }
-    for (archive, arguments, folder, day) in [("website-2025.7z", ["--format", "7zip"], home.appendingPathComponent("projects/website"), 2),
+    for (archive, arguments, folder, day) in [("website-2025.zip", ["--format", "zip"], home.appendingPathComponent("projects/website"), 2),
                                               ("downloads/logs-2026.tar.gz", ["--format", "pax", "-z"], home.appendingPathComponent("projects/logs"), 12),
                                               ("downloads/report.docx", ["--format", "zip"], docx, 9),
                                               ("downloads/private.zip", ["--format", "zip", "--options", "zip:encryption=aes256", "--passphrase", "tutorial"],

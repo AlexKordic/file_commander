@@ -379,19 +379,19 @@
     },
     {
       "caption": "Archives open like folders",
-      "sub": "Open on a .7z file browses it, read-only. The Archives explainer shows more"
+      "sub": "Open on a .zip file browses it, read-only. The Archives explainer shows more"
     },
     {
       "navigate": {
         "side": "left",
         "to": "{home}",
-        "focus": "{home}/website-2025.7z"
+        "focus": "{home}/website-2025.zip"
       }
     },
     {
       "cursor": {
         "side": "left",
-        "name": "website-2025.7z"
+        "name": "website-2025.zip"
       }
     },
     {
