@@ -88,8 +88,10 @@ struct CopySheet: View {
             .onSubmit(restart)
             .explainerAnchor("sheet.copy.destination")
         }
-        if destination.lowercased().hasSuffix(".7z") {
-          Label("Creates a 7z archive with the selection", systemImage: "archivebox").font(.callout).foregroundStyle(.secondary)
+        if let note = Engine.archiveNote(destination, sources: request.selected) {
+          Label(note.text, systemImage: note.refused ? "exclamationmark.triangle" : "archivebox").font(.callout)
+            .foregroundStyle(note.refused ? AnyShapeStyle(.red) : AnyShapeStyle(.secondary))
+            .explainerAnchor("sheet.copy.archive")
         }
         HStack(alignment: .top, spacing: 28) {
           VStack(alignment: .leading, spacing: 6) {

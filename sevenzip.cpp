@@ -659,7 +659,34 @@ struct Source {
   std::string name;
   bool directory = false;
   uint64_t size = 0;
+  std::string link;  // A symbolic link's target: the link is stored, not what it points to.
   struct stat info{};
+};
+
+// A link's target as an entry's data, as zip and 7z keep it.
+class MemoryIn final : public ISequentialInStream, public RefCounted {
+ public:
+  explicit MemoryIn(std::string data) : _data(std::move(data)) {}
+  STDMETHOD(QueryInterface)(REFIID iid, void** out) override {
+    *out = nullptr;
+    if (iid == IID_IUnknown || iid == IID_ISequentialInStream) *out = static_cast<ISequentialInStream*>(this);
+    else return E_NOINTERFACE;
+    AddRef();
+    return S_OK;
+  }
+  STDMETHOD_(ULONG, AddRef)() override { return add_ref(); }
+  STDMETHOD_(ULONG, Release)() override { return release(); }
+  STDMETHODIMP Read(void* data, UInt32 size, UInt32* processed) noexcept override {
+    const size_t n = std::min<size_t>(size, _data.size() - _at);
+    std::memcpy(data, _data.data() + _at, n);
+    _at += n;
+    if (processed) *processed = UInt32(n);
+    return S_OK;
+  }
+
+ private:
+  std::string _data;
+  size_t _at = 0;
 };
 
 class UpdateCallback final : public IArchiveUpdateCallback, public ICryptoGetTextPassword2, public RefCounted {
@@ -701,6 +728,14 @@ class UpdateCallback final : public IArchiveUpdateCallback, public ICryptoGetTex
         break;
       }
       case kpidIsDir: value->vt = VT_BOOL; value->boolVal = item.directory ? VARIANT_TRUE : VARIANT_FALSE; break;
+      case kpidSymLink: {
+        if (item.link.empty()) break;
+        const auto target = wide(item.link);
+        value->bstrVal = lib.alloc_string(target.data(), UINT(target.size()));
+        if (!value->bstrVal) return E_OUTOFMEMORY;
+        value->vt = VT_BSTR;
+        break;
+      }
       case kpidIsAnti: value->vt = VT_BOOL; value->boolVal = VARIANT_FALSE; break;
       case kpidSize: value->vt = VT_UI8; value->uhVal.QuadPart = item.size; break;
       case kpidAttrib:
@@ -724,6 +759,12 @@ class UpdateCallback final : public IArchiveUpdateCallback, public ICryptoGetTex
     *out = nullptr;
     if (index >= _items.size()) return E_INVALIDARG;
     if (_items[index].directory) return S_OK;
+    if (!_items[index].link.empty()) {
+      auto data = new MemoryIn(_items[index].link);
+      data->AddRef();
+      *out = data;
+      return S_OK;
+    }
     int error = 0;
     auto file = InFile::open(_items[index].path, error);
     if (!file) {
@@ -1048,6 +1089,17 @@ Err read_entries(const Library& lib, IInArchive* handler, const Filepath& file, 
   return Err();
 }
 
+template <class Handler>
+bool set_property(Handler* handler, const wchar_t* name, bool on) {
+  ComPtr<ISetProperties> properties;
+  if (handler->QueryInterface(IID_ISetProperties, reinterpret_cast<void**>(properties.put())) != S_OK || !properties) return false;
+  const wchar_t* names[] = {name};
+  PROPVARIANT value{};
+  value.vt = VT_BOOL;
+  value.boolVal = on ? VARIANT_TRUE : VARIANT_FALSE;
+  return properties->SetProperties(names, &value, 1) == S_OK;
+}
+
 // Zip names without the UTF-8 flag reach FC as their raw bytes (see from_cp437) instead of through the process's locale.
 void prefer_raw_names(IInArchive* handler) {
   ComPtr<ISetProperties> properties;
@@ -1063,17 +1115,30 @@ void collect(const Filepath& path, const std::string& name, std::vector<Source>&
   Source s;
   s.path = path;
   s.name = name;
-  if (::stat(path.c_str(), &s.info) != 0) {
+  if (::lstat(path.c_str(), &s.info) != 0) {
     error = Err("cannot read " + path.native() + ": " + std::strerror(errno));
+    return;
+  }
+  if (S_ISLNK(s.info.st_mode)) {
+    std::vector<char> target(PATH_MAX + 1);
+    const ssize_t n = ::readlink(path.c_str(), target.data(), target.size() - 1);
+    if (n <= 0) {
+      error = Err("cannot read the link " + path.native() + ": " + std::strerror(errno));
+      return;
+    }
+    s.link.assign(target.data(), size_t(n));
+    s.size = s.link.size();
+    out.push_back(s);
+    return;
+  }
+  if (!S_ISDIR(s.info.st_mode) && !S_ISREG(s.info.st_mode)) {
+    error = Err("FC doesn't put devices, pipes or sockets in archives: " + path.native());
     return;
   }
   s.directory = S_ISDIR(s.info.st_mode);
   s.size = s.directory ? 0 : uint64_t(s.info.st_size);
   out.push_back(s);
   if (!s.directory) return;
-  // A symlink to a folder is stored as an empty folder, so a link cycle can't recurse forever.
-  struct stat own{};
-  if (::lstat(path.c_str(), &own) == 0 && S_ISLNK(own.st_mode)) return;
   boost::system::error_code ec;
   std::vector<Filepath> children;
   for (boost::filesystem::directory_iterator it(path, ec), end; !ec && it != end; it.increment(ec)) children.push_back(it->path());
@@ -1303,23 +1368,122 @@ Err create(const std::string& format, const std::vector<NewItem>& items, const F
   ComPtr<IOutArchive> handler;
   if (lib.create_object(&handler_info->class_id, &IID_IOutArchive, reinterpret_cast<void**>(handler.put())) != S_OK || !handler)
     return Err("cannot create a " + format + " writer");
+  if (format == "zip") set_property(handler.get(), L"cu", true);  // Names that aren't ASCII are stored as UTF-8, with the flag that says so.
   int open_error = 0;
   auto file = OutFile::create(destination, open_error);
   if (!file) return Err("cannot create " + destination.native() + ": " + std::strerror(open_error));
-  if (encryption.encrypt_names) {
-    ComPtr<ISetProperties> properties;
-    if (handler->QueryInterface(IID_ISetProperties, reinterpret_cast<void**>(properties.put())) != S_OK || !properties)
-      return Err(format + " archives can't encrypt their names");
-    const wchar_t* names[] = {L"he"};
-    PROPVARIANT on{};
-    on.vt = VT_BOOL;
-    on.boolVal = VARIANT_TRUE;
-    if (properties->SetProperties(names, &on, 1) != S_OK) return Err(format + " archives can't encrypt their names");
-  }
+  if (encryption.encrypt_names && !set_property(handler.get(), L"he", true)) return Err(format + " archives can't encrypt their names");
   ComPtr<UpdateCallback> callback(new UpdateCallback(sources, progress, encryption.password));
   const HRESULT hr = handler->UpdateItems(file.get(), UInt32(sources.size()), callback.get());
   const int close_error = file->close();
   if (hr != S_OK) return Err("Archive creation stopped: " + (callback->error().empty() ? hresult_text(hr) : callback->error()));
+  if (close_error != 0) return Err("cannot write " + destination.native() + ": " + std::strerror(close_error));
+  return Err();
+}
+
+namespace {
+
+// The compressor's one input: the tar another thread writes into the pipe. Its size is only an estimate, for progress.
+class PipeUpdateCallback final : public IArchiveUpdateCallback, public RefCounted {
+ public:
+  PipeUpdateCallback(std::shared_ptr<Pipe> pipe, uint64_t estimate, const Progress& progress)
+      : _pipe(std::move(pipe)), _estimate(estimate), _progress(progress) {}
+  STDMETHOD(QueryInterface)(REFIID iid, void** out) override {
+    *out = nullptr;
+    if (iid == IID_IUnknown || iid == IID_IProgress || iid == IID_IArchiveUpdateCallback) *out = static_cast<IArchiveUpdateCallback*>(this);
+    else return E_NOINTERFACE;
+    AddRef();
+    return S_OK;
+  }
+  STDMETHOD_(ULONG, AddRef)() override { return add_ref(); }
+  STDMETHOD_(ULONG, Release)() override { return release(); }
+  STDMETHODIMP SetTotal(UInt64) noexcept override { return cancelled() ? E_ABORT : S_OK; }
+  STDMETHODIMP SetCompleted(const UInt64*) noexcept override { return cancelled() ? E_ABORT : S_OK; }
+  STDMETHODIMP GetUpdateItemInfo(UInt32, Int32* new_data, Int32* new_properties, UInt32* index_in_archive) noexcept override {
+    if (new_data) *new_data = 1;
+    if (new_properties) *new_properties = 1;
+    if (index_in_archive) *index_in_archive = UInt32(-1);
+    return S_OK;
+  }
+  STDMETHODIMP GetProperty(UInt32, PROPID id, PROPVARIANT* value) noexcept override {
+    library().variant_clear(reinterpret_cast<VARIANTARG*>(value));
+    switch (id) {
+      case kpidIsDir: value->vt = VT_BOOL; value->boolVal = VARIANT_FALSE; break;
+      case kpidSize: value->vt = VT_UI8; value->uhVal.QuadPart = _estimate; break;
+      case kpidMTime: {
+        timespec now{};
+        clock_gettime(CLOCK_REALTIME, &now);
+        value->vt = VT_FILETIME;
+        value->filetime = filetime_of(now.tv_sec, now.tv_nsec);
+        break;
+      }
+      default: break;
+    }
+    return S_OK;
+  }
+  STDMETHODIMP GetStream(UInt32, ISequentialInStream** out) noexcept override {
+    auto reader = new PipeReader(_pipe);
+    reader->AddRef();
+    *out = reader;
+    return S_OK;
+  }
+  STDMETHODIMP SetOperationResult(Int32) noexcept override { return S_OK; }
+
+ private:
+  bool cancelled() const { return _progress.cancelled && _progress.cancelled->load(); }
+  std::shared_ptr<Pipe> _pipe;
+  uint64_t _estimate;
+  const Progress& _progress;
+};
+
+}  // namespace
+
+Err create_compressed_tar(const std::string& compression, const std::vector<NewItem>& items, const Filepath& destination,
+                          const Progress& progress) {
+  const auto& lib = library();
+  if (!lib.error.empty()) return Err("Archive support is unavailable: " + lib.error);
+  const HandlerInfo *tar_info = nullptr, *compressor_info = nullptr;
+  for (const auto& h : lib.handlers) {
+    if (h.format.name == "tar") tar_info = &h;
+    if (h.format.name == compression) compressor_info = &h;
+  }
+  if (!tar_info || !tar_info->format.writable) return Err("7-Zip's library can't write tar");
+  if (!compressor_info || !compressor_info->format.writable) return Err("FC can't create " + compression + "-compressed tars");
+  std::vector<Source> sources;
+  Err error;
+  for (const auto& item : items) {
+    collect(item.source, item.name, sources, error);
+    if (!error.ok()) return error;
+  }
+  ComPtr<IOutArchive> tar, compressor;
+  if (lib.create_object(&tar_info->class_id, &IID_IOutArchive, reinterpret_cast<void**>(tar.put())) != S_OK || !tar)
+    return Err("cannot create a tar writer");
+  if (lib.create_object(&compressor_info->class_id, &IID_IOutArchive, reinterpret_cast<void**>(compressor.put())) != S_OK || !compressor)
+    return Err("cannot create a " + compression + " writer");
+  uint64_t estimate = 1024;
+  for (const auto& s : sources) estimate += 512 + (s.link.empty() ? (s.size + 511) / 512 * 512 : 0);
+  int open_error = 0;
+  auto file = OutFile::create(destination, open_error);
+  if (!file) return Err("cannot create " + destination.native() + ": " + std::strerror(open_error));
+  // tar writes into the pipe on its own thread while the compressor reads it here.
+  auto pipe = std::make_shared<Pipe>(size_t(1) << 20);
+  ComPtr<PipeWriter> writer(new PipeWriter(pipe));
+  const std::string no_password;
+  ComPtr<UpdateCallback> tar_callback(new UpdateCallback(sources, progress, no_password));
+  HRESULT written = S_OK;
+  std::thread producer([&] {
+    written = tar->UpdateItems(writer.get(), UInt32(sources.size()), tar_callback.get());
+    pipe->close_writer();
+  });
+  ComPtr<PipeUpdateCallback> feed(new PipeUpdateCallback(pipe, estimate, progress));
+  const HRESULT compressed = compressor->UpdateItems(file.get(), 1, feed.get());
+  pipe->close_reader();  // Stops tar when the compressor gave up first.
+  producer.join();
+  const int close_error = file->close();
+  if (progress.cancelled && progress.cancelled->load()) return Err("Archive creation stopped: cancelled");
+  if (written != S_OK)
+    return Err("Archive creation stopped: " + (tar_callback->error().empty() ? hresult_text(written) : tar_callback->error()));
+  if (compressed != S_OK) return Err("Archive creation stopped: " + hresult_text(compressed));
   if (close_error != 0) return Err("cannot write " + destination.native() + ": " + std::strerror(close_error));
   return Err();
 }

@@ -84,7 +84,7 @@ class ReadProgress {
 
 }  // namespace ArchiveFS
 
-// Writes a new .7z holding `sources` to `archive_path` through a private staging folder next to it. `conflict` decides what happens to an existing destination; `preferred_cwd`, when it holds every source, is where the names inside the archive start.
+// Writes a new archive holding `sources` to `archive_path`, in the format its name says (archive_destination: 7z, zip, tar, a compressed tar, or one compressed file), through a private staging folder next to it. `conflict` decides what happens to an existing destination; `preferred_cwd`, when it holds every source, is where the names inside the archive start.
 Err create_archive(const Filepath& archive_path, const std::vector<Filepath>& sources, const Filepath& preferred_cwd = Filepath(),
                    ArchiveConflict conflict = ArchiveConflict::Replace, std::atomic<bool>* cancelled = nullptr, bool* skipped = nullptr);
 

@@ -1,5 +1,7 @@
 #include "archive_formats.hpp"
 
+#include <boost/filesystem.hpp>
+
 #include <algorithm>
 #include <cstring>
 
@@ -11,9 +13,9 @@ constexpr ArchiveKind A = ArchiveKind::Archive, T = ArchiveKind::CompressedTar, 
 // The suffixes Enter knows. A longer suffix wins, so ".tar.gz" beats ".gz".
 constexpr ArchiveFormat kFormats[] = {
     {".7z", "7z", A, true, ""},
-    {".zip", "zip", A, false, ""},
+    {".zip", "zip", A, true, ""},
     {".zipx", "zip", A, false, ""},
-    {".tar", "tar", A, false, ""},
+    {".tar", "tar", A, true, ""},
     {".cpio", "Cpio", A, false, ""},
     {".cab", "Cab", A, false, ""},
     {".arj", "Arj", A, false, ""},
@@ -27,22 +29,22 @@ constexpr ArchiveFormat kFormats[] = {
     {".swm", "wim", A, false, ""},
     {".esd", "wim", A, false, ""},
     {".xar", "Xar", A, false, ""},
-    {".tar.gz", "gzip", T, false, ""},
-    {".tgz", "gzip", T, false, ""},
-    {".tar.bz2", "bzip2", T, false, ""},
-    {".tbz", "bzip2", T, false, ""},
-    {".tbz2", "bzip2", T, false, ""},
-    {".tar.xz", "xz", T, false, ""},
-    {".txz", "xz", T, false, ""},
+    {".tar.gz", "gzip", T, true, ""},
+    {".tgz", "gzip", T, true, ""},
+    {".tar.bz2", "bzip2", T, true, ""},
+    {".tbz", "bzip2", T, true, ""},
+    {".tbz2", "bzip2", T, true, ""},
+    {".tar.xz", "xz", T, true, ""},
+    {".txz", "xz", T, true, ""},
     {".tar.zst", "zstd", T, false, ""},
     {".tzst", "zstd", T, false, ""},
     {".tar.lzma", "lzma", T, false, ""},
     {".tlz", "lzma", T, false, ""},
     {".tar.z", "Z", T, false, ""},
     {".taz", "Z", T, false, ""},
-    {".gz", "gzip", C, false, ""},
-    {".bz2", "bzip2", C, false, ""},
-    {".xz", "xz", C, false, ""},
+    {".gz", "gzip", C, true, ""},
+    {".bz2", "bzip2", C, true, ""},
+    {".xz", "xz", C, true, ""},
     {".zst", "zstd", C, false, ""},
     {".lzma", "lzma", C, false, ""},
     {".z", "Z", C, false, ""},
@@ -123,4 +125,34 @@ std::string archive_stem(const Filepath& name) {
 std::string archive_icon_kind(const std::string& name) {
   const auto* row = archive_format_of(Filepath(name));
   return row && row->kind != ArchiveKind::OpenOnly ? "archive" : "";
+}
+
+ArchiveDestination archive_destination(const Filepath& destination, const std::vector<Filepath>& sources) {
+  ArchiveDestination out;
+  const auto* row = archive_format_of(destination);
+  // Documents and packages that are zips inside are copied under that name, not created.
+  if (!row || row->kind == ArchiveKind::OpenOnly) return out;
+  out.format = row;
+  out.kind   = ArchiveDestination::Refuse;
+  const std::string suffix = row->suffix;
+  if (!row->writable) {
+    out.text = "FC can't create " + suffix + " archives";
+    return out;
+  }
+  const std::string format = row->format;
+  if (row->kind == ArchiveKind::Compressed) {
+    boost::system::error_code ec;
+    if (sources.size() != 1 || !boost::filesystem::is_regular_file(boost::filesystem::symlink_status(sources.front(), ec))) {
+      out.text = "A " + suffix + " holds one file; use .tar" + suffix;
+      return out;
+    }
+    out.kind = ArchiveDestination::Create;
+    out.text = "Creates a " + format + "-compressed copy of " + sources.front().filename().native();
+    return out;
+  }
+  out.kind = ArchiveDestination::Create;
+  if (row->kind == ArchiveKind::CompressedTar) out.text = "Creates a " + format + "-compressed tar archive";
+  else if (format == "zip") out.text = "Creates a ZIP archive";
+  else out.text = "Creates a " + format + " archive";
+  return out;
 }

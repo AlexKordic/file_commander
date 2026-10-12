@@ -963,7 +963,13 @@ void CopyDialog::run_copy() {
     _confirm_when_ready = true;
     return;
   }
-  if (is_archive_file_path(target)) {
+  const auto archive = archive_destination(target, app->action.arguments->selected);
+  if (archive.kind == ArchiveDestination::Refuse) {
+    _confirm_when_ready = false;
+    file_operations().report_error(archive.text);
+    return;
+  }
+  if (archive.kind == ArchiveDestination::Create) {
     auto plan=selection_plan(OperationType::ARCHIVE_CREATE,app->action.arguments->selected,target);
     plan.conflict=to_job_copy_conflict(_conflict);
     auto job=std::make_shared<JobSpec>(std::make_shared<const OperationPlan>(std::move(plan)));
@@ -979,6 +985,13 @@ void CopyDialog::run_copy() {
   _clear_operation_state();
   app->dir->clear_selection();
   app->action.close_dialog();
+}
+
+// What the destination's name makes of the copy: a new archive, or why it can't be one.
+Element CopyDialog::archive_note() {
+  const auto archive = archive_destination(Filepath(destination_path), app->action.arguments->selected);
+  if (archive.kind == ArchiveDestination::Copy) return text("");
+  return text(" " + archive.text) | (archive.kind == ArchiveDestination::Refuse ? theme().mkdir_errortxt : dim);
 }
 
 Element CopyDialog::render() {
@@ -1006,6 +1019,7 @@ Element CopyDialog::render() {
     text(" Copy " + std::to_string(file_count) + " selected items ") | bold | hcenter,
   vbox({
             hbox({text(" TO: "), input_destination_path->Render() | xflex_grow, text(" ")}),
+            archive_note(),
             separator(),
             hbox({button_ok->Render() | hcenter, button_cancel->Render() | hcenter}) | hcenter,
             _confirm_when_ready ? text("Preparing copy…") | hcenter : text(""),

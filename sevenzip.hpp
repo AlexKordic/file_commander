@@ -97,9 +97,13 @@ struct Encryption {
   bool encrypt_names = false;  // 7z: the list of entries is encrypted too, so opening asks for the password
 };
 
-// Writes a new `format` archive holding `items` to `destination`, which must not exist yet.
+// Writes a new `format` archive holding `items` to `destination`, which must not exist yet. Symbolic links are stored as links; a single-stream format (gzip, bzip2, xz) takes exactly one file.
 Err create(const std::string& format, const std::vector<NewItem>& items, const Filepath& destination,
            const Progress& progress = {}, const Encryption& encryption = {});
+
+// Writes a tar of `items`, compressed as `compression` (gzip, bzip2 or xz), to `destination` in one pass: tar writes into memory that the compressor reads on another thread, so no .tar is stored anywhere.
+Err create_compressed_tar(const std::string& compression, const std::vector<NewItem>& items, const Filepath& destination,
+                          const Progress& progress = {});
 
 }  // namespace SevenZip
 

@@ -641,7 +641,9 @@ std::string copy_start(uint64_t id, int side) {
   if (session->_running.load()) return "Still preparing the copy";
   const auto& request = session->request();
   if (auto error = archive_mutation_error(request.destination); !error.empty()) return error;
-  if (is_archive_file_path(request.destination)) {
+  const auto archive = archive_destination(request.destination, request.sources);
+  if (archive.kind == ArchiveDestination::Refuse) return archive.text;
+  if (archive.kind == ArchiveDestination::Create) {
     auto plan     = Perun::selection_plan(OperationType::ARCHIVE_CREATE, request.sources, request.destination);
     plan.conflict = request.conflict;
     auto result   = submit(std::move(plan));
@@ -671,6 +673,12 @@ void browse_archive(int side, const std::string& archive) {
 }
 
 std::string archive_folder_name(const std::string& archive) { return archive_stem(Filepath(archive)); }
+
+ArchiveNote archive_note(const std::string& destination, const StringList& sources) {
+  std::vector<Filepath> paths(sources.begin(), sources.end());
+  const auto archive = archive_destination(Filepath(destination), paths);
+  return {archive.kind == ArchiveDestination::Create, archive.kind == ArchiveDestination::Refuse, archive.text};
+}
 
 bool archive_holds_many(const std::string& archive) {
   const auto* row = archive_format_of(Filepath(archive));

@@ -6,6 +6,7 @@
 #include "bfs.hpp"
 
 #include <string>
+#include <vector>
 
 enum class ArchiveKind {
   Archive,        // An index FC browses on Enter: 7z, zip, tar, iso, ...
@@ -19,7 +20,7 @@ struct ArchiveFormat {
   const char* suffix;   // lower case, with its dot: ".tar.gz"
   const char* format;   // 7-Zip's name for the outer format; empty lets 7-Zip decide from the contents
   ArchiveKind kind;
-  bool writable;        // FC can create it (Phase 6 decides more than .7z)
+  bool writable;        // FC can create it
   const char* refusal;  // for Unsupported
 };
 
@@ -38,5 +39,13 @@ std::string archive_stem(const Filepath& name);
 
 // "archive" for names of any archive kind, for icons; empty otherwise.
 std::string archive_icon_kind(const std::string& name);
+
+// What copying `sources` to `destination` does, decided from the destination's name: a plain copy, a new archive (`text` says which, for the copy dialogs), or a refusal (`text` says why).
+struct ArchiveDestination {
+  enum Kind { Copy, Create, Refuse } kind = Copy;
+  std::string text;
+  const ArchiveFormat* format = nullptr;
+};
+ArchiveDestination archive_destination(const Filepath& destination, const std::vector<Filepath>& sources);
 
 #endif  // FC_ARCHIVE_FORMATS_HPP_

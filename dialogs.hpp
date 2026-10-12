@@ -199,6 +199,7 @@ struct CopyDialog : Dialog {
   CopyDiscoveryProcess::P _discovery_process;
 
   Element render();
+  Element archive_note();
   void    run_copy();
   void    cancel();
 

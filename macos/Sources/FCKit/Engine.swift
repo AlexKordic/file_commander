@@ -269,6 +269,12 @@ public final class Engine {
   public nonisolated static func archiveFolderName(_ archive: String) -> String { String(fce.archive_folder_name(std.string(archive))) }
   /// Whether extracting `archive` offers a folder named after it: a compressed tar holds many files, a compressed file one.
   public nonisolated static func archiveHoldsMany(_ archive: String) -> Bool { fce.archive_holds_many(std.string(archive)) }
+  /// What copying `sources` to `destination` makes: a new archive (the text says which), a refusal (the text says why), or nil for a plain copy.
+  public static func archiveNote(_ destination: String, sources: [String]) -> (text: String, refused: Bool)? {
+    let note = fce.archive_note(std.string(destination), cxx(sources))
+    if !note.creates && !note.refused { return nil }
+    return (String(note.text), note.refused)
+  }
   /// Whether the listing shows `name` with an archive icon.
   public nonisolated static func isArchiveName(_ name: String) -> Bool { !String(fce.archive_icon(std.string(name))).isEmpty }
 

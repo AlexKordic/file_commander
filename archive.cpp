@@ -620,8 +620,10 @@ ReadProgress::~ReadProgress() { t_read_progress = _outer; }
 Err create_archive(const Filepath& archive_path, const std::vector<Filepath>& sources, const Filepath& preferred_cwd, ArchiveConflict conflict,
                    std::atomic<bool>* cancelled, bool* skipped) {
   if (skipped) *skipped = false;
-  if (!is_archive_file_path(archive_path)) return Err("unsupported archive destination: " + archive_path.native());
   if (sources.empty()) return Err("no input files selected for archive creation");
+  const auto destination = archive_destination(archive_path, sources);
+  if (destination.kind != ArchiveDestination::Create)
+    return Err(destination.kind == ArchiveDestination::Refuse ? destination.text : "unsupported archive destination: " + archive_path.native());
 
   const Filepath archive_abs = absolute_path_safe(archive_path);
   const Filepath archive_parent = archive_abs.parent_path();
@@ -663,7 +665,7 @@ Err create_archive(const Filepath& archive_path, const std::vector<Filepath>& so
       boost::filesystem::remove_all(root, ignored);
     }
   } cleanup{staging_dir};
-  const Filepath staged_archive = staging_dir / "output.7z";
+  const Filepath staged_archive = staging_dir / (std::string("output") + destination.format->suffix);
 
   // Names inside the archive start at `preferred_cwd` when it holds every source, otherwise at the sources' common folder.
   Filepath working_dir;
@@ -690,7 +692,9 @@ Err create_archive(const Filepath& archive_path, const std::vector<Filepath>& so
   }
   SevenZip::Progress progress;
   progress.cancelled = cancelled;
-  auto created = SevenZip::create("7z", items, staged_archive, progress);
+  const auto& row = *destination.format;
+  auto created = row.kind == ArchiveKind::CompressedTar ? SevenZip::create_compressed_tar(row.format, items, staged_archive, progress)
+                                                        : SevenZip::create(row.format, items, staged_archive, progress);
   if (cancelled && cancelled->load()) return Err("archive creation cancelled");
   if (!created.ok()) return Err("archive create failed: " + created.steps.front());
 

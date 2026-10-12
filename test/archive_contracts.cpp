@@ -397,6 +397,87 @@ void limits() {
   ArchiveFS::close_unused();
 }
 
+// Every format FC writes: browse what was made and compare it with the tree it came from.
+void create() {
+  Fixture f;
+  fs::create_directories(f / "tree/docs");
+  fs::create_directories(f / "tree/empty");
+  write(f / "tree/a.txt", "alpha\n");
+  write(f / "tree/docs/b.md", std::string(5000, 'b'));
+  write(f / "tree/caf\xc3\xa9.txt", "utf8");
+  fs::create_symlink("b.md", f / "tree/docs/link");
+  ::chmod((f / "tree/a.txt").c_str(), 0750);
+  fs::last_write_time(f / "tree/a.txt", 1700000000);
+  const std::vector<Filepath> sources{f / "tree/a.txt", f / "tree/docs", f / "tree/empty", f / "tree/caf\xc3\xa9.txt"};
+  for (const char* name : {"t.7z", "t.zip", "t.tar", "t.tar.gz", "t.tgz", "t.tar.bz2", "t.tbz2", "t.tar.xz", "t.txz"}) {
+    const auto archive = f / "made" / name;
+    auto error = create_archive(archive, sources, f / "tree");
+    require(error.ok(), std::string("create ") + name + ": " + (error.ok() ? "" : error.steps.front()));
+    const auto root = archive_root(archive);
+    std::set<std::string> top, docs;
+    for (auto& e : ArchiveFS::list(root)) top.insert(e.path.filename().native());
+    require(top == std::set<std::string>{"a.txt", "docs", "empty", "caf\xc3\xa9.txt"}, std::string("top level of ") + name);
+    for (auto& e : ArchiveFS::list(root / "docs")) docs.insert(e.path.filename().native());
+    require(docs == std::set<std::string>{"b.md", "link"}, std::string("docs in ") + name);
+    const auto link = ArchiveFS::inspect(root / "docs/link");
+    require(link.symlink() && link.link == "b.md", std::string("the link in ") + name);
+    require(ArchiveFS::inspect(root / "empty").directory, std::string("the empty folder in ") + name);
+    const auto a = ArchiveFS::inspect(root / "a.txt");
+    require((a.mode & 0777) == 0750 && a.mtime_ns / 1000000000 == 1700000000, std::string("mode and time in ") + name);
+    fs::create_directories(f / "out" / name);
+    auto job = copy_out({root / "docs/b.md", root / "caf\xc3\xa9.txt"}, f / "out" / name);
+    require(job->snapshot()->_state == JobState::COMPLETED && read(f / "out" / name / "b.md") == std::string(5000, 'b') &&
+                read(f / "out" / name / "caf\xc3\xa9.txt") == "utf8",
+            std::string("copy out of ") + name);
+  }
+  // One compressed file, under its own name.
+  for (const char* name : {"a.txt.gz", "a.txt.bz2", "a.txt.xz"}) {
+    require(create_archive(f / "made" / name, {f / "tree/a.txt"}, f / "tree").ok(), std::string("create ") + name);
+    fs::create_directories(f / "one" / name);
+    auto error = ArchiveFS::extract_all(f / "made" / name, [&](const SevenZip::Entry& e) { return f / "one" / name / e.path; }, [](const SevenZip::Entry&, Err) {});
+    require(error.ok() && read(f / "one" / name / "a.txt") == "alpha\n", std::string("the file in ") + name);
+  }
+  // Through a job, as the copy dialogs make one.
+  auto job = run_plan(selection_plan(OperationType::ARCHIVE_CREATE, {f / "tree/a.txt"}, f / "made/job.zip"));
+  require(job->snapshot()->_state == JobState::COMPLETED && ArchiveFS::list(archive_root(f / "made/job.zip")).size() == 1, "archive job");
+  // What the destination's name refuses, and what it leaves a plain copy.
+  auto refused = [&](const char* name, const std::vector<Filepath>& from, const std::string& why) {
+    auto error = create_archive(f / "made" / name, from, f / "tree");
+    require(!error.ok() && error.steps.front().find(why) != std::string::npos && !fs::exists(f / "made" / name), std::string("refusal of ") + name);
+  };
+  refused("two.gz", {f / "tree/a.txt", f / "tree/docs/b.md"}, "holds one file");
+  refused("folder.xz", {f / "tree/docs"}, "use .tar.xz");
+  refused("t.tar.zst", sources, "can't create .tar.zst");
+  refused("t.iso", sources, "can't create .iso");
+  refused("t.rar", sources, "can't create .rar");
+  require(archive_destination("report.docx", sources).kind == ArchiveDestination::Copy &&
+              archive_destination("folder", sources).kind == ArchiveDestination::Copy,
+          "plain copies");
+  require(archive_destination("x.tar.gz", sources).text == "Creates a gzip-compressed tar archive" &&
+              archive_destination("x.zip", sources).text == "Creates a ZIP archive",
+          "what the dialogs say");
+  // Cancelled while tar and the compressor are both running: nothing is left behind.
+  fs::create_directories(f / "big");
+  {
+    std::ofstream big((f / "big/data.bin").native(), std::ios::binary);
+    std::mt19937 random(7);
+    std::string block(1 << 20, '\0');
+    for (int i = 0; i < 64; ++i) {
+      for (auto& c : block) c = char(random());
+      big.write(block.data(), std::streamsize(block.size()));
+    }
+  }
+  fs::create_directories(f / "cancel");
+  std::atomic<bool> cancelled{false};
+  Err result;
+  std::thread worker([&] { result = create_archive(f / "cancel/big.tar.xz", {f / "big/data.bin"}, f / "big", ArchiveConflict::Replace, &cancelled); });
+  std::this_thread::sleep_for(std::chrono::milliseconds(150));
+  cancelled = true;
+  worker.join();
+  require(!result.ok() && count_in(f / "cancel") == 0, "a cancelled compressed tar left files behind");
+  ArchiveFS::close_unused();
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -409,7 +490,7 @@ int main(int argc, char** argv) {
     n();           \
     found = true;  \
   }
-    RUN(browse) RUN(copy) RUN(cancel) RUN(nested) RUN(formats) RUN(extract) RUN(names) RUN(passwords) RUN(damaged) RUN(limits) require(found, "unknown archive contract");
+    RUN(browse) RUN(copy) RUN(cancel) RUN(nested) RUN(formats) RUN(extract) RUN(names) RUN(passwords) RUN(damaged) RUN(limits) RUN(create) require(found, "unknown archive contract");
     std::cout << "PASS archive " << name << "\n";
   } catch (const std::exception& e) {
     std::cerr << e.what() << "\n";

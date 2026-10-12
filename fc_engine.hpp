@@ -196,6 +196,12 @@ void         browse_archive(int side, const std::string& archive);
 std::string  archive_folder_name(const std::string& archive);
 // Whether the extraction popup offers a folder named after the archive: true for a compressed tar, false for one compressed file.
 bool         archive_holds_many(const std::string& archive);
+// What copying `sources` to `destination` makes, from the destination's name: a new archive (`text` says which) or a refusal (`text` says why); neither for a plain copy.
+struct ArchiveNote {
+  bool        creates = false, refused = false;
+  std::string text;
+};
+ArchiveNote  archive_note(const std::string& destination, const StringList& sources);
 // "archive" for names the listing shows with an archive icon, empty otherwise.
 std::string  archive_icon(const std::string& name);
 void         copy_to_clipboard(int side, bool names);
