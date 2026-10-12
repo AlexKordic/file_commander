@@ -20,8 +20,8 @@ option(FC_CORE_ONLY "Build headless core and tests without UI/Lua/editor depende
 
 option(FC_BUILD_FRESH "Build local Fresh editor alongside file_commander" ON)
 set(FC_FRESH_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../editor-fresh" CACHE PATH "Path to local Fresh source checkout")
-option(FC_BUILD_LZMA_TOOL "Build local 7zr from LZMA SDK" ON)
-set(FC_LZMA_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../lzma2600" CACHE PATH "Path to local LZMA SDK checkout")
+option(FC_BUILD_SEVENZIP "Build 7-Zip's archive library (7z.so) from the pinned 7-Zip source" ON)
+set(FC_SEVENZIP_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../7zip2604" CACHE PATH "Path to the pinned 7-Zip source")
 set(FC_FTXUI_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../alex_ftxui" CACHE PATH "Path to local FTXUI source checkout")
 set(FC_LUAJIT_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../luajit" CACHE PATH "Path to local LuaJIT source checkout")
 
@@ -81,10 +81,73 @@ configure_file(cmake/remote_agent_source.hpp.in generated/remote_agent_source.hp
 set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS remote_agent.py)
 add_library(fc_core STATIC
   commander.cpp operation.cpp copy_planner.cpp file_io_jobs.cpp archive.cpp location.cpp
-  traversal.cpp settings.cpp workspace.cpp transfer_journal.cpp runtime_paths.cpp scheduled_updates.cpp file_metadata.cpp log.cpp err.cpp remote_fs.cpp)
+  traversal.cpp settings.cpp workspace.cpp transfer_journal.cpp runtime_paths.cpp scheduled_updates.cpp file_metadata.cpp log.cpp err.cpp remote_fs.cpp
+  sevenzip.cpp)
 target_include_directories(fc_core PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
 target_include_directories(fc_core PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/generated")
-target_link_libraries(fc_core PUBLIC Boost::filesystem Boost::json Threads::Threads)
+target_link_libraries(fc_core PUBLIC Boost::filesystem Boost::json Threads::Threads ${CMAKE_DL_LIBS})
+
+# 7-Zip's archive library, 7z.so, built with its own makefile from the pinned
+# source and loaded by fc at run time (sevenzip.cpp); RAR is left out. 7zr is
+# built from the same source until on-demand browsing replaces it.
+set(_fc_archive_default_bin "7zr")
+set(_fc_sevenzip_lib "")
+if(FC_BUILD_SEVENZIP)
+  set(_sevenzip_bundles "${FC_SEVENZIP_SOURCE_DIR}/CPP/7zip/Bundles")
+  if(EXISTS "${_sevenzip_bundles}/Format7zF/makefile.gcc")
+    file(GLOB_RECURSE _sevenzip_inputs CONFIGURE_DEPENDS
+      "${FC_SEVENZIP_SOURCE_DIR}/C/*.c" "${FC_SEVENZIP_SOURCE_DIR}/C/*.h"
+      "${FC_SEVENZIP_SOURCE_DIR}/CPP/*.cpp" "${FC_SEVENZIP_SOURCE_DIR}/CPP/*.h"
+      "${FC_SEVENZIP_SOURCE_DIR}/CPP/*.mak" "${FC_SEVENZIP_SOURCE_DIR}/CPP/makefile*")
+    foreach(_lang C CXX)
+      set(_sevenzip_${_lang} "${CMAKE_${_lang}_COMPILER}")
+      if(CMAKE_${_lang}_COMPILER_ARG1)
+        string(APPEND _sevenzip_${_lang} " ${CMAKE_${_lang}_COMPILER_ARG1}")
+      endif()
+      if(APPLE AND CMAKE_OSX_SYSROOT)
+        string(APPEND _sevenzip_${_lang} " -isysroot \"${CMAKE_OSX_SYSROOT}\"")
+      endif()
+    endforeach()
+    set(_sevenzip_env "CXX=${_sevenzip_CXX}" "CC=${_sevenzip_C}")
+    if(APPLE AND CMAKE_OSX_DEPLOYMENT_TARGET)
+      list(APPEND _sevenzip_env "MACOSX_DEPLOYMENT_TARGET=${CMAKE_OSX_DEPLOYMENT_TARGET}")
+    endif()
+    set(_sevenzip_lib_dir "${CMAKE_BINARY_DIR}/third_party/7zip/_o")
+    set(_fc_sevenzip_lib "${_sevenzip_lib_dir}/7z.so")
+    add_custom_command(
+      OUTPUT "${_fc_sevenzip_lib}"
+      COMMAND ${CMAKE_COMMAND} -E remove_directory "${_sevenzip_lib_dir}"
+      COMMAND ${CMAKE_COMMAND} -E make_directory "${_sevenzip_lib_dir}"
+      COMMAND ${CMAKE_COMMAND} -E env ${_sevenzip_env} make -f makefile.gcc DISABLE_RAR=1 O="${_sevenzip_lib_dir}" -C "${_sevenzip_bundles}/Format7zF"
+      DEPENDS ${_sevenzip_inputs}
+      WORKING_DIRECTORY "${_sevenzip_bundles}/Format7zF"
+      COMMENT "Building 7z.so from the pinned 7-Zip source"
+      VERBATIM
+    )
+    add_custom_target(sevenzip_lib ALL DEPENDS "${_fc_sevenzip_lib}")
+    add_dependencies(fc_core sevenzip_lib)
+    set(_lzma_obj_dir "${CMAKE_BINARY_DIR}/third_party/lzma/_o")
+    set(_lzma_bin "${_lzma_obj_dir}/7zr")
+    add_custom_command(
+      OUTPUT "${_lzma_bin}"
+      COMMAND ${CMAKE_COMMAND} -E remove_directory "${_lzma_obj_dir}"
+      COMMAND ${CMAKE_COMMAND} -E make_directory "${_lzma_obj_dir}"
+      COMMAND ${CMAKE_COMMAND} -E env ${_sevenzip_env} make -f makefile.gcc O="${_lzma_obj_dir}" -C "${_sevenzip_bundles}/Alone7z"
+      DEPENDS ${_sevenzip_inputs}
+      WORKING_DIRECTORY "${_sevenzip_bundles}/Alone7z"
+      COMMENT "Building 7zr from the pinned 7-Zip source"
+      VERBATIM
+    )
+    add_custom_target(lzma_7zr ALL DEPENDS "${_lzma_bin}")
+    add_dependencies(fc_core lzma_7zr)
+    set(_fc_archive_default_bin "${_lzma_bin}")
+  else()
+    message(WARNING "FC_BUILD_SEVENZIP=ON but the 7-Zip source is missing at: ${FC_SEVENZIP_SOURCE_DIR}. Archives will need a 7z.so next to fc.")
+  endif()
+endif()
+target_compile_definitions(fc_core PRIVATE FC_ARCHIVE_TOOL_DEFAULT="${_fc_archive_default_bin}" FC_SEVENZIP_LIB_DEFAULT="${_fc_sevenzip_lib}")
+# sevenzip.cpp includes 7-Zip's interface headers, and nothing else from the source.
+target_include_directories(fc_core SYSTEM PRIVATE "${FC_SEVENZIP_SOURCE_DIR}")
 if(BUILD_TESTING)
   add_executable(fc_remote_transfer_tests test/remote_transfer.cpp)
   target_link_libraries(fc_remote_transfer_tests PRIVATE fc_core)
@@ -127,6 +190,14 @@ if(BUILD_TESTING)
     set_tests_properties(fc.fault.${_case} PROPERTIES LABELS "core;fault;integration" TIMEOUT 30)
   endforeach()
   set_tests_properties(fc.fault.exdev PROPERTIES LABELS "platform;extended;exdev" SKIP_RETURN_CODE 77)
+  find_package(Python3 3.12 COMPONENTS Interpreter REQUIRED)
+  add_executable(fc_sevenzip_tests test/sevenzip_contracts.cpp)
+  target_link_libraries(fc_sevenzip_tests PRIVATE fc_core)
+  target_compile_definitions(fc_sevenzip_tests PRIVATE FC_TEST_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}" FC_TEST_PYTHON="${Python3_EXECUTABLE}")
+  foreach(_case load seven solid formats failures)
+    add_test(NAME fc.sevenzip.${_case} COMMAND fc_sevenzip_tests ${_case})
+    set_tests_properties(fc.sevenzip.${_case} PROPERTIES LABELS "core;unit;archive" TIMEOUT 60)
+  endforeach()
   add_executable(fc_core_tests test/core_operations.cpp)
   target_link_libraries(fc_core_tests PRIVATE fc_core)
   add_test(NAME fc.core COMMAND fc_core_tests)
@@ -184,12 +255,12 @@ option(FC_ALLOW_UNPINNED_DEPENDENCIES "Allow developer checkouts differing from 
 if(NOT FC_ALLOW_UNPINNED_DEPENDENCIES)
   find_package(Python3 3.12 COMPONENTS Interpreter REQUIRED)
   set(_fc_dependency_check "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tools/check_dependencies.py"
-    --ftxui "${FC_FTXUI_SOURCE_DIR}" --luajit "${FC_LUAJIT_SOURCE_DIR}" --fresh "${FC_FRESH_SOURCE_DIR}" --lzma "${FC_LZMA_SOURCE_DIR}")
+    --ftxui "${FC_FTXUI_SOURCE_DIR}" --luajit "${FC_LUAJIT_SOURCE_DIR}" --fresh "${FC_FRESH_SOURCE_DIR}" --sevenzip "${FC_SEVENZIP_SOURCE_DIR}")
   if(NOT FC_BUILD_FRESH)
     list(APPEND _fc_dependency_check --skip-fresh)
   endif()
-  if(NOT FC_BUILD_LZMA_TOOL)
-    list(APPEND _fc_dependency_check --skip-lzma)
+  if(NOT FC_BUILD_SEVENZIP)
+    list(APPEND _fc_dependency_check --skip-sevenzip)
   endif()
   execute_process(COMMAND ${_fc_dependency_check} RESULT_VARIABLE _fc_dependency_result OUTPUT_VARIABLE _fc_dependency_output ERROR_VARIABLE _fc_dependency_error)
   if(NOT _fc_dependency_result EQUAL 0)
@@ -342,50 +413,6 @@ endif()
 
 target_compile_definitions(fc_model PRIVATE FC_FRESH_DEFAULT_BIN="${_fc_fresh_default_bin}")
 
-set(_fc_archive_default_bin "7zr")
-if(FC_BUILD_LZMA_TOOL)
-  set(_lzma_makefile_dir "${FC_LZMA_SOURCE_DIR}/CPP/7zip/Bundles/Alone7z")
-  set(_lzma_makefile "${_lzma_makefile_dir}/makefile.gcc")
-  set(_lzma_obj_dir "${CMAKE_BINARY_DIR}/third_party/lzma/_o")
-  set(_lzma_bin "${_lzma_obj_dir}/7zr")
-  if(EXISTS "${_lzma_makefile}")
-    file(GLOB_RECURSE _lzma_inputs CONFIGURE_DEPENDS
-      "${FC_LZMA_SOURCE_DIR}/C/*.c" "${FC_LZMA_SOURCE_DIR}/C/*.h"
-      "${FC_LZMA_SOURCE_DIR}/CPP/*.cpp" "${FC_LZMA_SOURCE_DIR}/CPP/*.h"
-      "${FC_LZMA_SOURCE_DIR}/CPP/*.mak" "${FC_LZMA_SOURCE_DIR}/CPP/makefile*")
-    foreach(_lang C CXX)
-      set(_lzma_${_lang} "${CMAKE_${_lang}_COMPILER}")
-      if(CMAKE_${_lang}_COMPILER_ARG1)
-        string(APPEND _lzma_${_lang} " ${CMAKE_${_lang}_COMPILER_ARG1}")
-      endif()
-      if(CMAKE_${_lang}_COMPILER_TARGET)
-        string(APPEND _lzma_${_lang} " -target ${CMAKE_${_lang}_COMPILER_TARGET}")
-      endif()
-      if(APPLE AND CMAKE_OSX_SYSROOT)
-        string(APPEND _lzma_${_lang} " -isysroot \"${CMAKE_OSX_SYSROOT}\"")
-      elseif(CMAKE_SYSROOT)
-        string(APPEND _lzma_${_lang} " --sysroot=\"${CMAKE_SYSROOT}\"")
-      endif()
-    endforeach()
-    add_custom_command(
-      OUTPUT "${_lzma_bin}"
-      COMMAND ${CMAKE_COMMAND} -E remove_directory "${_lzma_obj_dir}"
-      COMMAND ${CMAKE_COMMAND} -E make_directory "${_lzma_obj_dir}"
-      COMMAND ${CMAKE_COMMAND} -E env "CXX=${_lzma_CXX}" "CC=${_lzma_C}" make -f makefile.gcc O="${_lzma_obj_dir}" -C "${_lzma_makefile_dir}"
-      DEPENDS ${_lzma_inputs}
-      WORKING_DIRECTORY "${_lzma_makefile_dir}"
-      COMMENT "Building 7zr from local LZMA SDK"
-      VERBATIM
-    )
-    add_custom_target(lzma_7zr ALL DEPENDS "${_lzma_bin}")
-    add_dependencies(fc_core lzma_7zr)
-    set(_fc_archive_default_bin "${_lzma_bin}")
-  else()
-    message(WARNING "FC_BUILD_LZMA_TOOL=ON but LZMA makefile is missing at: ${_lzma_makefile}. Falling back to PATH lookup for 7zr.")
-  endif()
-endif()
-
-target_compile_definitions(fc_core PRIVATE FC_ARCHIVE_TOOL_DEFAULT="${_fc_archive_default_bin}")
 
 if(BUILD_TESTING)
   add_executable(fc_remote_ui_tests test/remote_ui.cpp)
@@ -447,7 +474,7 @@ if(UNIX AND NOT CMAKE_CROSSCOMPILING)
     set_tests_properties(fc.package_build PROPERTIES LABELS "integration;package;build;posix" TIMEOUT 180 RUN_SERIAL TRUE)
     add_test(NAME fc.package COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/test/test_package.py" "${CMAKE_BINARY_DIR}" "${_fc_dist_root}/${_fc_dist_name}.tar.gz")
     set_tests_properties(fc.package PROPERTIES LABELS "integration;package;posix" TIMEOUT 180 RUN_SERIAL TRUE SKIP_RETURN_CODE 77)
-    if(FC_BUILD_LZMA_TOOL)
+    if(FC_BUILD_SEVENZIP)
       option(FC_TEST_DEPENDENCY_REBUILDS "Run slow source-timestamp rebuild checks in CTest" OFF)
       add_test(NAME fc.dependency_rebuild COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/test/test_dependency_rebuild.py" "${CMAKE_BINARY_DIR}")
       set_tests_properties(fc.dependency_rebuild PROPERTIES LABELS "build;slow;posix" TIMEOUT 600 RUN_SERIAL TRUE)

@@ -27,7 +27,7 @@ if [[ ! -f build-macos/CMakeCache.txt ]]; then
   extra=()
   # Reuse the dependency checkouts the terminal build was configured with.
   if [[ -f build-release/CMakeCache.txt ]]; then
-    for name in FC_FTXUI_SOURCE_DIR FC_FRESH_SOURCE_DIR FC_LUAJIT_SOURCE_DIR FC_LZMA_SOURCE_DIR; do
+    for name in FC_FTXUI_SOURCE_DIR FC_FRESH_SOURCE_DIR FC_LUAJIT_SOURCE_DIR FC_SEVENZIP_SOURCE_DIR; do
       value="$(grep "^$name:" build-release/CMakeCache.txt | cut -d= -f2- || true)"
       [[ -n "$value" ]] && extra+=("-D$name=$value")
     done
@@ -35,7 +35,7 @@ if [[ ! -f build-macos/CMakeCache.txt ]]; then
   say "configuring the engine (preset macos-app)"
   cmake --preset macos-app ${extra[@]+"${extra[@]}"} > /dev/null
 fi
-say "building the engine, fresh and 7zr"
+say "building the engine, fresh and 7-Zip"
 cmake --build --preset macos-app | grep -E "error|FAILED" || true
 [[ -f build-macos/libfc_engine_bundle.a ]] || { echo "build_app: the engine did not build" >&2; exit 1; }
 
@@ -52,6 +52,7 @@ mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
 cp "$bin/FileCommander" "$bin/fc-relaunch" "$bin/fc-askpass" "$app/Contents/MacOS/"
 cp -R "$bin"/*.bundle "$app/Contents/Resources/"
 cp build-macos/third_party/lzma/_o/7zr "$app/Contents/MacOS/7zr"
+cp build-macos/third_party/7zip/_o/7z.so "$app/Contents/MacOS/7z.so"
 # The terminal interface, for fc run (Lua scripts) and for people who want it.
 cp build-macos/fc "$app/Contents/MacOS/fc"
 if [[ -x build-macos/third_party/fresh/bin/fresh ]]; then

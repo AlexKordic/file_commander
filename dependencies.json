@@ -26,13 +26,13 @@
       "bundle_sha256": "2cf8a5ea0055c537c083252f1d7dbf38c4ed01bc1ff297817825da657ac01dce"
     }
   },
-  "lzma": {
-    "version": "26.00",
-    "default_path": "../lzma2600",
-    "source_files": 606,
-    "source_sha256": "744ef6617d606d78676e06d3ab30784072c8a936a4c629c76d5877b93710e66c",
-    "archive": "dependencies/lzma-sdk-26.00.tar.gz",
-    "archive_sha256": "282b4d32b47e83a4b4215b174988d967ba02407e243a46b963779cde38931cc6"
+  "sevenzip": {
+    "version": "26.04",
+    "default_path": "../7zip2604",
+    "source_files": 1111,
+    "source_sha256": "8fc7a9e48cdd4fe7fa24adefb3f0b7c99633139801f38aa51e6fe2cd3a5ec099",
+    "archive": "dependencies/7zip-26.04-src.tar.xz",
+    "archive_sha256": "9691944c0fe0d01bb49373a704fb983fd33bc98b1738695179dfbf99ac1734f6"
   },
   "requirements": {
     "cmake": ">=3.19",

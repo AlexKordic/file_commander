@@ -31,9 +31,9 @@ endforeach()
 
 if(UNIX AND NOT CMAKE_CROSSCOMPILING)
   find_package(Python3 3.12 COMPONENTS Interpreter REQUIRED)
-  if(FC_BUILD_LZMA_TOOL AND NOT FC_ALLOW_UNPINNED_DEPENDENCIES)
+  if(FC_BUILD_SEVENZIP AND NOT FC_ALLOW_UNPINNED_DEPENDENCIES)
   add_test(NAME fc.harness.dependencies COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/test/test_dependencies.py"
-    "${FC_FTXUI_SOURCE_DIR}" "${FC_LUAJIT_SOURCE_DIR}" "${FC_LZMA_SOURCE_DIR}")
+    "${FC_FTXUI_SOURCE_DIR}" "${FC_LUAJIT_SOURCE_DIR}" "${FC_SEVENZIP_SOURCE_DIR}")
   set_tests_properties(fc.harness.dependencies PROPERTIES LABELS "harness;build;integration" TIMEOUT 60)
   endif()
   add_test(NAME fc.terminal.input_resize COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/test/test_terminal.py" $<TARGET_FILE:fc>)

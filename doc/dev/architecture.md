@@ -71,9 +71,7 @@ not directories, defines the boundaries. Dependencies point one way only:
 The UI-free core is the boundary that matters. `fc_model` holds what both
 interfaces need above it; FTXUI-dependent orchestration stays in `fc_ui`, and
 the macOS app (`macos/`) is a second observer of `fc_model`. Configure also embeds
-`remote_agent.py` and `fc_framework.lua` into generated headers, builds `fresh`
-(Cargo) and `7zr` (LZMA SDK) as side targets, and bakes their paths in as
-defaults. The Boost.Filesystem changes (cancellable, throttled, staged
+`remote_agent.py` and `fc_framework.lua` into generated headers, builds `fresh` (Cargo), 7-Zip's archive library `7z.so` and `7zr` (7-Zip's makefiles) as side targets, and bakes their paths in as defaults. The Boost.Filesystem changes (cancellable, throttled, staged
 `copy_file`) are described in [../../boost/changes.md](../../boost/changes.md).
 
 | Test executable | Links | CTest names |

@@ -59,7 +59,7 @@ cmake --preset release \
   -DFC_FTXUI_SOURCE_DIR="$PWD/build-deps/ftxui" \
   -DFC_LUAJIT_SOURCE_DIR="$PWD/build-deps/luajit" \
   -DFC_FRESH_SOURCE_DIR="$PWD/build-deps/fresh" \
-  -DFC_LZMA_SOURCE_DIR="$PWD/build-deps/lzma"
+  -DFC_SEVENZIP_SOURCE_DIR="$PWD/build-deps/7zip"
 cmake --build --preset release
 ./build-release/fc
 ```

@@ -57,7 +57,7 @@ def check_build(build, repo, system, arch):
         raise ValueError('release build belongs to a different source tree')
     required = {'CMAKE_BUILD_TYPE': 'Release', 'BUILD_TESTING': 'ON', 'FC_CORE_ONLY': 'OFF',
                 'FC_ALLOW_UNPINNED_DEPENDENCIES': 'OFF', 'FC_BUILD_FRESH': 'ON',
-                'FC_BUILD_LZMA_TOOL': 'ON', 'FC_TEST_DEPENDENCY_REBUILDS': 'ON'}
+                'FC_BUILD_SEVENZIP': 'ON', 'FC_TEST_DEPENDENCY_REBUILDS': 'ON'}
     for key, value in required.items():
         if cache.get(key) != value:
             raise ValueError(f'release requires {key}={value}, got {cache.get(key)!r}')
@@ -95,7 +95,7 @@ def check_package(archive, binaries):
         # An executable-only archive must not pass distribution qualification.
         notices = ('share/licenses/file-commander/LICENSE', 'share/licenses/ftxui/LICENSE',
                    'share/licenses/luajit/COPYRIGHT', 'share/licenses/boost/LICENSE_1_0.txt',
-                   'share/licenses/lzma-sdk/lzma-sdk.txt', 'share/licenses/fresh/LICENSE',
+                   'share/licenses/7zip/License.txt', 'share/licenses/7zip/copying.txt', 'share/licenses/fresh/LICENSE',
                    'share/file-commander/THIRD_PARTY_NOTICES.md',
                    'share/file-commander/dependencies.json')
         for relative in notices:

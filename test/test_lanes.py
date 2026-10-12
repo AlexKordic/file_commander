@@ -70,7 +70,7 @@ else:
     fake.chmod(0o700)
     cache = {'CMAKE_HOME_DIRECTORY': str(repo), 'CMAKE_BUILD_TYPE': 'Release', 'BUILD_TESTING': 'ON',
              'FC_CORE_ONLY': 'OFF', 'FC_ALLOW_UNPINNED_DEPENDENCIES': 'OFF', 'FC_BUILD_FRESH': 'ON',
-             'FC_BUILD_LZMA_TOOL': 'ON', 'FC_TEST_DEPENDENCY_REBUILDS': 'ON',
+             'FC_BUILD_SEVENZIP': 'ON', 'FC_TEST_DEPENDENCY_REBUILDS': 'ON',
              'CMAKE_CACHE_MAJOR_VERSION': '3', 'CMAKE_CACHE_MINOR_VERSION': '30', 'CMAKE_CACHE_PATCH_VERSION': '0'}
     def write_cache(values):
         (build / 'CMakeCache.txt').write_text(''.join(f'{key}:STRING={value}\n' for key, value in values.items()))
@@ -92,7 +92,8 @@ else:
                        'share/licenses/ftxui/LICENSE': 'licenses/ftxui/LICENSE',
                        'share/licenses/luajit/COPYRIGHT': 'licenses/luajit/COPYRIGHT',
                        'share/licenses/boost/LICENSE_1_0.txt': 'licenses/boost/LICENSE_1_0.txt',
-                       'share/licenses/lzma-sdk/lzma-sdk.txt': 'licenses/lzma-sdk/lzma-sdk.txt',
+                       'share/licenses/7zip/License.txt': 'licenses/7zip/License.txt',
+                       'share/licenses/7zip/copying.txt': 'licenses/7zip/copying.txt',
                        'share/licenses/fresh/LICENSE': 'licenses/fresh/LICENSE',
                        'share/file-commander/THIRD_PARTY_NOTICES.md': 'THIRD_PARTY_NOTICES.md',
                        'share/file-commander/dependencies.json': 'dependencies.json'}
@@ -136,7 +137,7 @@ else:
     for mode in ('empty', 'missing', 'failure', 'malformed'): run('fast', mode)
     for key, value in [('CMAKE_HOME_DIRECTORY', str(root)), ('CMAKE_BUILD_TYPE', 'Debug'), ('BUILD_TESTING', 'OFF'),
                        ('FC_CORE_ONLY', 'ON'), ('FC_ALLOW_UNPINNED_DEPENDENCIES', 'ON'), ('FC_BUILD_FRESH', 'OFF'),
-                       ('FC_BUILD_LZMA_TOOL', 'OFF'), ('FC_TEST_DEPENDENCY_REBUILDS', 'OFF'), ('FETCHCONTENT_SOURCE_DIR_BOOST', '/unchecked')]:
+                       ('FC_BUILD_SEVENZIP', 'OFF'), ('FC_TEST_DEPENDENCY_REBUILDS', 'OFF'), ('FETCHCONTENT_SOURCE_DIR_BOOST', '/unchecked')]:
         write_cache(dict(cache, **{key: value})); run()
     write_cache(cache)
     native = system.read_text()

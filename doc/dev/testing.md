@@ -242,11 +242,7 @@ python3 tools/run_test_lane.py release --build build-release \
 Set `--expect-os` and `--expect-arch` to the platform you are qualifying.
 Before running any test, the release lane checks that:
 
-- The build directory was configured from this checkout with
-  `CMAKE_BUILD_TYPE=Release`, `BUILD_TESTING=ON`, `FC_CORE_ONLY=OFF`,
-  `FC_ALLOW_UNPINNED_DEPENDENCIES=OFF`, `FC_BUILD_FRESH=ON`,
-  `FC_BUILD_LZMA_TOOL=ON` and `FC_TEST_DEPENDENCY_REBUILDS=ON`, and without a
-  Boost source override. The `release` preset sets all of these.
+- The build directory was configured from this checkout with `CMAKE_BUILD_TYPE=Release`, `BUILD_TESTING=ON`, `FC_CORE_ONLY=OFF`, `FC_ALLOW_UNPINNED_DEPENDENCIES=OFF`, `FC_BUILD_FRESH=ON`, `FC_BUILD_SEVENZIP=ON` and `FC_TEST_DEPENDENCY_REBUILDS=ON`, and without a Boost source override. The `release` preset sets all of these.
 - The build is native for the current OS and architecture.
 - `fc`, `fresh` and `7zr` exist and are executable.
 - CTest's test list matches the expected list exactly. The expected list comes
@@ -432,7 +428,6 @@ variables:
 
 | Variable | Purpose |
 | --- | --- |
-| `FC_LZMA_SDK` | Required. An LZMA SDK 26.00 source directory. The workflow always passes it to bootstrap's `--lzma-source`, and an empty value does not fall back to the bundled snapshot. |
 | `FC_FTXUI_MIRROR`, `FC_FRESH_MIRROR` | Optional mirrors for the FTXUI and upstream Fresh clones. When empty, bootstrap uses the URLs in `dependencies.json`. |
 | `FC_TEST_EXDEV_ROOT` | For the manual lane: a writable directory on a second filesystem. Needed on macOS, and on Linux wherever `/dev/shm` is not a separate filesystem. |
 

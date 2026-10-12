@@ -56,7 +56,7 @@ for bundle in "$bin"/*.bundle; do
   rm -rf "$app/Contents/Resources/$(basename "$bundle")"
   cp -R "$bundle" "$app/Contents/Resources/"
 done
-for pair in "build-macos/fc:fc" "build-macos/third_party/fresh/bin/fresh:fresh" "build-macos/third_party/lzma/_o/7zr:7zr"; do
+for pair in "build-macos/fc:fc" "build-macos/third_party/fresh/bin/fresh:fresh" "build-macos/third_party/lzma/_o/7zr:7zr" "build-macos/third_party/7zip/_o/7z.so:7z.so"; do
   from="${pair%%:*}" name="${pair##*:}"
   if [[ -x "$from" && "$from" -nt "$app/Contents/MacOS/$name" ]]; then
     place "$from" "$name"

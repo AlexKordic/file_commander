@@ -12,22 +12,22 @@ import tarfile
 import tempfile
 
 
-def provision_lzma(repo, spec, target, source=None):
+def provision_sevenzip(repo, spec, target, source=None):
     if target.exists():
         return
     target.parent.mkdir(parents=True, exist_ok=True)
     # Stage first so rejection or interruption does not leave a partial input.
-    with tempfile.TemporaryDirectory(prefix='fc-sdk-', dir=target.parent) as directory:
+    with tempfile.TemporaryDirectory(prefix='fc-7zip-', dir=target.parent) as directory:
         staged = Path(directory) / 'source'
         if source:
             shutil.copytree(source, staged, ignore=shutil.ignore_patterns('_o', '_o_*', '.git'))
         else:
             archive = repo / spec['archive']
             if hashlib.sha256(archive.read_bytes()).hexdigest() != spec['archive_sha256']:
-                raise ValueError('lzma: dependency archive fingerprint mismatch')
-            with tarfile.open(archive, 'r:gz') as package:
+                raise ValueError('sevenzip: dependency archive fingerprint mismatch')
+            with tarfile.open(archive, 'r:*') as package:
                 if any(not member.isfile() and not member.isdir() for member in package.getmembers()):
-                    raise ValueError('lzma: source archive must contain only files and directories')
+                    raise ValueError('sevenzip: source archive must contain only files and directories')
                 package.extractall(staged, filter='data')
         staged.rename(target)
 
@@ -41,7 +41,7 @@ def main():
     parser.add_argument('--root', type=Path, required=True)
     parser.add_argument('--ftxui-url', default=os.getenv('FC_FTXUI_MIRROR'))
     parser.add_argument('--fresh-url', default=os.getenv('FC_FRESH_MIRROR'))
-    parser.add_argument('--lzma-source', type=Path, help='Optional SDK 26.00 folder; default is the bundled source snapshot')
+    parser.add_argument('--sevenzip-source', type=Path, help='Optional 7-Zip 26.04 source folder; default is the bundled source tarball')
     args = parser.parse_args()
     root = args.root.resolve()
     root.mkdir(parents=True, exist_ok=True)
@@ -62,9 +62,9 @@ def main():
             subprocess.run(['git', '-C', str(target), 'bundle', 'verify', str(bundle)], check=True, timeout=60)
             subprocess.run(['git', '-C', str(target), 'fetch', str(bundle), 'refs/heads/fc-editor-workflow'], check=True, timeout=60)
         subprocess.run(['git', '-C', str(target), 'checkout', '--detach', spec['revision']], check=True, timeout=60)
-    sdk = root / 'lzma'
-    provision_lzma(repo, manifest['lzma'], sdk, args.lzma_source)
-    command = [sys.executable, str(repo / 'tools/check_dependencies.py'), '--lzma', str(sdk)]
+    sevenzip = root / '7zip'
+    provision_sevenzip(repo, manifest['sevenzip'], sevenzip, args.sevenzip_source)
+    command = [sys.executable, str(repo / 'tools/check_dependencies.py'), '--sevenzip', str(sevenzip)]
     for name, path in paths.items():
         command += ['--' + name, str(path)]
     subprocess.run(command, check=True, timeout=60)

@@ -63,7 +63,7 @@ for _,e in ipairs(fc.errors()) do print('ERROR DETAIL',e) end
 assert(#fc.errors()==0,'packaged Fresh version adapter failed')
 test_pass('packaged_script')
 ''')
-    denied=[repo.resolve(),*( (repo/path).resolve() for path in ('../alex_ftxui','../editor-fresh','../luajit','../lzma2600'))]
+    denied=[repo.resolve(),*( (repo/path).resolve() for path in ('../alex_ftxui','../editor-fresh','../luajit','../7zip2604'))]
     prefix=[]
     if platform.system()=='Darwin' and shutil.which('sandbox-exec'):
         profile='(version 1)(allow default)' + ''.join('(deny file-read* (subpath '+json.dumps(str(path))+'))' for path in denied)
