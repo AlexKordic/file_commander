@@ -18,22 +18,12 @@ include(cmake/manual_tests.cmake)
 find_package(Threads REQUIRED)
 option(FC_CORE_ONLY "Build headless core and tests without UI/Lua/editor dependencies" OFF)
 
-option(FC_STATIC_MODE "Prefer static linking for non-system libraries" OFF)
 option(FC_BUILD_FRESH "Build local Fresh editor alongside file_commander" ON)
 set(FC_FRESH_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../editor-fresh" CACHE PATH "Path to local Fresh source checkout")
 option(FC_BUILD_LZMA_TOOL "Build local 7zr from LZMA SDK" ON)
 set(FC_LZMA_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../lzma2600" CACHE PATH "Path to local LZMA SDK checkout")
 set(FC_FTXUI_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../alex_ftxui" CACHE PATH "Path to local FTXUI source checkout")
 set(FC_LUAJIT_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../luajit" CACHE PATH "Path to local LuaJIT source checkout")
-
-if(FC_STATIC_MODE)
-  set(BUILD_SHARED_LIBS OFF CACHE BOOL "Build shared libraries" FORCE)
-  set(CMAKE_FIND_LIBRARY_SUFFIXES ".a")
-  set(CMAKE_POSITION_INDEPENDENT_CODE OFF)
-  if(NOT APPLE)
-    string(APPEND CMAKE_EXE_LINKER_FLAGS " -static")
-  endif()
-endif()
 
 include(FetchContent)
 include(ExternalProject)
@@ -413,7 +403,7 @@ set(_fc_dist_name "fc-${CMAKE_SYSTEM_NAME}-${CMAKE_SYSTEM_PROCESSOR}")
 set(_fc_pack_script "${CMAKE_BINARY_DIR}/cmake/package_dist.cmake")
 configure_file("${CMAKE_CURRENT_SOURCE_DIR}/cmake/package_dist.cmake.in" "${_fc_pack_script}" @ONLY)
 
-add_custom_target(package_static_dist
+add_custom_target(package_dist
   DEPENDS fc
   COMMAND ${CMAKE_COMMAND}
     -DFC_BIN=$<TARGET_FILE:fc>

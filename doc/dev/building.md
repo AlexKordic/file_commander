@@ -27,7 +27,6 @@ Optional tools:
 | Tool | Used for |
 | --- | --- |
 | bubblewrap (`bwrap`), Linux only | Isolating the `fc.package` relocation test. macOS uses the built-in `sandbox-exec`. |
-| Zig | The static Linux build described [below](#static-linux-build-with-zig). |
 | OpenSSH | SSH locations at run time only. The remote host needs Python 3. |
 
 The [headless core build](#headless-core-build) needs only the compiler,
@@ -276,41 +275,6 @@ The `ubsan` preset works the same way as `asan-ubsan` and builds into
 only `fc_core` and its tests. The UI, Lua and editor code is never built with
 sanitizers. See [testing.md](testing.md#sanitizers) for what each lane runs.
 
-## Static Linux build with Zig
-
-`cmake/toolchains/` contains toolchain files that compile with `zig cc` and
-`zig c++` for `x86_64-linux-musl` and `aarch64-linux-musl` and link with
-`-static`. For x86-64:
-
-```sh
-cmake -S . -B build-linux-x86_64 -G Ninja \
-  -DCMAKE_TOOLCHAIN_FILE=cmake/toolchains/zig-musl-x86_64.cmake \
-  -DCMAKE_BUILD_TYPE=Release \
-  -DFC_STATIC_MODE=ON \
-  -DFC_BUILD_FRESH=OFF \
-  -DFC_FTXUI_SOURCE_DIR="$PWD/build-deps/ftxui" \
-  -DFC_LUAJIT_SOURCE_DIR="$PWD/build-deps/luajit" \
-  -DFC_LZMA_SOURCE_DIR="$PWD/build-deps/lzma"
-cmake --build build-linux-x86_64
-```
-
-- Fresh can't be cross-compiled by this build; configure fails unless
-  `FC_BUILD_FRESH=OFF`. Build Fresh for the target separately.
-- LuaJIT runs code generators on the build host, so a host C compiler (`cc`,
-  `clang` or `gcc`) must be on `PATH`.
-- The x86-64 toolchain file also uses Zig for `ar` and `ranlib`. The aarch64
-  file uses the host's archive tools.
-- Test executables are compiled, but the Python-driven tests are not
-  registered and target binaries can't run on the host. Run the tests in a
-  native build on the target.
-
-To check the result, `file build-linux-x86_64/fc` should report a statically
-linked ELF executable, and on Linux `ldd build-linux-x86_64/fc` prints
-`not a dynamic executable`.
-
-macOS binaries can't be fully static. `otool -L build-release/fc` should list
-only system libraries and frameworks under `/usr/lib` and `/System/Library`.
-
 ## Updating a dependency
 
 Change a dependency deliberately, in one commit that updates its pin in
@@ -335,7 +299,7 @@ with the new version. Then run the release lane, which includes
 ## Release packages
 
 ```sh
-cmake --build build-release --target package_static_dist
+cmake --build build-release --target package_dist
 ```
 
 This writes `build-release/dist/fc-<system>-<processor>.tar.gz`, for example
@@ -365,8 +329,9 @@ unpacks the archive in a temporary directory, creates and extracts a real 7z
 archive and runs the bundled Fresh, while reads of the source tree and
 dependency checkouts are denied.
 
-A package built from a cross build does not contain Fresh, because
-`package_static_dist` includes Fresh only when the same build built it.
+Linux packages are built natively on the Linux system they are for, with its compiler and glibc, and link dynamically. A package runs on that distribution and on systems with the same or a newer glibc.
+
+Neither platform's binaries are fully static. To check, `otool -L build-release/fc` on macOS should list only system libraries and frameworks under `/usr/lib` and `/System/Library`, and `ldd build-release/fc` on Linux only the system's own libraries.
 
 On macOS, CMake sets the deployment target to the build machine's macOS
 version, so binaries need that version or newer. To target older versions,
@@ -465,8 +430,7 @@ libclang error.** Install Cargo through rustup, the toolchain named in
 Fresh's `rust-toolchain.toml`, and Clang with libclang. To build FC without
 the editor, configure with `-DFC_BUILD_FRESH=OFF`.
 
-**`Fresh cross-compilation requires a separately configured Rust target`.**
-Cross builds must use `-DFC_BUILD_FRESH=OFF`.
+**`Fresh cross-compilation requires a separately configured Rust target`.** FC doesn't support cross builds; build on the system the binaries are for.
 
 **The Boost download fails.** Save the archive in the repository root as shown
 in [Boost archive](#boost-archive).

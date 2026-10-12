@@ -15,7 +15,7 @@ parser.add_argument('--build-only', action='store_true', help='Build and verify 
 args = parser.parse_args()
 build, archive = args.build, args.archive
 if args.build_only:
-    subprocess.run(['cmake', '--build', str(build), '--target', 'package_static_dist', '-j8'], check=True)
+    subprocess.run(['cmake', '--build', str(build), '--target', 'package_dist', '-j8'], check=True)
 try:
     check_package(archive, built_executables(build))
 except (OSError, ValueError, tarfile.TarError) as error:

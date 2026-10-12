@@ -38,7 +38,6 @@
     "cmake": ">=3.19",
     "cxx": "C++20 with std::format",
     "python": ">=3.12",
-    "fresh": "Cargo with --locked and the pinned checkout's toolchain",
-    "cross": "Zig musl toolchain; Fresh must be independently built for the target"
+    "fresh": "Cargo with --locked and the pinned checkout's toolchain"
   }
 }
