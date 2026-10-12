@@ -372,6 +372,15 @@ second instead of 110. Fresh allocates 10,700–14,700 times per frame instead o
 76,000–80,000, all of it while rendering the editor and building its views;
 encoding allocates nothing. Opening a large file takes 120–140 ms either way.
 
+Fresh's render keeps what frames repeat: a buffer's rows are reused while
+what they are drawn from is unchanged, so a scroll draws the rows that came
+into view; the menu model is rebuilt only when the menus, the keymap or the
+menu context change; the app's grid rows are hashed with foldhash. Measured
+on the app's scene path at 200×60 in the same 61,000-line file, a wheel step
+renders in 0.86 ms instead of 1.02 (p50; p95 1.11 instead of 1.27) with 4,950
+allocations instead of 6,570, and paging into new text stays at 2.9–3.0 ms,
+more than half of it spent highlighting the new lines.
+
 ## ExplainerKit in other projects
 
 ExplainerKit (`macos/Package.swift`, library product `ExplainerKit`) has no

@@ -24,7 +24,7 @@ recovery. FC never closes a tab or writes a file on the editor's behalf.
 
 ## Pinned revision
 
-FC builds Fresh from revision `a172663d0d82b6ca4b0472670c69243b32df0018` on
+FC builds Fresh from revision `e1f66e9f30f19e229029495872f681822ae2b632` on
 the `fc-editor-workflow` branch of the FC fork. Its upstream base is
 `b10f9084f5eae571e9b8dac1a0f3694384bcb53d`, which is Fresh 0.5.2 plus 40
 upstream commits; FC's integration commits sit on top. The pinned Rust
