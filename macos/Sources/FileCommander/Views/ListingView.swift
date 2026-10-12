@@ -651,10 +651,10 @@ enum FileIcons {
     else {
       let ext = (row.name as NSString).pathExtension.lowercased()
       switch ext {
+      case _ where Engine.isArchiveName(row.name): name = "archivebox"
       case "jpg", "jpeg", "png", "gif", "heic", "tiff", "webp", "bmp": name = "photo"
       case "mov", "mp4", "m4v", "avi", "mkv": name = "film"
       case "flac", "mp3", "wav", "aac", "m4a", "ogg": name = "music.note"
-      case "7z", "zip", "tar", "gz", "xz", "bz2", "rar": name = "archivebox"
       case "md", "txt", "rtf", "pdf", "doc", "docx": name = "doc.text"
       case "js", "ts", "cpp", "hpp", "c", "h", "swift", "py", "rs", "go", "java", "json", "html", "css", "lua", "sh": name = "chevron.left.forwardslash.chevron.right"
       default: name = row.isExecutable ? "terminal" : "doc"

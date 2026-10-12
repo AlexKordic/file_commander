@@ -1,12 +1,17 @@
 #!/usr/bin/env python3
-"""Writes test archives of a folder with Python's standard library only, so the archive tests need no fixture binaries and no archiver but the one under test.
+"""Writes test archives of a folder, so the archive tests need no fixture binaries: Python's standard library writes the common formats, and a libarchive tar, when there is one, the rest.
 
     make_archives.py SOURCE_DIR OUTPUT_DIR
 
-OUTPUT_DIR receives tree.zip, tree.tar, tree.tar.gz, tree.tar.bz2, tree.tar.xz, and one.txt.gz (the first regular file of SOURCE_DIR, gzip-compressed, with its name in the gzip header). Entries are sorted and timestamps fixed, so the bytes are the same on every run.
+OUTPUT_DIR receives tree.zip, tree.tar, tree.tar.gz, tree.tar.bz2, tree.tar.xz, hostile.tar.gz (entries that try to leave the destination), and one.txt.gz (the first regular file of SOURCE_DIR, gzip-compressed, with its name in the gzip header). Entries are sorted and timestamps fixed, so the bytes are the same on every run.
+
+When a libarchive tar (bsdtar; macOS's /usr/bin/tar is one) is on hand, it also writes tree.cpio, tree.iso, tree.xar, tree.bsd.7z and tree.tar.zst, for the formats Python can't write. Their names are printed, one per line, so a test knows which exist.
 """
 import gzip
+import io
 import os
+import shutil
+import subprocess
 import sys
 import tarfile
 import zipfile
@@ -38,6 +43,32 @@ def main():
                         archive.addfile(info, data)
                 else:
                     archive.addfile(info)
+    bsdtar = next((c for c in (shutil.which('bsdtar'), '/usr/bin/tar') if c and os.access(c, os.X_OK) and
+                   'bsdtar' in subprocess.run([c, '--version'], capture_output=True, text=True).stdout), None)
+    if bsdtar:
+        for name, args in (('tree.cpio', ['--format', 'newc']), ('tree.iso', ['--format', 'iso9660']), ('tree.xar', ['--format', 'xar']),
+                           ('tree.bsd.7z', ['--format', '7zip']), ('tree.tar.zst', ['--format', 'pax', '--zstd'])):
+            made = subprocess.run([bsdtar, *args, '-cf', str(output / name), '-C', str(source), '.'], capture_output=True)
+            if made.returncode == 0:
+                print(name)
+            else:
+                (output / name).unlink(missing_ok=True)
+    # Entries an extractor must not follow out of its destination: a link inside it (kept), a link out of it, a "../" path and an absolute one.
+    with tarfile.open(output / 'hostile.tar.gz', 'w:gz', format=tarfile.PAX_FORMAT) as archive:
+        def add(name, data=None, link=None):
+            info = tarfile.TarInfo(name)
+            info.mtime = MTIME
+            if link is not None:
+                info.type, info.linkname = tarfile.SYMTYPE, link
+                archive.addfile(info)
+            else:
+                info.size = len(data)
+                archive.addfile(info, io.BytesIO(data))
+        add('ok.txt', b'kept')
+        add('docs/inner', link='../ok.txt')
+        add('up', link='../../outside')
+        add('../evil.txt', b'escaped')
+        add('/abs.txt', b'absolute')
     first = next(path for path, _ in entries(source) if path.is_file())
     with open(output / 'one.txt.gz', 'wb') as raw:
         with gzip.GzipFile(filename=first.name, mode='wb', fileobj=raw, mtime=MTIME) as archive:

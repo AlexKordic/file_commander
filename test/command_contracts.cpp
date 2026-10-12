@@ -2,6 +2,7 @@
 #include <iostream>
 #include <set>
 #include "app.hpp"
+#include "archive.hpp"
 #include "scripting.hpp"
 #include "support/contracts.hpp"
 #include "ui_dispatcher.hpp"
@@ -22,6 +23,15 @@ static void command(const std::string& id, int route) {
   fs::create_directory(f / "right");
   write(f / "left/a", "payload");
   write(f / "left/b", "other");
+  if (id == "open_as_archive") {
+    // A stored zip holding inner.txt, under a name that isn't an archive's.
+    static const char zip[] =
+        "\x50\x4b\x03\x04\x14\x00\x00\x00\x00\x00\xaa\xb1\x6e\x57\xb4\xf2\xfe\xba\x06\x00\x00\x00\x06\x00\x00\x00\x09\x00\x00\x00\x69\x6e\x6e\x65"
+        "\x72\x2e\x74\x78\x74\x69\x6e\x73\x69\x64\x65\x50\x4b\x01\x02\x14\x03\x14\x00\x00\x00\x00\x00\xaa\xb1\x6e\x57\xb4\xf2\xfe\xba\x06\x00\x00"
+        "\x00\x06\x00\x00\x00\x09\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x80\x01\x00\x00\x00\x00\x69\x6e\x6e\x65\x72\x2e\x74\x78\x74\x50\x4b"
+        "\x05\x06\x00\x00\x00\x00\x01\x00\x01\x00\x37\x00\x00\x00\x2d\x00\x00\x00\x00\x00";
+    write(f / "left/0.data", std::string(zip, sizeof(zip) - 1));
+  }
   setenv("XDG_CONFIG_HOME", (f / "config").c_str(), 1);
   setenv("FC_FRESH_FAKE_LOG", (f / "fresh.log").c_str(), 1);
   setenv("FC_FRESH_BIN", (std::string(FC_TEST_SOURCE_DIR) + "/test/fakes/fresh_fake.sh").c_str(), 1);
@@ -48,6 +58,7 @@ static void command(const std::string& id, int route) {
   app.navigation->OnEvent(Event::Escape);
   require(app._active_dialog == 0, "availability dialog did not close");
   if (id == "clear_selection") left.dir.select_all();
+  if (id == "open_as_archive") left.get_shared_state()->set_focused_index(1);  // sub, then 0.data
   if (id == "tab_close" || id == "tab_next" || id == "tab_prev") {
     left.new_tab();
     ready(app, ui);
@@ -216,6 +227,9 @@ static void command(const std::string& id, int route) {
   else if (id == "clear_selection") require(left.dir.stats().items_selected == 0, "clear selection");
   else if (id == "enter_dir") require(left.dir.path == f / "left/sub", "enter directory");
   else if (id == "leave_dir") require(left.dir.path == f.root, "leave directory");
+  else if (id == "open_as_archive")
+    require(left.dir.path == archive_root(f / "left/0.data") && left.dir.items.size() == 1 && left.dir.items[0].filename_ref() == "inner.txt",
+            "Open as Archive browses a zip whatever its name");
   else if (id == "toggle_permissions_column") require(left.get_shared_state()->show_permissions_column, "permissions column");
   else if (id == "toggle_owner_group_column") require(left.get_shared_state()->show_owner_group_column, "owner column");
   else if (id == "switch_panel") require(&app.focused_panel() == &right, "switch panel");

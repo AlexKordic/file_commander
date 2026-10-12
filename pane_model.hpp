@@ -66,7 +66,11 @@ class PaneModel {
   // Navigation.
   void     move_to(const Filepath& where, Filepath focus = {});
   void     refresh();
-  bool     enter(int item_index);  // Directory or archive; false for other files.
+  enum class EnterResult { NotHandled, Entered, OfferExtraction };
+  // A folder or an archive is entered. A compressed file (.tar.gz, .gz, ...) is OfferExtraction: the caller offers to extract it. Other files are NotHandled.
+  EnterResult enter(int item_index);
+  // "Open as archive": browses the file under `item_index` whatever its name, letting 7-Zip find its format.
+  bool     browse_archive(int item_index);
   void     leave();
   Filepath focused_dir() const;
   void     restart_initial_load();

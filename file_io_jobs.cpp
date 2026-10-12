@@ -429,7 +429,8 @@ class ThreadedFileJobs : public FileJobs {
     job->_job_id   = id;
     job->_queued_time = now();
     // Copies out of an archive keep no journal: after a crash they are simply extracted again.
-    const bool from_archive = std::any_of(job->_plan->steps.begin(), job->_plan->steps.end(), [](const auto& op) { return is_archive_path(op.source); });
+    const bool from_archive = job->_type == OperationType::EXTRACT ||
+                              std::any_of(job->_plan->steps.begin(), job->_plan->steps.end(), [](const auto& op) { return is_archive_path(op.source); });
     try { if (!_journal_directory.empty() && !from_archive) job->_journal = TransferJournal::create(_journal_directory, *job); }
     catch (const std::exception& e) { report_error("[Transfer journal] " + std::string(e.what())); return 0; }
     bind_updates(job);
@@ -704,7 +705,9 @@ class ThreadedFileJobs : public FileJobs {
       if (_active_job->_cancel_requested.load()) {
         _active_job->_state = JobState::CANCELLED;
       } else if (validate_mutation_paths(_active_job.get())) {
-        if (std::any_of(_active_job->_plan->steps.begin(), _active_job->_plan->steps.end(),
+        if (_active_job->_type == OperationType::EXTRACT)
+          run_extract(_active_job.get());
+        else if (std::any_of(_active_job->_plan->steps.begin(), _active_job->_plan->steps.end(),
                         [](const auto &op) { return is_archive_path(op.source); }))
           run_archive_copy(_active_job.get());
         else if (std::any_of(_active_job->_plan->steps.begin(), _active_job->_plan->steps.end(),
@@ -728,6 +731,8 @@ class ThreadedFileJobs : public FileJobs {
           case JobSpec::Type::RENAME:
           case JobSpec::Type::CLIPBOARD:
             run_small(_active_job.get());
+            break;
+          case JobSpec::Type::EXTRACT:  // Dispatched above.
             break;
           }
       }
@@ -986,6 +991,162 @@ class ThreadedFileJobs : public FileJobs {
       job->_state = JobState::CANCELLED;
     } else if (!error.ok())
       report_error("[Archive] " + error.steps.front());
+  }
+
+  // An archive entry's place under `root`, or empty when its path would leave it (absolute, or climbing with "..").
+  static Filepath inside(const Filepath& root, const std::string& entry) {
+    Filepath relative;
+    for (const auto& part : Filepath(entry)) {
+      const auto name = part.native();
+      if (name == "..") return {};
+      if (name.empty() || name == "." || name == "/") continue;
+      relative /= part;
+    }
+    return relative.empty() ? Filepath() : root / relative;
+  }
+
+  // Extracts a whole archive into a folder in one pass (the extraction popup): a compressed tar's entries as they stream past, a compressed file's one file. FC builds every destination itself under the folder; each file is staged next to it and committed as copies are.
+  void run_extract(JobSpec* job) {
+    const auto& op = job->_plan->steps.front();
+    const auto item = operation_display(op);
+    const auto root = op.destination;
+    error_code ec;
+    boost::filesystem::create_directories(root, ec);
+    if (ec || is_virtual_path(root)) {
+      std::lock_guard lock(job->_m);
+      job->report_error(item, "Cannot create " + root.native() + (ec ? ": " + ec.message() : ""));
+      job->_items_done = job->_items_failed = 1;
+      return;
+    }
+    auto fail = [&](const Filepath& path, const std::string& message) {
+      report_error("[Extract] " + path.native() + ": " + message);
+      std::lock_guard lock(job->_m);
+      job->report_error(DirItem(path, path.filename().native(), boost::filesystem::regular_file, boost::filesystem::no_perms, 0, 0), message);
+      ++job->_items_failed;
+    };
+    auto newer_or_absent = [&](const Filepath& target, const SevenZip::Entry& e) {
+      const auto present = boost::filesystem::symlink_status(target, ec);
+      if (ec || !boost::filesystem::exists(present)) return true;
+      if (job->_copy_conflict == CopyConflictMode::Skip) return false;
+      if (job->_copy_conflict == CopyConflictMode::Update) return e.modified_ns && *e.modified_ns / 1000000000 > DirItem(target).write_time();
+      return true;
+    };
+    struct Staged {
+      Filepath stage_root, target;
+    };
+    std::optional<Staged> staged;
+    std::vector<std::pair<Filepath, SevenZip::Entry>> folders;
+    auto output = [&](const SevenZip::Entry& e) -> Filepath {
+      const auto target = inside(root, e.path);
+      if (target.empty()) {
+        fail(root / Filepath(e.path).filename(), "Skipped: the archive puts it outside the destination (" + e.path + ")");
+        return {};
+      }
+      if (e.directory) {
+        boost::filesystem::create_directories(target, ec);
+        if (ec) fail(target, "Failed to create directory: " + ec.message());
+        else folders.push_back({target, e});
+        return {};
+      }
+      boost::filesystem::create_directories(target.parent_path(), ec);
+      if (!e.symlink.empty()) {
+        // A link must stay inside the destination; one that points elsewhere is skipped.
+        const Filepath link(e.symlink);
+        const auto resolved = (target.parent_path() / link).lexically_normal();
+        if (link.is_absolute() || !path_is_under(root, resolved)) {
+          fail(target, "Skipped a link that points outside the destination: " + e.symlink);
+          return {};
+        }
+        if (!newer_or_absent(target, e)) {
+          std::lock_guard lock(job->_m);
+          ++job->_items_skipped;
+          return {};
+        }
+        const auto temporary = target.parent_path() / boost::filesystem::unique_path(".fc-link-%%%%-%%%%-%%%%");
+        boost::filesystem::create_symlink(link, temporary, ec);
+        if (!ec) boost::filesystem::rename(temporary, target, ec);
+        error_code cleanup;
+        boost::filesystem::remove(temporary, cleanup);
+        if (ec) fail(target, "Failed to create symlink: " + ec.message());
+        return {};
+      }
+      if (!newer_or_absent(target, e)) {
+        std::lock_guard lock(job->_m);
+        ++job->_items_skipped;
+        return {};
+      }
+      if (boost::filesystem::is_directory(boost::filesystem::symlink_status(target, ec))) {
+        fail(target, "Cannot replace a directory with a file");
+        return {};
+      }
+      const auto stage_root = target.parent_path() / boost::filesystem::unique_path(".fc-copy-%%%%-%%%%-%%%%");
+      if (!boost::filesystem::create_directory(stage_root, ec) || ec) {
+        fail(target, "Failed to create staging directory: " + ec.message());
+        return {};
+      }
+      boost::filesystem::permissions(stage_root, boost::filesystem::owner_all, ec);
+      staged = Staged{stage_root, target};
+      return stage_root / "data";
+    };
+    auto finished = [&](const SevenZip::Entry& e, Err error) {
+      if (!staged) return;
+      const auto current = *staged;
+      staged.reset();
+      const auto data = current.stage_root / "data";
+      std::string failure = error.ok() ? std::string() : error.steps.front();
+      if (failure.empty()) {
+        const auto mode = boost::filesystem::perms(e.posix_mode ? (*e.posix_mode & 07777) : 0644);
+        boost::filesystem::permissions(data, mode, ec);
+        if (!ec && e.modified_ns) boost::filesystem::last_write_time(data, std::time_t(*e.modified_ns / 1000000000), ec);
+        if (!ec) {
+          if (job->_copy_conflict == CopyConflictMode::Skip) {
+            rename_no_replace(data, current.target, ec);
+            if (ec == boost::system::errc::file_exists) {
+              ec.clear();
+              std::lock_guard lock(job->_m);
+              ++job->_items_skipped;
+            }
+          } else
+            boost::filesystem::rename(data, current.target, ec);
+        }
+        if (ec) failure = "Failed to write: " + ec.message();
+      }
+      error_code cleanup;
+      boost::filesystem::remove_all(current.stage_root, cleanup);
+      if (!failure.empty()) fail(current.target, failure);
+      job->updated();
+    };
+    auto progress = [&](uint64_t done, uint64_t total) {
+      wait_for_resume(job);
+      {
+        std::lock_guard lock(job->_m);
+        job->_bytes_total = double(total);
+        job->_bytes_processed = double(done);
+        job->_total.update(int64_t(done), int64_t(total));
+      }
+      if (now() > job->_last_progress_update_time + job->_progress_update_interval) {
+        job->_last_progress_update_time = now();
+        job->updated();
+      }
+    };
+    auto error = ArchiveFS::extract_all(op.source, output, finished, &job->_cancel_requested, progress);
+    if (staged) {
+      error_code cleanup;
+      boost::filesystem::remove_all(staged->stage_root, cleanup);
+    }
+    // Folders get their archived permissions and times after their contents are in place.
+    for (auto it = folders.rbegin(); it != folders.rend(); ++it) {
+      if (it->second.posix_mode) boost::filesystem::permissions(it->first, boost::filesystem::perms(*it->second.posix_mode & 07777), ec);
+      if (it->second.modified_ns) boost::filesystem::last_write_time(it->first, std::time_t(*it->second.modified_ns / 1000000000), ec);
+    }
+    std::lock_guard lock(job->_m);
+    job->_items_done = 1;
+    if (job->_cancel_requested.load()) job->_state = JobState::CANCELLED;
+    else if (!error.ok()) {
+      job->report_error(item, error.steps.front());
+      ++job->_items_failed;
+    } else
+      job->_bytes_processed = job->_bytes_total;
   }
 
   void run_remote(JobSpec *job) {

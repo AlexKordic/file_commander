@@ -253,6 +253,18 @@ public final class Engine {
     submitted(fce.submit_rename(Engine.cxx(sources), Engine.cxx(names)))
   }
   public func copyToClipboard(_ side: Int, names: Bool) { fce.copy_to_clipboard(Int32(side), names); drain() }
+  /// The extraction popup: everything in `archive` into `folder`, in one pass. `conflict`: 0 replace, 1 update if newer, 2 skip.
+  public func submitExtract(_ archive: String, into folder: String, conflict: Int) -> Submitted {
+    submitted(fce.submit_extract(std.string(archive), std.string(folder), Int32(conflict)))
+  }
+  /// "Browse anyway" and Open as Archive: shows `archive` as a read-only folder.
+  public func browseArchive(_ side: Int, _ archive: String) { fce.browse_archive(Int32(side), std.string(archive)); drain() }
+  /// The folder an archive is extracted into by default: its name without the archive suffix.
+  public nonisolated static func archiveFolderName(_ archive: String) -> String { String(fce.archive_folder_name(std.string(archive))) }
+  /// Whether extracting `archive` offers a folder named after it: a compressed tar holds many files, a compressed file one.
+  public nonisolated static func archiveHoldsMany(_ archive: String) -> Bool { fce.archive_holds_many(std.string(archive)) }
+  /// Whether the listing shows `name` with an archive icon.
+  public nonisolated static func isArchiveName(_ name: String) -> Bool { !String(fce.archive_icon(std.string(name))).isEmpty }
 
   public func findStart(root: String, pattern: String) -> String? {
     let s = String(fce.find_start(std.string(root), std.string(pattern)))

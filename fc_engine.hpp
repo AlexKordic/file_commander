@@ -118,7 +118,7 @@ int  glob_select(int side, const std::string& pattern, bool select);  // Returns
 void set_filter(int side, const std::string& text);
 void set_sort(int side, int sort);
 void set_columns(int side, bool permissions, bool owner_group);
-bool open_row(int side, int64_t row);  // Folder or archive; false for other files.
+bool open_row(int side, int64_t row);  // Folder or archive, or an "Extract" dialog request for a compressed file; false for other files.
 void go_up(int side);
 void navigate(int side, const std::string& location, const std::string& focus);
 void refresh(int side);
@@ -177,6 +177,16 @@ SubmitResult submit_move(const StringList& sources, const std::string& target, i
 SubmitResult submit_delete(const StringList& sources, int side);
 SubmitResult submit_mkdir(const std::string& folder, const std::string& name);
 SubmitResult submit_rename(const StringList& sources, const StringList& names);
+// The extraction popup: everything in `archive` into `folder` (created when missing), in one pass. `conflict`: 0 Replace, 1 Update, 2 Skip.
+SubmitResult submit_extract(const std::string& archive, const std::string& folder, int conflict);
+// "Browse anyway" and Open as archive: shows `archive` as a read-only folder in `side`.
+void         browse_archive(int side, const std::string& archive);
+// The folder name an archive is extracted into by default ("release-1.2.tar.gz" gives "release-1.2").
+std::string  archive_folder_name(const std::string& archive);
+// Whether the extraction popup offers a folder named after the archive: true for a compressed tar, false for one compressed file.
+bool         archive_holds_many(const std::string& archive);
+// "archive" for names the listing shows with an archive icon, empty otherwise.
+std::string  archive_icon(const std::string& name);
 void         copy_to_clipboard(int side, bool names);
 
 struct FindInfo {

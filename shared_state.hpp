@@ -50,7 +50,9 @@ struct PanelSharedState {
 
   // std::function<ftxui::Element(RowInfo&)> transform;
   std::function<void(Filepath, Filepath)> move_to;
-  std::function<bool(const Filepath&)>    enter_archive;
+  // 0: not an archive; 1: the panel went into it; 2: handled where it is (a dialog, or a refusal).
+  std::function<int(const Filepath&)>     enter_archive;
+  std::function<bool(const Filepath&)>    browse_archive;  // Open as archive, whatever the name.
   std::function<bool(int64_t&)>           leave_virtual_dir;
   std::function<void(int)>                set_min_y;
   std::function<Filepath const*()>        get_focused_item;

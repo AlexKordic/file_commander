@@ -71,9 +71,15 @@ class Archive {
   struct State;
 
  private:
+  friend Err read_compressed_tar(const Filepath&, const std::string&, const std::function<Filepath(const Entry&)>&,
+                                 const std::function<void(const Entry&, Err)>&, const Progress&);
   explicit Archive(std::unique_ptr<State>);
   std::unique_ptr<State> _state;
 };
+
+// A tar inside a compressed stream (tar.gz, tar.xz, ...) read in one sequential pass: the compression handler decodes into the tar reader through memory, so no part of the tar is written anywhere. `output` is asked about every entry in order; its `index` counts entries from 0 and is the same on every pass over the same file. A path extracts the entry there, created new; empty skips it. Listing is a pass whose `output` always answers empty. `compression` is a Format::name, or empty to detect it.
+Err read_compressed_tar(const Filepath& file, const std::string& compression, const std::function<Filepath(const Entry&)>& output,
+                        const std::function<void(const Entry&, Err)>& finished = {}, const Progress& progress = {});
 
 struct NewItem {
   Filepath source;   // a file or folder on disk; folders are added with everything in them

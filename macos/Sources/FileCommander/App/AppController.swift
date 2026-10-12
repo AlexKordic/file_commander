@@ -11,6 +11,7 @@ enum SheetKind: Identifiable {
   case delete(DialogRequest)
   case mkdir(DialogRequest)
   case rename(DialogRequest)
+  case extract(DialogRequest)
   case connectSSH
   case restartEditor
   case transferSpeed
@@ -25,6 +26,7 @@ enum SheetKind: Identifiable {
     case .delete: return "delete"
     case .mkdir: return "mkdir"
     case .rename: return "rename"
+    case .extract: return "extract"
     case .connectSSH: return "ssh"
     case .restartEditor: return "restart"
     case .transferSpeed: return "speed"
@@ -259,6 +261,7 @@ final class AppController {
     case "Delete": sheet = .delete(request)
     case "Mkdir": sheet = .mkdir(request)
     case "Rename": sheet = .rename(request)
+    case "Extract": sheet = .extract(request)
     case "Find":
       findRoot = request.origin
       openWindowAction?(id: "find")

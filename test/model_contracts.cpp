@@ -45,7 +45,7 @@ void panes() {
   int photos = -1;
   for (int item : pane.visible_rows())
     if (pane.dir().items[item].filename_ref() == "photos") photos = item;
-  require(pane.enter(photos), "entering photos failed");
+  require(pane.enter(photos) == PaneModel::EnterResult::Entered, "entering photos failed");
   pump(dispatcher, [&] { return !pane.loading() && pane.dir().items.size() == 3; }, "photos listing missing");
   pane.set_filter("JPG");
   require(names(pane).size() == 2, "filter must ignore case and hide notes.txt");

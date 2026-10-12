@@ -108,6 +108,7 @@ public struct JobInfo: Hashable, Sendable, Identifiable {
     case "MOVE": return "Move"
     case "DELETE": return "Delete"
     case "ARCHIVE": return "Create archive"
+    case "EXTRACT": return "Extract"
     case "MKDIR": return "New folder"
     case "RENAME": return "Rename"
     case "CLIPBOARD": return "Clipboard"

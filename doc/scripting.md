@@ -453,9 +453,7 @@ fc.state()
                                 newest first; time is Unix time in seconds
 ```
 
-Job states are `queued`, `running`, `paused`, `cancelled`, `completed` and
-`completed_with_errors`. Job types are `copy`, `move`, `delete`,
-`archive_create`, `mkdir`, `rename` and `clipboard`.
+Job states are `queued`, `running`, `paused`, `cancelled`, `completed` and `completed_with_errors`. Job types are `copy`, `move`, `delete`, `archive_create`, `extract`, `mkdir`, `rename` and `clipboard`.
 
 Key names in `key_bindings` use the [Key names](#key-names) format.
 

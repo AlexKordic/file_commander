@@ -446,6 +446,7 @@ struct JobBar: View {
     case "MOVE": return "arrow.right.doc.on.clipboard"
     case "DELETE": return "trash"
     case "ARCHIVE": return "archivebox"
+    case "EXTRACT": return "archivebox.fill"
     default: return "gearshape"
     }
   }

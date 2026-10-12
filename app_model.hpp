@@ -93,6 +93,8 @@ class AppModel {
   void copy_to_clipboard(int side, bool names);
   // Opens an SSH location in a new tab of the focused pane.
   void open_ssh(const std::string& host, const std::string& path);
+  // The extraction popup: asks the front end, through an "Extract" dialog request, where to extract `archive`.
+  void offer_extraction(int side, const Filepath& archive);
 
  private:
   void register_commands();

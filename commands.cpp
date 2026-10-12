@@ -10,6 +10,7 @@ Commands::Commands() {
   available.push_back({"select_all", keys().key_select_all, "", "Select All", CommandScope::PANEL, CommandKind::EXECUTE_CALLBACK});
   available.push_back({"enter_dir", keys().key_enter_dir, "", "Enter Directory", CommandScope::PANEL, CommandKind::EXECUTE_CALLBACK});
   available.push_back({"leave_dir", keys().key_leave_dir, "", "Leave Directory", CommandScope::PANEL, CommandKind::EXECUTE_CALLBACK});
+  available.push_back({"open_as_archive", keys().key_open_as_archive, "", "Open as Archive", CommandScope::PANEL, CommandKind::EXECUTE_CALLBACK});
   available.push_back({"toggle_permissions_column", keys().key_toggle_permissions_column, "", "Toggle Permissions Column", CommandScope::PANEL, CommandKind::EXECUTE_CALLBACK});
   available.push_back({"toggle_owner_group_column", keys().key_toggle_owner_group_column, "", "Toggle Owner/Group Column", CommandScope::PANEL, CommandKind::EXECUTE_CALLBACK});
 

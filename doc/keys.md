@@ -24,7 +24,8 @@ These act on the focused panel.
 
 | Default key | Command ID | Action |
 | --- | --- | --- |
-| `Enter` | `enter_dir` | Open the focused directory, or open a `.7z` archive as a read-only folder. |
+| `Enter` | `enter_dir` | Open the focused directory, or browse an archive (`.zip`, `.7z`, `.tar`, `.iso`, ...) as a read-only folder. On a compressed tar (`.tar.gz`, ...) or a compressed file (`.gz`, ...) it offers to extract it instead, with Browse anyway. |
+| `Ctrl+PageDown` | `open_as_archive` | Browse the focused file as an archive, whatever its name: 7-Zip decides the format from its contents. |
 | `?` | `leave_dir` | Go to the parent directory. |
 | `Space` | `select_toggle` | Select or deselect the focused item and move down. |
 | `Esc` | `clear_selection` | Clear the selection. |

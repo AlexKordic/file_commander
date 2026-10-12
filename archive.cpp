@@ -1,5 +1,5 @@
 #include "archive.hpp"
-#include "sevenzip.hpp"
+#include "archive_formats.hpp"
 
 #include <boost/filesystem.hpp>
 
@@ -114,7 +114,13 @@ struct Folder {
 };
 
 struct Opened {
-  std::unique_ptr<SevenZip::Archive> archive;
+  std::unique_ptr<SevenZip::Archive> archive;  // Unless `streamed`.
+  // A compressed tar has no index: it is listed by one pass over the stream, and each extraction is another.
+  bool streamed = false;
+  std::string compression;
+  Filepath data;                       // The file the archive's bytes are read from.
+  std::vector<SevenZip::Entry> listed;
+  const std::vector<SevenZip::Entry>& entries() const { return streamed ? listed : archive->entries(); }
   Filepath owned;               // A nested archive's private folder, removed on close.
   SourceIdentity identity;      // Of the outermost archive file.
   ArchiveFS::Metadata root;     // The archive file's own metadata stands in for its root folder.
@@ -154,7 +160,7 @@ std::string normal_entry_path(const std::string& path) {
 
 void index_entries(Opened& opened) {
   opened.folders[""];
-  const auto& entries = opened.archive->entries();
+  const auto& entries = opened.entries();
   for (const auto& e : entries) {
     const auto path = normal_entry_path(e.path);
     if (path.empty()) continue;
@@ -192,7 +198,7 @@ ArchiveFS::Metadata metadata_of(const Opened& opened, const SevenZip::Entry& e) 
 }
 
 ArchiveFS::Metadata folder_metadata(const Opened& opened, const Folder& folder) {
-  if (folder.entry != UINT32_MAX) return metadata_of(opened, opened.archive->entries()[folder.entry]);
+  if (folder.entry != UINT32_MAX) return metadata_of(opened, opened.entries()[folder.entry]);
   ArchiveFS::Metadata m;
   m.exists = true;
   m.directory = true;
@@ -201,9 +207,18 @@ ArchiveFS::Metadata folder_metadata(const Opened& opened, const Folder& folder) 
   return m;
 }
 
-std::shared_ptr<Opened> open_chain(const std::vector<Filepath>& chain);
+std::shared_ptr<Opened> open_chain(const std::vector<Filepath>& chain, const std::atomic<bool>* cancelled = nullptr);
 
-std::shared_ptr<Opened> open_new(const std::vector<Filepath>& chain, const SourceIdentity& identity) {
+// Extracts entries of an open archive to files, one pass.
+Err extract_indices(Opened& opened, const std::vector<uint32_t>& indices, const std::function<Filepath(const SevenZip::Entry&)>& output,
+                    const std::function<void(const SevenZip::Entry&, Err)>& finished, const SevenZip::Progress& progress) {
+  if (!opened.streamed) return opened.archive->extract(indices, output, finished, {}, progress);
+  std::set<uint32_t> wanted(indices.begin(), indices.end());
+  return SevenZip::read_compressed_tar(
+      opened.data, opened.compression, [&](const SevenZip::Entry& e) { return wanted.count(e.index) ? output(e) : Filepath(); }, finished, progress);
+}
+
+std::shared_ptr<Opened> open_new(const std::vector<Filepath>& chain, const SourceIdentity& identity, const std::atomic<bool>* cancelled) {
   auto opened = std::make_shared<Opened>();
   opened->identity = identity;
   Filepath file = chain.front();
@@ -217,23 +232,38 @@ std::shared_ptr<Opened> open_new(const std::vector<Filepath>& chain, const Sourc
   }
   if (chain.size() > 1) {
     // A nested archive is read from a private copy of its entry in the archive around it.
-    auto outer = open_chain({chain.begin(), chain.end() - 1});
+    auto outer = open_chain({chain.begin(), chain.end() - 1}, cancelled);
     const auto inner = normal_entry_path(chain.back().generic_string());
     auto found = outer->files.find(inner);
     if (found == outer->files.end()) throw std::runtime_error("Nested archive is missing: " + chain.back().native());
     opened->owned = private_directory();
     file = opened->owned / Filepath(inner).filename();
     Err failure;
-    auto error = outer->archive->extract({found->second}, [&](const SevenZip::Entry&) { return file; },
-                                         [&](const SevenZip::Entry&, Err err) { if (!err.ok()) failure = err; });
+    SevenZip::Progress progress;
+    progress.cancelled = cancelled;
+    auto error = extract_indices(*outer, {found->second}, [&](const SevenZip::Entry&) { return file; },
+                                 [&](const SevenZip::Entry&, Err err) { if (!err.ok()) failure = err; }, progress);
     if (!error.ok()) throw std::runtime_error(error.steps.front());
     if (!failure.ok()) throw std::runtime_error(failure.steps.front());
-    opened->root.mtime_ns = metadata_of(*outer, outer->archive->entries()[found->second]).mtime_ns;
+    opened->root.mtime_ns = metadata_of(*outer, outer->entries()[found->second]).mtime_ns;
   }
   opened->root.exists = opened->root.directory = true;
   opened->root.mode = S_IFDIR | 0755;
-  auto error = SevenZip::Archive::open(file, is_archive_file_path(file) ? "7z" : "", opened->archive);
-  if (!error.ok()) throw std::runtime_error(error.steps.front());
+  opened->data = file;
+  const auto name = chain.back().filename();
+  const auto* row = archive_format_of(name);
+  if (row && row->kind == ArchiveKind::CompressedTar) {
+    opened->streamed = true;
+    opened->compression = row->format;
+    SevenZip::Progress progress;
+    progress.cancelled = cancelled;
+    auto error = SevenZip::read_compressed_tar(
+        file, opened->compression, [&](const SevenZip::Entry& e) { opened->listed.push_back(e); return Filepath(); }, {}, progress);
+    if (!error.ok()) throw std::runtime_error(error.steps.front());
+  } else {
+    auto error = SevenZip::Archive::open(file, archive_format_hint(name), opened->archive);
+    if (!error.ok()) throw std::runtime_error(error.steps.front());
+  }
   index_entries(*opened);
   return opened;
 }
@@ -244,7 +274,7 @@ std::string key_of(const std::vector<Filepath>& chain) {
   return root.encode();
 }
 
-std::shared_ptr<Opened> open_chain(const std::vector<Filepath>& chain) {
+std::shared_ptr<Opened> open_chain(const std::vector<Filepath>& chain, const std::atomic<bool>* cancelled) {
   const auto identity = identity_of(chain.front());
   const auto key = key_of(chain);
   {
@@ -255,7 +285,7 @@ std::shared_ptr<Opened> open_chain(const std::vector<Filepath>& chain) {
       return found->second;
     }
   }
-  auto opened = open_new(chain, identity);
+  auto opened = open_new(chain, identity, cancelled);
   std::lock_guard lock(g_mutex);
   opened->used = std::chrono::steady_clock::now();
   g_open[key] = opened;
@@ -269,18 +299,15 @@ std::shared_ptr<Opened> open_chain(const std::vector<Filepath>& chain) {
   return opened;
 }
 
-std::pair<std::shared_ptr<Opened>, std::string> open_path(const Filepath& path) {
+std::pair<std::shared_ptr<Opened>, std::string> open_path(const Filepath& path, const std::atomic<bool>* cancelled = nullptr) {
   const auto location = Location::decode(path.native());
   if (!location.read_only()) throw std::runtime_error("not an archive path: " + path.native());
-  return {open_chain(location.archives), location.internal.generic_string()};
+  return {open_chain(location.archives, cancelled), location.internal.generic_string()};
 }
 
 }  // namespace
 
-bool is_archive_file_path(const Filepath& path) {
-  const std::string ext = to_lower_ascii(path.extension().native());
-  return ext == ".7z";
-}
+bool is_archive_file_path(const Filepath& path) { return enter_action(path) == EnterAction::Browse; }
 
 bool path_is_under(const Filepath& parent, const Filepath& child) {
   const Filepath parent_norm = parent.lexically_normal();
@@ -338,12 +365,12 @@ Metadata inspect(const Filepath& path) {
   auto [opened, inside] = open_path(path);
   if (inside.empty()) return opened->root;
   if (auto folder = opened->folders.find(inside); folder != opened->folders.end()) return folder_metadata(*opened, folder->second);
-  if (auto file = opened->files.find(inside); file != opened->files.end()) return metadata_of(*opened, opened->archive->entries()[file->second]);
+  if (auto file = opened->files.find(inside); file != opened->files.end()) return metadata_of(*opened, opened->entries()[file->second]);
   return {};
 }
 
 std::vector<Entry> list(const Filepath& folder_path, const std::atomic<bool>* cancelled) {
-  auto [opened, inside] = open_path(folder_path);
+  auto [opened, inside] = open_path(folder_path, cancelled);
   auto folder = opened->folders.find(inside);
   if (folder == opened->folders.end()) throw std::runtime_error("No such folder in the archive: " + Location::decode(folder_path.native()).display());
   const auto base = Filepath(Location::decode(folder_path.native()).encode());
@@ -354,7 +381,7 @@ std::vector<Entry> list(const Filepath& folder_path, const std::atomic<bool>* ca
     const auto child = inside.empty() ? name : inside + "/" + name;
     Entry e{base / name, {}};
     if (auto sub = opened->folders.find(child); sub != opened->folders.end()) e.metadata = folder_metadata(*opened, sub->second);
-    else e.metadata = metadata_of(*opened, opened->archive->entries()[opened->files.at(child)]);
+    else e.metadata = metadata_of(*opened, opened->entries()[opened->files.at(child)]);
     out.push_back(std::move(e));
   }
   return out;
@@ -401,13 +428,57 @@ Err extract(const std::vector<Item>& items, const std::function<void(const Item&
         group_bytes = done;
         progress(written_before + done);
       };
-    auto error = opened->archive->extract(
-        indices, [&](const SevenZip::Entry& e) { return by_index.at(e.index)->output; },
-        [&](const SevenZip::Entry& e, Err err) { finished(*by_index.at(e.index), err); }, {}, report);
+    auto error = extract_indices(
+        *opened, indices, [&](const SevenZip::Entry& e) { return by_index.at(e.index)->output; },
+        [&](const SevenZip::Entry& e, Err err) { finished(*by_index.at(e.index), err); }, report);
     written_before += group_bytes;
     if (!error.ok()) return error;
   }
   return Err();
+}
+
+Err extract_all(const Filepath& archive, const std::function<Filepath(const SevenZip::Entry&)>& output,
+                const std::function<void(const SevenZip::Entry&, Err)>& finished, const std::atomic<bool>* cancelled,
+                const std::function<void(uint64_t, uint64_t)>& progress) {
+  // A file inside another archive is read from a private copy.
+  Filepath data = archive, owned;
+  struct Cleanup {
+    Filepath& dir;
+    ~Cleanup() {
+      boost::system::error_code ec;
+      if (!dir.empty()) boost::filesystem::remove_all(dir, ec);
+    }
+  } cleanup{owned};
+  if (is_archive_path(archive)) {
+    try {
+      const auto location = Location::decode(archive.native());
+      auto outer = open_chain(location.archives, cancelled);
+      auto found = outer->files.find(location.internal.generic_string());
+      if (found == outer->files.end()) return Err("No such file in the archive: " + location.display());
+      owned = private_directory();
+      data = owned / location.internal.filename();
+      Err failure;
+      SevenZip::Progress quiet;
+      quiet.cancelled = cancelled;
+      auto error = extract_indices(*outer, {found->second}, [&](const SevenZip::Entry&) { return data; },
+                                   [&](const SevenZip::Entry&, Err err) { if (!err.ok()) failure = err; }, quiet);
+      if (!error.ok()) return error;
+      if (!failure.ok()) return failure;
+    } catch (const std::exception& e) {
+      return Err(e.what());
+    }
+  }
+  SevenZip::Progress report;
+  report.cancelled = cancelled;
+  if (progress) report.report = progress;
+  const auto name = Filepath(archive.native()).filename();
+  const auto* row = archive_format_of(name);
+  if (row && row->kind == ArchiveKind::CompressedTar) return SevenZip::read_compressed_tar(data, row->format, output, finished, report);
+  std::unique_ptr<SevenZip::Archive> opened;
+  if (auto error = SevenZip::Archive::open(data, archive_format_hint(name), opened); !error.ok()) return error;
+  std::vector<uint32_t> all;
+  for (const auto& e : opened->entries()) all.push_back(e.index);
+  return opened->extract(all, output, finished, {}, report);
 }
 
 void close_unused() {

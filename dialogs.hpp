@@ -82,6 +82,27 @@ struct MkdirDialog : Dialog {
   Element render();
 };
 
+// The extraction popup: a compressed tar or a compressed file, extracted in one pass to a folder; "Browse anyway" lists it instead.
+struct ExtractDialog : Dialog {
+  Filepath                 archive;
+  std::string              destination;
+  int                      destination_cursor = 0;
+  bool                     into_folder        = true;
+  std::vector<std::string> conflict_labels{"Replace", "Update if newer", "Skip"};
+  int                      conflict_selected = 0;
+  std::string              error;
+
+  Component input_destination, check_folder, radio_conflict, button_extract, button_browse, button_close;
+
+  ExtractDialog(PanelSharedState::P s);
+  void     OnShow() override;
+  Filepath folder() const;
+  void     ok();
+  void     browse();
+  void     cancel();
+  Element  render();
+};
+
 struct GlobSelectDialog : Dialog {
   GlobSelectDialog(PanelSharedState::P s, bool select_mode);
   void OnShow() override;

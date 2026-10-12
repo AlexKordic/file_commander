@@ -1,6 +1,7 @@
 #include "traversal.hpp"
 
 #include "dialogs.hpp"
+#include "archive_formats.hpp"
 #include "dialog_support.hpp"
 #include "archive.hpp"
 #include "bfs.hpp"
@@ -234,15 +235,25 @@ bool execute_file_command(PanelSharedState* app,DataSource* data_source,const st
       app->move_to(parent_dir, old_path);
       return true;
     }
+    if (action->id == "open_as_archive") {
+      if (app->dir->items.empty() || !app->browse_archive) return false;
+      DirItem& where = app->dir->items.at(data_source->focused_id);
+      if (where.is_dir() || !app->browse_archive(where.path_ref())) return false;
+      data_source->focused_id = app->dir->offset_vissible(0, 0);
+      app->filter_txt.clear();
+      return true;
+    }
     if (action->id == "enter_dir") {
       if (app->dir->items.empty()) return false;
       DirItem& where = app->dir->items.at(data_source->focused_id);
       if (!where.is_dir()) {
         if (!app->enter_archive) return false;
-        const bool entered_archive = app->enter_archive(where.path_ref());
-        if (!entered_archive) return false;
-        data_source->focused_id = app->dir->offset_vissible(0, 0);
-        app->filter_txt.clear();
+        const int entered_archive = app->enter_archive(where.path_ref());
+        if (entered_archive == 0) return false;
+        if (entered_archive == 1) {
+          data_source->focused_id = app->dir->offset_vissible(0, 0);
+          app->filter_txt.clear();
+        }
         return true;
       }
       app->move_to(where.path_ref(), {});
@@ -486,6 +497,95 @@ void MkdirDialog::ok() {
 }
 
 void MkdirDialog::cancel() { cancel_submission();app->action.close_dialog(); }
+
+//
+// Extract
+//
+
+ExtractDialog::ExtractDialog(PanelSharedState::P s) : Dialog(std::move(s)) {
+  InputOption destination_opt;
+  destination_opt.on_change      = [this]() { this->error.clear(); };
+  destination_opt.on_enter       = [this]() { this->ok(); };
+  destination_opt.multiline      = false;
+  destination_opt.cursor_position = &destination_cursor;
+  input_destination              = Input(&destination, "Folder to extract into", destination_opt);
+  CheckboxOption checkbox_opt    = CheckboxOption::Simple();
+  check_folder                   = Checkbox("Into a folder named after the archive", &into_folder, checkbox_opt);
+  radio_conflict                 = Radiobox(&conflict_labels, &conflict_selected);
+  button_extract                 = Button(" Extract ", [this] { this->ok(); });
+  button_browse                  = Button(" Browse anyway ", [this] { this->browse(); });
+  button_close                   = Button(" Cancel ", [this] { this->cancel(); });
+  navigation = CatchEvent(Container::Vertical({
+                            input_destination,
+                            check_folder,
+                            radio_conflict,
+                            Container::Horizontal({button_extract, button_browse, button_close}),
+                          }),
+                          close_on_esc(this));
+  renderer   = Renderer(navigation, [this]() -> Element { return this->render(); });
+}
+
+void ExtractDialog::OnShow() {
+  archive            = app->action.arguments->focused;
+  destination        = app->action.arguments->target.native();
+  destination_cursor = int(destination.size());
+  const auto* row    = archive_format_of(archive);
+  into_folder        = !row || row->kind != ArchiveKind::Compressed;
+  conflict_selected  = 0;
+  error.clear();
+}
+
+Filepath ExtractDialog::folder() const {
+  return into_folder ? Filepath(destination) / archive_stem(archive) : Filepath(destination);
+}
+
+Element ExtractDialog::render() {
+  Elements e = {
+    paragraphAlignCenter("Extract " + archive.filename().native()),
+    separator(),
+    text("To:"),
+    input_destination->Render(),
+    check_folder->Render(),
+    text(into_folder ? "  " + folder().native() : "") | dim,
+    separator(),
+    text("If a file exists:"),
+    radio_conflict->Render(),
+  };
+  if (!error.empty()) e.push_back(text(error) | theme().mkdir_errortxt);
+  e.push_back(filler());
+  e.push_back(hbox({button_extract->Render(), text(" "), button_browse->Render(), text(" "), button_close->Render()}) | hcenter);
+  return window(text(" Extract ") | bold | hcenter, vbox(std::move(e)), BorderStyle::DOUBLE);
+}
+
+void ExtractDialog::ok() {
+  error.clear();
+  if (destination.empty()) {
+    error = "Enter a folder to extract into";
+    return;
+  }
+  const auto target = folder();
+  if (is_virtual_path(target)) {
+    error = "Extract into a local folder";
+    return;
+  }
+  boost::system::error_code ec;
+  const auto bytes = is_archive_path(archive) ? 0 : int64_t(boost::filesystem::file_size(archive, ec));
+  const auto mode  = conflict_selected == 2 ? CopyConflictMode::Skip : conflict_selected == 1 ? CopyConflictMode::Update : CopyConflictMode::Replace;
+  auto job = std::make_shared<JobSpec>(std::make_shared<const OperationPlan>(extraction_plan(archive, target, mode, ec ? 0 : bytes)));
+  if (!(app->jobs ? *app->jobs : file_operations()).add_job(job)) {
+    error = "The job queue is full; try again when a job finishes";
+    return;
+  }
+  app->action.close_dialog();
+}
+
+void ExtractDialog::browse() {
+  const auto where = archive;
+  app->action.close_dialog();
+  if (app->browse_archive) app->browse_archive(where);
+}
+
+void ExtractDialog::cancel() { app->action.close_dialog(); }
 
 namespace {
 

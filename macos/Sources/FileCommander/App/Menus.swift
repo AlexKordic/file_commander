@@ -59,6 +59,7 @@ struct AppCommands: Commands {
     }
     CommandMenu("Go") {
       item("enter_dir")
+      item("open_as_archive")
       item("leave_dir")
       Divider()
       item("switch_panel")
@@ -128,7 +129,7 @@ enum MenuShortcuts {
     "tab_new", "tab_close", "mkdir", "rename", "copy", "move", "delete", "open_in_editor", "connect_ssh", "run_script",
     "names_to_clipboard", "paths_to_clipboard", "select_toggle", "glob_select", "glob_deselect", "clear_selection", "find",
     "command_palette", "toggle_single_panel_mode", "refresh_dir", "sort_by_name", "sort_by_size", "sort_by_date",
-    "toggle_permissions_column", "toggle_owner_group_column", "edit_theme_colors", "enter_dir", "leave_dir", "switch_panel",
+    "toggle_permissions_column", "toggle_owner_group_column", "edit_theme_colors", "enter_dir", "open_as_archive", "leave_dir", "switch_panel",
     "target_left", "target_right", "open_bookmarks", "add_bookmark", "transfer_speed", "toggle_job_list", "tab_next", "tab_prev",
     "toggle_errors", "clear_errors", "switch_to_file_commander", "restart_editor_backend", "help",
   ]
@@ -148,7 +149,7 @@ enum ContextMenu {
   @MainActor
   static func make(app: AppController) -> NSMenu {
     let menu = NSMenu()
-    for id in ["enter_dir", "open_in_editor", "-", "copy", "move", "rename", "delete", "-", "names_to_clipboard", "paths_to_clipboard", "-",
+    for id in ["enter_dir", "open_as_archive", "open_in_editor", "-", "copy", "move", "rename", "delete", "-", "names_to_clipboard", "paths_to_clipboard", "-",
                "mkdir", "add_bookmark", "target_left", "target_right"] {
       if id == "-" { menu.addItem(.separator()); continue }
       let item = ClosureMenuItem(title: app.engine.command(id)?.title ?? id) { app.run(id) }

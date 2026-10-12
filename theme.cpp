@@ -1,5 +1,6 @@
 
 #include "theme.hpp"
+#include "custom_controls.hpp"
 #include <ftxui/dom/elements.hpp>
 #include <ftxui/screen/color.hpp>
 
@@ -222,6 +223,7 @@ KeyBindings::KeyBindings() {
   key_clear_selection      = Event::Escape;
   key_enter_dir            = Event::Return;
   key_leave_dir            = Event::Character("?");
+  key_open_as_archive      = ctrl_page_down();
   key_refresh_dir          = Event::CtrlR;
   key_toggle_single_panel_mode = Event::CtrlO;
   key_toggle_permissions_column = Event::CtrlL;

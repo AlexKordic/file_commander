@@ -6,8 +6,10 @@
 #include <algorithm>
 #include <cerrno>
 #include <climits>
+#include <condition_variable>
 #include <cstring>
 #include <mutex>
+#include <thread>
 #include <string_view>
 
 #include <dlfcn.h>
@@ -355,9 +357,19 @@ class InFile final : public IInStream, public IStreamGetSize, public RefCounted 
     if (processed) *processed = 0;
     for (;;) {
       const ssize_t n = ::read(_fd, data, size);
-      if (n >= 0) { if (processed) *processed = UInt32(n); return S_OK; }
+      if (n >= 0) {
+        if (processed) *processed = UInt32(n);
+        _consumed += uint64_t(n);
+        return S_OK;
+      }
       if (errno != EINTR) return HRESULT_FROM_WIN32(errno);
     }
+  }
+  // Bytes read so far, for progress through a file read once.
+  uint64_t consumed() const { return _consumed.load(); }
+  uint64_t size() const {
+    struct stat info{};
+    return ::fstat(_fd, &info) == 0 ? uint64_t(info.st_size) : 0;
   }
   STDMETHODIMP Seek(Int64 offset, UInt32 origin, UInt64* position) noexcept override { return seek_fd(_fd, offset, origin, position); }
   STDMETHODIMP GetSize(UInt64* size) noexcept override {
@@ -371,6 +383,7 @@ class InFile final : public IInStream, public IStreamGetSize, public RefCounted 
   explicit InFile(int fd) : _fd(fd) {}
   ~InFile() override { ::close(_fd); }
   int _fd;
+  std::atomic<uint64_t> _consumed{0};
 };
 
 class OutFile final : public IOutStream, public RefCounted {
@@ -672,6 +685,224 @@ class UpdateCallback final : public IArchiveUpdateCallback, public ICryptoGetTex
   std::string _error;
 };
 
+Entry entry_at(const Library& lib, IInArchive* handler, UInt32 i, const Filepath& file);
+
+// A bounded byte queue from one writer thread to one reader: a compressed stream's handler decodes into it while tar reads from it, so the decompressed tar is never stored.
+class Pipe {
+ public:
+  explicit Pipe(size_t capacity) : _buffer(capacity) {}
+  HRESULT write(const char* data, size_t size) {
+    std::unique_lock lock(_mutex);
+    while (size > 0) {
+      _changed.wait(lock, [&] { return _count < _buffer.size() || _reader_gone; });
+      if (_reader_gone) return E_ABORT;
+      const size_t n = std::min(size, _buffer.size() - _count);
+      for (size_t i = 0; i < n; ++i) _buffer[(_start + _count + i) % _buffer.size()] = data[i];
+      _count += n;
+      data += n;
+      size -= n;
+      _changed.notify_all();
+    }
+    return S_OK;
+  }
+  // Fewer bytes than asked, or none at the end of the stream.
+  size_t read(char* data, size_t size) {
+    std::unique_lock lock(_mutex);
+    _changed.wait(lock, [&] { return _count > 0 || _writer_done; });
+    const size_t n = std::min(size, _count);
+    for (size_t i = 0; i < n; ++i) data[i] = _buffer[(_start + i) % _buffer.size()];
+    _start = (_start + n) % _buffer.size();
+    _count -= n;
+    _changed.notify_all();
+    return n;
+  }
+  void close_writer() {
+    std::lock_guard lock(_mutex);
+    _writer_done = true;
+    _changed.notify_all();
+  }
+  void close_reader() {
+    std::lock_guard lock(_mutex);
+    _reader_gone = true;
+    _changed.notify_all();
+  }
+
+ private:
+  std::mutex _mutex;
+  std::condition_variable _changed;
+  std::vector<char> _buffer;
+  size_t _start = 0, _count = 0;
+  bool _writer_done = false, _reader_gone = false;
+};
+
+class PipeWriter final : public ISequentialOutStream, public RefCounted {
+ public:
+  explicit PipeWriter(std::shared_ptr<Pipe> pipe) : _pipe(std::move(pipe)) {}
+  STDMETHOD(QueryInterface)(REFIID iid, void** out) override {
+    *out = nullptr;
+    if (iid == IID_IUnknown || iid == IID_ISequentialOutStream) *out = static_cast<ISequentialOutStream*>(this);
+    else return E_NOINTERFACE;
+    AddRef();
+    return S_OK;
+  }
+  STDMETHOD_(ULONG, AddRef)() override { return add_ref(); }
+  STDMETHOD_(ULONG, Release)() override { return release(); }
+  STDMETHODIMP Write(const void* data, UInt32 size, UInt32* processed) noexcept override {
+    const HRESULT hr = _pipe->write(static_cast<const char*>(data), size);
+    if (processed) *processed = hr == S_OK ? size : 0;
+    return hr;
+  }
+
+ private:
+  std::shared_ptr<Pipe> _pipe;
+};
+
+class PipeReader final : public ISequentialInStream, public RefCounted {
+ public:
+  explicit PipeReader(std::shared_ptr<Pipe> pipe) : _pipe(std::move(pipe)) {}
+  STDMETHOD(QueryInterface)(REFIID iid, void** out) override {
+    *out = nullptr;
+    if (iid == IID_IUnknown || iid == IID_ISequentialInStream) *out = static_cast<ISequentialInStream*>(this);
+    else return E_NOINTERFACE;
+    AddRef();
+    return S_OK;
+  }
+  STDMETHOD_(ULONG, AddRef)() override { return add_ref(); }
+  STDMETHOD_(ULONG, Release)() override { return release(); }
+  STDMETHODIMP Read(void* data, UInt32 size, UInt32* processed) noexcept override {
+    const size_t n = _pipe->read(static_cast<char*>(data), size);
+    if (processed) *processed = UInt32(n);
+    return S_OK;
+  }
+
+ private:
+  std::shared_ptr<Pipe> _pipe;
+};
+
+// Decodes a compressed stream's single item into the pipe.
+class PipeExtractCallback final : public IArchiveExtractCallback, public RefCounted {
+ public:
+  explicit PipeExtractCallback(std::shared_ptr<Pipe> pipe) : _pipe(std::move(pipe)) {}
+  STDMETHOD(QueryInterface)(REFIID iid, void** out) override {
+    *out = nullptr;
+    if (iid == IID_IUnknown || iid == IID_IProgress || iid == IID_IArchiveExtractCallback) *out = static_cast<IArchiveExtractCallback*>(this);
+    else return E_NOINTERFACE;
+    AddRef();
+    return S_OK;
+  }
+  STDMETHOD_(ULONG, AddRef)() override { return add_ref(); }
+  STDMETHOD_(ULONG, Release)() override { return release(); }
+  STDMETHODIMP SetTotal(UInt64) noexcept override { return S_OK; }
+  STDMETHODIMP SetCompleted(const UInt64*) noexcept override { return S_OK; }
+  STDMETHODIMP GetStream(UInt32, ISequentialOutStream** out, Int32 mode) noexcept override {
+    *out = nullptr;
+    if (mode != NArchive::NExtract::NAskMode::kExtract) return S_OK;
+    *out = new PipeWriter(_pipe);
+    (*out)->AddRef();
+    return S_OK;
+  }
+  STDMETHODIMP PrepareOperation(Int32) noexcept override { return S_OK; }
+  STDMETHODIMP SetOperationResult(Int32 result) noexcept override {
+    this->result = result;
+    return S_OK;
+  }
+  Int32 result = NArchive::NExtract::NOperationResult::kOK;
+
+ private:
+  std::shared_ptr<Pipe> _pipe;
+};
+
+// Extracts entries of a tar read in order: each entry's properties are known only when tar reaches it.
+class SequentialTarCallback final : public IArchiveExtractCallback, public RefCounted {
+ public:
+  SequentialTarCallback(IInArchive* tar, const Filepath& file, const std::function<Filepath(const Entry&)>& output,
+                        const std::function<void(const Entry&, Err)>& finished, const Progress& progress, InFile* source)
+      : _tar(tar), _file(file), _output(output), _finished(finished), _progress(progress), _source(source), _total(source->size()) {}
+  STDMETHOD(QueryInterface)(REFIID iid, void** out) override {
+    *out = nullptr;
+    if (iid == IID_IUnknown || iid == IID_IProgress || iid == IID_IArchiveExtractCallback) *out = static_cast<IArchiveExtractCallback*>(this);
+    else return E_NOINTERFACE;
+    AddRef();
+    return S_OK;
+  }
+  STDMETHOD_(ULONG, AddRef)() override { return add_ref(); }
+  STDMETHOD_(ULONG, Release)() override { return release(); }
+  STDMETHODIMP SetTotal(UInt64) noexcept override { return S_OK; }
+  // Progress is the compressed bytes read, against the compressed file's size: the tar's own size isn't known until its end.
+  STDMETHODIMP SetCompleted(const UInt64*) noexcept override { return report_progress(_progress, _source->consumed(), _total); }
+  STDMETHODIMP GetStream(UInt32 index, ISequentialOutStream** out, Int32 mode) noexcept override {
+    *out = nullptr;
+    finish(NArchive::NExtract::NOperationResult::kOK);
+    if (mode != NArchive::NExtract::NAskMode::kExtract) return S_OK;
+    try {
+      _entry = entry_at(library(), _tar, index, _file);
+    } catch (...) {
+      return E_OUTOFMEMORY;
+    }
+    if (const HRESULT hr = report_progress(_progress, _source->consumed(), _total); hr != S_OK) return hr;
+    Filepath path;
+    try {
+      path = _output(_entry);
+    } catch (...) {
+      return E_FAIL;
+    }
+    if (path.empty() || _entry.directory || !_entry.symlink.empty()) return S_OK;
+    _current = true;
+    int error = 0;
+    auto file = OutFile::create(path, error);
+    if (!file) {
+      _open_error = "cannot create " + path.native() + ": " + std::strerror(error);
+      return S_OK;
+    }
+    _out = file;
+    *out = file.get();
+    file->AddRef();
+    return S_OK;
+  }
+  STDMETHODIMP PrepareOperation(Int32) noexcept override { return S_OK; }
+  STDMETHODIMP SetOperationResult(Int32 result) noexcept override {
+    finish(result);
+    return S_OK;
+  }
+  void abandon(const std::string& why) {
+    if (_current) {
+      _open_error = why;
+      finish(NArchive::NExtract::NOperationResult::kOK);
+    }
+  }
+
+ private:
+  void finish(Int32 result) {
+    if (!_current) return;
+    std::string why = _open_error;
+    if (_out) {
+      if (const int error = _out->close(); error != 0 && why.empty()) why = std::string("cannot write: ") + std::strerror(error);
+      _out = {};
+    }
+    if (why.empty()) why = operation_result_text(result);
+    _current = false;
+    _open_error.clear();
+    if (_finished) {
+      try {
+        _finished(_entry, why.empty() ? Err() : Err(_entry.path + ": " + why));
+      } catch (...) {
+      }
+    }
+  }
+
+  IInArchive* _tar;
+  const Filepath& _file;
+  const std::function<Filepath(const Entry&)>& _output;
+  const std::function<void(const Entry&, Err)>& _finished;
+  const Progress& _progress;
+  InFile* _source;
+  uint64_t _total;
+  Entry _entry;
+  bool _current = false;
+  ComPtr<OutFile> _out;
+  std::string _open_error;
+};
+
 std::string lower_extension(const Filepath& file) {
   std::string ext = file.extension().native();
   if (!ext.empty() && ext.front() == '.') ext.erase(0, 1);
@@ -707,11 +938,7 @@ std::vector<const HandlerInfo*> candidates(const Filepath& file, const std::stri
   return out;
 }
 
-void read_entries(const Library& lib, IInArchive* handler, const Filepath& file, std::vector<Entry>& entries) {
-  UInt32 count = 0;
-  if (handler->GetNumberOfItems(&count) != S_OK) return;
-  entries.reserve(count);
-  for (UInt32 i = 0; i < count; ++i) {
+Entry entry_at(const Library& lib, IInArchive* handler, UInt32 i, const Filepath& file) {
     Entry e;
     e.index = i;
     Variant path(lib), dir(lib), size(lib), mtime(lib), attrib(lib), posix(lib), encrypted(lib), link(lib);
@@ -738,8 +965,14 @@ void read_entries(const Library& lib, IInArchive* handler, const Filepath& file,
     else if (auto a = number_of(attrib.value); a && (*a & FILE_ATTRIBUTE_UNIX_EXTENSION)) e.posix_mode = uint32_t(*a >> 16);
     if (!e.directory && e.posix_mode && S_ISDIR(*e.posix_mode)) e.directory = true;
     e.symlink = string_of(lib, link.value);
-    entries.push_back(std::move(e));
-  }
+    return e;
+}
+
+void read_entries(const Library& lib, IInArchive* handler, const Filepath& file, std::vector<Entry>& entries) {
+  UInt32 count = 0;
+  if (handler->GetNumberOfItems(&count) != S_OK) return;
+  entries.reserve(count);
+  for (UInt32 i = 0; i < count; ++i) entries.push_back(entry_at(lib, handler, i, file));
 }
 
 void collect(const Filepath& path, const std::string& name, std::vector<Source>& out, Err& error) {
@@ -842,6 +1075,54 @@ Err Archive::extract(const std::vector<uint32_t>& indices, const std::function<F
     callback->abandon(why);
     return Err("Extraction stopped: " + why);
   }
+  return Err();
+}
+
+Err read_compressed_tar(const Filepath& file, const std::string& compression, const std::function<Filepath(const Entry&)>& output,
+                        const std::function<void(const Entry&, Err)>& finished, const Progress& progress) {
+  const auto& lib = library();
+  if (!lib.error.empty()) return Err("Archive support is unavailable: " + lib.error);
+  std::unique_ptr<Archive> outer;
+  if (auto error = Archive::open(file, compression, outer, {}, progress); !error.ok()) return error;
+  if (outer->entries().size() != 1) return Err("Not a compressed tar: " + file.native());
+  const HandlerInfo* tar_info = nullptr;
+  for (const auto& h : lib.handlers)
+    if (h.format.name == "tar") tar_info = &h;
+  if (!tar_info) return Err("7-Zip's library has no tar reader");
+  ComPtr<IInArchive> tar;
+  if (lib.create_object(&tar_info->class_id, &IID_IInArchive, reinterpret_cast<void**>(tar.put())) != S_OK || !tar)
+    return Err("cannot create a tar reader");
+  ComPtr<IArchiveOpenSeq> sequential;
+  if (tar->QueryInterface(IID_IArchiveOpenSeq, reinterpret_cast<void**>(sequential.put())) != S_OK || !sequential)
+    return Err("tar can't be read sequentially");
+  auto pipe = std::make_shared<Pipe>(size_t(1) << 20);
+  ComPtr<PipeReader> reader(new PipeReader(pipe));
+  if (sequential->OpenSeq(reader.get()) != S_OK) return Err("cannot read a tar from " + file.native());
+  // The compressed stream is decoded on its own thread, into the pipe tar reads from.
+  ComPtr<PipeExtractCallback> producer(new PipeExtractCallback(pipe));
+  HRESULT produced = S_OK;
+  auto& state = *outer->_state;
+  std::thread decoder([&] {
+    UInt32 index = 0;
+    {
+      std::lock_guard lock(state.mutex);
+      produced = state.handler->Extract(&index, 1, 0, producer.get());
+    }
+    pipe->close_writer();
+  });
+  ComPtr<SequentialTarCallback> consumer(new SequentialTarCallback(tar.get(), file, output, finished, progress, state.stream.get()));
+  const HRESULT hr = tar->Extract(nullptr, UInt32(-1), 0, consumer.get());
+  pipe->close_reader();  // Stops the decoder when tar ended before the stream did.
+  decoder.join();
+  tar->Close();
+  if (hr != S_OK) {
+    const auto why = progress.cancelled && progress.cancelled->load() ? std::string("cancelled") : hresult_text(hr);
+    consumer->abandon(why);
+    return Err("Extraction stopped: " + why);
+  }
+  if (produced == S_OK && producer->result != NArchive::NExtract::NOperationResult::kOK)
+    return Err(file.native() + ": " + operation_result_text(producer->result));
+  if (produced != S_OK && produced != E_ABORT) return Err("Extraction stopped: " + hresult_text(produced));
   return Err();
 }
 

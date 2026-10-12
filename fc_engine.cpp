@@ -2,6 +2,7 @@
 
 #include "app_model.hpp"
 #include "archive.hpp"
+#include "archive_formats.hpp"
 #include "file_io_jobs.hpp"
 #include "location.hpp"
 #include "remote_fs.hpp"
@@ -172,6 +173,7 @@ const char* type_name(OperationType type) {
   case OperationType::MKDIR: return "MKDIR";
   case OperationType::RENAME: return "RENAME";
   case OperationType::CLIPBOARD: return "CLIPBOARD";
+  case OperationType::EXTRACT: return "EXTRACT";
   }
   return "?";
 }
@@ -466,7 +468,11 @@ void set_columns(int side, bool permissions, bool owner_group) {
 bool open_row(int side, int64_t row) {
   if (!started()) return false;
   int item = item_at(side, row);
-  return item >= 0 && app().pane(side).enter(item);
+  if (item < 0) return false;
+  auto& pane = app().pane(side);
+  const auto result = pane.enter(item);
+  if (result == PaneModel::EnterResult::OfferExtraction) app().offer_extraction(side, pane.dir().items[item].path_ref());
+  return result != PaneModel::EnterResult::NotHandled;
 }
 void go_up(int side) {
   if (started()) app().pane(side).leave();
@@ -600,6 +606,29 @@ std::string copy_start(uint64_t id, int side) {
   if (started()) app().pane(side).clear_selection();
   return "";
 }
+
+SubmitResult submit_extract(const std::string& archive, const std::string& folder, int conflict) {
+  if (folder.empty()) return {"Choose a folder to extract into", 0};
+  if (auto error = archive_mutation_error(Filepath(folder)); !error.empty()) return {error, 0};
+  if (is_remote(Filepath(folder))) return {"Extract into a local folder", 0};
+  const auto mode = conflict == 2 ? Perun::CopyConflictMode::Skip : conflict == 1 ? Perun::CopyConflictMode::Update : Perun::CopyConflictMode::Replace;
+  boost::system::error_code ec;
+  const auto bytes = is_archive_path(Filepath(archive)) ? 0 : int64_t(boost::filesystem::file_size(Filepath(archive), ec));
+  return submit(Perun::extraction_plan(Filepath(archive), Filepath(folder), mode, ec ? 0 : bytes));
+}
+
+void browse_archive(int side, const std::string& archive) {
+  if (started()) app().pane(side).move_to(archive_root(Filepath(archive)));
+}
+
+std::string archive_folder_name(const std::string& archive) { return archive_stem(Filepath(archive)); }
+
+bool archive_holds_many(const std::string& archive) {
+  const auto* row = archive_format_of(Filepath(archive));
+  return !row || row->kind != ArchiveKind::Compressed;
+}
+
+std::string archive_icon(const std::string& name) { return archive_icon_kind(name); }
 
 SubmitResult submit_move(const StringList& sources, const std::string& target, int side) {
   if (auto error = archive_mutation_error(Filepath(target)); !error.empty()) return {error, 0};

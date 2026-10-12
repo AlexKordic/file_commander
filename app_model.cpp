@@ -26,7 +26,8 @@ const std::vector<AppCommand> kCommands = {
   {"names_to_clipboard", "Copy Names", "Edit", "panel", "", "Ctrl+N", "Cmd+C", "Copies the selected names to the clipboard, in display order."},
   {"paths_to_clipboard", "Copy Paths", "Edit", "panel", "", "Ctrl+P", "Opt+Cmd+C", "Copies the selected full paths to the clipboard, in display order."},
   {"find", "Find…", "Edit", "panel", "Find", "F3", "Cmd+F", "Finds files by name below a folder."},
-  {"enter_dir", "Open", "Go", "panel", "", "Enter", "Cmd+Down", "Opens the folder or 7z archive under the cursor."},
+  {"enter_dir", "Open", "Go", "panel", "", "Enter", "Cmd+Down", "Opens the folder or archive under the cursor; offers to extract a compressed file."},
+  {"open_as_archive", "Open as Archive", "Go", "panel", "", "Ctrl+PageDown", "Opt+Cmd+Down", "Browses the file under the cursor as an archive, whatever its name."},
   {"leave_dir", "Enclosing Folder", "Go", "panel", "", "?", "Cmd+Up", "Goes to the parent folder."},
   {"switch_panel", "Switch Pane", "Go", "global", "", "Tab", "Tab", "Moves the focus to the other pane."},
   {"target_right", "Show in Right Pane", "Go", "global", "", "Ctrl+Right", "Opt+Cmd+Right", "Shows the focused folder in the right pane."},
@@ -103,6 +104,17 @@ void AppModel::set_single_pane(bool on) {
   settings_changed();
 }
 
+void AppModel::offer_extraction(int side, const Filepath& archive) {
+  DialogRequest request;
+  request.name     = "Extract";
+  request.side     = side;
+  request.selected = {archive};
+  request.focused  = archive;
+  request.origin   = pane(side).dir().path;
+  request.target   = pane(1 - side).dir().path;
+  _dialogs.push_back(std::move(request));
+}
+
 void AppModel::request_dialog(const std::string& name, bool with_selection) {
   DialogRequest request;
   request.name = name;
@@ -150,9 +162,14 @@ void AppModel::register_commands() {
   }, has_items);
   add("clear_selection", [focused] { focused().clear_selection(); }, always);
   add("select_all", [focused] { focused().select_all(); }, always);
-  add("enter_dir", [focused] {
+  add("enter_dir", [this, focused] {
     auto& pane = focused();
-    if (auto* item = pane.cursor_item()) pane.enter(int(item - pane.dir().items.data()));
+    if (auto* item = pane.cursor_item())
+      if (pane.enter(int(item - pane.dir().items.data())) == PaneModel::EnterResult::OfferExtraction) offer_extraction(_focused, item->path_ref());
+  }, has_items);
+  add("open_as_archive", [focused] {
+    auto& pane = focused();
+    if (auto* item = pane.cursor_item()) pane.browse_archive(int(item - pane.dir().items.data()));
   }, has_items);
   add("leave_dir", [focused] { focused().leave(); }, always);
   add("toggle_permissions_column", [this, focused] {

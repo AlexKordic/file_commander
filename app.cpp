@@ -1,4 +1,5 @@
 #include "app.hpp"
+#include "archive_formats.hpp"
 #include "dialog_support.hpp"
 #include "remote_fs.hpp"
 #include "settings.hpp"
@@ -106,6 +107,7 @@ Panel::Panel(Filepath location, TargetFunc get_target, ExecuteOnUiThread e, Dire
   navigation                  = Container::Tab({}, &_active_dialog);
   _state->move_to             = [this](Filepath where, Filepath focus) { this->move_to(where, focus); };
   _state->enter_archive       = [this](const Filepath& where) { return this->enter_archive(where); };
+  _state->browse_archive      = [this](const Filepath& where) { return this->browse_archive(where); };
   _state->leave_virtual_dir   = [this](int64_t& focused_id) { return this->leave_virtual_dir(focused_id); };
   _state->action.close_dialog = [this]() { close_dialog(); };
   _state->loading             = [this] { return _loading && !_loading_unattended; };
@@ -133,6 +135,7 @@ Panel::Panel(Filepath location, TargetFunc get_target, ExecuteOnUiThread e, Dire
   }));
   // register dialogs
   _overlay_dialogs["Mkdir"]           = std::make_shared<MkdirDialog>(_state);
+  _overlay_dialogs["Extract"]         = std::make_shared<ExtractDialog>(_state);
   _overlay_dialogs["Rename"]          = std::make_shared<RenameDialog>(_state);
   _overlay_dialogs["Copy"]            = std::make_shared<CopyDialog>(_state);
   _overlay_dialogs["Move"]            = std::make_shared<MoveDialog>(_state);
@@ -386,14 +389,41 @@ Filepath Panel::focused_dir() {
   return focused->parent_path();
 }
 
-bool Panel::enter_archive(const Filepath& archive_candidate) {
+int Panel::enter_archive(const Filepath& archive_candidate) {
+  const auto action = enter_action(archive_candidate);
+  if (action == EnterAction::None) return 0;
   if (is_remote(archive_candidate)) {
+    file_operations().report_error("Copy remote archives to a local tab before opening them");
+    return 2;
+  }
+  if (action == EnterAction::Refuse) {
+    file_operations().report_error(std::string(archive_format_of(archive_candidate)->refusal) + ": " + archive_candidate.filename().native());
+    return 2;
+  }
+  if (action == EnterAction::OfferExtraction) {
+    offer_extraction(archive_candidate);
+    return 2;
+  }
+  move_to(archive_root(archive_candidate));
+  return 1;
+}
+
+bool Panel::browse_archive(const Filepath& archive) {
+  if (is_remote(archive)) {
     file_operations().report_error("Copy remote archives to a local tab before opening them");
     return false;
   }
-  if (!is_archive_file_path(archive_candidate)) return false;
-  move_to(archive_root(archive_candidate));
+  move_to(archive_root(archive));
   return true;
+}
+
+void Panel::offer_extraction(const Filepath& archive) {
+  _state->action.dialog              = "Extract";
+  _state->action.arguments           = std::make_shared<CommandArgs>();
+  _state->action.arguments->selected = {archive};
+  _state->action.arguments->focused  = archive;
+  _state->action.arguments->origin   = dir.path;
+  _state->action.show_dialog();
 }
 
 // Leaving an archive's root lands on the archive file itself.
@@ -647,6 +677,7 @@ Element JobProgressBar::render() {
       buttons,
     });
   } break;
+  case JobInstructions::Type::EXTRACT:
   case JobInstructions::Type::DELETE: {
     float       byte_percentage = std::max(0.0, std::min(100.0, 100.0 * job->_bytes_processed / job->_bytes_total));
     float       item_percentage = std::max(0.0, std::min(100.0, job->_items_done * 100.0 / items_total));

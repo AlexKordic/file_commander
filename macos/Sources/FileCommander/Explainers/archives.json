@@ -1,17 +1,19 @@
 {
   "id": "archives",
-  "title": "7z archives",
+  "title": "Archives",
   "order": 12,
   "duration": 60,
   "chapter": "files",
   "needs": {
     "idle_queue": true
   },
-  "summary": "Browse an archive, copy files out, create an archive, and why archives are read-only.",
+  "summary": "Browse an archive, copy files out, extract a compressed tar, open any file as an archive, and create an archive.",
   "covers": {
     "anchors": [
       "pane.left.path",
-      "errors.lines"
+      "errors.lines",
+      "sheet.extract.destination",
+      "sheet.extract.folder"
     ]
   },
   "steps": [
@@ -133,6 +135,122 @@
         "path": {
           "side": "left",
           "ends_with": "/home"
+        }
+      }
+    },
+    {
+      "caption": "Compressed tars ask first",
+      "sub": "Listing a .tar.gz reads all of it, so Enter offers to extract it in one pass"
+    },
+    {
+      "navigate": {
+        "side": "left",
+        "to": "{home}/downloads"
+      }
+    },
+    {
+      "cursor": {
+        "side": "left",
+        "name": "logs-2026.tar.gz"
+      }
+    },
+    {
+      "keys": [
+        "@enter_dir"
+      ]
+    },
+    {
+      "wait": {
+        "sheet": "extract"
+      }
+    },
+    {
+      "wait": {
+        "anchor": "sheet.extract.extract"
+      }
+    },
+    {
+      "highlight": "sheet.extract.destination",
+      "hold": 1400
+    },
+    {
+      "pause": 1400
+    },
+    {
+      "highlight": "sheet.extract.folder",
+      "hold": 1400
+    },
+    {
+      "pause": 1400
+    },
+    {
+      "unhighlight": true
+    },
+    {
+      "click": "sheet.extract.extract",
+      "as_job": "logs"
+    },
+    {
+      "wait": {
+        "sheet": null
+      },
+      "timeout": 20
+    },
+    {
+      "wait": {
+        "job": {
+          "name": "logs",
+          "state": "finished"
+        }
+      },
+      "timeout": 40
+    },
+    {
+      "wait": {
+        "rows": {
+          "side": "right",
+          "contains": "logs-2026"
+        }
+      },
+      "timeout": 20
+    },
+    {
+      "caption": "Open any file as an archive",
+      "sub": "A .docx is a zip inside; Open as Archive browses it"
+    },
+    {
+      "cursor": {
+        "side": "left",
+        "name": "report.docx"
+      }
+    },
+    {
+      "keys": [
+        "@open_as_archive"
+      ]
+    },
+    {
+      "wait": {
+        "rows": {
+          "side": "left",
+          "contains": "word"
+        }
+      },
+      "timeout": 20
+    },
+    {
+      "pause": 1400
+    },
+    {
+      "keys": [
+        "@leave_dir"
+      ]
+    },
+    {
+      "wait": {
+        "path": {
+          "side": "left",
+          "ends_with": "/downloads"
         }
       }
     },

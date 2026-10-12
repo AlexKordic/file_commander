@@ -1,5 +1,6 @@
 #include "pane_model.hpp"
 
+#include "archive_formats.hpp"
 #include "file_io_jobs.hpp"
 #include "location.hpp"
 
@@ -267,29 +268,43 @@ void PaneModel::restore_cursor(const Filepath& focused_before, int index_before)
 }
 
 
-bool PaneModel::enter(int item_index) {
+PaneModel::EnterResult PaneModel::enter(int item_index) {
   auto& items = dir().items;
-  if (item_index < 0 || item_index >= int(items.size())) return false;
+  if (item_index < 0 || item_index >= int(items.size())) return EnterResult::NotHandled;
   const DirItem where = items[item_index];
   if (where.is_dir()) {
     active().filter.clear();
     dir().apply_filter("", true);
     move_to(where.path_ref());
     active().cursor = 0;
+    return EnterResult::Entered;
+  }
+  const auto action = enter_action(where.path_ref());
+  if (action == EnterAction::None) return EnterResult::NotHandled;
+  if (is_remote(where.path_ref())) {
+    file_operations().report_error("Copy remote archives to a local tab before opening them");
+    return EnterResult::Entered;
+  }
+  if (action == EnterAction::Refuse) {
+    file_operations().report_error(std::string(archive_format_of(where.path_ref())->refusal) + ": " + where.path_ref().filename().native());
+    return EnterResult::Entered;
+  }
+  if (action == EnterAction::OfferExtraction) return EnterResult::OfferExtraction;
+  return browse_archive(item_index) ? EnterResult::Entered : EnterResult::NotHandled;
+}
+
+bool PaneModel::browse_archive(int item_index) {
+  auto& items = dir().items;
+  if (item_index < 0 || item_index >= int(items.size()) || items[item_index].is_dir()) return false;
+  const Filepath where = items[item_index].path_ref();
+  if (is_remote(where)) {
+    file_operations().report_error("Copy remote archives to a local tab before opening them");
     return true;
   }
-  if (is_remote(where.path_ref())) {
-    if (is_archive_file_path(where.path_ref())) {
-      file_operations().report_error("Copy remote archives to a local tab before opening them");
-      return true;
-    }
-    return false;
-  }
-  if (!is_archive_file_path(where.path_ref())) return false;
   active().filter.clear();
   dir().apply_filter("", true);
   active().restore.reset();
-  move_to(archive_root(where.path_ref()));
+  move_to(archive_root(where));
   return true;
 }
 

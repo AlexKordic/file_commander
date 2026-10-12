@@ -6,6 +6,7 @@
 #include "bfs.hpp"
 #include "err.hpp"
 #include "location.hpp"
+#include "sevenzip.hpp"
 
 #include <atomic>
 #include <cstdint>
@@ -51,6 +52,11 @@ struct Item {
 };
 Err extract(const std::vector<Item>& items, const std::function<void(const Item&, Err)>& finished, const std::atomic<bool>* cancelled = nullptr,
             const std::function<void(uint64_t)>& progress = {});
+
+// Extracts every entry of `archive` (a local file, or a file inside another archive) in one pass: a compressed tar's entries as they stream past, a compressed file's one file, or every entry of any other archive. `output` names the file to write each entry to, or empty to skip it (folders and links are never written); `finished` hears how each written one went. Progress counts compressed bytes read for a compressed tar.
+Err extract_all(const Filepath& archive, const std::function<Filepath(const SevenZip::Entry&)>& output,
+                const std::function<void(const SevenZip::Entry&, Err)>& finished, const std::atomic<bool>* cancelled = nullptr,
+                const std::function<void(uint64_t done, uint64_t total)>& progress = {});
 
 // Archives stay open while browsed; these close the ones nobody is using.
 void close_unused();

@@ -82,7 +82,7 @@ set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS remote_agent.py)
 add_library(fc_core STATIC
   commander.cpp operation.cpp copy_planner.cpp file_io_jobs.cpp archive.cpp location.cpp
   traversal.cpp settings.cpp workspace.cpp transfer_journal.cpp runtime_paths.cpp scheduled_updates.cpp file_metadata.cpp log.cpp err.cpp remote_fs.cpp
-  sevenzip.cpp)
+  sevenzip.cpp archive_formats.cpp)
 target_include_directories(fc_core PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
 target_include_directories(fc_core PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/generated")
 target_link_libraries(fc_core PUBLIC Boost::filesystem Boost::json Threads::Threads ${CMAKE_DL_LIBS})
@@ -183,7 +183,8 @@ if(BUILD_TESTING)
   endforeach()
   add_executable(fc_archive_tests test/archive_contracts.cpp)
   target_link_libraries(fc_archive_tests PRIVATE fc_core)
-  foreach(_case browse copy cancel nested)
+  target_compile_definitions(fc_archive_tests PRIVATE FC_TEST_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}" FC_TEST_PYTHON="${Python3_EXECUTABLE}")
+  foreach(_case browse copy cancel nested formats extract)
     add_test(NAME fc.archive.${_case} COMMAND fc_archive_tests ${_case})
     set_tests_properties(fc.archive.${_case} PROPERTIES LABELS "core;unit;archive" TIMEOUT 120)
   endforeach()

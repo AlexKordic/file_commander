@@ -272,6 +272,7 @@ JobListDialog::JobListDialog(std::function<void()> close_dialog) : Dialog(nullpt
     case JobInstructions::Type::MKDIR: type_str = "MKDIR"; break;
     case JobInstructions::Type::RENAME: type_str = "RENAME"; break;
     case JobInstructions::Type::CLIPBOARD: type_str = "CLIP"; break;
+    case JobInstructions::Type::EXTRACT: type_str = "EXTR"; break;
     }
 
     std::string icon    = state_icon(state);
@@ -473,6 +474,7 @@ Element JobListDialog::render_detail() {
   case JobInstructions::Type::MKDIR: type_str = "MKDIR"; break;
   case JobInstructions::Type::RENAME: type_str = "RENAME"; break;
   case JobInstructions::Type::CLIPBOARD: type_str = "CLIPBOARD"; break;
+  case JobInstructions::Type::EXTRACT: type_str = "EXTRACT"; break;
   }
 
   int items_done  = static_cast<int>(detail_job->_items_done);

@@ -12,6 +12,7 @@ struct SheetHost: View {
     case .delete(let request): DeleteSheet(request: request)
     case .mkdir(let request): MkdirSheet(request: request)
     case .rename(let request): RenameSheet(request: request)
+    case .extract(let request): ExtractSheet(request: request)
     case .connectSSH: ConnectSheet()
     case .restartEditor: RestartEditorSheet()
     case .transferSpeed: TransferSpeedView(inPopover: false).padding(20).frame(width: 380)
@@ -310,6 +311,69 @@ struct MkdirSheet: View {
         error = detail.errors.first ?? "Couldn't create the folder"
       }
     }
+  }
+}
+
+/// The extraction popup: a compressed tar or compressed file, extracted in one pass to a folder; "Browse anyway" lists it instead.
+struct ExtractSheet: View {
+  let request: DialogRequest
+  @Environment(AppController.self) private var app
+  @State private var destination = ""
+  @State private var intoFolder = true
+  @State private var conflict = 0
+  @State private var error = ""
+
+  private var archive: String { request.focused }
+  private var name: String { (archive as NSString).lastPathComponent }
+  private var folder: String {
+    intoFolder ? (destination as NSString).appendingPathComponent(Engine.archiveFolderName(archive)) : destination
+  }
+
+  var body: some View {
+    SheetFrame(title: "Extract \(name)", subtitle: "Extracts it in one pass; browsing it first reads all of it.", width: 520) {
+      VStack(alignment: .leading, spacing: 10) {
+        TextField("Folder", text: $destination)
+          .textFieldStyle(.roundedBorder)
+          .font(app.theme.font("sheet.field"))
+          .onSubmit(extract)
+          .onChange(of: destination) { error = "" }
+          .explainerAnchor("sheet.extract.destination")
+        if Engine.archiveHoldsMany(archive) {
+          Toggle("Into a folder named “\(Engine.archiveFolderName(archive))”", isOn: $intoFolder)
+            .explainerAnchor("sheet.extract.folder") { intoFolder.toggle() }
+        }
+        Picker("When a file exists:", selection: $conflict) {
+          Text("Replace existing").tag(0).explainerAnchor("sheet.extract.conflict[mode=replace]") { conflict = 0 }
+          Text("Update if newer").tag(1).explainerAnchor("sheet.extract.conflict[mode=update]") { conflict = 1 }
+          Text("Skip existing").tag(2).explainerAnchor("sheet.extract.conflict[mode=skip]") { conflict = 2 }
+        }
+        .pickerStyle(.radioGroup)
+        .explainerAnchor("sheet.extract.conflict")
+        Text("Extracts to \(Engine.displayLocation(folder))").font(.callout).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
+        if !error.isEmpty { Text(error).foregroundStyle(.red) }
+      }
+    } buttons: {
+      Button("Cancel") { app.sheet = nil; app.focusPane(request.side) }.keyboardShortcut(.cancelAction)
+      Button("Browse Anyway", action: browse).explainerAnchor("sheet.extract.browse", action: browse)
+      Button("Extract", action: extract).keyboardShortcut(.defaultAction).explainerAnchor("sheet.extract.extract", action: extract)
+    }
+    .onAppear {
+      destination = request.target
+      intoFolder = Engine.archiveHoldsMany(archive)
+    }
+  }
+
+  private func extract() {
+    let result = app.engine.submitExtract(archive, into: folder, conflict: conflict)
+    if let problem = result.error { error = problem; return }
+    app.sheet = nil
+    app.focusPane(request.side)
+  }
+
+  private func browse() {
+    app.sheet = nil
+    app.engine.browseArchive(request.side, archive)
+    app.focusPane(request.side)
   }
 }
 

@@ -29,7 +29,11 @@ Component clipped_menu(DataSource* data) {
 }
 
 
+// Ctrl+PageDown, as terminals send it: FTXUI has no name for it.
+Event ctrl_page_down() { return Event::Special("\x1B[6;5~"); }
+
 Event event_from_string(std::string s) {
+  if(s == "cpgdn") return ctrl_page_down();
   if(s == "<-") return Event::ArrowLeft;
   if(s == "->") return Event::ArrowRight;
   if(s == "up") return Event::ArrowUp;
@@ -121,6 +125,7 @@ Event event_from_string(std::string s) {
 }
 
 std::string event_to_string(const Event& e) {
+  if (e == ctrl_page_down()) return "Ctrl+PageDown";
   if (e == Event::ArrowLeft) return "<-";
   if (e == Event::ArrowRight) return "->";
   if (e == Event::ArrowUp) return "Up";
@@ -185,6 +190,7 @@ std::string event_to_string(const Event& e) {
 }
 
 std::string event_to_token(const Event& e) {
+  if (e == ctrl_page_down()) return "cpgdn";
   if (e == Event::ArrowLeft) return "<-";
   if (e == Event::ArrowRight) return "->";
   if (e == Event::ArrowUp) return "up";

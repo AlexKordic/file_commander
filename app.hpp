@@ -127,7 +127,10 @@ class Panel : public DialogOverlay {
   Element  render();
   Filepath focused_dir();
 
-  bool enter_archive(const Filepath& archive_candidate);
+  // 0: not an archive; 1: went into it; 2: handled here (the extraction popup, or a refusal).
+  int  enter_archive(const Filepath& archive_candidate);
+  bool browse_archive(const Filepath& archive);  // Open as archive, whatever the name.
+  void offer_extraction(const Filepath& archive);  // The extraction popup.
 
   bool leave_virtual_dir(int64_t& focused_id);
 
@@ -176,6 +179,7 @@ inline std::string job_type_to_string(JobInstructions::Type type) {
   case JobInstructions::Type::MKDIR: return "MKDIR";
   case JobInstructions::Type::RENAME: return "RENAME";
   case JobInstructions::Type::CLIPBOARD: return "CLIPBOARD";
+  case JobInstructions::Type::EXTRACT: return "EXTRACT";
   default: return "?";
   }
 }
