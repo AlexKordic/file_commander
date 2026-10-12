@@ -27,6 +27,57 @@ final class SceneSocketTests: XCTestCase {
   }
 }
 
+final class SceneWireTests: XCTestCase {
+  private func hex(_ bytes: [UInt8]) -> String { bytes.map { String(format: "%02x", $0) }.joined() }
+
+  func testVarintsRoundTripAndBadOnesAreRefused() throws {
+    for value: UInt64 in [0, 1, 127, 128, 300, 16_383, 16_384, UInt64(UInt32.max), .max] {
+      var bytes: [UInt8] = []
+      SceneWire.appendVarint(value, to: &bytes)
+      let read = try XCTUnwrap(try SceneWire.varint(bytes, at: 0))
+      XCTAssertEqual(read.value, value)
+      XCTAssertEqual(read.length, bytes.count)
+      for n in 0..<bytes.count {
+        XCTAssertNil(try SceneWire.varint(Array(bytes.prefix(n)), at: 0), "\(value) cut at \(n) is incomplete, not wrong")
+      }
+    }
+    XCTAssertThrowsError(try SceneWire.varint([0x80, 0x00], at: 0)) { XCTAssertEqual($0 as? SceneWire.Failure, .notMinimal) }
+    XCTAssertThrowsError(try SceneWire.varint([UInt8](repeating: 0xFF, count: 10), at: 0)) {
+      XCTAssertEqual($0 as? SceneWire.Failure, .longVarint)
+    }
+  }
+
+  func testMessagesAreFramedByTypeAndLength() throws {
+    let stream = SceneWire.message(.frame, payload: Array("abc".utf8)) + SceneWire.message(.applied, payload: [])
+    let first = try XCTUnwrap(try SceneWire.readMessage(stream, at: 0))
+    XCTAssertEqual(first.kind, SceneWire.Kind.frame.rawValue)
+    XCTAssertEqual(Array(stream[first.payload]), Array("abc".utf8))
+    let second = try XCTUnwrap(try SceneWire.readMessage(stream, at: first.length))
+    XCTAssertEqual(second.kind, SceneWire.Kind.applied.rawValue)
+    XCTAssertEqual(second.payload.count, 0)
+    XCTAssertNil(try SceneWire.readMessage(Array(stream.prefix(4)), at: 0), "a payload still arriving")
+    var huge: [UInt8] = []
+    SceneWire.appendVarint(2, to: &huge)
+    SceneWire.appendVarint(UInt64(SceneWire.maxPayload + 1), to: &huge)
+    XCTAssertThrowsError(try SceneWire.readMessage(huge, at: 0))
+  }
+
+  /// The app's messages, byte for byte as protoc encodes them from scene.proto
+  /// (`protoc --encode=fresh.scene.v1.<Message>`), so the generated types and
+  /// the schema Fresh decodes agree on every field number.
+  func testMessagesMatchTheSchema() {
+    XCTAssertEqual(hex(SceneInput.hello(telemetry: true).payload()), "08011001")
+    XCTAssertEqual(hex(SceneInput.key(WireKey.with { $0.key = "x"; $0.ctrl = true; $0.shift = true }).payload()), "0a017818013001")
+    let wheel = WireMouse.with { $0.kind = .scrollDown; $0.col = 10; $0.row = 5; $0.n = 1 }
+    XCTAssertEqual(hex(SceneInput.mouse(wheel).payload()), "0806180a20052801")
+    XCTAssertEqual(hex(SceneInput.resize(cols: 200, rows: 61).payload()), "08c801103d")
+    XCTAssertEqual(hex(SceneInput.action(name: "menu_open", argsJson: #"{"name":"File"}"#).payload()),
+                   "0a096d656e755f6f70656e120f7b226e616d65223a2246696c65227d")
+    XCTAssertEqual(hex(SceneInput.applied(seq: 300).payload()), "08ac02")
+    XCTAssertEqual(SceneInput.mouse(wheel).telemetryName.kind, "scrolldown")
+  }
+}
+
 final class SceneTests: XCTestCase {
   private func message(_ json: String) -> SceneMessage {
     SceneMessage(json: Array(json.utf8))!

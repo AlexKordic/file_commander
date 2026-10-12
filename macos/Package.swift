@@ -15,6 +15,9 @@ let package = Package(
   ],
   dependencies: [
     .package(url: "https://github.com/migueldeicaza/SwiftTerm", exact: "1.11.2"),
+    // The scene channel's protobuf runtime; FreshKit's types are generated
+    // from Fresh's scene.proto (macos/tools/gen_scene_proto.sh).
+    .package(url: "https://github.com/apple/swift-protobuf.git", exact: "1.38.1"),
   ],
   targets: [
     .systemLibrary(name: "CFCEngine", path: "Sources/CFCEngine"),
@@ -29,7 +32,7 @@ let package = Package(
     // Annotation engine for explainers: no dependency on File Commander.
     .target(name: "ExplainerKit"),
     // Client of a Fresh session's scene channel: socket, scene model, key mapping.
-    .target(name: "FreshKit"),
+    .target(name: "FreshKit", dependencies: [.product(name: "SwiftProtobuf", package: "swift-protobuf")]),
     .executableTarget(
       name: "FileCommander",
       dependencies: ["FCKit", "ExplainerKit", "FreshKit", .product(name: "SwiftTerm", package: "SwiftTerm")],

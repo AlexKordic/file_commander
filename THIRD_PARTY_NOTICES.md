@@ -12,6 +12,7 @@ notices in third-party source must be retained.
 | LZMA SDK / 7zr | SDK 26.00; fingerprinted source snapshot in `dependencies/` | Public domain; Igor Pavlov and the additional authors named upstream | [SDK statement](licenses/lzma-sdk/lzma-sdk.txt) |
 | Fresh editor | Exact commit and integration bundle in `dependencies.json`; [FC fork](https://github.com/AlexKordic/fresh), [upstream](https://github.com/sinelaw/fresh) | GPL-3.0-or-later; embedded assets and Rust dependencies retain their own terms | [GPLv3](licenses/fresh/LICENSE) |
 | SwiftTerm (macOS app only) | 1.11.2, pinned in `macos/Package.swift`; [upstream](https://github.com/migueldeicaza/SwiftTerm) | MIT, copyright Miguel de Icaza, the xterm.js authors and others | [MIT](licenses/swiftterm/LICENSE) |
+| SwiftProtobuf (macOS app only) | 1.38.1, pinned in `macos/Package.swift`; [upstream](https://github.com/apple/swift-protobuf) | Apache-2.0 with the Runtime Library Exception, copyright Apple Inc. and the Swift project authors | [Apache-2.0](licenses/swift-protobuf/LICENSE.txt) |
 
 FC starts Fresh as a separate executable and communicates with it through its
 command-line/session interface. It does not link Fresh code into `fc`. FC's MIT
