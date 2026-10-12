@@ -379,7 +379,11 @@ menu context change; the app's grid rows are hashed with foldhash. Measured
 on the app's scene path at 200×60 in the same 61,000-line file, a wheel step
 renders in 0.86 ms instead of 1.02 (p50; p95 1.11 instead of 1.27) with 4,950
 allocations instead of 6,570, and paging into new text stays at 2.9–3.0 ms,
-more than half of it spent highlighting the new lines.
+more than half of it spent highlighting the new lines. Plugins' `lines_changed`
+batches are built only for buffers a plugin asked for (Markdown compose and
+live diff ask only for the ones they decorate), so a code buffer's frame no
+longer copies its visible lines for them: about 200 fewer allocations per
+frame and 2.5–3.5% less CPU, with frame times unchanged.
 
 ## ExplainerKit in other projects
 
