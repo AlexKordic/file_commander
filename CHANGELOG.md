@@ -75,6 +75,7 @@
 - Copying to a destination named `.zip`, `.7z`, `.tar`, `.tar.gz`, `.tar.bz2`, `.tar.xz` (and their short forms), or `.gz`, `.bz2`, `.xz` for one file, creates that archive; the copy dialogs say what the name will create. Archives keep symbolic links as links, Unix permissions and times, and empty folders. A compressed tar is written in one pass, without a temporary `.tar`.
 - Encrypted archives (zip AES and ZipCrypto, 7z) ask for their password in a dialog or sheet, again after a wrong one, and FC remembers it until it quits. RAR isn't supported.
 - Linux is built natively against the system's glibc instead of cross-compiled with Zig and musl; a Linux package holds `bin/fc`, `bin/fresh` and `lib/file-commander/7z.so`.
+- Fixed: in the macOS editor, a font without some of the symbols Fresh draws (Monoid lacks the fold marker ▾ and ⌃, for example) no longer scrambles the text: every row after the first such symbol was drawn displaced, overlapping the top of the window.
 
 This is a release candidate. It is built from source; there are no binary
 releases yet.

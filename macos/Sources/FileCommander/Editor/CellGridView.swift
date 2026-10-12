@@ -222,6 +222,9 @@ final class CellGridView: NSView, @preconcurrency NSTextInputClient {
       let line = CTLineCreateWithAttributedString(attributed)
       context.textPosition = CGPoint(x: x, y: -baseline)
       CTLineDraw(line, context)
+      // The text position is the text matrix's translation: left set, it would
+      // move every glyph drawn after this one, whose positions are absolute.
+      context.textPosition = .zero
     }
     if !glyphs.isEmpty { CTFontDrawGlyphs(font, glyphs, positions, glyphs.count, context) }
   }
@@ -251,6 +254,7 @@ final class CellGridView: NSView, @preconcurrency NSTextInputClient {
       context.setFillColor(defaultForeground.cgColor)
       context.textPosition = CGPoint(x: cell.minX, y: -(cell.minY + ascent))
       CTLineDraw(line, context)
+      context.textPosition = .zero
       return
     }
     let focused = window?.isKeyWindow == true && window?.firstResponder === self
