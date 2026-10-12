@@ -8,7 +8,6 @@
 #include <cstdlib>
 #include <format>
 #include <fstream>
-#include <future>
 #include <ftxui/component/screen_interactive.hpp>
 #include <ftxui/dom/table.hpp>
 #include <regex>
@@ -1089,19 +1088,14 @@ void FileCommander::observe_state() {
 
 FileCommander::FileCommander(Filepath l, Filepath r, ExecuteOnUiThread exec, std::function<int()> dimx, RunWithRestoredIO run_with_restored_io, bool defer_load) : left(l, get_target(), exec, {}, defer_load), right(r, get_target(), exec, {}, defer_load), _get_dimx(dimx), _run_with_restored_io(std::move(run_with_restored_io)) {
   _close_dialog = [this]() { close_dialog(); };
-  // Encrypted archives: the reader's thread waits while this thread asks.
-  ArchiveFS::set_password_prompt([this, alive = _alive, exec](const std::string& archive, bool wrong) -> std::optional<std::string> {
-    auto answer  = std::make_shared<std::promise<std::optional<std::string>>>();
-    auto replied = answer->get_future();
-    exec([this, alive, answer, archive, wrong] {
-      if (!alive->load()) return answer->set_value(std::nullopt);
+  // Encrypted archives: the reader's thread waits (ArchiveFS) while this thread asks.
+  ArchiveFS::set_password_prompt([this, alive = _alive, exec](const std::string& archive, bool wrong, ArchiveFS::PasswordAnswer answer) {
+    exec([this, alive, archive, wrong, answer] {
+      if (!alive->load()) return answer(std::nullopt);
       auto dialog = std::static_pointer_cast<ArchivePasswordDialog>(_overlay_dialogs.at("ArchivePassword"));
-      dialog->ask(archive, wrong, [answer](std::optional<std::string> password) { answer->set_value(std::move(password)); });
+      dialog->ask(archive, wrong, answer);
       show_dialog("ArchivePassword");
     });
-    while (replied.wait_for(std::chrono::milliseconds(100)) != std::future_status::ready)
-      if (!alive->load()) return std::nullopt;
-    return replied.get();
   });
   auto emit     = [weak = std::weak_ptr<ApplicationEvents>(events)](std::string name, std::string detail, uint64_t request = 0) {
     if (auto bus = weak.lock()) bus->publish(std::move(name), std::move(detail), request);

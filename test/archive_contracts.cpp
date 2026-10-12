@@ -276,23 +276,34 @@ void names() {
   ArchiveFS::close_unused();
 }
 
-// The password prompt is called from the reading thread; answers come from `answers`, in order.
+// Answers the password questions from `answers`, in order, right away; `silent` leaves them unanswered.
 struct Prompter {
   std::vector<std::optional<std::string>> answers;
   std::vector<std::pair<std::string, bool>> asked;
+  std::vector<ArchiveFS::PasswordAnswer> unanswered;
+  bool silent = false;
   std::mutex mutex;
   void install() {
     // Set from another thread: the thread that sets the prompt is never made to wait for it.
     std::thread([this] {
-      ArchiveFS::set_password_prompt([this](const std::string& archive, bool wrong) -> std::optional<std::string> {
-        std::lock_guard lock(mutex);
-        asked.push_back({archive, wrong});
-        if (answers.empty()) return std::nullopt;
-        auto answer = answers.front();
-        answers.erase(answers.begin());
-        return answer;
+      ArchiveFS::set_password_prompt([this](const std::string& archive, bool wrong, ArchiveFS::PasswordAnswer answer) {
+        std::optional<std::string> password;
+        {
+          std::lock_guard lock(mutex);
+          asked.push_back({archive, wrong});
+          if (silent) return unanswered.push_back(std::move(answer));
+          if (!answers.empty()) {
+            password = answers.front();
+            answers.erase(answers.begin());
+          }
+        }
+        answer(password);
       });
     }).join();
+  }
+  size_t count() {
+    std::lock_guard lock(mutex);
+    return asked.size();
   }
 };
 
@@ -307,7 +318,7 @@ void passwords() {
   require(SevenZip::create("7z", {{f / "tree/a.txt", "a.txt"}, {f / "tree/docs", "docs"}}, f / "made/data.7z", {}, data).ok(), "data.7z");
 
   // The thread that set the prompt fails instead of waiting.
-  ArchiveFS::set_password_prompt([](const std::string&, bool) -> std::optional<std::string> { throw std::runtime_error("asked on the prompt's thread"); });
+  ArchiveFS::set_password_prompt([](const std::string&, bool, ArchiveFS::PasswordAnswer) { throw std::runtime_error("asked on the prompt's thread"); });
   bool refused = false;
   try {
     ArchiveFS::list(archive_root(f / "made/names.7z"));
@@ -352,6 +363,28 @@ void passwords() {
     require(plan->snapshot()->_state == JobState::COMPLETED && read(f / "zips" / name / "a.txt") == "alpha\n", std::string("extract ") + name);
     require(prompter.asked.size() == 2, std::string("asked twice for ") + name);
   }
+
+  // A question nobody answers never holds up a cancel or a shutdown: the waiting read gives up.
+  ArchiveFS::forget_passwords();
+  ArchiveFS::close_unused();
+  prompter.asked.clear();
+  prompter.silent = true;
+  fs::create_directories(f / "waiting");
+  for (bool shut_down : {false, true}) {
+    CopyPlanner planner({{archive_root(f / "made/data.7z") / "a.txt"}, f / "waiting", false, true, CopyConflictMode::Replace});
+    until([&] { return !planner._running.load(); }, "copy discovery timeout");
+    auto job = std::make_shared<JobSpec>(planner.take_plan());
+    auto jobs = make_file_jobs();
+    const auto asked_before = prompter.count();
+    jobs->add_job(job);
+    until([&] { return prompter.count() > asked_before; }, "the copy didn't ask for the password");
+    if (shut_down) jobs->shutdown();
+    else job->_cancel_requested = true;
+    until([&] { return jobs->idle() || job->is_stopped(); }, "an unanswered password question held up the job");
+    jobs->shutdown();
+    require(count_in(f / "waiting") == 0, "a cancelled copy left files");
+  }
+  for (auto& answer : prompter.unanswered) answer(std::string("too late"));  // Answers after the reader gave up are ignored.
   ArchiveFS::set_password_prompt({});
   ArchiveFS::forget_passwords();
   ArchiveFS::close_unused();

@@ -9,6 +9,7 @@
 #include <map>
 #include <memory>
 #include <mutex>
+#include <condition_variable>
 #include <set>
 #include <thread>
 #include <unordered_map>
@@ -157,12 +158,43 @@ std::mutex g_password_mutex;
 std::map<std::string, Remembered> g_passwords;
 ArchiveFS::PasswordPrompt g_prompt;
 std::thread::id g_prompt_thread;
-std::mutex g_ask_mutex;  // One question at a time.
+std::timed_mutex g_ask_mutex;  // One question at a time.
+std::atomic<uint64_t> g_prompt_generation{0};  // Changes when the prompt is replaced or removed: questions it was asked are dropped.
+
+bool stopped(const std::atomic<bool>* cancelled) { return cancelled && cancelled->load(); }
+
+// Asks through the prompt and waits for its answer, or until `cancelled`.
+std::optional<std::string> ask(const ArchiveFS::PasswordPrompt& prompt, const std::string& archive, bool wrong, const std::atomic<bool>* cancelled) {
+  struct Reply {
+    std::mutex mutex;
+    std::condition_variable ready;
+    bool answered = false;
+    std::optional<std::string> password;
+  };
+  auto reply = std::make_shared<Reply>();
+  const auto generation = g_prompt_generation.load();
+  prompt(archive, wrong, [reply](std::optional<std::string> password) {
+    std::lock_guard lock(reply->mutex);
+    if (reply->answered) return;
+    reply->answered = true;
+    reply->password = std::move(password);
+    reply->ready.notify_all();
+  });
+  std::unique_lock lock(reply->mutex);
+  while (!reply->answered) {
+    reply->ready.wait_for(lock, std::chrono::milliseconds(100));
+    if (!reply->answered && (stopped(cancelled) || generation != g_prompt_generation.load())) {
+      reply->answered = true;  // A late answer is ignored.
+      return std::nullopt;
+    }
+  }
+  return reply->password;
+}
 
 SevenZip::PasswordSource password_source(const std::vector<Filepath>& chain, const SourceIdentity& identity) {
   Location where;
   where.archives = chain;
-  return [key = key_of(chain), display = where.display(), identity](bool wrong) -> std::optional<std::string> {
+  return [key = key_of(chain), display = where.display(), identity](bool wrong, const std::atomic<bool>* cancelled) -> std::optional<std::string> {
     auto remembered = [&]() -> std::optional<std::string> {
       std::lock_guard lock(g_password_mutex);
       auto found = g_passwords.find(key);
@@ -179,10 +211,12 @@ SevenZip::PasswordSource password_source(const std::vector<Filepath>& chain, con
       prompt = g_prompt;
     }
     if (!prompt) return std::nullopt;
-    std::lock_guard ask(g_ask_mutex);
+    std::unique_lock turn(g_ask_mutex, std::defer_lock);
+    while (!turn.try_lock_for(std::chrono::milliseconds(100)))
+      if (stopped(cancelled)) return std::nullopt;
     if (!wrong)
       if (auto known = remembered()) return known;  // Answered while this one waited its turn.
-    auto answer = prompt(display, wrong);
+    auto answer = ask(prompt, display, wrong, cancelled);
     if (answer) {
       std::lock_guard lock(g_password_mutex);
       g_passwords[key] = {identity, *answer};
@@ -494,7 +528,7 @@ Err extract(const std::vector<Item>& items, const std::function<void(const Item&
     const auto& group = groups[key];
     std::shared_ptr<Opened> opened;
     try {
-      opened = open_chain(Location::decode(group.front()->source.native()).archives);
+      opened = open_chain(Location::decode(group.front()->source.native()).archives, cancelled);
     } catch (const std::exception& e) {
       return Err(e.what());
     }
@@ -605,6 +639,7 @@ void set_password_prompt(PasswordPrompt prompt) {
   std::lock_guard lock(g_password_mutex);
   g_prompt = std::move(prompt);
   g_prompt_thread = std::this_thread::get_id();
+  ++g_prompt_generation;
 }
 
 void forget_passwords() {

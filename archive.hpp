@@ -64,8 +64,9 @@ Err extract_all(const Filepath& archive, const std::function<Filepath(const Seve
 void close_unused();
 size_t open_count();
 
-// Asks the person for an encrypted archive's password, on whichever thread reads it, and waits for the answer; nullopt when they decline. `archive` is the archive as FC displays it, and `wrong` says the last password given for it was refused. Set it on the thread that shows the questions: that thread is never made to wait, and reads there needing a password fail instead. Passwords that work are kept for the session, for the same archive file.
-using PasswordPrompt = std::function<std::optional<std::string>(const std::string& archive, bool wrong)>;
+// Shows the person a question for an encrypted archive's password and returns at once; `answer` hears the password, or nullopt when they decline, from any thread (only its first call counts). `archive` is the archive as FC displays it, and `wrong` says the last password given for it was refused. The reading thread waits for the answer, and gives up when its read is cancelled (Stop on a pane, a job's Cancel, shutdown), so a question nobody answers never holds up a quit. Set the prompt on the thread that shows the questions: that thread is never made to wait, and reads there needing a password fail instead. Passwords that work are kept for the session, for the same archive file.
+using PasswordAnswer = std::function<void(std::optional<std::string>)>;
+using PasswordPrompt = std::function<void(const std::string& archive, bool wrong, PasswordAnswer answer)>;
 void set_password_prompt(PasswordPrompt prompt);
 void forget_passwords();
 

@@ -40,8 +40,8 @@ struct Progress {
   const std::atomic<bool>* cancelled = nullptr;
 };
 
-// Asked for an encrypted archive's password: `wrong` says the archive refused the one it gave last time. nullopt gives up.
-using PasswordSource = std::function<std::optional<std::string>(bool wrong)>;
+// Asked for an encrypted archive's password: `wrong` says the archive refused the one it gave last time. nullopt gives up. A source that waits for a person must stop waiting, and give up, once `cancelled` (the read's own flag, when it has one) is set.
+using PasswordSource = std::function<std::optional<std::string>(bool wrong, const std::atomic<bool>* cancelled)>;
 
 // The most entries FC lists in one archive (1,000,000); an archive claiming more is refused, so its index can't exhaust memory. Tests lower it.
 size_t entry_limit();

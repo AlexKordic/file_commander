@@ -144,12 +144,14 @@ struct AskpassSheet: View {
   let prompt: AskpassPrompt
   @Environment(AppController.self) private var app
   @State private var secret = ""
+  @FocusState private var secretFocused: Bool
 
   var body: some View {
     SheetFrame(title: !prompt.title.isEmpty ? prompt.title : prompt.kind == .confirm ? "Trust This Host?" : "SSH Needs an Answer", subtitle: "", width: 480) {
       Text(prompt.text).font(prompt.title.isEmpty ? .system(.body, design: .monospaced) : .body).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
       if prompt.kind == .secret {
         SecureField(prompt.field, text: $secret).textFieldStyle(.roundedBorder).onSubmit(ok)
+          .focused($secretFocused)
           .explainerAnchor("sheet.askpass.secret")
       } else {
         Label("Check the fingerprint with the server's administrator before you trust it.", systemImage: "checkmark.shield")
@@ -159,6 +161,7 @@ struct AskpassSheet: View {
       Button("Cancel") { app.askpass.answer(prompt.id, nil); app.sheet = nil }.keyboardShortcut(.cancelAction)
       Button(prompt.kind == .confirm ? "Trust and Connect" : "OK", action: ok).keyboardShortcut(.defaultAction)
     }
+    .onAppear { if prompt.kind == .secret { DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { secretFocused = true } } }
   }
 
   private func ok() {

@@ -491,11 +491,12 @@ class OutFile final : public IOutStream, public RefCounted {
 struct PasswordAsker {
   const PasswordSource& source;
   bool wrong = false;
+  const std::atomic<bool>* cancelled = nullptr;
   bool refused = false;
   std::optional<std::string> given;
   HRESULT ask(BSTR* out) {
     *out = nullptr;
-    if (!given && !refused) given = source ? source(wrong) : std::nullopt;
+    if (!given && !refused) given = source ? source(wrong, cancelled) : std::nullopt;
     if (!given) {
       refused = true;
       return E_ABORT;
@@ -514,7 +515,8 @@ HRESULT report_progress(const Progress& progress, UInt64 done, UInt64 total) {
 
 class OpenCallback final : public IArchiveOpenCallback, public ICryptoGetTextPassword, public RefCounted {
  public:
-  OpenCallback(const PasswordSource& password, bool wrong, const Progress& progress) : _password{password, wrong}, _progress(progress) {}
+  OpenCallback(const PasswordSource& password, bool wrong, const Progress& progress)
+      : _password{password, wrong, progress.cancelled}, _progress(progress) {}
   STDMETHOD(QueryInterface)(REFIID iid, void** out) override {
     *out = nullptr;
     if (iid == IID_IUnknown || iid == IID_IArchiveOpenCallback) *out = static_cast<IArchiveOpenCallback*>(this);
@@ -559,7 +561,7 @@ class ExtractCallback final : public IArchiveExtractCallback, public ICryptoGetT
  public:
   ExtractCallback(const std::vector<Entry>& entries, const std::function<Filepath(const Entry&)>& output,
                   const std::function<void(const Entry&, Err)>& finished, const PasswordSource& password, bool wrong, const Progress& progress)
-      : _entries(entries), _output(output), _finished(finished), _password{password, wrong}, _progress(progress) {}
+      : _entries(entries), _output(output), _finished(finished), _password{password, wrong, progress.cancelled}, _progress(progress) {}
   STDMETHOD(QueryInterface)(REFIID iid, void** out) override {
     *out = nullptr;
     if (iid == IID_IUnknown || iid == IID_IProgress || iid == IID_IArchiveExtractCallback) *out = static_cast<IArchiveExtractCallback*>(this);
@@ -1259,7 +1261,7 @@ Err Archive::extract(const std::vector<uint32_t>& indices, const std::function<F
       break;
     }
   }
-  const PasswordSource same = [&](bool) { return checked; };
+  const PasswordSource same = [&](bool, const std::atomic<bool>*) { return checked; };
   ComPtr<ExtractCallback> callback(new ExtractCallback(_state->entries, output, finished, asked ? same : password, false, progress));
   const HRESULT hr = _state->handler->Extract(sorted.data(), UInt32(sorted.size()), 0, callback.get());
   if (hr != S_OK) {

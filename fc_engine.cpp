@@ -14,7 +14,6 @@
 #include <cstdlib>
 #include <deque>
 #include <format>
-#include <future>
 #include <map>
 #include <mutex>
 
@@ -61,19 +60,22 @@ struct Mailbox {
   }
 };
 
-// Archive passwords: a reader's thread waits on its question until the app answers it, or the engine stops.
+// Archive passwords: a reader's thread waits (in ArchiveFS) until the app answers its question, its read is cancelled, or the engine stops.
 struct Passwords {
   std::mutex                    mutex;
   bool                          closed = false;
   int64_t                       next   = 0;
-  std::map<int64_t, std::shared_ptr<std::promise<std::optional<std::string>>>> waiting;
+  std::map<int64_t, ArchiveFS::PasswordAnswer> waiting;
   std::vector<PasswordQuestion> asked;  // Not yet handed to the app.
   void close() {
-    std::lock_guard lock(mutex);
-    closed = true;
-    for (auto& [id, answer] : waiting) answer->set_value(std::nullopt);
-    waiting.clear();
-    asked.clear();
+    std::map<int64_t, ArchiveFS::PasswordAnswer> answers;
+    {
+      std::lock_guard lock(mutex);
+      closed = true;
+      answers.swap(waiting);
+      asked.clear();
+    }
+    for (auto& [id, answer] : answers) answer(std::nullopt);
   }
 };
 
@@ -289,18 +291,20 @@ StartResult start(const StartOptions& options) {
   Filepath    right    = options.right.empty() ? (options.left.empty() ? fallback : Filepath(options.left)) : Filepath(options.right);
   e.app                = std::make_unique<AppModel>(left, right, poster());
   e.passwords          = std::make_shared<Passwords>();
-  ArchiveFS::set_password_prompt([passwords = e.passwords, wm = std::weak_ptr<Mailbox>(mailbox)](const std::string& archive, bool wrong) {
-    auto answer  = std::make_shared<std::promise<std::optional<std::string>>>();
-    auto replied = answer->get_future();
+  ArchiveFS::set_password_prompt([passwords = e.passwords, wm = std::weak_ptr<Mailbox>(mailbox)](const std::string& archive, bool wrong,
+                                                                                                  ArchiveFS::PasswordAnswer answer) {
+    bool queued = false;
     {
       std::lock_guard lock(passwords->mutex);
-      if (passwords->closed) return std::optional<std::string>();
-      const auto id = ++passwords->next;
-      passwords->waiting[id] = answer;
-      passwords->asked.push_back({id, archive, wrong});
+      if (!passwords->closed) {
+        const auto id = ++passwords->next;
+        passwords->waiting[id] = answer;
+        passwords->asked.push_back({id, archive, wrong});
+        queued = true;
+      }
     }
+    if (!queued) return answer(std::nullopt);  // Stopped: nobody will be asked.
     if (auto m = wm.lock()) m->signal();
-    return replied.get();
   });
   auto emit            = [weak = std::weak_ptr<ApplicationEvents>(e.app->events), wm = std::weak_ptr<Mailbox>(mailbox), &e](std::string name, std::string detail, uint64_t request) {
     if (name == "error_reported" || name == "errors_cleared") ++e.errors_revision;
@@ -362,11 +366,15 @@ Changes drain() {
 
 void answer_password(int64_t id, bool given, const std::string& password) {
   auto& passwords = *engine().passwords;
-  std::lock_guard lock(passwords.mutex);
-  auto found = passwords.waiting.find(id);
-  if (found == passwords.waiting.end()) return;
-  found->second->set_value(given ? std::optional<std::string>(password) : std::nullopt);
-  passwords.waiting.erase(found);
+  ArchiveFS::PasswordAnswer answer;
+  {
+    std::lock_guard lock(passwords.mutex);
+    auto found = passwords.waiting.find(id);
+    if (found == passwords.waiting.end()) return;
+    answer = std::move(found->second);
+    passwords.waiting.erase(found);
+  }
+  answer(given ? std::optional<std::string>(password) : std::nullopt);
 }
 
 PaneInfo pane(int side) {
