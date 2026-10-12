@@ -59,6 +59,12 @@
   skips to the newest frame instead of playing every one. FC builds Fresh
   optimized for speed rather than size, which halves the time each frame
   takes to build.
+- The macOS editor and Fresh exchange compact binary (protobuf) messages
+  instead of JSON. Paging through a large file, a frame is on screen 15 ms
+  after the key instead of 19, and the editor keeps up with 172 frames a
+  second instead of 110; frames are half the size. After updating, run
+  **Restart Editor Backend** once: the new app can't talk to a backend still
+  running the previous build.
 - **Transfer Speed** in the palette changes the speed limit while a copy runs;
   the new limit applies within the running file.
 - The application model shared by both interfaces is now its own library,

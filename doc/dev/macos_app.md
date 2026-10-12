@@ -360,6 +360,18 @@ Fresh's release profile has `"z"`
 scroll frame then builds in 2–3 ms, reaches the app 5–6 ms after the wheel
 event (p50) and is on screen after 10–15 ms (p95 under 20 ms).
 
+The scene channel's protobuf messages
+([fresh_integration.md](fresh_integration.md#scene-channel)) replaced JSON
+and halved a page-down frame (18.6 KiB instead of 40.6). Fresh encodes a
+frame in 0.1 ms instead of 1.6–2.2 ms, and the app decodes it in 0.1 ms
+instead of 0.9–1.1 ms. Paging down through a 61,000-line file
+(`page_down_large.json`) at key-repeat speed, a frame reaches the app 7.1 ms
+after the key instead of 9.8 ms (p50) and is drawn after 15.2 ms instead of
+19.3 ms. Pressing as fast as frames come back, the editor answers 172 presses a
+second instead of 110. Fresh allocates 10,700–14,700 times per frame instead of
+76,000–80,000, all of it while rendering the editor and building its views;
+encoding allocates nothing. Opening a large file takes 120–140 ms either way.
+
 ## ExplainerKit in other projects
 
 ExplainerKit (`macos/Package.swift`, library product `ExplainerKit`) has no
