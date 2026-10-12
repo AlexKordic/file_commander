@@ -348,7 +348,6 @@ final class TutorialCoordinator: ExplainerHost {
     }
     app.engine.setTransferRate(snapshot?.transferRate ?? 0, persist: false)
     app.editor.native.benchFrameDelay = 0
-    app.editor.native.benchWithoutApplied = false
     if app.editor.running && script.needs("editor") { app.editor.detachAll() }
     for id in ["activity", "errors", "find"] {
       NSApp.windows.first { $0.identifier?.rawValue.hasPrefix(id) == true }?.close()
@@ -587,11 +586,8 @@ final class TutorialCoordinator: ExplainerHost {
       textBench.open(path: world.expand(v.string ?? ""), font: app.theme.nsFont("editor.terminal"), frame: mainWindow?.frame ?? .zero)
       try await Task.sleep(for: .milliseconds(500))
     case "editor_bench":
-      // A slow editor, until changed or the script ends: {"apply_ms": extra main-thread time per frame,
-      // "applied": false to stop telling Fresh which frames were applied (set it before the editor
-      // connects for Fresh to send every frame, as it does to a client that never reports)}.
+      // A slow editor, until changed or the script ends: {"apply_ms": extra main-thread time per frame}.
       if let ms = v["apply_ms"]?.number { app.editor.native.benchFrameDelay = ms / 1000 }
-      if let applied = v["applied"]?.bool { app.editor.native.benchWithoutApplied = !applied }
     case "generate_file":
       // A large file for benchmarks: {"from": path, "copies": n, "to": path}. Its first line names it
       // ("// <file name>: n copies of <from name>") and its last is "// END OF LARGE FILE".
@@ -608,7 +604,7 @@ final class TutorialCoordinator: ExplainerHost {
       // within "timeout" ms (default 3000).
       let deadline = ProcessInfo.processInfo.systemUptime + (v["timeout"]?.number ?? 3000) / 1000
       while ProcessInfo.processInfo.systemUptime < deadline {
-        if app.editor.native.store.regions["trustDialog"] is [String: Any] {
+        if app.editor.native.store.trustDialog != nil {
           app.editor.press("Enter", app: app)
           break
         }
@@ -634,7 +630,7 @@ final class TutorialCoordinator: ExplainerHost {
       let native = app.editor.native
       EditorTelemetry.shared.record(["ev": "gesture", "to": target, "speed": gesture.speed, "decay": gesture.decay,
                                      "events": gesture.events.count, "distance": gesture.distance,
-                                     "apply_ms": native.benchFrameDelay * 1000, "applied": !native.benchWithoutApplied])
+                                     "apply_ms": native.benchFrameDelay * 1000])
       await scrollInjector.play(gesture, into: view, record: target)
     case "remember":
       rememberedTabs = [app.engine.left.tabs.count, app.engine.right.tabs.count]
@@ -664,7 +660,7 @@ final class TutorialCoordinator: ExplainerHost {
     let interval = (v["interval_ms"]?.number ?? 33) / 1000
     let limit = Int(v["max"]?.number ?? 20000)
     let label = v["label"]?.string ?? key
-    guard let message = EditorController.message(for: key) else {
+    guard let pressed = EditorController.key(for: key) else {
       throw ExplainerFailure(script: runner.script?.id ?? "", step: runner.stepIndex, message: "Can't send \(key) to the editor")
     }
     let native = app.editor.native
@@ -673,7 +669,7 @@ final class TutorialCoordinator: ExplainerHost {
     var presses = 0, unanswered = 0
     while presses < limit {
       if let until = v["until"], evaluate(until) { break }
-      native.send(message)
+      native.send(.key(pressed))
       presses += 1
       if interval > 0 {
         let next = started + Double(presses) * interval

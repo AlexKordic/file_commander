@@ -306,8 +306,6 @@ def main():
         speed = f", flick {mark['speed']:+.0f} pt/s" if mark.get('speed') else ''
         if mark.get('apply_ms'):
             speed += f", frames take {mark['apply_ms']:.0f} ms longer"
-        if mark.get('applied') is False:
-            speed += ', applied frames not reported'
         print(f"#{i} {target}{speed}")
         for key, value in report.items():
             print(f"  {key:34} {value}")

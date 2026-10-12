@@ -1,7 +1,8 @@
 import Foundation
 import Observation
+import SwiftProtobuf
 
-/// A color from the scene: `#rrggbb`.
+/// A color from the scene.
 public struct SceneColor: Hashable, Sendable {
   public var red, green, blue: UInt8
 
@@ -11,11 +12,9 @@ public struct SceneColor: Hashable, Sendable {
     self.blue = blue
   }
 
-  public init?(_ value: Any?) {
-    guard let text = value as? String, text.count == 7, text.first == "#", let number = UInt32(text.dropFirst(), radix: 16) else {
-      return nil
-    }
-    self.init(red: UInt8(number >> 16 & 0xFF), green: UInt8(number >> 8 & 0xFF), blue: UInt8(number & 0xFF))
+  /// `0xRRGGBB`, as the scene carries colors.
+  public init(packed: UInt32) {
+    self.init(red: UInt8(packed >> 16 & 0xFF), green: UInt8(packed >> 8 & 0xFF), blue: UInt8(packed & 0xFF))
   }
 }
 
@@ -40,16 +39,32 @@ public struct CellRun: Equatable, Sendable {
     cells = text.count
   }
 
-  init?(json: Any) {
-    guard let run = json as? [String: Any], let text = run["t"] as? String else { return nil }
-    self.init(text: text, foreground: SceneColor(run["fg"]), background: SceneColor(run["bg"]),
-              bold: run["b"] as? Bool ?? false, italic: run["i"] as? Bool ?? false,
-              underline: run["u"] as? Bool ?? false, reverse: run["r"] as? Bool ?? false)
+  /// A grid row's runs: its text, cut at each run's byte length, with each
+  /// run's style (fg | bg << 25 | flags << 50; a color 0x1RRGGBB, 0 for the
+  /// default; flags bold 1, italic 2, underline 4, reverse 8).
+  public static func runs(_ row: WireGridRow) -> [CellRun] {
+    var out: [CellRun] = []
+    out.reserveCapacity(row.runBytes.count)
+    let utf8 = row.text.utf8
+    var start = utf8.startIndex
+    for (length, style) in zip(row.runBytes, row.runStyles) {
+      let end = utf8.index(start, offsetBy: Int(length), limitedBy: utf8.endIndex) ?? utf8.endIndex
+      let color = { (c: UInt64) -> SceneColor? in c & 1 << 24 != 0 ? SceneColor(packed: UInt32(c & 0xFF_FFFF)) : nil }
+      let flags = style >> 50
+      out.append(CellRun(text: String(decoding: utf8[start..<end], as: UTF8.self), foreground: color(style & 0x1FF_FFFF),
+                         background: color(style >> 25 & 0x1FF_FFFF), bold: flags & 1 != 0, italic: flags & 2 != 0,
+                         underline: flags & 4 != 0, reverse: flags & 8 != 0))
+      start = end
+    }
+    return out
   }
 
-  /// Decodes one row: an array of runs.
-  public static func row(_ json: Any?) -> [CellRun] {
-    (json as? [Any] ?? []).compactMap { CellRun(json: $0) }
+  /// A popup line's spans as runs.
+  public static func runs(_ line: WirePopupLine) -> [CellRun] {
+    line.spans.map {
+      CellRun(text: $0.text, foreground: $0.hasFg ? SceneColor(packed: $0.fg) : nil, background: $0.hasBg ? SceneColor(packed: $0.bg) : nil,
+              bold: $0.bold, italic: $0.italic, underline: $0.underline, reverse: $0.reverse)
+    }
   }
 }
 
@@ -64,13 +79,8 @@ public struct CellRect: Equatable, Sendable {
     self.height = height
   }
 
-  /// Reads `{x, y, w, h}`.
-  public init?(_ json: Any?) {
-    guard let rect = json as? [String: Any] else { return nil }
-    x = rect["x"] as? Int ?? 0
-    y = rect["y"] as? Int ?? 0
-    width = rect["w"] as? Int ?? 0
-    height = rect["h"] as? Int ?? 0
+  public init(_ rect: WireRect) {
+    self.init(x: Int(rect.x), y: Int(rect.y), width: Int(rect.w), height: Int(rect.h))
   }
 
   public func contains(column: Int, row: Int) -> Bool {
@@ -88,24 +98,24 @@ public struct SceneTheme: Equatable, Sendable {
 
   public init() {}
 
-  init(json: Any?) {
-    guard let theme = json as? [String: Any] else { return }
-    name = theme["name"] as? String ?? ""
-    background = SceneColor(theme["bg"])
-    foreground = SceneColor(theme["fg"])
-    accent = SceneColor(theme["accent"])
-    muted = SceneColor(theme["muted"])
-    selection = SceneColor(theme["selectionBg"])
-    menuBackground = SceneColor(theme["menuBg"])
-    menuForeground = SceneColor(theme["menuFg"])
-    menuHighlight = SceneColor(theme["menuHi"])
-    menuHighlightForeground = SceneColor(theme["menuHighlightFg"])
-    popupBackground = SceneColor(theme["popupBg"])
-    popupForeground = SceneColor(theme["popupFg"])
-    border = SceneColor(theme["border"])
-    statusBackground = SceneColor(theme["statusBg"])
-    statusForeground = SceneColor(theme["statusFg"])
-    tabActiveBackground = SceneColor(theme["tabActiveBg"])
+  init(_ t: WireTheme) {
+    let color = { (has: Bool, value: UInt32) in has ? SceneColor(packed: value) : nil }
+    name = t.name
+    background = color(t.hasBg, t.bg)
+    foreground = color(t.hasFg, t.fg)
+    accent = color(t.hasAccent, t.accent)
+    muted = color(t.hasMuted, t.muted)
+    selection = color(t.hasSelectionBg, t.selectionBg)
+    menuBackground = color(t.hasMenuBg, t.menuBg)
+    menuForeground = color(t.hasMenuFg, t.menuFg)
+    menuHighlight = color(t.hasMenuHi, t.menuHi)
+    menuHighlightForeground = color(t.hasMenuHighlightFg, t.menuHighlightFg)
+    popupBackground = color(t.hasPopupBg, t.popupBg)
+    popupForeground = color(t.hasPopupFg, t.popupFg)
+    border = color(t.hasBorder, t.border)
+    statusBackground = color(t.hasStatusBg, t.statusBg)
+    statusForeground = color(t.hasStatusFg, t.statusFg)
+    tabActiveBackground = color(t.hasTabActiveBg, t.tabActiveBg)
   }
 
   /// Whether text on the editor background should be light.
@@ -115,11 +125,11 @@ public struct SceneTheme: Equatable, Sendable {
   }
 }
 
-/// Fresh's timing for one frame, sent while telemetry is on (`t`).
+/// Fresh's timing for one frame, sent while telemetry is on.
 public struct FrameTiming: Sendable {
   /// How many of this client's messages Fresh had applied when it built the frame.
   public var ack: Int
-  /// Building the scene, and diffing and encoding it for this client, in ms.
+  /// Building the scene, and encoding it and this frame, in ms.
   public var buildMs, diffMs: Double
   /// Of building: rendering the editor into cells, and hashing the grid's rows, in ms.
   public var renderMs, gridMs: Double
@@ -136,119 +146,70 @@ public struct FrameTiming: Sendable {
   /// Allocations and bytes of Fresh's previous push (an `alloc-stats` build).
   public var prevAllocs, prevAllocBytes: Int?
 
-  init?(json: Any?) {
-    guard let t = json as? [String: Any], let ack = t["ack"] as? Int else { return nil }
-    self.ack = ack
-    buildMs = t["build_ms"] as? Double ?? 0
-    diffMs = t["diff_ms"] as? Double ?? 0
-    renderMs = t["render_ms"] as? Double ?? 0
-    gridMs = t["grid_ms"] as? Double ?? 0
-    queued = t["queued"] as? Int ?? 0
-    ahead = t["ahead"] as? Int ?? 0
-    owed = t["owed"] as? Int ?? 0
-    top = t["top"] as? Int ?? 0
-    cpuMs = t["cpu_ms"] as? Double ?? 0
-    prevAllocs = t["prev_allocs"] as? Int
-    prevAllocBytes = t["prev_alloc_bytes"] as? Int
+  init(_ t: WireTiming) {
+    ack = Int(t.ack)
+    buildMs = t.buildMs
+    diffMs = t.encodeMs
+    renderMs = t.renderMs
+    gridMs = t.gridMs
+    queued = Int(t.queued)
+    ahead = Int(t.ahead)
+    owed = Int(t.owed)
+    top = Int(t.top)
+    cpuMs = t.cpuMs
+    prevAllocs = t.hasPrevAllocs ? Int(t.prevAllocs) : nil
+    prevAllocBytes = t.hasPrevAllocBytes ? Int(t.prevAllocBytes) : nil
   }
 }
 
-/// One message from the bridge, parsed off the main thread. A hello carries the
-/// whole scene, flattened into the same paths a frame uses, so the store
-/// applies both the same way.
+/// One message from Fresh, decoded off the main thread: a `ServerHello`'s
+/// whole scene or a `Frame`, with its grid rows already turned into runs.
 public struct SceneMessage: @unchecked Sendable {
   public let isHello: Bool
   public let sequence: Int
-  /// A hello's promise that Fresh holds newer frames back while the client
-  /// has not applied the ones sent, if the client says what it applied
-  /// (`applied` with the frame's `seq`), and then sends the newest scene.
-  public let wantsApplied: Bool
-  /// Changed top-level values (`w`, `h`, `theme`, `clipboard`, `windowId`) and
-  /// regions (`regions.<key>`), except panes and grid rows.
-  public let values: [String: Any]
-  /// Changed grid rows, decoded, by row index.
+  /// What changed (everything, for a hello).
+  public let frame: WireFrame
+  /// Rows sent in full, decoded, by row index.
   public let gridRows: [Int: [CellRun]]
-  /// Grid rows the client already has, by where they were in its previous
-  /// frame (`regions.grid.copy`, asked for with `copies=1`): rows
-  /// `to..<to+count` become the previous `from..<from+count`. A scroll sends
-  /// these for the rows that moved and full rows only for those that came
-  /// into view.
+  /// Rows the client already has, by where they were in its previous frame:
+  /// rows `to..<to+count` become the previous `from..<from+count`.
   public let gridCopies: [(to: Int, from: Int, count: Int)]
   /// The new number of grid rows, when it changed.
   public let gridCount: Int?
-  /// Changed panes by index, and the new pane count when it changed.
-  public let panes: [Int: Any]
-  public let paneCount: Int?
   /// Fresh's timing, when the client asked for telemetry.
   public let timing: FrameTiming?
   /// When the reader had the whole message (system uptime, as `NSEvent.timestamp`),
-  /// how long parsing it took, and its size: for telemetry.
+  /// how long decoding it took, and its size: for telemetry.
   public internal(set) var receivedAt: TimeInterval = 0
   public internal(set) var parseSeconds: TimeInterval = 0
   public internal(set) var bytes = 0
 
-  init?(json data: [UInt8]) {
-    guard let object = try? JSONSerialization.jsonObject(with: Data(data)) as? [String: Any], let type = object["type"] as? String else {
-      return nil
-    }
-    sequence = object["seq"] as? Int ?? 0
-    wantsApplied = object["acks"] as? Bool ?? false
-    timing = FrameTiming(json: object["t"])
-    var values: [String: Any] = [:]
-    var rows: [Int: [CellRun]] = [:]
-    var copies: [(to: Int, from: Int, count: Int)] = []
-    var panes: [Int: Any] = [:]
-    var gridCount: Int?
-    var paneCount: Int?
-    switch type {
-    case "hello":
+  /// Decodes a message of type `kind` (`SceneWire.Kind`): nil for one that
+  /// isn't a hello or a frame, or doesn't decode.
+  public init?(kind: UInt64, payload: ArraySlice<UInt8>) {
+    let frame: WireFrame
+    switch SceneWire.Kind(rawValue: kind) {
+    case .serverHello:
+      guard let hello = try? WireServerHello(serializedBytes: Array(payload)) else { return nil }
       isHello = true
-      let scene = object["scene"] as? [String: Any] ?? [:]
-      for (key, value) in scene where key != "regions" { values[key] = value }
-      for (key, value) in scene["regions"] as? [String: Any] ?? [:] {
-        switch key {
-        case "grid":
-          let all = value as? [Any] ?? []
-          for (index, row) in all.enumerated() { rows[index] = CellRun.row(row) }
-          gridCount = all.count
-        case "panes":
-          let all = value as? [Any] ?? []
-          for (index, pane) in all.enumerated() { panes[index] = pane }
-          paneCount = all.count
-        default:
-          values["regions." + key] = value
-        }
-      }
-      gridCount = gridCount ?? 0
-      paneCount = paneCount ?? 0
-    case "frame":
+      frame = hello.scene
+    case .frame:
+      guard let decoded = try? WireFrame(serializedBytes: Array(payload)) else { return nil }
       isHello = false
-      for (key, value) in object["changed"] as? [String: Any] ?? [:] {
-        if key.hasPrefix("regions.grid.") {
-          let rest = key.dropFirst("regions.grid.".count)
-          if rest == "len" {
-            gridCount = value as? Int
-          } else if rest == "copy" {
-            copies = (value as? [[Int]] ?? []).compactMap { $0.count == 3 ? (to: $0[0], from: $0[1], count: $0[2]) : nil }
-          } else if let index = Int(rest) {
-            rows[index] = CellRun.row(value)
-          }
-        } else if key.hasPrefix("regions.panes.") {
-          let rest = key.dropFirst("regions.panes.".count)
-          if rest == "len" { paneCount = value as? Int } else if let index = Int(rest) { panes[index] = value }
-        } else {
-          values[key] = value
-        }
-      }
+      frame = decoded
     default:
       return nil
     }
-    self.values = values
-    self.gridRows = rows
-    self.gridCopies = copies
-    self.gridCount = gridCount
-    self.panes = panes
-    self.paneCount = paneCount
+    self.frame = frame
+    sequence = Int(frame.seq)
+    var rows: [Int: [CellRun]] = [:]
+    for row in frame.rows { rows[Int(row.index)] = CellRun.runs(row) }
+    gridRows = rows
+    gridCopies = stride(from: 0, to: frame.copies.count - 2, by: 3).map {
+      (to: Int(frame.copies[$0]), from: Int(frame.copies[$0 + 1]), count: Int(frame.copies[$0 + 2]))
+    }
+    gridCount = frame.hasGridLen ? Int(frame.gridLen) : nil
+    timing = frame.hasTiming ? FrameTiming(frame.timing) : nil
   }
 }
 
@@ -258,11 +219,14 @@ public struct SceneChange: Sendable {
   public var sizeChanged = false
   public var cursorChanged = false
   public var themeChanged = false
+  /// The regions that changed, by name: `panes`, `cursor`, `menus`,
+  /// `statusbar`, `fileExplorer`, `separators`, `popups`, `palette`,
+  /// `trustDialog`, `contextMenu`, `keybindingEditor`, `settings`.
   public var regions = Set<String>()
   public var isHello = false
 }
 
-/// The scene as last sent, kept current by applying the bridge's messages.
+/// The scene as last sent, kept current by applying Fresh's messages.
 @MainActor
 @Observable
 public final class SceneStore {
@@ -276,13 +240,20 @@ public final class SceneStore {
   /// The editor's latest copy: its sequence number and text.
   public private(set) var clipboard: (sequence: Int, text: String)?
 
-  /// Every row of the frame, when the client asked for the grid.
+  /// Every row of the frame.
   @ObservationIgnored public private(set) var grid: [[CellRun]] = []
-  /// The panes, as raw JSON objects.
-  @ObservationIgnored public private(set) var panes: [[String: Any]] = []
-  /// Every other region, as raw JSON, by key (`menus`, `statusbar`, `palette`, ...).
-  @ObservationIgnored public private(set) var regions: [String: Any] = [:]
-  /// Raises when the region named by the key changes.
+  @ObservationIgnored public private(set) var panes: [WirePane] = []
+  @ObservationIgnored public private(set) var menus: [WireMenuEntry] = []
+  @ObservationIgnored public private(set) var statusBar: WireStatusView?
+  @ObservationIgnored public private(set) var fileExplorer: WireFileExplorerView?
+  @ObservationIgnored public private(set) var separators: [WireSeparator] = []
+  @ObservationIgnored public private(set) var popups: [WireScenePopup] = []
+  @ObservationIgnored public private(set) var palette: WirePaletteView?
+  @ObservationIgnored public private(set) var trustDialog: WireTrustDialogView?
+  @ObservationIgnored public private(set) var contextMenu: WireContextMenuView?
+  @ObservationIgnored public private(set) var keybindingEditor: WireKeybindingEditorView?
+  @ObservationIgnored public private(set) var settings: WireSettingsView?
+  /// Raises when the region of that name (`SceneChange.regions`) changes.
   public private(set) var regionRevisions: [String: Int] = [:]
 
   /// Called after each message with what it changed.
@@ -291,23 +262,48 @@ public final class SceneStore {
   public init() {}
 
   public func apply(_ message: SceneMessage) {
+    let frame = message.frame
     var change = SceneChange()
     change.isHello = message.isHello
     if message.isHello {
-      regions = [:]
       grid = []
       panes = []
+      menus = []
+      statusBar = nil
+      fileExplorer = nil
+      separators = []
+      popups = []
+      palette = nil
+      trustDialog = nil
+      contextMenu = nil
+      keybindingEditor = nil
+      settings = nil
     }
-    if let w = message.values["w"] as? Int, w != width { width = w; change.sizeChanged = true }
-    if let h = message.values["h"] as? Int, h != height { height = h; change.sizeChanged = true }
-    if let id = message.values["windowId"] as? Int { windowID = id }
-    if message.values.keys.contains("theme") {
-      theme = SceneTheme(json: message.values["theme"])
+    if frame.hasWidth, Int(frame.width) != width {
+      width = Int(frame.width)
+      change.sizeChanged = true
+    }
+    if frame.hasHeight, Int(frame.height) != height {
+      height = Int(frame.height)
+      change.sizeChanged = true
+    }
+    if frame.hasWindowID { windowID = Int(frame.windowID) }
+    if frame.hasTheme {
+      theme = SceneTheme(frame.theme)
       change.themeChanged = true
     }
-    if let copy = message.values["clipboard"] as? [String: Any], let text = copy["text"] as? String {
-      clipboard = (copy["seq"] as? Int ?? 0, text)
+    if frame.hasClipboard { clipboard = (Int(frame.clipboard.seq), frame.clipboard.text) }
+    if frame.hasCursor {
+      let next = (column: Int(frame.cursor.x), row: Int(frame.cursor.y))
+      if next.column != cursor?.column || next.row != cursor?.row {
+        change.cursorChanged = true
+        if let old = cursor { change.rows.insert(old.row) }
+        change.rows.insert(next.row)
+      }
+      cursor = next
+      change.regions.insert("cursor")
     }
+    // Copies read the rows as they were, before this message.
     let previous = grid
     if let count = message.gridCount {
       if count < grid.count { grid.removeLast(grid.count - count) }
@@ -326,29 +322,32 @@ public final class SceneStore {
       grid[index] = row
       change.rows.insert(index)
     }
-    if let count = message.paneCount {
+    if frame.hasPaneLen {
+      let count = Int(frame.paneLen)
       if count < panes.count { panes.removeLast(panes.count - count) }
-      while panes.count < count { panes.append([:]) }
+      while panes.count < count { panes.append(WirePane()) }
     }
-    for (index, pane) in message.panes where index < panes.count {
-      panes[index] = pane as? [String: Any] ?? [:]
+    for update in frame.panes where Int(update.index) < panes.count {
+      panes[Int(update.index)] = update.pane
     }
-    if message.paneCount != nil || !message.panes.isEmpty { change.regions.insert("panes") }
-    for (key, value) in message.values where key.hasPrefix("regions.") {
-      let name = String(key.dropFirst("regions.".count))
-      regions[name] = value
+    if frame.hasPaneLen || !frame.panes.isEmpty { change.regions.insert("panes") }
+    func region(_ present: Bool, _ name: String, _ apply: () -> Void) {
+      guard present else { return }
+      apply()
       change.regions.insert(name)
-      if name == "cursor" {
-        let point = value as? [String: Any]
-        let next = point.flatMap { p in (p["x"] as? Int).flatMap { x in (p["y"] as? Int).map { (x, $0) } } }
-        if next?.0 != cursor?.column || next?.1 != cursor?.row {
-          change.cursorChanged = true
-          if let old = cursor { change.rows.insert(old.row) }
-          if let new = next { change.rows.insert(new.1) }
-        }
-        cursor = next.map { (column: $0.0, row: $0.1) }
-      }
     }
+    region(frame.hasMenus, "menus") { menus = frame.menus.menus }
+    region(frame.hasStatusBar, "statusbar") { statusBar = frame.statusBar.hasValue ? frame.statusBar.value : nil }
+    region(frame.hasFileExplorer, "fileExplorer") { fileExplorer = frame.fileExplorer.hasValue ? frame.fileExplorer.value : nil }
+    region(frame.hasSeparators, "separators") { separators = frame.separators.separators }
+    region(frame.hasPopups, "popups") { popups = frame.popups.popups }
+    region(frame.hasPalette, "palette") { palette = frame.palette.hasValue ? frame.palette.value : nil }
+    region(frame.hasTrustDialog, "trustDialog") { trustDialog = frame.trustDialog.hasValue ? frame.trustDialog.value : nil }
+    region(frame.hasContextMenu, "contextMenu") { contextMenu = frame.contextMenu.hasValue ? frame.contextMenu.value : nil }
+    region(frame.hasKeybindingEditor, "keybindingEditor") {
+      keybindingEditor = frame.keybindingEditor.hasValue ? frame.keybindingEditor.value : nil
+    }
+    region(frame.hasSettings, "settings") { settings = frame.settings.hasValue ? frame.settings.value : nil }
     for name in change.regions { regionRevisions[name, default: 0] += 1 }
     revision += 1
     onChange?(change)

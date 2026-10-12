@@ -16,7 +16,7 @@ are in [doc/dev/building.md](../doc/dev/building.md) and licenses in
 | Boost.Filesystem | Modified subtree `boost/filesystem` in the FC repository | The same FC commit |
 | FTXUI (FC fork) | `https://github.com/AlexKordic/FTXUI.git`, branch `fc-integration` | `ff94e7a1008d41e11ce040702654eed6aff1e52c` |
 | LuaJIT | `https://github.com/LuaJIT/LuaJIT.git` | `233ad24035944ece5367157e824e8357df3417d9` |
-| Fresh (FC fork) | `https://github.com/sinelaw/fresh.git` plus `dependencies/fresh-fc.bundle`; also branch `fc-editor-workflow` of `https://github.com/AlexKordic/fresh` | `1dedacf118f18b78681690f64874f65f4b97e2a3` on upstream base `b10f9084f5eae571e9b8dac1a0f3694384bcb53d`; bundle SHA-256 `48435b99e64e234293f103543d67311423e762c59ac1236cd32eb1b8c7ddfd34` |
+| Fresh (FC fork) | `https://github.com/sinelaw/fresh.git` plus `dependencies/fresh-fc.bundle`; also branch `fc-editor-workflow` of `https://github.com/AlexKordic/fresh` | `fb2c4519ac1d83f35ae8b560f0cf732c354f5ced` on upstream base `b10f9084f5eae571e9b8dac1a0f3694384bcb53d`; bundle SHA-256 `7ed1434e012d3662a050913f96765a8de360d5208fb59f15351e6cddea6ebf69` |
 | LZMA SDK | `dependencies/lzma-sdk-26.00.tar.gz` in the FC repository | 26.00; archive SHA-256 `282b4d32b47e83a4b4215b174988d967ba02407e243a46b963779cde38931cc6`; source fingerprint `744ef6617d606d78676e06d3ab30784072c8a936a4c629c76d5877b93710e66c` over 606 files |
 
 FTXUI and Fresh carry FC changes; LuaJIT and Boost come from their public
@@ -57,7 +57,7 @@ pinned revision is FC's fork of it:
   `b10f9084f5eae571e9b8dac1a0f3694384bcb53d`, which is Fresh 0.5.2 plus 40
   upstream commits. It includes the upstream fix that makes daemon sessions run
   the shared editor tick, so recovery saves happen in the background.
-- **Pinned revision** (`revision`): `1dedacf118f18b78681690f64874f65f4b97e2a3`,
+- **Pinned revision** (`revision`): `fb2c4519ac1d83f35ae8b560f0cf732c354f5ced`,
   the base plus FC's commits on the `fc-editor-workflow` branch.
 - **Bundle** (`fresh-fc.bundle`): a Git bundle holding exactly the commits from
   the base to the pinned revision, with the branch head
@@ -113,6 +113,13 @@ source tree.
   most two frames unapplied by a client that reports what it applied (then
   the newest scene), and a scrolled grid sent as copies of the rows the client
   already has, with rows built only when sent.
+- Speak protobuf on the scene socket: messages framed by type and length
+  (varints) with a schema (`scene.proto`) the app generates its types from,
+  in place of WebSocket and JSON; the browser front end keeps JSON over TCP.
+  Each push encodes the scene's parts once for every client and allocates
+  nothing once its buffers have grown; scenes render into one terminal kept
+  between frames. Telemetry adds Fresh's CPU time and, in an `alloc-stats`
+  build, its allocations per push.
 
 ### Update an existing checkout
 
@@ -157,7 +164,7 @@ bundle at `share/file-commander/fresh-fc.bundle`:
 
 ```sh
 BASE=b10f9084f5eae571e9b8dac1a0f3694384bcb53d   # git.fresh.base_revision
-REV=1dedacf118f18b78681690f64874f65f4b97e2a3    # git.fresh.revision
+REV=fb2c4519ac1d83f35ae8b560f0cf732c354f5ced    # git.fresh.revision
 BUNDLE=/path/to/share/file-commander/fresh-fc.bundle
 git clone --no-checkout https://github.com/sinelaw/fresh.git fresh
 git -C fresh cat-file -e "$BASE^{commit}"       # the clone must contain the base

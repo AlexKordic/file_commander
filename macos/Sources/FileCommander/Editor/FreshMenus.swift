@@ -11,7 +11,8 @@ import FreshKit
 @MainActor
 final class FreshMenus: NSObject, NSMenuDelegate {
   private let store: SceneStore
-  private let run: (String, [String: Any]) -> Void
+  /// Runs an action by name with its item's arguments (JSON, or empty).
+  private let run: (String, String) -> Void
   /// Opens File Commander's Settings window.
   var openSettings: (() -> Void)?
   /// Hides the editor and shows the files.
@@ -35,7 +36,7 @@ final class FreshMenus: NSObject, NSMenuDelegate {
     "focus_file_explorer": ("e", .command), "navigate_back": ("-", .command), "navigate_forward": ("=", .command),
   ]
 
-  init(store: SceneStore, run: @escaping (String, [String: Any]) -> Void) {
+  init(store: SceneStore, run: @escaping (String, String) -> Void) {
     self.store = store
     self.run = run
     super.init()
@@ -46,9 +47,7 @@ final class FreshMenus: NSObject, NSMenuDelegate {
     }
   }
 
-  private var entries: [[String: Any]] {
-    (store.regions["menus"] as? [[String: Any]] ?? []).filter { $0["visible"] as? Bool ?? true }
-  }
+  private var entries: [WireMenuEntry] { store.menus.filter(\.visible) }
 
   // MARK: Installing
 
@@ -88,7 +87,7 @@ final class FreshMenus: NSObject, NSMenuDelegate {
   /// Rebuilds the bar when Fresh's top-level menus change (a plugin added one).
   func menusChanged() {
     guard saved != nil else { return }
-    let labels = entries.map { $0["label"] as? String ?? "" }
+    let labels = entries.map(\.label)
     guard labels != installedLabels else { return }
     let bar = buildMainMenu()
     installed = bar
@@ -115,7 +114,7 @@ final class FreshMenus: NSObject, NSMenuDelegate {
     installedLabels = []
     var helpItem: NSMenuItem?
     for (index, entry) in entries.enumerated() {
-      let label = entry["label"] as? String ?? ""
+      let label = entry.label
       installedLabels.append(label)
       let top = NSMenuItem(title: label, action: nil, keyEquivalent: "")
       let menu = NSMenu(title: label)
@@ -159,44 +158,46 @@ final class FreshMenus: NSObject, NSMenuDelegate {
     guard let id = menu.identifier?.rawValue, id.hasPrefix("fresh.") else { return }
     let path = id.dropFirst("fresh.".count).split(separator: ".").compactMap { Int($0) }
     guard let first = path.first, first < entries.count else { return }
-    var items = entries[first]["items"] as? [[String: Any]] ?? []
+    var items = entries[first].items
     for index in path.dropFirst() {
-      guard index < items.count else { return }
-      items = items[index]["items"] as? [[String: Any]] ?? []
+      guard index < items.count, case .submenu(let submenu)? = items[index].item else { return }
+      items = submenu.items
     }
     menu.removeAllItems()
     for (index, entry) in items.enumerated() {
-      switch entry["kind"] as? String {
-      case "sep":
+      switch entry.item {
+      case .separator?:
         if menu.items.last.map({ !$0.isSeparatorItem }) ?? false { menu.addItem(.separator()) }
-      case "submenu":
-        let item = NSMenuItem(title: entry["label"] as? String ?? "", action: nil, keyEquivalent: "")
+      case .submenu(let entry)?:
+        let item = NSMenuItem(title: entry.label, action: nil, keyEquivalent: "")
         let submenu = NSMenu(title: item.title)
         submenu.autoenablesItems = false
         submenu.delegate = self
         submenu.identifier = NSUserInterfaceItemIdentifier(id + ".\(index)")
         item.submenu = submenu
         menu.addItem(item)
-      case "action":
-        let action = entry["action"] as? String ?? ""
-        let item = NSMenuItem(title: entry["label"] as? String ?? action, action: #selector(choose(_:)), keyEquivalent: "")
+      case .action(let entry)?:
+        let action = entry.action
+        let item = NSMenuItem(title: entry.label.isEmpty ? action : entry.label, action: #selector(choose(_:)), keyEquivalent: "")
         item.target = self
-        item.representedObject = MenuAction(name: action, args: entry["args"] as? [String: Any] ?? [:])
-        item.isEnabled = entry["enabled"] as? Bool ?? true
-        if let checked = entry["checked"] as? Bool { item.state = checked ? .on : .off }
+        item.representedObject = MenuAction(name: action, argsJson: entry.argsJson)
+        item.isEnabled = entry.enabled
+        if entry.hasChecked { item.state = entry.checked ? .on : .off }
         if let (key, modifiers) = FreshMenus.shortcuts[action] {
           item.keyEquivalent = key
           item.keyEquivalentModifierMask = modifiers
-        } else if let accel = entry["accel"] as? String, !accel.isEmpty {
-          item.attributedTitle = FreshMenus.title(item.title, accelerator: accel)
+        } else if !entry.accel.isEmpty {
+          item.attributedTitle = FreshMenus.title(item.title, accelerator: entry.accel)
         }
         menu.addItem(item)
-      default:
-        if let label = entry["label"] as? String, !label.isEmpty {
-          let item = NSMenuItem(title: label, action: nil, keyEquivalent: "")
+      case .label(let entry)?:
+        if !entry.label.isEmpty {
+          let item = NSMenuItem(title: entry.label, action: nil, keyEquivalent: "")
           item.isEnabled = false
           menu.addItem(item)
         }
+      case nil:
+        break
       }
     }
     while menu.items.last?.isSeparatorItem == true { menu.removeItem(at: menu.items.count - 1) }
@@ -204,7 +205,7 @@ final class FreshMenus: NSObject, NSMenuDelegate {
 
   @objc private func choose(_ sender: NSMenuItem) {
     guard let action = sender.representedObject as? MenuAction else { return }
-    run(action.name, action.args)
+    run(action.name, action.argsJson)
   }
 
   /// "Title" with Fresh's own shortcut right-aligned, for keys that aren't Cmd chords.
@@ -221,10 +222,10 @@ final class FreshMenus: NSObject, NSMenuDelegate {
 
 private final class MenuAction: NSObject {
   let name: String
-  let args: [String: Any]
+  let argsJson: String
 
-  init(name: String, args: [String: Any]) {
+  init(name: String, argsJson: String) {
     self.name = name
-    self.args = args
+    self.argsJson = argsJson
   }
 }

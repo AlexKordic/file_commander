@@ -1,32 +1,6 @@
 import XCTest
 @testable import FreshKit
 
-final class SceneSocketTests: XCTestCase {
-  func testClientFramesAreMaskedAndDecode() {
-    for size in [5, 200, 70_000] {
-      let payload = (0..<size).map { UInt8($0 % 251) }
-      let frame = SceneSocket.encode(opcode: 0x1, payload: payload)
-      XCTAssertEqual(frame[0], 0x81)
-      XCTAssertNotEqual(frame[1] & 0x80, 0, "client frames are masked")
-      guard let decoded = SceneSocket.decode(frame) else { return XCTFail("frame of \(size) bytes didn't decode") }
-      XCTAssertEqual(decoded.opcode, 0x1)
-      XCTAssertEqual(decoded.payload, payload)
-      XCTAssertEqual(decoded.used, frame.count)
-    }
-  }
-
-  func testPartialFramesWait() {
-    let frame = SceneSocket.encode(opcode: 0x1, payload: Array("hello".utf8))
-    XCTAssertNil(SceneSocket.decode(Array(frame.prefix(frame.count - 1))))
-  }
-
-  func testHeaderEnd() {
-    let head = Array("HTTP/1.1 101 Switching\r\nUpgrade: websocket\r\n\r\nrest".utf8)
-    XCTAssertEqual(SceneSocket.headerEnd(head), head.count - 8)
-    XCTAssertNil(SceneSocket.headerEnd(Array("HTTP/1.1 101\r\n".utf8)))
-  }
-}
-
 final class SceneWireTests: XCTestCase {
   private func hex(_ bytes: [UInt8]) -> String { bytes.map { String(format: "%02x", $0) }.joined() }
 
@@ -79,74 +53,166 @@ final class SceneWireTests: XCTestCase {
 }
 
 final class SceneTests: XCTestCase {
-  private func message(_ json: String) -> SceneMessage {
-    SceneMessage(json: Array(json.utf8))!
+  /// A run's style as Fresh packs it: fg | bg << 25 | flags << 50, a color
+  /// 0x1RRGGBB (0 for the default), flags bold 1, italic 2, underline 4, reverse 8.
+  private func style(fg: UInt64? = nil, bg: UInt64? = nil, flags: UInt64 = 0) -> UInt64 {
+    (fg.map { 1 << 24 | $0 } ?? 0) | (bg.map { 1 << 24 | $0 } ?? 0) << 25 | flags << 50
   }
 
-  func testHelloFillsTheStore() {
-    let hello = message("""
-      {"type":"hello","seq":0,"scene":{"w":4,"h":2,"windowId":1,
-       "theme":{"name":"dark","bg":"#1e1e1e","fg":"#d4d4d4","accent":"#ff0000"},
-       "regions":{"grid":[[{"t":"ab","fg":"#ffffff","b":true},{"t":"cd"}],[{"t":"ef  "}]],
-                  "panes":[{"leaf":1,"tabs":[{"label":"a.txt","active":true}]}],
-                  "cursor":{"x":1,"y":0},"statusbar":{"rect":{"x":0,"y":1,"w":4,"h":1},"segments":[]}}}}
-      """)
+  private func row(_ index: Int, _ runs: [(String, UInt64)]) -> WireGridRow {
+    WireGridRow.with {
+      $0.index = UInt32(index)
+      $0.text = runs.map(\.0).joined()
+      $0.runBytes = runs.map { UInt32($0.0.utf8.count) }
+      $0.runStyles = runs.map(\.1)
+    }
+  }
+
+  private func rows(_ texts: [String]) -> [WireGridRow] {
+    texts.enumerated().map { row($0.offset, [($0.element, 0)]) }
+  }
+
+  private func hello(_ build: (inout WireFrame) -> Void) throws -> SceneMessage {
+    let bytes: [UInt8] = try WireServerHello.with {
+      $0.version = SceneWire.version
+      $0.scene = WireFrame.with(build)
+    }.serializedBytes()
+    return try XCTUnwrap(SceneMessage(kind: SceneWire.Kind.serverHello.rawValue, payload: bytes[...]))
+  }
+
+  private func frame(_ build: (inout WireFrame) -> Void) throws -> SceneMessage {
+    let bytes: [UInt8] = try WireFrame.with(build).serializedBytes()
+    return try XCTUnwrap(SceneMessage(kind: SceneWire.Kind.frame.rawValue, payload: bytes[...]))
+  }
+
+  func testHelloFillsTheStore() throws {
+    let message = try hello {
+      $0.width = 4
+      $0.height = 2
+      $0.windowID = 1
+      $0.theme = WireTheme.with { $0.name = "dark"; $0.bg = 0x1e1e1e; $0.fg = 0xd4d4d4; $0.accent = 0xff0000 }
+      $0.gridLen = 2
+      $0.rows = [row(0, [("ab", style(fg: 0xffffff, flags: 1)), ("cd", 0)]), row(1, [("ef  ", 0)])]
+      $0.paneLen = 1
+      $0.panes = [WirePaneUpdate.with {
+        $0.pane.tabBar.tabs = [WireTabView.with { $0.label = "a.txt"; $0.active = true }]
+      }]
+      $0.cursor = WireCursor.with { $0.x = 1 }
+      $0.statusBar.value.rect = WireRect.with { $0.y = 1; $0.w = 4; $0.h = 1 }
+    }
     let store = MainActor.assumeIsolated { SceneStore() }
     MainActor.assumeIsolated {
       var seen: SceneChange?
       store.onChange = { seen = $0 }
-      store.apply(hello)
+      store.apply(message)
       XCTAssertEqual(store.width, 4)
       XCTAssertEqual(store.height, 2)
       XCTAssertEqual(store.lines, ["abcd", "ef  "])
       XCTAssertEqual(store.grid[0][0], CellRun(text: "ab", foreground: SceneColor(red: 255, green: 255, blue: 255), bold: true))
       XCTAssertEqual(store.cursor?.column, 1)
       XCTAssertEqual(store.theme.background, SceneColor(red: 0x1e, green: 0x1e, blue: 0x1e))
+      XCTAssertNil(store.theme.muted, "a color left out is the default")
       XCTAssertTrue(store.theme.isDark)
-      XCTAssertEqual(store.panes.count, 1)
-      XCTAssertNotNil(store.regions["statusbar"])
+      XCTAssertEqual(store.panes.first?.tabBar.tabs.first?.label, "a.txt")
+      XCTAssertEqual(store.statusBar.map { CellRect($0.rect) }, CellRect(x: 0, y: 1, width: 4, height: 1))
       XCTAssertEqual(seen?.isHello, true)
     }
   }
 
-  func testFramesReplaceRowsAndRegions() {
+  func testFramesReplaceRowsAndRegions() throws {
     let store = MainActor.assumeIsolated { SceneStore() }
+    let first = try hello {
+      $0.width = 3
+      $0.height = 3
+      $0.gridLen = 3
+      $0.rows = rows(["aaa", "bbb", "ccc"])
+      $0.cursor = WireCursor()
+      $0.statusBar.value.rect = WireRect.with { $0.w = 3; $0.h = 1 }
+    }
+    let typed = try frame {
+      $0.seq = 1
+      $0.rows = [row(1, [("xyz", 0)])]
+      $0.cursor = WireCursor.with { $0.x = 2; $0.y = 1 }
+    }
+    let shrunk = try frame {
+      $0.seq = 2
+      $0.height = 2
+      $0.gridLen = 2
+      $0.paneLen = 1
+      $0.panes = [WirePaneUpdate.with { $0.pane.leaf = 3 }]
+      $0.statusBar = WireStatusBarUpdate()
+    }
     MainActor.assumeIsolated {
-      store.apply(message(#"{"type":"hello","seq":0,"scene":{"w":3,"h":3,"regions":{"grid":[[{"t":"aaa"}],[{"t":"bbb"}],[{"t":"ccc"}]],"panes":[],"cursor":{"x":0,"y":0}}}}"#))
+      store.apply(first)
       var seen = SceneChange()
       store.onChange = { seen = $0 }
-      store.apply(message(#"{"type":"frame","seq":1,"changed":{"regions.grid.1":[{"t":"xyz"}],"regions.cursor":{"x":2,"y":1}}}"#))
+      store.apply(typed)
       XCTAssertEqual(store.lines, ["aaa", "xyz", "ccc"])
       XCTAssertEqual(seen.rows, IndexSet([0, 1]), "the changed row and both cursor rows redraw")
       XCTAssertTrue(seen.cursorChanged)
-      store.apply(message(#"{"type":"frame","seq":2,"changed":{"h":2,"regions.grid.len":2,"regions.panes.len":1,"regions.panes.0":{"leaf":3}}}"#))
+      XCTAssertNotNil(store.statusBar, "a region left out of a frame stays")
+      store.apply(shrunk)
       XCTAssertEqual(store.grid.count, 2)
       XCTAssertEqual(store.height, 2)
-      XCTAssertEqual(store.panes.first?["leaf"] as? Int, 3)
+      XCTAssertEqual(store.panes.first?.leaf, 3)
+      XCTAssertNil(store.statusBar, "a region's update without a value: it's gone")
+      XCTAssertTrue(seen.regions.isSuperset(of: ["panes", "statusbar"]))
     }
   }
 
-  func testCopiedRowsComeFromThePreviousFrame() {
+  func testCopiedRowsComeFromThePreviousFrame() throws {
     let store = MainActor.assumeIsolated { SceneStore() }
+    let first = try hello {
+      $0.width = 1
+      $0.height = 4
+      $0.gridLen = 4
+      $0.rows = rows(["a", "b", "c", "d"])
+    }
+    // Scrolled by two: rows 0-1 are the previous 2-3, rows 2-3 came into view.
+    let down = try frame {
+      $0.seq = 1
+      $0.copies = [0, 2, 2]
+      $0.rows = [row(2, [("e", 0)]), row(3, [("f", 0)])]
+    }
+    // Back up by one, with a row the grid grows by: copies read the rows as they were.
+    let up = try frame {
+      $0.seq = 2
+      $0.gridLen = 5
+      $0.copies = [1, 0, 4]
+      $0.rows = [row(0, [("b", 0)])]
+    }
     MainActor.assumeIsolated {
-      store.apply(message(#"{"type":"hello","seq":0,"scene":{"w":1,"h":4,"regions":{"grid":[[{"t":"a"}],[{"t":"b"}],[{"t":"c"}],[{"t":"d"}]]}}}"#))
+      store.apply(first)
       var seen = SceneChange()
       store.onChange = { seen = $0 }
-      // Scrolled by two: rows 0-1 are the previous 2-3, rows 2-3 came into view.
-      store.apply(message(#"{"type":"frame","seq":1,"changed":{"regions.grid.copy":[[0,2,2]],"regions.grid.2":[{"t":"e"}],"regions.grid.3":[{"t":"f"}]}}"#))
+      store.apply(down)
       XCTAssertEqual(store.lines, ["c", "d", "e", "f"])
       XCTAssertEqual(seen.rows, IndexSet(0..<4))
-      // Back up by one, with a row the grid grows by: copies read the rows as they were.
-      store.apply(message(#"{"type":"frame","seq":2,"changed":{"regions.grid.len":5,"regions.grid.copy":[[1,0,4]],"regions.grid.0":[{"t":"b"}]}}"#))
+      store.apply(up)
       XCTAssertEqual(store.lines, ["b", "c", "d", "e", "f"])
     }
   }
 
-  func testHelloSaysWhetherToReportAppliedFrames() {
-    XCTAssertTrue(message(#"{"type":"hello","seq":0,"scene":{"w":1,"h":1,"regions":{}},"acks":true}"#).wantsApplied)
-    XCTAssertFalse(message(#"{"type":"hello","seq":0,"scene":{"w":1,"h":1,"regions":{}}}"#).wantsApplied, "an older Fresh doesn't ask")
-    let frame = message(#"{"type":"frame","seq":3,"changed":{},"t":{"ack":7,"ahead":2}}"#)
-    XCTAssertEqual(frame.timing?.ahead, 2)
+  func testRunsAreCutByBytesAndCarryTheirStyle() {
+    let packed = row(0, [("hé", style(fg: 0x102030, bg: 0x405060, flags: 2 | 4 | 8)), ("llo", 0)])
+    let runs = CellRun.runs(packed)
+    XCTAssertEqual(runs.map(\.text), ["hé", "llo"])
+    XCTAssertEqual(runs[0], CellRun(text: "hé", foreground: SceneColor(red: 0x10, green: 0x20, blue: 0x30),
+                                    background: SceneColor(red: 0x40, green: 0x50, blue: 0x60),
+                                    italic: true, underline: true, reverse: true))
+    XCTAssertEqual(runs[1], CellRun(text: "llo"), "style 0 is the terminal's default")
+  }
+
+  func testTimingComesWithFramesThatCarryIt() throws {
+    let timed = try frame {
+      $0.seq = 3
+      $0.timing = WireTiming.with { $0.ack = 7; $0.ahead = 2; $0.encodeMs = 0.5 }
+    }
+    XCTAssertEqual(timed.timing?.ack, 7)
+    XCTAssertEqual(timed.timing?.ahead, 2)
+    XCTAssertEqual(timed.timing?.diffMs, 0.5)
+    XCTAssertNil(try frame { $0.seq = 4 }.timing)
+    XCTAssertNil(SceneMessage(kind: SceneWire.Kind.applied.rawValue, payload: []), "not a message Fresh sends")
   }
 
   func testRunsCountCellsByCharacter() {
@@ -159,21 +225,21 @@ final class SceneKeysTests: XCTestCase {
   func testNamedKeysAndModifiers() {
     let enter = SceneKeys.message(keyCode: 36, charactersIgnoringModifiers: "\r", command: false, control: false, option: false,
                                   shift: false, optionAsAlt: false)
-    XCTAssertEqual(enter?["key"] as? String, "Enter")
+    XCTAssertEqual(enter?.key, "Enter")
     let f10 = SceneKeys.message(keyCode: 109, charactersIgnoringModifiers: nil, command: false, control: false, option: false,
                                 shift: false, optionAsAlt: false)
-    XCTAssertEqual(f10?["key"] as? String, "F10")
+    XCTAssertEqual(f10?.key, "F10")
     let save = SceneKeys.message(keyCode: 1, charactersIgnoringModifiers: "s", command: true, control: false, option: false,
                                  shift: false, optionAsAlt: false)
-    XCTAssertEqual(save?["key"] as? String, "s")
-    XCTAssertEqual(save?["meta"] as? Bool, true)
+    XCTAssertEqual(save?.key, "s")
+    XCTAssertEqual(save?.meta, true)
     let redo = SceneKeys.message(keyCode: 6, charactersIgnoringModifiers: "Z", command: true, control: false, option: false,
                                  shift: true, optionAsAlt: false)
-    XCTAssertEqual(redo?["key"] as? String, "Z")
-    XCTAssertEqual(redo?["shift"] as? Bool, true)
+    XCTAssertEqual(redo?.key, "Z")
+    XCTAssertEqual(redo?.shift, true)
     let bookmark = SceneKeys.message(keyCode: 18, charactersIgnoringModifiers: "!", command: false, control: true, option: false,
                                      shift: true, optionAsAlt: false)
-    XCTAssertEqual(bookmark?["code"] as? String, "Digit1", "the digit row names its digit")
+    XCTAssertEqual(bookmark?.code, "Digit1", "the digit row names its digit")
   }
 
   func testTypingGoesToTextInput() {
@@ -183,22 +249,26 @@ final class SceneKeysTests: XCTestCase {
                                    shift: false, optionAsAlt: false), "Option types its character, so dead keys work")
     let alt = SceneKeys.message(keyCode: 3, charactersIgnoringModifiers: "f", command: false, control: false, option: true,
                                 shift: false, optionAsAlt: true)
-    XCTAssertEqual(alt?["alt"] as? Bool, true)
-    XCTAssertEqual(SceneKeys.typing("a\nb").compactMap { $0["key"] as? String }, ["a", "Enter", "b"])
+    XCTAssertEqual(alt?.alt, true)
+    XCTAssertEqual(SceneKeys.typing("a\nb").map(\.key), ["a", "Enter", "b"])
   }
 }
 
-/// Messages recorded from a real Fresh session by macos/tools/record_scene.py.
-/// Rerun the recorder after bumping the Fresh pin: if Fresh changed what it
-/// sends, this fails here instead of in the app.
+/// Messages recorded from a real Fresh session by macos/tools/record_scene.py,
+/// as they came off the socket. Rerun the recorder after bumping the Fresh pin:
+/// if Fresh changed what it sends, this fails here instead of in the app.
 final class RecordedSceneTests: XCTestCase {
   private func recorded() throws -> [SceneMessage] {
-    let url = try XCTUnwrap(Bundle.module.url(forResource: "Fixtures/scene", withExtension: "json"))
-    let all = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(contentsOf: url)) as? [Any])
-    return try all.map { item in
-      let data = try JSONSerialization.data(withJSONObject: item)
-      return try XCTUnwrap(SceneMessage(json: Array(data)), "a recorded message didn't parse")
+    let url = try XCTUnwrap(Bundle.module.url(forResource: "Fixtures/scene", withExtension: "tlv"))
+    let bytes = try [UInt8](Data(contentsOf: url))
+    var messages: [SceneMessage] = []
+    var start = 0
+    while start < bytes.count {
+      let (kind, payload, length) = try XCTUnwrap(try SceneWire.readMessage(bytes, at: start), "a message cut short")
+      messages.append(try XCTUnwrap(SceneMessage(kind: kind, payload: bytes[payload]), "a recorded message didn't decode"))
+      start += length
     }
+    return messages
   }
 
   func testRecordedSessionReplays() throws {
@@ -213,7 +283,7 @@ final class RecordedSceneTests: XCTestCase {
       var sawPalette = false
       for message in messages {
         store.apply(message)
-        if store.regions["palette"] is [String: Any] { sawPalette = true }
+        if store.palette != nil { sawPalette = true }
       }
       XCTAssertEqual(store.width, 80)
       XCTAssertEqual(store.height, 24)
@@ -222,17 +292,18 @@ final class RecordedSceneTests: XCTestCase {
       XCTAssertTrue(store.lines.contains { $0.contains("First line. (recorded)") }, "typed keys reached the buffer")
       XCTAssertNotNil(store.cursor)
       XCTAssertNotNil(store.theme.background)
-      let tabs = store.panes.first?["tabs"] as? [[String: Any]]
-      XCTAssertEqual(tabs?.first?["label"] as? String, "notes.md*", "the edited file's tab says it is modified")
-      XCTAssertEqual(tabs?.first?["modified"] as? Bool, true)
-      XCTAssertNotNil(CellRect((store.regions["statusbar"] as? [String: Any])?["rect"]), "the status bar has its rectangle")
-      let menus = store.regions["menus"] as? [[String: Any]] ?? []
-      XCTAssertTrue(menus.contains { $0["label"] as? String == "File" }, "the menu model is in the scene")
+      let tab = store.panes.first?.tabBar.tabs.first
+      XCTAssertEqual(tab?.label, "notes.md*", "the edited file's tab says it is modified")
+      XCTAssertEqual(tab?.modified, true)
+      XCTAssertEqual(store.statusBar.map { CellRect($0.rect).width }, 80, "the status bar has its rectangle")
+      XCTAssertTrue(store.menus.contains { $0.label == "File" }, "the menu model is in the scene")
       XCTAssertTrue(sawPalette, "the command palette appeared as a region")
-      XCTAssertNil(store.regions["palette"] as? [String: Any], "and closed again")
+      XCTAssertNil(store.palette, "and closed again")
       let fresh = SceneStore()
       fresh.apply(reference)
       XCTAssertEqual(store.grid, fresh.grid, "the frames, copies and all, rebuilt the scene a new connection gets")
+      XCTAssertEqual(store.panes, fresh.panes)
+      XCTAssertEqual(store.menus, fresh.menus)
     }
   }
 }

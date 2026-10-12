@@ -52,10 +52,13 @@ fc_core              unchanged                     locations, plans, jobs, journ
   to the bundled `fc-askpass` with `SSH_ASKPASS_REQUIRE=force`; each prompt
   becomes a sheet.
 - **The native editor.** `FreshKit` speaks the scene protocol described in
-  [fresh_integration.md](fresh_integration.md#scene-channel): `SceneSocket` is
-  a minimal WebSocket client over the Unix socket (frames parsed on a thread of
-  its own, delivered in order on the main actor), `SceneStore` applies `hello`
-  and `frame` messages, and `SceneKeys` maps Mac keys to Fresh's key names. In
+  [fresh_integration.md](fresh_integration.md#scene-channel): `SceneWire`
+  frames protobuf messages by type and length, `SceneSocket` is the
+  connection over the Unix socket (messages decoded on a thread of their own,
+  delivered in order on the main actor), `SceneInput` names the messages the
+  app sends, `SceneStore` applies the hello and the frames into typed views of
+  the scene (the `Wire…` types generated from Fresh's `scene.proto`), and
+  `SceneKeys` maps Mac keys to Fresh's key names. In
   the app, `NativeEditor` owns the connection and one `EditorHostView` for
   the life of the app (the grid, the chrome and the panels);
   `CellGridView` draws the frame's cells with Core Text (every glyph on its
@@ -67,8 +70,8 @@ fc_core              unchanged                     locations, plans, jobs, journ
   `FreshMenus` builds Fresh's menus into the menu bar while the editor is
   shown and the main window is key;
   `FreshModals` shows Fresh's Settings and key binding editor as SwiftUI panels
-  that never take the keyboard and send clicks as `settings` and `kbedit`
-  messages, and steps aside for Fresh's own small dialogs (unsaved-changes
+  that never take the keyboard and send clicks as `SettingsClick` and
+  `KbEditClick` messages, and steps aside for Fresh's own small dialogs (unsaved-changes
   confirmation, the binding edit dialog).
   `EditorController` is the one interface explainers use for either editor.
   Restart Editor Backend disconnects first, because Fresh restarts only with
@@ -148,12 +151,14 @@ needs no Metal toolchain.
 | `fc.model.engine` | The facade end to end: start, rows, glob, jobs, profile lock |
 | `fc.model.editor` | Attaching hands the app the session's scene socket, or the terminal command when there is none |
 | `fc.macos.explainers` | `macos/tools/check_explainers.py`: every step, key, command and anchor in the explainers exists, and every visible command is covered |
-| `swift test --package-path macos` | FCKit drives the real engine; ExplainerKit decodes every explainer and builds captions; FreshKit frames WebSocket messages, applies scenes, maps keys, and replays a scene recorded from a real Fresh session |
+| `swift test --package-path macos` | FCKit drives the real engine; ExplainerKit decodes every explainer and builds captions; FreshKit frames messages by type and length and encodes them as the schema does, applies scenes, maps keys, and replays a scene recorded from a real Fresh session |
 
-`Tests/FreshKitTests/Fixtures/scene.json` comes from
+`Tests/FreshKitTests/Fixtures/scene.tlv` comes from
 `macos/tools/record_scene.py`, which starts a throwaway Fresh session, connects
-to its scene socket as the app does, types a few keys and opens the palette.
-Rerun it after bumping the Fresh pin, then run the tests.
+to its scene socket as the app does, types a few keys, opens the palette and
+scrolls, and saves the messages as they came off the socket. Rerun it after
+bumping the Fresh pin, then run the tests. After a change to Fresh's
+`scene.proto`, regenerate the app's types with `macos/tools/gen_scene_proto.sh`.
 
 The explainers are end-to-end tests of the app. Run one, or all of them, in a
 throwaway profile; the app quits with status 0 when the explainer finished and
@@ -267,9 +272,9 @@ object per line, times in milliseconds of system uptime (the clock of
 | `keys` | A benchmark key run starts and ends | `label`, `phase`, `key`, `interval`; at the end `presses`, `unanswered`, `seconds` |
 | `bench` | A benchmark mark | `mark`: `<name>-start` when armed, `<name>` when the first frame showing the watched text was applied |
 
-The app asks Fresh for its part with the scene channel's `telemetry` option
-([fresh_integration.md](fresh_integration.md#scene-channel)), so a session
-started by an older Fresh records only the app's side.
+The app asks Fresh for its part with `telemetry` in its hello, or `Configure`
+when the setting changes
+([fresh_integration.md](fresh_integration.md#scene-channel)).
 
 `macos/tools/editor_telemetry.py <file>` summarizes a recording per scroll
 gesture: how long input waited for the main thread, the round trip from a
@@ -293,10 +298,9 @@ macos/tools/editor_telemetry.py /tmp/fc-bench/telemetry/editor-*.jsonl
 ```
 
 `macos/bench/scroll_slow_app.json` scrolls an editor whose frames each take
-25 ms longer on the main thread, as a slow redraw would: first without telling
-Fresh which frames were applied, so Fresh sends every frame, then telling it,
-so Fresh holds newer frames back and sends the newest scene once the app
-catches up (see [Frames and the app](#frames-and-the-app)).
+25 ms longer on the main thread, as a slow redraw would: Fresh holds newer
+frames back and sends the newest scene once the app catches up (see
+[Frames and the app](#frames-and-the-app)).
 
 `macos/bench/page_down_large.json` opens a small file first, so the timed
 opens find the editor running, then `file_io_jobs.cpp` repeated 40 times
@@ -321,8 +325,7 @@ are host steps like the explainers': `scroll` (`target` `editor` or
 `textview`, `speed` in points per second, negative scrolling down, optional
 `finger_ms` and `decay`), `textview_open` and `textview_close`,
 `window_frame` (`w`, `h`), `editor_bench` (`apply_ms`, extra main-thread time
-for each frame, and `applied: false` to stop reporting applied frames; set it
-before the editor connects for Fresh to send every frame), `generate_file`
+for each frame), `generate_file`
 (`from`, `copies`, `to`: a large file whose first line names it and whose last
 is `// END OF LARGE FILE`), `editor_watch` (`contains`, `mark`: marks when a
 frame first shows the text), `editor_trust` (answers Fresh's prompt to trust a
@@ -337,23 +340,19 @@ a trackpad's.
 
 The scene socket has 4 MiB buffers on both ends; macOS's default of 8 KiB per
 direction is a fraction of one frame, and frames queued up behind it in
-Fresh while scrolling, up to 1.4 s behind the trackpad. When Fresh's hello
-carries `acks`, the app reports each message it applied (`applied` with its
-`seq`) and Fresh keeps at most two frames unapplied: while the app is behind,
-Fresh builds nothing, and once it catches up it gets one frame with the newest
-scene. With frames slowed by 25 ms, that keeps a frame from input to screen at
-p50 64 ms instead of 142 ms. An older Fresh sends no `acks`, and the app then
-reports nothing.
+Fresh while scrolling, up to 1.4 s behind the trackpad. The app reports each
+frame it applied (`Applied` with its `seq`) and Fresh keeps at most two frames
+unapplied: while the app is behind, Fresh builds nothing, and once it catches
+up it gets one frame with the newest scene. With frames slowed by 25 ms, that
+keeps a frame from input to screen at p50 64 ms instead of 142 ms without
+reports.
 
-The app connects with `copies=1`: a frame names grid rows the app already has
-by where they were in its previous frame (`regions.grid.copy`, `[to, from,
-count]` runs, applied to the previous rows before the rows sent in full), so a
-scroll sends only the rows that came into view and the scrollbar's. Fresh
-builds a row's runs only when it sends the row and leaves `false` flags and
-default colors out of them. A scroll frame is 4–10 KiB instead of 55–88 KiB,
-the app parses it in 0.3 ms instead of 1.5–2 ms, and Fresh builds it in
-5–6 ms instead of 7–8 ms. An older Fresh ignores `copies` and sends every
-changed row.
+A frame names grid rows the app already has by where they were in its
+previous frame (`copies`, `[to, from, count]` triples, applied to the
+previous rows before the rows sent in full), so a scroll sends only the rows
+that came into view and the scrollbar's. On the JSON channel this replaced,
+that took a scroll frame from 55–88 KiB to 4–10 KiB, the app's parse from
+1.5–2 ms to 0.3 ms, and Fresh's build from 7–8 ms to 5–6 ms.
 
 FC builds Fresh with its own `fc-release` profile, at `opt-level` 3 where
 Fresh's release profile has `"z"`

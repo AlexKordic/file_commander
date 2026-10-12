@@ -1,7 +1,8 @@
 import Foundation
 
-/// Turns Mac key presses into the bridge's key messages, which use browser key
-/// names (`Enter`, `ArrowUp`, `F5`, single characters) with modifier flags.
+/// Turns Mac key presses into the scene channel's `Key` messages, which use
+/// browser key names (`Enter`, `ArrowUp`, `F5`, single characters) with
+/// modifier flags.
 public enum SceneKeys {
   /// Named keys by virtual key code.
   static let named: [UInt16: String] = [
@@ -28,7 +29,7 @@ public enum SceneKeys {
   /// - Parameter optionAsAlt: Option sends Alt instead of typing its
   ///   character, for Fresh's Alt shortcuts.
   public static func message(keyCode: UInt16, charactersIgnoringModifiers: String?, command: Bool, control: Bool,
-                             option: Bool, shift: Bool, optionAsAlt: Bool) -> [String: Any]? {
+                             option: Bool, shift: Bool, optionAsAlt: Bool) -> WireKey? {
     let alt = option && optionAsAlt
     var key: String
     if let name = named[keyCode] {
@@ -41,19 +42,22 @@ public enum SceneKeys {
     }
     // A letter with Shift is sent uppercase, as a browser reports it.
     if shift, key.count == 1, key.first?.isLetter == true { key = key.uppercased() }
-    var message: [String: Any] = [
-      "type": "key", "key": key, "ctrl": control, "alt": alt, "meta": command, "shift": shift,
-    ]
-    if let code = digitRow[keyCode] { message["code"] = code }
-    return message
+    return WireKey.with {
+      $0.key = key
+      $0.ctrl = control
+      $0.alt = alt
+      $0.meta = command
+      $0.shift = shift
+      if let code = digitRow[keyCode] { $0.code = code }
+    }
   }
 
   /// Key messages that type `text`, one per character; newlines and tabs press
   /// Enter and Tab.
-  public static func typing(_ text: String) -> [[String: Any]] {
+  public static func typing(_ text: String) -> [WireKey] {
     text.map { character in
       let key = character == "\n" || character == "\r\n" ? "Enter" : character == "\t" ? "Tab" : String(character)
-      return ["type": "key", "key": key]
+      return WireKey.with { $0.key = key }
     }
   }
 }

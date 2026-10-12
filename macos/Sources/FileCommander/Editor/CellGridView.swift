@@ -6,7 +6,7 @@ import FreshKit
 /// shape it.
 @MainActor
 protocol CellGridDelegate: AnyObject {
-  func grid(_ grid: CellGridView, send message: [String: Any])
+  func grid(_ grid: CellGridView, send input: SceneInput)
   func gridDidResize(_ grid: CellGridView, columns: Int, rows: Int)
   /// The chord is an app shortcut (Quit, Hide, the switch key, ...) that the
   /// editor must not see; returns true when the owner handled it.
@@ -353,11 +353,11 @@ final class CellGridView: NSView, @preconcurrency NSTextInputClient {
       delegate?.gridPaste(self)
       return
     }
-    if let message = SceneKeys.message(keyCode: event.keyCode, charactersIgnoringModifiers: event.charactersIgnoringModifiers,
-                                       command: flags.contains(.command), control: flags.contains(.control),
-                                       option: flags.contains(.option), shift: flags.contains(.shift),
-                                       optionAsAlt: delegate?.optionAsAlt ?? false) {
-      delegate?.grid(self, send: message)
+    if let key = SceneKeys.message(keyCode: event.keyCode, charactersIgnoringModifiers: event.charactersIgnoringModifiers,
+                                   command: flags.contains(.command), control: flags.contains(.control),
+                                   option: flags.contains(.option), shift: flags.contains(.shift),
+                                   optionAsAlt: delegate?.optionAsAlt ?? false) {
+      delegate?.grid(self, send: .key(key))
       return
     }
     inputContext?.handleEvent(event)
@@ -368,7 +368,7 @@ final class CellGridView: NSView, @preconcurrency NSTextInputClient {
   func insertText(_ string: Any, replacementRange: NSRange) {
     let text = (string as? NSAttributedString)?.string ?? (string as? String) ?? ""
     marked = ""
-    for message in SceneKeys.typing(text) { delegate?.grid(self, send: message) }
+    for key in SceneKeys.typing(text) { delegate?.grid(self, send: .key(key)) }
     setNeedsDisplayCaret()
   }
 
@@ -398,17 +398,20 @@ final class CellGridView: NSView, @preconcurrency NSTextInputClient {
 
   // MARK: Mouse
 
-  private func modifiers(_ event: NSEvent) -> [String: Any] {
-    ["ctrl": event.modifierFlags.contains(.control), "alt": event.modifierFlags.contains(.option),
-     "shift": event.modifierFlags.contains(.shift)]
-  }
-
-  private func sendMouse(_ kind: String, _ event: NSEvent, button: String = "left", extra: [String: Any] = [:]) {
+  private func sendMouse(_ kind: WireMouseKind, _ event: NSEvent, button: WireMouseButton = .left, count: Int = 1, steps: Int = 1) {
     let (column, row) = cell(at: point(of: event))
-    var message: [String: Any] = ["type": "mouse", "kind": kind, "button": button, "col": column, "row": row]
-    message.merge(modifiers(event)) { a, _ in a }
-    message.merge(extra) { _, b in b }
-    delegate?.grid(self, send: message)
+    let flags = event.modifierFlags
+    delegate?.grid(self, send: .mouse(WireMouse.with {
+      $0.kind = kind
+      $0.button = button
+      $0.col = UInt32(clamping: column)
+      $0.row = UInt32(clamping: row)
+      $0.n = UInt32(clamping: steps)
+      $0.count = UInt64(clamping: count)
+      $0.ctrl = flags.contains(.control)
+      $0.alt = flags.contains(.option)
+      $0.shift = flags.contains(.shift)
+    }))
   }
 
   /// Where an event happened in this view. A synthesized event (a scroll
@@ -421,30 +424,30 @@ final class CellGridView: NSView, @preconcurrency NSTextInputClient {
   override func mouseDown(with event: NSEvent) {
     window?.makeFirstResponder(self)
     lastDragCell = nil
-    sendMouse("down", event, extra: ["count": event.clickCount])
+    sendMouse(.down, event, count: event.clickCount)
   }
 
   override func mouseDragged(with event: NSEvent) {
     let cell = cell(at: convert(event.locationInWindow, from: nil))
     guard lastDragCell.map({ $0 != cell }) ?? true else { return }
     lastDragCell = cell
-    sendMouse("drag", event)
+    sendMouse(.drag, event)
   }
 
-  override func mouseUp(with event: NSEvent) { sendMouse("up", event) }
+  override func mouseUp(with event: NSEvent) { sendMouse(.up, event) }
   override func rightMouseDown(with event: NSEvent) {
     window?.makeFirstResponder(self)
-    sendMouse("down", event, button: "right")
+    sendMouse(.down, event, button: .right)
   }
-  override func rightMouseUp(with event: NSEvent) { sendMouse("up", event, button: "right") }
-  override func otherMouseDown(with event: NSEvent) { sendMouse("down", event, button: "middle") }
-  override func otherMouseUp(with event: NSEvent) { sendMouse("up", event, button: "middle") }
+  override func rightMouseUp(with event: NSEvent) { sendMouse(.up, event, button: .right) }
+  override func otherMouseDown(with event: NSEvent) { sendMouse(.down, event, button: .middle) }
+  override func otherMouseUp(with event: NSEvent) { sendMouse(.up, event, button: .middle) }
 
   override func mouseMoved(with event: NSEvent) {
     let cell = cell(at: convert(event.locationInWindow, from: nil))
     guard lastHoverCell.map({ $0 != cell }) ?? true else { return }
     lastHoverCell = cell
-    sendMouse("moved", event)
+    sendMouse(.moved, event)
   }
 
   /// A trackpad moves three rows per scroll step, as one wheel notch does in
@@ -466,11 +469,11 @@ final class CellGridView: NSView, @preconcurrency NSTextInputClient {
     }
     if vertical != 0 {
       scrollRemainder -= CGFloat(vertical) * step
-      sendMouse(vertical > 0 ? "scrollup" : "scrolldown", event, extra: ["n": min(8, abs(vertical))])
+      sendMouse(vertical > 0 ? .scrollUp : .scrollDown, event, steps: min(8, abs(vertical)))
     }
     if horizontal != 0 {
       horizontalRemainder -= CGFloat(horizontal) * (precise ? cellWidth * 3 : 1)
-      sendMouse(horizontal > 0 ? "scrollleft" : "scrollright", event, extra: ["n": min(8, abs(horizontal))])
+      sendMouse(horizontal > 0 ? .scrollLeft : .scrollRight, event, steps: min(8, abs(horizontal)))
     }
     if event.phase == .ended || event.momentumPhase == .ended {
       scrollRemainder = 0

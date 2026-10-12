@@ -4,19 +4,18 @@
     macos/tools/record_scene.py [FRESH] [OUT]
 
 FRESH defaults to build-macos/third_party/fresh/bin/fresh; OUT to
-macos/Tests/FreshKitTests/Fixtures/scene.json. The script starts a throwaway
+macos/Tests/FreshKitTests/Fixtures/scene.tlv. The script starts a throwaway
 File Commander session in a temporary HOME, opens a small file, connects to the
 session's scene socket at 80x24 the way the app does, types a few keys,
 scrolls down and back up, and writes the hello and the frames that answered
 them, then the hello a second connection gets, for the tests to compare with
-the replayed frames. Rerun it after bumping the Fresh pin; the FreshKit tests
-then check the app still reads what Fresh sends.
+the replayed frames. The fixture is the messages as they came off the socket:
+type, length and protobuf payload each. Rerun it after bumping the Fresh pin;
+the FreshKit tests then check the app still reads what Fresh sends.
 """
-import base64
 import json
 import os
 import socket
-import struct
 import subprocess
 import sys
 import tempfile
@@ -25,7 +24,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 FRESH = Path(sys.argv[1]) if len(sys.argv) > 1 else ROOT / 'build-macos/third_party/fresh/bin/fresh'
-OUT = Path(sys.argv[2]) if len(sys.argv) > 2 else ROOT / 'macos/Tests/FreshKitTests/Fixtures/scene.json'
+OUT = Path(sys.argv[2]) if len(sys.argv) > 2 else ROOT / 'macos/Tests/FreshKitTests/Fixtures/scene.tlv'
 CONFIG = {
     'check_for_updates': False,
     'theme': 'dark',
@@ -35,48 +34,96 @@ CONFIG = {
         'welcome_screen': {'enabled': True, 'settings': {'showOnStartup': False}},
     },
 }
+# Message types (scene.proto) and the protocol version.
+SERVER_HELLO, FRAME, ERROR = 1, 2, 3
+CLIENT_HELLO, KEY, MOUSE, RESIZE, ACTION, APPLIED = 16, 17, 18, 19, 21, 26
+VERSION = 1
+SCROLL_UP, SCROLL_DOWN = 5, 6
+
+
+def varint(n):
+    out = bytearray()
+    while n >= 0x80:
+        out.append(n & 0x7F | 0x80)
+        n >>= 7
+    out.append(n)
+    return bytes(out)
+
+
+def read_varint(data, i):
+    """The varint at i and where it ends; None while it hasn't all arrived."""
+    value = shift = 0
+    while i < len(data):
+        b = data[i]
+        value |= (b & 0x7F) << shift
+        i += 1
+        if b < 0x80:
+            return value, i
+        shift += 7
+    return None
+
+
+def fields(**values):
+    """A protobuf message of numbered fields: f1=..., f2=...; ints as varints,
+    strings length-delimited, zero and empty left out as protobuf does."""
+    out = b''
+    for name, value in sorted(values.items(), key=lambda kv: int(kv[0][1:])):
+        number = int(name[1:])
+        if isinstance(value, str):
+            data = value.encode()
+            if data:
+                out += varint(number << 3 | 2) + varint(len(data)) + data
+        elif value:
+            out += varint(number << 3) + varint(int(value))
+    return out
+
+
+def top_fields(payload):
+    """A message's top-level fields: number -> varint value or bytes (the last of each)."""
+    out, i = {}, 0
+    while i < len(payload):
+        key, i = read_varint(payload, i)
+        number, wire = key >> 3, key & 7
+        if wire == 0:
+            out[number], i = read_varint(payload, i)
+        elif wire == 2:
+            n, i = read_varint(payload, i)
+            out[number], i = payload[i:i + n], i + n
+        elif wire == 1:
+            i += 8
+        elif wire == 5:
+            i += 4
+        else:
+            raise ValueError(f'wire type {wire}')
+    return out
 
 
 class Scene:
     def __init__(self, path):
         self.sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         self.sock.connect(path)
-        key = base64.b64encode(os.urandom(16)).decode()
-        self.sock.sendall((f'GET /ws?grid=1&menus=native&copies=1 HTTP/1.1\r\nHost: localhost\r\nUpgrade: websocket\r\n'
-                           f'Connection: Upgrade\r\nSec-WebSocket-Key: {key}\r\nSec-WebSocket-Version: 13\r\n\r\n').encode())
-        buf = b''
-        while b'\r\n\r\n' not in buf:
-            buf += self.sock.recv(65536)
-        head, self.buf = buf.split(b'\r\n\r\n', 1)
-        assert b' 101 ' in head.split(b'\r\n')[0], head
+        self.buf = b''
+        self.send(CLIENT_HELLO, f1=VERSION)
 
-    def send(self, message):
+    def send(self, kind, **values):
         self.sock.settimeout(None)
-        data = json.dumps(message).encode()
-        mask = os.urandom(4)
-        n = len(data)
-        head = bytes([0x81]) + (bytes([0x80 | n]) if n < 126 else bytes([0x80 | 126]) + struct.pack('>H', n))
-        self.sock.sendall(head + mask + bytes(b ^ mask[i % 4] for i, b in enumerate(data)))
+        payload = fields(**values)
+        self.sock.sendall(varint(kind) + varint(len(payload)) + payload)
 
     def message(self, timeout):
+        """The next message as (type, payload, its bytes on the wire), each frame
+        reported applied; None when nothing comes in time."""
         self.sock.settimeout(timeout)
         while True:
-            if len(self.buf) >= 2:
-                opcode, n, offset = self.buf[0] & 0x0F, self.buf[1] & 0x7F, 2
-                ready = True
-                if n == 126:
-                    ready = len(self.buf) >= 4
-                    if ready:
-                        n, offset = struct.unpack('>H', self.buf[2:4])[0], 4
-                elif n == 127:
-                    ready = len(self.buf) >= 10
-                    if ready:
-                        n, offset = struct.unpack('>Q', self.buf[2:10])[0], 10
-                if ready and len(self.buf) >= offset + n:
-                    payload, self.buf = self.buf[offset:offset + n], self.buf[offset + n:]
-                    if opcode == 1:
-                        return json.loads(payload)
-                    continue
+            head = read_varint(self.buf, 0)
+            length = head and read_varint(self.buf, head[1])
+            if length and len(self.buf) >= length[1] + length[0]:
+                kind, end = head[0], length[1] + length[0]
+                raw, payload, self.buf = self.buf[:end], self.buf[length[1]:end], self.buf[end:]
+                assert kind != ERROR, top_fields(payload).get(1, b'').decode()
+                frame = top_fields(payload) if kind == FRAME else top_fields(top_fields(payload).get(2, b''))
+                self.send(APPLIED, f1=frame.get(1, 0))
+                return kind, payload, raw
             try:
                 chunk = self.sock.recv(1 << 20)
             except socket.timeout:
@@ -111,24 +158,22 @@ def main():
             run('open-location', name, '-', str(work), '-', str(sample))
             first = Scene(ensured['scene'])
             first.message(10)
-            first.send({'type': 'resize', 'cols': 80, 'rows': 24})
+            first.send(RESIZE, f1=80, f2=24)
             first.drain(1.5)
             first.sock.close()
             time.sleep(0.3)
             scene = Scene(ensured['scene'])
             messages = [scene.message(10)]
             messages += scene.drain(0.8)
-            for key in ['End', 'ArrowDown', 'ArrowDown', 'End']:
-                scene.send({'type': 'key', 'key': key.replace('ArrowDown', 'ArrowDown')})
-            for character in ' (recorded)':
-                scene.send({'type': 'key', 'key': character})
+            for key in ['End', 'ArrowDown', 'ArrowDown', 'End', *' (recorded)']:
+                scene.send(KEY, f1=key)
             messages += scene.drain(1.0)
-            scene.send({'type': 'action', 'action': 'command_palette'})
+            scene.send(ACTION, f1='command_palette')
             messages += scene.drain(0.8)
-            scene.send({'type': 'key', 'key': 'Escape'})
+            scene.send(KEY, f1='Escape')
             messages += scene.drain(0.6)
-            for kind in ['scrolldown'] * 4 + ['scrollup'] * 4:
-                scene.send({'type': 'mouse', 'kind': kind, 'button': 'left', 'col': 40, 'row': 10, 'n': 1})
+            for kind in [SCROLL_DOWN] * 4 + [SCROLL_UP] * 4:
+                scene.send(MOUSE, f1=kind, f3=40, f4=10, f5=1, f6=1)
                 messages += scene.drain(0.2)
             messages += scene.drain(0.6)
             reference = Scene(ensured['scene'])
@@ -137,11 +182,13 @@ def main():
             scene.sock.close()
         finally:
             subprocess.run([str(FRESH), '--cmd', 'session', 'kill', name], env=env, stdin=subprocess.DEVNULL, capture_output=True)
+    messages = [m for m in messages if m]
+    assert messages[0][0] == SERVER_HELLO and messages[-1][0] == SERVER_HELLO, [m[0] for m in messages]
     OUT.parent.mkdir(parents=True, exist_ok=True)
-    OUT.write_text(json.dumps([m for m in messages if m], separators=(',', ':')) + '\n')
-    hello = messages[0]['scene']
-    copies = sum(1 for m in messages if 'regions.grid.copy' in m.get('changed', {}))
-    print(f'{OUT}: hello {hello["w"]}x{hello["h"]}, {len(messages) - 2} frames ({copies} with row copies), '
+    OUT.write_bytes(b''.join(raw for _, _, raw in messages))
+    hello = top_fields(top_fields(messages[0][1])[2])
+    copies = sum(1 for kind, payload, _ in messages if kind == FRAME and 9 in top_fields(payload))
+    print(f'{OUT}: hello {hello.get(2)}x{hello.get(3)}, {len(messages) - 2} frames ({copies} with row copies), '
           f'{OUT.stat().st_size} bytes')
 
 

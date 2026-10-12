@@ -11,7 +11,7 @@ final class EditorHostView: NSView {
   let chrome: ChromeView
   let modals: ModalHost
 
-  init(store: SceneStore, send: @escaping ([String: Any]) -> Void) {
+  init(store: SceneStore, send: @escaping (SceneInput) -> Void) {
     grid = CellGridView(store: store)
     chrome = ChromeView(store: store, grid: grid)
     modals = ModalHost(rootView: FreshModals(store: store, send: send))

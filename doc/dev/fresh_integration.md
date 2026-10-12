@@ -24,7 +24,7 @@ recovery. FC never closes a tab or writes a file on the editor's behalf.
 
 ## Pinned revision
 
-FC builds Fresh from revision `1dedacf118f18b78681690f64874f65f4b97e2a3` on
+FC builds Fresh from revision `fb2c4519ac1d83f35ae8b560f0cf732c354f5ced` on
 the `fc-editor-workflow` branch of the FC fork. Its upstream base is
 `b10f9084f5eae571e9b8dac1a0f3694384bcb53d`, which is Fresh 0.5.2 plus 40
 upstream commits; FC's integration commits sit on top. The pinned Rust
@@ -252,66 +252,98 @@ FC never kills an incompatible backend or removes its sockets.
 ## Scene channel
 
 A session an FC client started (`FC_EDITOR_SWITCH_KEY` set, so the backend has
-`FRESH_FC_DATA_DIR`) also hosts Fresh's web bridge, on a Unix socket instead
-of a TCP port: `<socket dir>/<id>.scene.sock`, next to the session's own
+`FRESH_FC_DATA_DIR`) also serves its scene to the macOS app's native editor,
+on a Unix socket: `<socket dir>/<id>.scene.sock`, next to the session's own
 sockets, in the owner-only socket directory, with the socket itself at mode
 `0600`. Nothing listens on the network. The backend binds it during the first
 handshake, once that handshake has built the editor (so a failed restore is
 still reported in place of the hello), replaces a stale file, and removes it on
 exit. Its path is `fc_scene` in every handshake and what `ensure` prints.
 
-The protocol is the web front end's (`crates/fresh-editor/src/webui/mod.rs`),
-unchanged by the transport:
+The socket carries protobuf messages in a type-length-value stream; there is
+no HTTP, no WebSocket and no JSON (`SceneBridge`,
+`crates/fresh-editor/src/webui/scene_bridge.rs`). Fresh's browser front end
+keeps its own JSON protocol over TCP and is not affected.
 
-- **Connect** with an HTTP/1.1 WebSocket upgrade, `GET /ws`, over the Unix
-  socket. Options can ride on the query:
-  `?grid=1&menus=native&copies=1&telemetry=1`.
-- **Server to client**: one `{"type":"hello","seq":0,"scene":{...},"acks":true}`
-  with the whole scene, then `{"type":"frame","seq":N,"changed":{...}}` only
-  when something changed. Each changed path replaces its value: `w`, `h`,
-  `theme`, `clipboard`, `windowId`, `regions.<key>`, `regions.panes.<i>` and
-  `regions.panes.len`, and with the grid option `regions.grid.<row>` and
-  `regions.grid.len`. With `copies`, `regions.grid.copy` names rows the client
-  already has: `[to, from, count]` runs, rows `to..to+count` becoming its
-  previous rows `from..from+count`, applied before the rows sent in full.
-- **Client to server**: JSON text frames `{"type":...}`: `key` (browser key
-  names with `ctrl`, `alt`, `meta`, `shift`), `mouse` (cell `col` and `row`),
-  `action` (a Fresh action by name, with `args`), `paste`, `resize` (`cols`,
-  `rows`), `widget`, `settings`, `kbedit`, `configure`, and `applied` (`seq`,
-  the last message the client applied; see Pacing).
-- **Options** (`configure` with `grid`, `nativeMenus`, `rowCopies` and
-  `telemetry`, or the query): with `grid`, the frame comes as cells, chrome
-  included, one array of styled runs per row (`{t, fg, bg, b, i, u, r}`, with
-  only the flags that are set and only colors that aren't the default; a wide
-  character is followed by the blank cell it covers), and panes keep their
-  geometry without cells of their own. With `nativeMenus`, the frame has no
-  menu row while no menu is open. With `rowCopies` (`copies=1`), scrolled rows
-  come as copies. With `telemetry`, each frame carries `t`: `ack` (how many of
-  this client's messages were applied before it was built), `build_ms` (of it
-  `render_ms`, rendering the editor, and `grid_ms`, hashing the grid's rows)
-  and `diff_ms`, `queued` (bytes of earlier frames still waiting for the
+- **Framing**: each message is `type | length | payload`. Type and length
+  are varints (protobuf's unsigned LEB128, minimally encoded, at most ten
+  bytes); the payload, at most 16 MiB, is a message of
+  `crates/fresh-editor/src/webui/scene.proto` (package `fresh.scene.v1`).
+  Fresh writes its messages with a hand-written encoder
+  (`crates/fresh-editor/src/webui/wire.rs`), and a test keeps the schema
+  equal to it. The app's types are generated from the schema
+  (`macos/tools/gen_scene_proto.sh`, SwiftProtobuf).
+
+  | Type | Message | Direction | Carries |
+  | --- | --- | --- | --- |
+  | 1 | `ServerHello` | to the app | The protocol version and the whole scene, as a `Frame` |
+  | 2 | `Frame` | to the app | What changed since the app's previous frame |
+  | 3 | `Error` | to the app | Why Fresh is closing the connection |
+  | 16 | `ClientHello` | to Fresh | The protocol version; `telemetry` asks for frame timing |
+  | 17 | `Key` | to Fresh | A browser key name (`key`), the physical key (`code`), `ctrl`, `alt`, `meta`, `shift` |
+  | 18 | `Mouse` | to Fresh | `kind`, `button`, the cell (`col`, `row`), `n` wheel notches, the click `count`, modifiers |
+  | 19 | `Resize` | to Fresh | The grid size the app wants (`cols`, `rows`) |
+  | 20 | `Paste` | to Fresh | Text to paste |
+  | 21 | `Action` | to Fresh | A Fresh action by name, with a menu item's arguments (`args_json`) |
+  | 22 | `Widget` | to Fresh | A click on a surface's widget |
+  | 23 | `SettingsClick` | to Fresh | A click in the Settings modal |
+  | 24 | `KbEditClick` | to Fresh | A click on a row of the key binding editor |
+  | 25 | `Configure` | to Fresh | Frame timing on or off |
+  | 26 | `Applied` | to Fresh | The last frame the app applied (`seq`) |
+
+- **Hello**: the app sends `ClientHello` first. Fresh answers with
+  `ServerHello`, or, for another protocol version, with `Error` and closes the
+  connection. There is one version (1) and no negotiation: the app speaks
+  what the Fresh it is pinned to speaks.
+- **Frames**: a field is present only when it changed: `width`, `height`,
+  `window_id`, `theme`, `clipboard`, `cursor`, `grid_len`, `copies` and
+  `rows`, `pane_len` and `panes` (by index), and one update per region
+  (menus, status bar, file explorer, separators, popups, palette, trust
+  dialog, context menu, key binding editor, Settings): present when the
+  region changed, without its `value` when the region is gone. The frame is
+  the grid of cells, chrome included; panes carry their geometry and tab bar,
+  not cells, and the menu row is left out while no menu is open (the app has
+  the menus in the menu bar). A `GridRow` has its `text` once and its runs as
+  byte lengths into it (`run_bytes`), each with a packed style (`run_styles`:
+  `fg | bg << 25 | flags << 50`, a color being `0x1RRGGBB` and 0 the
+  terminal default, the flags bold 1, italic 2, underline 4, reverse 8); a
+  wide character is followed by the blank cell it covers. `copies` names rows
+  the app already has, as `[to, from, count]` triples: rows `to..to+count`
+  become its previous rows `from..from+count`, applied before the rows sent
+  in full, so a scroll sends only the rows that came into view.
+- **JSON**: the only JSON is a menu action's `args_json`, the keymap's
+  arguments for the action, which the app hands back untouched in `Action`.
+- **Encoding**: each push encodes every region, pane, the theme and the
+  clipboard once and hashes them; a client's frame takes the bytes of what
+  changed since its previous frame. Rows are written from the cells. Once the
+  buffers have grown, encoding a push allocates nothing (`scene_golden` checks
+  this in a build with `alloc-stats`).
+- **Timing**: with telemetry, each frame carries `timing`: `ack` (how many
+  of this client's messages were applied before it was built), `build_ms`
+  (of it `render_ms`, rendering the editor, and `grid_ms`, hashing the grid's
+  rows), `encode_ms`, `queued` (bytes of earlier frames still waiting for the
   socket ahead of it), `ahead` (earlier frames the client had not applied),
-  `owed` (wheel lines smooth scrolling still owes), `top` (the active
-  view's top line, 0-based) and `cpu_ms` (Fresh's CPU time so far). A Fresh
-  built with the `alloc-stats` feature, which counts heap allocations per
-  thread, also reports `prev_allocs` and `prev_alloc_bytes`: those of the
-  previous push, from building its scene to queueing its frames. Options end
-  with the last client.
+  `owed` (wheel lines smooth scrolling still owes), `top` (the active view's
+  top line, 0-based) and `cpu_ms` (Fresh's CPU time so far). A Fresh built
+  with the `alloc-stats` feature, which counts heap allocations per thread,
+  also reports `prev_allocs` and `prev_alloc_bytes`: those of the previous
+  push, from building its scene to queueing its frames.
 - **Keys**: a `meta` (`⌘`) chord resolves through Fresh's `macos-gui` keymap
   in the current key context, so `⌘S` saves and `⇧⌘P` opens the palette, while
   the user's keymap keeps every other key for this client and the terminals.
 - **Pacing**: a frame answering the client's own input is pushed in the same
   pass (about 10 ms from key to frame); time-driven frames go at most every
   40 ms. While a client is connected the loop polls every 3 ms. The socket
-  has 4 MiB buffers each way (macOS's 8 KiB default made frames queue up). A
-  client that reports `applied` has at most two frames unapplied: while it is
-  behind, Fresh builds nothing, and when it catches up it gets one frame with
-  the newest scene. One that stops reporting gets frames again after 500 ms;
-  one that never reports, such as a browser, gets every frame (see
+  has 4 MiB buffers each way (macOS's 8 KiB default made frames queue up). The
+  app reports every frame it applies, and Fresh keeps at most two frames
+  unapplied: while the app is behind, Fresh builds nothing, and when it
+  catches up it gets one frame with the newest scene. An app that stops
+  reporting gets a frame again after 500 ms (see
   [macos_app.md](macos_app.md#frames-and-the-app)).
 - **Sizing and liveness**: the shared grid fits the smallest viewport among
-  the primary terminal and the scene clients. The server pings every 15 s and
-  drops a client silent for 45 s.
+  the primary terminal and the scene clients. A connection ends when either
+  side closes it; an app that stops reading with 8 MiB of frames waiting is
+  dropped.
 
 A connected scene client counts as attached: the session does not shut down
 idle, and `prepare-restart` refuses while one is connected, so the app
@@ -473,6 +505,10 @@ downgrade path.
      and the switch-key token syntax.
    - Keep `open-location` arguments and exit codes, or change
      `editor_manager.cpp` in the same FC commit.
+   - The scene channel is not kept compatible: the native editor connects
+     only to a backend on the same pin. With a backend from an older pin the
+     connection ends at the hello until the user runs **Restart editor
+     backend**.
 3. If the upstream base moved, check `rust-toolchain.toml` and update the Rust
    version wherever it is documented.
 4. Rebuild and run the Fresh-labeled tests with

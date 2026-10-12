@@ -7,7 +7,7 @@
   "needs": {
     "editor": true
   },
-  "summary": "Trackpad flicks of file_io_jobs.cpp while each frame takes 25 ms longer on the main thread: first without telling Fresh which frames were applied, so it sends every frame, then telling it.",
+  "summary": "Trackpad flicks of file_io_jobs.cpp while each frame takes 25 ms longer on the main thread: Fresh holds newer frames back until the app has applied the ones it has, then sends the newest scene.",
   "covers": {},
   "steps": [
     {
@@ -17,8 +17,7 @@
     },
     {
       "editor_bench": {
-        "apply_ms": 25,
-        "applied": false
+        "apply_ms": 25
       }
     },
     {
@@ -70,33 +69,7 @@
       "pause": 2000
     },
     {
-      "notice": "Scrolling a slow editor that doesn't report applied frames"
-    },
-    {
-      "scroll": {
-        "target": "editor",
-        "speed": -8000
-      }
-    },
-    {
-      "pause": 5000
-    },
-    {
-      "scroll": {
-        "target": "editor",
-        "speed": 8000
-      }
-    },
-    {
-      "pause": 5000
-    },
-    {
-      "editor_bench": {
-        "applied": true
-      }
-    },
-    {
-      "notice": "Scrolling a slow editor that reports applied frames"
+      "notice": "Scrolling an editor slow to show frames"
     },
     {
       "scroll": {

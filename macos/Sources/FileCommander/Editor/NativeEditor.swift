@@ -16,13 +16,9 @@ final class NativeEditor: NSObject, CellGridDelegate {
   var grid: CellGridView? { view?.grid }
   private var chrome: ChromeView? { view?.chrome }
   private var socket: SceneSocket?
-  /// The session's Fresh asked to be told each frame that was applied.
-  private var sendsApplied = false
-  /// The scroll benchmark's stand-ins for a slow app: extra main-thread time
-  /// each frame takes, and not reporting applied frames (Fresh then sends
-  /// every frame, as it does to a browser).
+  /// The scroll benchmark's stand-in for a slow app: extra main-thread time
+  /// each frame takes.
   var benchFrameDelay: TimeInterval = 0
-  var benchWithoutApplied = false
   /// The benchmark's watch for a frame that first shows some text: when one
   /// is applied, a `bench` record with `mark` notes when.
   var benchWatch: (text: String, mark: String)?
@@ -86,7 +82,7 @@ final class NativeEditor: NSObject, CellGridDelegate {
     applyTheme()
     Task.detached {
       do {
-        try socket.open(query: "?grid=1&menus=native&copies=1" + (EditorTelemetry.shared.isOn ? "&telemetry=1" : ""))
+        try socket.open(telemetry: EditorTelemetry.shared.isOn)
         await MainActor.run { [weak self] in
           Trace.write("editor: connected")
           guard let self, self.socket === socket else { return }
@@ -157,10 +153,10 @@ final class NativeEditor: NSObject, CellGridDelegate {
   /// The editor's view, made once and kept.
   private func makeView() -> EditorHostView {
     if let view { return view }
-    let view = EditorHostView(store: store) { [weak self] message in self?.sendFromPanel(message) }
+    let view = EditorHostView(store: store) { [weak self] input in self?.sendFromPanel(input) }
     view.grid.delegate = self
     self.view = view
-    let menus = FreshMenus(store: store) { [weak self] action, args in self?.runAction(action, args: args) }
+    let menus = FreshMenus(store: store) { [weak self] action, argsJson in self?.send(.action(name: action, argsJson: argsJson)) }
     menus.openSettings = { [weak self] in self?.app?.openSettings(tab: .editor) }
     menus.showFiles = { [weak self] in self?.switchBack() }
     self.menus = menus
@@ -189,11 +185,8 @@ final class NativeEditor: NSObject, CellGridDelegate {
     if benchFrameDelay > 0 { Thread.sleep(forTimeInterval: benchFrameDelay) }
     // Fresh sends only a couple of frames ahead of what was applied, so a slow
     // moment here gets the newest scene next rather than every one in between.
-    if message.isHello {
-      sendsApplied = message.wantsApplied
-      lastAck = 0
-    }
-    if sendsApplied, !benchWithoutApplied { socket?.send(["type": "applied", "seq": message.sequence]) }
+    if message.isHello { lastAck = 0 }
+    socket?.send(.applied(seq: UInt64(message.sequence)))
     if let ack = message.timing?.ack { noteAck(ack) }
     if let watch = benchWatch, store.lines.contains(where: { $0.contains(watch.text) }) {
       benchWatch = nil
@@ -250,9 +243,8 @@ final class NativeEditor: NSObject, CellGridDelegate {
 
   /// Asks Fresh for frame timing, or to stop sending it, after the setting changed.
   func telemetryChanged() {
-    socket?.send(["type": "configure", "grid": true, "nativeMenus": true, "rowCopies": true, "telemetry": EditorTelemetry.shared.isOn])
+    socket?.send(.configure(telemetry: EditorTelemetry.shared.isOn))
   }
-
 
   private func sceneChanged(_ change: SceneChange) {
     if change.themeChanged { applyTheme() }
@@ -274,25 +266,17 @@ final class NativeEditor: NSObject, CellGridDelegate {
 
   /// The active tab of the focused pane, for the window title.
   private func updateTitle() {
-    let active = store.panes.compactMap { pane -> String? in
-      (pane["tabs"] as? [[String: Any]])?.first { $0["active"] as? Bool == true }?["label"] as? String
-    }.first
+    let active = store.panes.lazy.compactMap { $0.tabBar.tabs.first(where: \.active)?.label }.first
     grid?.title = active ?? "Editor"
     onTitle?(active ?? "")
   }
 
-  private func runAction(_ action: String, args: [String: Any]) {
-    var message: [String: Any] = ["type": "action", "action": action]
-    if !args.isEmpty { message["args"] = args }
-    socket?.send(message)
-  }
-
   // MARK: CellGridDelegate
 
-  func grid(_ grid: CellGridView, send message: [String: Any]) { socket?.send(message) }
+  func grid(_ grid: CellGridView, send input: SceneInput) { socket?.send(input) }
 
   func gridDidResize(_ grid: CellGridView, columns: Int, rows: Int) {
-    socket?.send(["type": "resize", "cols": columns, "rows": rows])
+    socket?.send(.resize(cols: columns, rows: rows))
   }
 
   func grid(_ grid: CellGridView, handleAppChord event: NSEvent) -> Bool {
@@ -306,7 +290,7 @@ final class NativeEditor: NSObject, CellGridDelegate {
 
   func gridPaste(_ grid: CellGridView) {
     guard let text = NSPasteboard.general.string(forType: .string), !text.isEmpty else { return }
-    socket?.send(["type": "paste", "text": text])
+    socket?.send(.paste(text))
   }
 
   var optionAsAlt: Bool { app?.preferences.optionAsAlt ?? false }
@@ -339,25 +323,24 @@ final class NativeEditor: NSObject, CellGridDelegate {
     return window.convertToScreen(grid.convert(grid.rect(column: col, row: row, count: count), to: nil))
   }
 
-  func send(_ message: [String: Any]) { socket?.send(message) }
+  func send(_ input: SceneInput) { socket?.send(input) }
 
   /// A click on a native panel: sent to Fresh, and the keyboard stays with the editor.
-  private func sendFromPanel(_ message: [String: Any]) {
-    socket?.send(message)
+  private func sendFromPanel(_ input: SceneInput) {
+    socket?.send(input)
     focus()
   }
 
   /// The cells a native surface covers: "tabs", "status", "palette", "popup" or "explorer".
   func surfaceCells(_ surface: String) -> [CellRect] {
-    let regions = store.regions
     switch surface {
-    case "tabs": return store.panes.compactMap { CellRect($0["tabBar"]) }
-    case "status": return [CellRect((regions["statusbar"] as? [String: Any])?["rect"])].compactMap { $0 }
+    case "tabs": return store.panes.filter(\.tabBar.hasBar).map { CellRect($0.tabBar.bar) }
+    case "status": return store.statusBar.map { [CellRect($0.rect)] } ?? []
     case "palette":
-      let palette = regions["palette"] as? [String: Any]
-      return [CellRect(palette?["outerRect"]) ?? CellRect(palette?["listRect"])].compactMap { $0 }
-    case "popup": return (regions["popups"] as? [[String: Any]] ?? []).compactMap { CellRect($0["rect"]) }
-    case "explorer": return [CellRect((regions["fileExplorer"] as? [String: Any])?["rect"])].compactMap { $0 }
+      guard let palette = store.palette else { return [] }
+      return [CellRect(palette.hasOuterRect ? palette.outerRect : palette.listRect)]
+    case "popup": return store.popups.map { CellRect($0.rect) }
+    case "explorer": return store.fileExplorer.map { [CellRect($0.rect)] } ?? []
     default: return []
     }
   }

@@ -61,8 +61,6 @@ final class ChromeView: NSView {
            width: CGFloat(r.width) * grid.cellWidth, height: CGFloat(r.height) * grid.cellHeight)
   }
 
-  private func region(_ key: String) -> [String: Any]? { store.regions[key] as? [String: Any] }
-
   // MARK: Drawing
 
   /// Rectangles drawn this pass; the caret is drawn on top when it falls in one.
@@ -96,9 +94,9 @@ final class ChromeView: NSView {
   // MARK: Dividers and scrollbars
 
   private func drawSeparators() {
-    for separator in store.regions["separators"] as? [[String: Any]] ?? [] {
-      let x = separator["x"] as? Int ?? 0, y = separator["y"] as? Int ?? 0, length = separator["len"] as? Int ?? 0
-      let vertical = separator["vertical"] as? Bool ?? true
+    for separator in store.separators {
+      let x = Int(separator.x), y = Int(separator.y), length = Int(separator.len)
+      let vertical = separator.vertical
       let cells = box(CellRect(x: x, y: y, width: vertical ? 1 : length, height: vertical ? length : 1))
       editorBackground.setFill()
       cells.fill()
@@ -111,16 +109,16 @@ final class ChromeView: NSView {
     }
   }
 
-  private func drawScrollbar(_ pane: [String: Any]) {
-    guard let track = CellRect(pane["vscroll"]), track.width > 0, track.height > 0 else { return }
+  private func drawScrollbar(_ pane: WirePane) {
+    let track = CellRect(pane.vscroll)
+    guard track.width > 0, track.height > 0 else { return }
     let area = box(track)
     editorBackground.setFill()
     area.fill()
-    let start = pane["thumbStart"] as? Int ?? 0, end = pane["thumbEnd"] as? Int ?? 0
-    for marker in pane["vscrollMarkers"] as? [[String: Any]] ?? [] {
-      guard let row = marker["row"] as? Int else { continue }
-      (SceneColor(marker["color"]).map(NSColor.init(scene:)) ?? accent).setFill()
-      NSRect(x: area.maxX - 3, y: area.minY + CGFloat(row) * grid.cellHeight + grid.cellHeight / 2 - 1, width: 3, height: 2).fill()
+    let start = Int(pane.thumbStart), end = Int(pane.thumbEnd)
+    for marker in pane.markers {
+      NSColor(scene: SceneColor(packed: marker.color)).setFill()
+      NSRect(x: area.maxX - 3, y: area.minY + CGFloat(marker.row) * grid.cellHeight + grid.cellHeight / 2 - 1, width: 3, height: 2).fill()
     }
     guard end > start, end - start < track.height else { return }
     let thumb = NSRect(x: area.midX - 3, y: area.minY + CGFloat(start) * grid.cellHeight + 2,
@@ -131,20 +129,22 @@ final class ChromeView: NSView {
 
   // MARK: Tabs
 
-  private func drawTabBar(_ pane: [String: Any]) {
-    guard let barRect = CellRect(pane["tabBar"]), barRect.width > 0 else { return }
+  private func drawTabBar(_ pane: WirePane) {
+    guard pane.tabBar.hasBar else { return }
+    let barRect = CellRect(pane.tabBar.bar)
+    guard barRect.width > 0 else { return }
     let bar = box(barRect)
     barBackground.setFill()
     bar.fill()
-    let tabs = pane["tabs"] as? [[String: Any]] ?? []
     var taken: [CellRect] = []
     let font = NSFont.systemFont(ofSize: max(10, grid.cellHeight * 0.68))
-    for tab in tabs {
-      guard let cells = CellRect(tab["rect"]) else { continue }
+    for tab in pane.tabBar.tabs {
+      let cells = CellRect(tab.rect)
+      let closeCells = CellRect(tab.closeRect)
       taken.append(cells)
-      if let close = CellRect(tab["closeRect"]) { taken.append(close) }
+      if closeCells.width > 0 { taken.append(closeCells) }
       let rect = box(cells).insetBy(dx: 1, dy: 0)
-      let active = tab["active"] as? Bool ?? false
+      let active = tab.active
       if active {
         editorBackground.setFill()
         rect.fill()
@@ -154,11 +154,11 @@ final class ChromeView: NSView {
         divider.setFill()
         NSRect(x: rect.maxX, y: rect.minY + 3, width: 1, height: rect.height - 6).fill()
       }
-      let close = CellRect(tab["closeRect"]).map(box)
+      let close = closeCells.width > 0 ? box(closeCells) : nil
       var labelRect = rect.insetBy(dx: grid.cellWidth, dy: 0)
       if let close { labelRect.size.width = max(0, close.minX - labelRect.minX - 2) }
-      let modified = tab["modified"] as? Bool ?? false
-      var label = tab["label"] as? String ?? ""
+      let modified = tab.modified
+      var label = tab.label
       if modified, label.hasSuffix("*") { label.removeLast() }  // the dot says it
       drawLabel(label, in: labelRect, font: active ? .systemFont(ofSize: font.pointSize, weight: .medium) : font,
                 color: active ? editorText : muted)
@@ -191,7 +191,8 @@ final class ChromeView: NSView {
   // MARK: Status bar
 
   private func drawStatusBar() {
-    guard let status = region("statusbar"), let cells = CellRect(status["rect"]) else { return }
+    guard let status = store.statusBar else { return }
+    let cells = CellRect(status.rect)
     let bar = box(cells)
     (theme.statusBackground.map(NSColor.init(scene:)) ?? barBackground).setFill()
     bar.fill()
@@ -199,11 +200,11 @@ final class ChromeView: NSView {
     NSRect(x: bar.minX, y: bar.minY, width: bar.width, height: 1).fill()
     let text = theme.statusForeground.map(NSColor.init(scene:)) ?? muted
     let font = NSFont.systemFont(ofSize: max(10, grid.cellHeight * 0.66))
-    for segment in status["segments"] as? [[String: Any]] ?? [] {
-      guard var label = segment["text"] as? String, !label.trimmingCharacters(in: .whitespaces).isEmpty else { continue }
-      let x = segment["x"] as? Int ?? 0, w = segment["w"] as? Int ?? 0
-      var rect = box(CellRect(x: x, y: cells.y, width: w, height: 1))
-      let name = segment["name"] as? String ?? ""
+    for segment in status.segments {
+      var label = segment.text
+      guard !label.trimmingCharacters(in: .whitespaces).isEmpty else { continue }
+      var rect = box(CellRect(x: Int(segment.x), y: cells.y, width: Int(segment.w), height: 1))
+      let name = segment.name
       let symbol: String? = [
         "lsp": "bolt.fill", "warning": "exclamationmark.triangle.fill", "remote": "network", "trust": "lock.shield",
         "terminalRestart": "arrow.clockwise",
@@ -223,21 +224,22 @@ final class ChromeView: NSView {
   // MARK: File explorer
 
   private func drawExplorer() {
-    guard let explorer = region("fileExplorer"), let cells = CellRect(explorer["rect"]), cells.width > 1 else { return }
+    guard let explorer = store.fileExplorer else { return }
+    let cells = CellRect(explorer.rect)
+    guard cells.width > 1 else { return }
     let panel = box(CellRect(x: cells.x, y: cells.y, width: cells.width - 1, height: cells.height))
     barBackground.setFill()
     panel.fill()
     divider.setFill()
     NSRect(x: panel.maxX, y: panel.minY, width: 1, height: panel.height).fill()
     let font = NSFont.systemFont(ofSize: max(10, grid.cellHeight * 0.7))
-    let title = (explorer["title"] as? String ?? "Explorer").trimmingCharacters(in: .whitespaces)
+    let title = (explorer.title.isEmpty ? "Explorer" : explorer.title).trimmingCharacters(in: .whitespaces)
     drawLabel(title.uppercased(), in: box(CellRect(x: cells.x + 1, y: cells.y, width: cells.width - 2, height: 1)),
               font: .systemFont(ofSize: font.pointSize - 1, weight: .semibold), color: muted)
-    let rows = explorer["rows"] as? [[String: Any]] ?? []
-    let start = explorer["scrollOffset"] as? Int ?? 0
-    let height = max(0, min(explorer["viewportHeight"] as? Int ?? cells.height - 1, cells.height - 1))
-    let viewport = explorer["viewportRows"] as? [Int] ?? Array(start..<(start + height))
-    let selected = explorer["selected"] as? Int
+    let rows = explorer.rows
+    let height = max(0, min(Int(explorer.viewportHeight), cells.height - 1))
+    let viewport = explorer.viewportRows.map { Int($0) }
+    let selected = explorer.hasSelected ? Int(explorer.selected) : nil
     let focused = window?.isKeyWindow == true
     for (line, index) in viewport.prefix(height).enumerated() where index < rows.count {
       let row = rows[index]
@@ -246,21 +248,21 @@ final class ChromeView: NSView {
         (focused ? selection : selection.withAlphaComponent(0.5)).setFill()
         NSBezierPath(roundedRect: rect.insetBy(dx: 4, dy: 0.5), xRadius: 4, yRadius: 4).fill()
       }
-      let depth = CGFloat(row["depth"] as? Int ?? 0)
-      let isDirectory = row["isDir"] as? Bool ?? false
+      let depth = CGFloat(row.depth)
+      let isDirectory = row.isDir
       var x = rect.minX + 6 + depth * 12
       if isDirectory {
-        drawSymbol(row["expanded"] as? Bool == true ? "chevron.down" : "chevron.right",
+        drawSymbol(row.expanded ? "chevron.down" : "chevron.right",
                    in: NSRect(x: x, y: rect.minY, width: 10, height: rect.height), size: 8, color: muted)
       }
       x += 12
       let icon = isDirectory ? NSWorkspace.shared.icon(for: .folder)
-        : NSWorkspace.shared.icon(for: .init(filenameExtension: ((row["name"] as? String ?? "") as NSString).pathExtension) ?? .data)
+        : NSWorkspace.shared.icon(for: .init(filenameExtension: (row.name as NSString).pathExtension) ?? .data)
       let side = min(rect.height - 2, 14)
       icon.draw(in: NSRect(x: x, y: rect.midY - side / 2, width: side, height: side), from: .zero, operation: .sourceOver,
                 fraction: 1, respectFlipped: true, hints: nil)
       x += side + 5
-      drawLabel(row["name"] as? String ?? "", in: NSRect(x: x, y: rect.minY, width: max(0, rect.maxX - x - 4), height: rect.height),
+      drawLabel(row.name, in: NSRect(x: x, y: rect.minY, width: max(0, rect.maxX - x - 4), height: rect.height),
                 font: font, color: editorText)
     }
     covered.append(panel)
@@ -269,20 +271,20 @@ final class ChromeView: NSView {
   // MARK: Popups
 
   private func drawPopups(_ context: CGContext) {
-    for popup in store.regions["popups"] as? [[String: Any]] ?? [] {
-      guard let cells = CellRect(popup["rect"]) else { continue }
+    for popup in store.popups {
+      let cells = CellRect(popup.rect)
       let rect = box(cells)
       drawPanel(rect)
-      let inner = CellRect(popup["contentRect"]) ?? cells
-      let content = popup["content"] as? [String: Any] ?? [:]
-      if let title = popup["title"] as? String, !title.isEmpty, inner.y > cells.y {
-        drawLabel(title, in: box(CellRect(x: cells.x + 1, y: cells.y, width: cells.width - 2, height: 1)),
+      let inner = CellRect(popup.contentRect)
+      if !popup.title.isEmpty, inner.y > cells.y {
+        drawLabel(popup.title, in: box(CellRect(x: cells.x + 1, y: cells.y, width: cells.width - 2, height: 1)),
                   font: .systemFont(ofSize: grid.cellHeight * 0.66, weight: .semibold), color: muted)
       }
-      let scroll = popup["scrollOffset"] as? Int ?? 0
-      if content["type"] as? String == "list" {
-        let items = content["items"] as? [[String: Any]] ?? []
-        let selected = content["selected"] as? Int ?? -1
+      let scroll = Int(popup.scrollOffset)
+      switch popup.content.content {
+      case .list(let list)?:
+        let items = list.items
+        let selected = Int(list.selected)
         let font = NSFont.systemFont(ofSize: max(10, grid.cellHeight * 0.72))
         for line in 0..<inner.height {
           let index = scroll + line
@@ -293,10 +295,10 @@ final class ChromeView: NSView {
             selectionFill.setFill()
             NSBezierPath(roundedRect: row.insetBy(dx: 2, dy: 0.5), xRadius: 4, yRadius: 4).fill()
           }
-          let color = index == selected ? NSColor.white : (item["disabled"] as? Bool == true ? muted : panelText)
-          var text = item["text"] as? String ?? ""
-          if let icon = item["icon"] as? String, !icon.isEmpty { text = icon + " " + text }
-          let detail = item["detail"] as? String
+          let color = index == selected ? NSColor.white : (item.disabled ? muted : panelText)
+          var text = item.text
+          if !item.icon.isEmpty { text = item.icon + " " + text }
+          let detail = item.hasDetail ? item.detail : nil
           let detailWidth = detail.map { min(row.width * 0.45, ($0 as NSString).size(withAttributes: [.font: font]).width + 12) } ?? 0
           drawLabel(text, in: NSRect(x: row.minX + 8, y: row.minY, width: row.width - 16 - detailWidth, height: row.height),
                     font: font, color: color)
@@ -305,19 +307,21 @@ final class ChromeView: NSView {
                       font: font, color: index == selected ? NSColor.white.withAlphaComponent(0.8) : muted, alignment: .right)
           }
         }
-      } else {
+      case .lines(let content)?:
         // Hover docs and other text: Fresh's styled runs, one per cell, on the panel.
-        let lines = content["lines"] as? [[Any]] ?? []
+        let lines = content.lines
         for line in 0..<inner.height {
           let index = scroll + line
           guard index < lines.count else { break }
           var column = inner.x
-          for run in CellRun.row(lines[index]) {
+          for run in CellRun.runs(lines[index]) {
             let (fg, _) = grid.colors(run)
             grid.drawText(run, column: column, row: inner.y + line, color: fg ?? panelText, context: context)
             column += run.cells
           }
         }
+      case nil:
+        break
       }
       covered.append(rect)
     }
@@ -330,12 +334,14 @@ final class ChromeView: NSView {
   /// of an overlay prompt, mode hints, a toolbar) keep Fresh's own text, drawn
   /// on the native panel, so the caret still lines up with the query.
   private func drawPalette(_ context: CGContext) {
-    guard let palette = region("palette"), let list = CellRect(palette["listRect"]) else { return }
-    let suggestions = palette["suggestions"] as? [[String: Any]] ?? []
-    let selected = palette["selected"] as? Int
-    let start = palette["scrollStart"] as? Int ?? 0
-    let count = min(palette["visibleCount"] as? Int ?? suggestions.count, max(0, suggestions.count - start))
-    let outer = CellRect(palette["outerRect"]) ?? CellRect(x: list.x - 1, y: list.y, width: list.width + 2, height: max(1, count))
+    guard let palette = store.palette, palette.hasListRect else { return }
+    let list = CellRect(palette.listRect)
+    let suggestions = palette.suggestions
+    let selected = palette.hasSelected ? Int(palette.selected) : nil
+    let start = Int(palette.scrollStart)
+    let count = min(Int(palette.visibleCount), max(0, suggestions.count - start))
+    let outer = palette.hasOuterRect ? CellRect(palette.outerRect)
+      : CellRect(x: list.x - 1, y: list.y, width: list.width + 2, height: max(1, count))
     let rect = box(outer)
     drawPanel(rect)
     let rows = list.y..<(list.y + count)
@@ -351,14 +357,14 @@ final class ChromeView: NSView {
         selectionFill.setFill()
         NSBezierPath(roundedRect: row.insetBy(dx: 3, dy: 0.5), xRadius: 4, yRadius: 4).fill()
       }
-      let disabled = item["disabled"] as? Bool == true
-      let color = isSelected ? NSColor.white : (disabled ? muted : panelText)
-      let key = item["keybinding"] as? String
+      let color = isSelected ? NSColor.white : (item.disabled ? muted : panelText)
+      let key = item.hasKeybinding ? item.keybinding : nil
       let keyWidth = key.map { ($0 as NSString).size(withAttributes: [.font: font]).width + 16 } ?? 0
-      let text = item["text"] as? String ?? ""
+      let text = item.text
       var textRect = NSRect(x: row.minX + 10, y: row.minY, width: row.width - 20 - keyWidth, height: row.height)
       drawLabel(text, in: textRect, font: font, color: color)
-      if let description = item["description"] as? String, !description.isEmpty {
+      if !item.description_p.isEmpty {
+        let description = item.description_p
         let used = (text as NSString).size(withAttributes: [.font: font]).width + 14
         textRect.origin.x += used
         textRect.size.width -= used
@@ -387,13 +393,13 @@ final class ChromeView: NSView {
   // MARK: Context menu
 
   private func drawContextMenu() {
-    guard let menu = region("contextMenu") else { return }
-    let items = menu["items"] as? [String] ?? []
-    let x = menu["x"] as? Int ?? 0, y = menu["y"] as? Int ?? 0
+    guard let menu = store.contextMenu else { return }
+    let items = menu.items
+    let x = Int(menu.x), y = Int(menu.y)
     let width = (items.map(\.count).max() ?? 8) + 4
     let rect = box(CellRect(x: x, y: y, width: width, height: items.count + 2))
     drawPanel(rect)
-    let highlighted = menu["highlighted"] as? Int ?? -1
+    let highlighted = Int(menu.highlighted)
     let font = NSFont.menuFont(ofSize: max(10, grid.cellHeight * 0.72))
     for (index, item) in items.enumerated() {
       let row = box(CellRect(x: x, y: y + 1 + index, width: width, height: 1))
@@ -409,30 +415,30 @@ final class ChromeView: NSView {
   // MARK: Trust dialog
 
   private func drawTrustDialog() {
-    guard let dialog = region("trustDialog"), let cells = CellRect(dialog["dialog"]) else { return }
+    guard let dialog = store.trustDialog else { return }
+    let cells = CellRect(dialog.dialog)
     NSColor.black.withAlphaComponent(0.25).setFill()
     bounds.fill()
     let rect = box(cells)
     drawPanel(rect)
     let font = NSFont.systemFont(ofSize: max(11, grid.cellHeight * 0.75))
-    drawLabel(dialog["title"] as? String ?? "", in: box(CellRect(x: cells.x + 2, y: cells.y + 1, width: cells.width - 4, height: 1)),
+    drawLabel(dialog.title, in: box(CellRect(x: cells.x + 2, y: cells.y + 1, width: cells.width - 4, height: 1)),
               font: .boldSystemFont(ofSize: font.pointSize), color: panelText)
-    drawLabel(dialog["path"] as? String ?? "", in: box(CellRect(x: cells.x + 2, y: cells.y + 2, width: cells.width - 4, height: 1)),
+    drawLabel(dialog.path, in: box(CellRect(x: cells.x + 2, y: cells.y + 2, width: cells.width - 4, height: 1)),
               font: .monospacedSystemFont(ofSize: font.pointSize - 1, weight: .regular), color: muted)
-    for option in dialog["options"] as? [[String: Any]] ?? [] {
-      guard let r = CellRect(option["rect"]) else { continue }
-      let row = box(r)
-      let selected = option["selected"] as? Bool ?? false
+    for option in dialog.options {
+      let row = box(CellRect(option.rect))
+      let selected = option.selected
       drawSymbol(selected ? "largecircle.fill.circle" : "circle", in: NSRect(x: row.minX, y: row.minY, width: grid.cellHeight, height: row.height),
                  size: 11, color: selected ? selectionFill : muted)
-      var text = option["label"] as? String ?? ""
-      if let description = option["description"] as? String, !description.isEmpty { text += " — " + description }
+      var text = option.label
+      if !option.description_p.isEmpty { text += " — " + option.description_p }
       drawLabel(text, in: NSRect(x: row.minX + grid.cellHeight + 4, y: row.minY, width: row.width - grid.cellHeight - 4, height: row.height),
                 font: font, color: panelText)
     }
-    for (key, label, primary) in [("ok", dialog["okLabel"] as? String ?? "OK", true), ("quit", dialog["quitLabel"] as? String ?? "Quit", false)] {
-      guard let r = CellRect(dialog[key]) else { continue }
-      let button = box(r).insetBy(dx: 0, dy: 1)
+    for (r, label, primary) in [(dialog.ok, dialog.okLabel.isEmpty ? "OK" : dialog.okLabel, true),
+                                (dialog.quit, dialog.quitLabel.isEmpty ? "Quit" : dialog.quitLabel, false)] {
+      let button = box(CellRect(r)).insetBy(dx: 0, dy: 1)
       (primary ? selectionFill : panelBackground.blended(withFraction: 0.12, of: panelText) ?? panelBackground).setFill()
       NSBezierPath(roundedRect: button, xRadius: 5, yRadius: 5).fill()
       drawLabel(label.trimmingCharacters(in: CharacterSet(charactersIn: "[] ")), in: button, font: font,

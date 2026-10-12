@@ -113,8 +113,8 @@ final class EditorController {
       return true
     }
     if showingNative {
-      guard let message = EditorController.message(for: chord) else { return false }
-      native.send(message)
+      guard let key = EditorController.key(for: chord) else { return false }
+      native.send(.key(key))
       return true
     }
     guard let bytes = TerminalKeys.bytes(for: chord) else { return false }
@@ -125,7 +125,7 @@ final class EditorController {
   /// Types text into the editor.
   func type(_ text: String) {
     if showingNative {
-      for message in SceneKeys.typing(text) { native.send(message) }
+      for key in SceneKeys.typing(text) { native.send(.key(key)) }
     } else {
       terminal.send(text)
     }
@@ -135,12 +135,21 @@ final class EditorController {
   func drag(row: Int, from start: Int, to end: Int, duration: Double) async {
     let steps = max(1, end - start)
     if showingNative {
-      native.send(["type": "mouse", "kind": "down", "button": "left", "col": start, "row": row])
+      let mouse = { (kind: WireMouseKind, column: Int) in
+        SceneInput.mouse(WireMouse.with {
+          $0.kind = kind
+          $0.col = UInt32(clamping: column)
+          $0.row = UInt32(clamping: row)
+          $0.n = 1
+          $0.count = 1
+        })
+      }
+      native.send(mouse(.down, start))
       for column in (start + 1)...max(start + 1, end) {
         try? await Task.sleep(for: .seconds(duration / Double(steps)))
-        native.send(["type": "mouse", "kind": "drag", "button": "left", "col": column, "row": row])
+        native.send(mouse(.drag, column))
       }
-      native.send(["type": "mouse", "kind": "up", "button": "left", "col": end, "row": row])
+      native.send(mouse(.up, end))
       return
     }
     terminal.send("\u{1b}[<0;\(start + 1);\(row + 1)M")
@@ -151,8 +160,8 @@ final class EditorController {
     terminal.send("\u{1b}[<0;\(end + 1);\(row + 1)m")
   }
 
-  /// The scene key message for a chord in the app's notation.
-  static func message(for chord: String) -> [String: Any]? {
+  /// The scene key for a chord in the app's notation.
+  static func key(for chord: String) -> WireKey? {
     guard let parsed = KeyChord(chord) else { return nil }
     let names: [String: String] = [
       "Enter": "Enter", "Return": "Enter", "Tab": "Tab", "Esc": "Escape", "Escape": "Escape", "Backspace": "Backspace",
@@ -163,9 +172,12 @@ final class EditorController {
     if key.count > 1, !key.hasPrefix("F"), names[parsed.key] == nil { return nil }
     let shift = parsed.modifiers.contains(.shift)
     if key.count == 1, !shift { key = key.lowercased() }
-    return [
-      "type": "key", "key": key, "ctrl": parsed.modifiers.contains(.control), "alt": parsed.modifiers.contains(.option),
-      "meta": parsed.modifiers.contains(.command), "shift": shift,
-    ]
+    return WireKey.with {
+      $0.key = key
+      $0.ctrl = parsed.modifiers.contains(.control)
+      $0.alt = parsed.modifiers.contains(.option)
+      $0.meta = parsed.modifiers.contains(.command)
+      $0.shift = shift
+    }
   }
 }
