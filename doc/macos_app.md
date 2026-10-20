@@ -7,8 +7,9 @@ key rebinding. It adds menus, a sidebar, sheets and windows in place of the
 terminal dialogs, light and dark themes with a font for each element, and a
 built-in tutorial that explains every feature by doing it.
 
-It needs macOS 14 or later. To build it, see
-[building the macOS app](dev/macos_app.md#build).
+It needs macOS 14 or later. Run `macos/build_app.sh --install` from the source
+checkout to build and install it in Applications. See
+[building and installing the macOS app](dev/macos_app.md#build).
 
 - [The window](#the-window)
 - [Keys](#keys)

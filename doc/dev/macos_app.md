@@ -102,6 +102,8 @@ fc_core              unchanged                     locations, plans, jobs, journ
 macos/build_app.sh            # release build: build-macos/File Commander.app
 macos/build_app.sh --debug    # faster Swift compile
 macos/build_app.sh --open     # build, then open the app
+macos/build_app.sh --install  # build, verify signing and replace the installed app
+macos/build_app.sh --install --open  # install, then open the installed copy
 macos/tools/update_app.sh     # after Swift-only changes: update the bundle in seconds
 ```
 
@@ -115,6 +117,16 @@ The script configures the `macos-app` CMake preset once (deployment target macOS
 | `Contents/Resources/FileCommander_FileCommander.bundle` | explainers and themes |
 | `Contents/Resources/AppIcon.icns` | drawn by `macos/tools/make_icon.swift` |
 
+`--install` updates an existing copy in `~/Applications` or `/Applications`
+(preferring the user copy when both exist); a first install goes to
+`~/Applications`. Set `FC_APP_INSTALL_DIR` to choose another directory, for
+example `FC_APP_INSTALL_DIR="$HOME/Applications" macos/build_app.sh --install`.
+Quit File Commander before installing. The installer verifies the built app's
+signature, copies the full bundle to a temporary directory on the destination
+volume, verifies that copy, then atomically replaces the installed bundle.
+Build, copy or verification failures leave the installed app intact. It never
+merges new files into an old bundle. `--open --install` opens the installed copy.
+
 `macos/tools/sign_app.sh` signs the bundle, inside out (helpers and resource
 bundles, then the app). It uses `FC_CODESIGN_IDENTITY` when that is set (`-`
 for ad hoc), else the first valid Apple Development identity in the keychain,
@@ -122,6 +134,10 @@ else an ad hoc signature. A real identity keeps the app's code identity the
 same across builds, so macOS asks for a permission (such as files on network
 volumes) once; an ad hoc signature changes with every build, and macOS asks
 again each time.
+
+Installation uses `codesign --verify --deep --strict`; a trust or signature
+failure stops installation. For a local ad hoc build, explicitly select
+`FC_CODESIGN_IDENTITY=-`.
 
 `macos/tools/update_app.sh` rebuilds only the Swift products (debug unless
 `--release`), puts them into the existing bundle, installs `fc`, `fresh` and `7z.so` from `build-macos` when they are newer than the bundle's, and signs
@@ -142,6 +158,7 @@ needs no Metal toolchain.
 
 | Test | What it checks |
 | --- | --- |
+| `python3 test/test_macos_install.py` | Disposable signed apps: first install, replacement, failure preservation, running-app checks, and build failures with stale outputs. Never installs into your Applications folders. |
 | `fc.model.panes`, `fc.model.commands` | `PaneModel` and `AppModel`: listing, filter, glob, cursor, sort, tutorial tabs, the command catalog, palette ranking, dialog requests, settings |
 | `fc.model.rate` | A raised transfer limit applies within a running file |
 | `fc.model.engine` | The facade end to end: start, rows, glob, jobs, profile lock |

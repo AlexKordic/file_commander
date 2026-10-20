@@ -5,17 +5,21 @@
 #   macos/build_app.sh            release build into build-macos/File Commander.app
 #   macos/build_app.sh --debug    debug Swift build (faster to compile)
 #   macos/build_app.sh --open     build, then open the app
+#   macos/build_app.sh --install  build, verify and replace the installed app
+#   FC_APP_INSTALL_DIR overrides the install directory.
 set -euo pipefail
 
 repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo"
 configuration=release
 open_app=0
+install_app=0
 for arg in "$@"; do
   case "$arg" in
     --debug) configuration=debug ;;
     --open) open_app=1 ;;
-    -h|--help) sed -n '2,8p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    --install) install_app=1 ;;
+    -h|--help) sed -n '2,9p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "build_app: unknown option $arg" >&2; exit 2 ;;
   esac
 done
@@ -36,7 +40,7 @@ if [[ ! -f build-macos/CMakeCache.txt ]]; then
   cmake --preset macos-app ${extra[@]+"${extra[@]}"} > /dev/null
 fi
 say "building the engine, fresh and 7-Zip"
-cmake --build --preset macos-app | grep -E "error|FAILED" || true
+cmake --build --preset macos-app
 [[ -f build-macos/libfc_engine_bundle.a ]] || { echo "build_app: the engine did not build" >&2; exit 1; }
 
 say "building the Swift package ($configuration)"
@@ -91,4 +95,7 @@ cp build-macos/AppIcon.icns "$app/Contents/Resources/AppIcon.icns"
 signed="$(macos/tools/sign_app.sh "$app")"
 say "$signed"
 say "done: $app"
+if [[ $install_app == 1 ]]; then
+  app="$(python3 macos/tools/install_app.py "$app")"
+fi
 if [[ $open_app == 1 ]]; then open "$app"; fi

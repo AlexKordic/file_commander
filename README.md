@@ -68,7 +68,7 @@ The bootstrap script downloads the exact dependency versions FC is tested with
 (listed in [`dependencies.json`](dependencies.json)) into `build-deps/`. The
 first build also downloads Boost and Rust crates, so it needs network access.
 
-There is no install step yet. Run `build-release/fc` directly, or symlink it into a directory on your `PATH`. To move FC to another machine, build the self-contained package (`fc`, `fresh`, 7-Zip's `7z.so` and the license notices) described in [building FC](doc/dev/building.md).
+Run the terminal interface as `build-release/fc`, or symlink it into a directory on your `PATH`. For the native macOS app, `macos/build_app.sh --install` builds, verifies signing and installs the complete app bundle; see [building the macOS app](doc/dev/macos_app.md#build). To move the terminal interface to another machine, build the self-contained package (`fc`, `fresh`, 7-Zip's `7z.so` and the license notices) described in [building FC](doc/dev/building.md).
 
 More build options, such as debug and sanitizer builds or using local
 dependency checkouts, are in [building FC](doc/dev/building.md).

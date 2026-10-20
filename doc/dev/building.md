@@ -74,7 +74,7 @@ python3 tools/run_test_lane.py fast --build build-release
 
 ### How fc finds Fresh and 7-Zip
 
-There is no install step: FC defines no install rules, so `cmake --install` does nothing useful. Instead, CMake compiles the absolute paths of the build-tree Fresh and `7z.so` into `fc` as defaults.
+The terminal build defines no CMake install rules, so `cmake --install` does nothing useful. CMake compiles the absolute paths of the build-tree Fresh and `7z.so` into `fc` as defaults. The native macOS app has a separate [build-and-install command](macos_app.md#build), `macos/build_app.sh --install`.
 
 FC looks for the editor in this order:
 
