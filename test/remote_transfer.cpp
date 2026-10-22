@@ -1,10 +1,12 @@
 #include "copy_planner.hpp"
 #include "file_io_jobs.hpp"
 #include "remote_fs.hpp"
+#include "remote_protocol.hpp"
 #include "sha256.hpp"
 #include "support/contracts.hpp"
 #include "transfer_journal.hpp"
 #include <iostream>
+#include <sstream>
 using namespace Perun;
 using test::require;
 static void done(FileJobs &jobs, const std::shared_ptr<JobSpec> &job) {
@@ -15,6 +17,66 @@ static std::shared_ptr<JobSpec> copy_job(const Filepath &source, const Filepath 
   auto plan = std::make_shared<OperationPlan>();
   plan->steps.push_back({Operation::Kind::CopyFile, source, dest, {}, "", RemoteFS::inspect(source).size});
   return std::make_shared<JobSpec>(plan);
+}
+static void streaming_pipeline_contracts(FileJobs &jobs, const test::Fixture &local, const Filepath &remote) {
+  const std::string data(2 * 1024 * 1024 + 17, char(0xac));
+  test::write(local / "gap-first", data);
+  boost::filesystem::create_directory(local / "gap-dir");
+  test::write(local / "gap-dir/second", data);
+  boost::filesystem::create_symlink("gap-first", local / "gap-link");
+  const auto gate = local / "stream-gate", trace = local / "stream-trace";
+  setenv("FC_SSH_FIXTURE_STREAM_GATE", gate.c_str(), 1);
+  setenv("FC_SSH_FIXTURE_STREAM_TRACE", trace.c_str(), 1);
+  RemoteFS::close_connections();
+  auto plan = std::make_shared<OperationPlan>();
+  plan->steps = {
+      {Operation::Kind::CopyFile, local / "gap-first", remote / "gap-first", {}, "", int64_t(data.size())},
+      {Operation::Kind::CreateDirectory, local / "gap-dir", remote / "gap-dir"},
+      {Operation::Kind::CreateSymlink, local / "gap-link", remote / "gap-link", Filepath("gap-first")},
+      {Operation::Kind::CopyFile, local / "gap-dir/second", remote / "gap-dir/second", {}, "", int64_t(data.size())}};
+  auto job = std::make_shared<JobSpec>(plan);
+  jobs.add_job(job); done(jobs, job);
+  require(boost::filesystem::exists(Filepath(gate.native() + ".entered")) &&
+              boost::filesystem::exists(Filepath(gate.native() + ".second-ended")),
+          "Second file did not stream while the previous fsync was blocked");
+  auto snapshot = job->snapshot();
+  require(snapshot->_transfer_written == 2 * data.size() && snapshot->_transfer_verified == 2 * data.size() &&
+              snapshot->_transfer_durable == 2 * data.size(), "Pipeline progress did not track written/verified/durable bytes");
+  require(RemoteFS::digest(remote / "gap-first") == RemoteFS::digest(local / "gap-first") &&
+              RemoteFS::digest(remote / "gap-dir/second") == RemoteFS::digest(local / "gap-dir/second") &&
+              RemoteFS::inspect(remote / "gap-link").link == "gap-first", "Pipeline changed files or symbolic links");
+  require(RemoteFS::inspect(remote / "gap-dir").mtime_ns == RemoteFS::inspect(local / "gap-dir").mtime_ns,
+          "Look-ahead directory metadata was not finalized");
+  std::istringstream records(test::read(trace));
+  uint64_t time, identity, length, bytes = 0, frames = 0;
+  int pid, kind, operation;
+  std::string direction;
+  while (records >> time >> pid >> direction >> kind >> operation >> identity >> length)
+    if (direction == "in" && kind == RemoteFS::Wire::Data && operation == RemoteFS::Wire::opcode("stream_write")) {
+      bytes += length; ++frames;
+    }
+  require(bytes == 2 * data.size() && frames >= 6, "Wire data was expanded, missing or not framed as raw bytes");
+  unsetenv("FC_SSH_FIXTURE_STREAM_GATE"); unsetenv("FC_SSH_FIXTURE_STREAM_TRACE");
+  RemoteFS::close_connections();
+
+  for (const auto &fault : {"corrupt", "disk-full"}) {
+    setenv("FC_SSH_FIXTURE_STREAM_FAULT", fault, 1);
+    auto fault_plan = std::make_shared<OperationPlan>();
+    for (int n = 0; n < 2; ++n)
+      fault_plan->steps.push_back({Operation::Kind::CopyFile, local / "gap-first",
+          remote / (std::string(fault) + std::to_string(n)), {}, "", int64_t(data.size())});
+    auto failed = std::make_shared<JobSpec>(fault_plan);
+    jobs.add_job(failed);
+    test::until([&] { return jobs.idle(); }, "Streaming fault did not stop the job");
+    require(failed->_state == JobState::PAUSED && !RemoteFS::inspect(fault_plan->steps[0].destination).exists &&
+                !RemoteFS::inspect(fault_plan->steps[1].destination).exists &&
+                RemoteFS::inspect(local / "gap-first").exists,
+            "Corrupt or full destination published output or removed its source");
+    unsetenv("FC_SSH_FIXTURE_STREAM_FAULT"); RemoteFS::close_connections();
+    jobs.resume(failed->_job_id); done(jobs, failed);
+    for (const auto &op : fault_plan->steps)
+      require(RemoteFS::digest(op.destination) == RemoteFS::digest(op.source), "Resumed fault published incorrect bytes");
+  }
 }
 static void pending_recovery_contracts(const test::Fixture &local, const Filepath &remote) {
   for (bool replaced : {false, true}) {
@@ -250,6 +312,7 @@ int main(int argc, char **argv) {
     done(*jobs, deletions);
     require(!RemoteFS::inspect(remote / "tree").exists, "Remote delete failed");
     if (host == "fixture") {
+      streaming_pipeline_contracts(*jobs, local, remote);
       pending_recovery_contracts(local, remote);
       metadata_contracts(*jobs, local, remote);
       RemoteFS::close_connections();

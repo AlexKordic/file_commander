@@ -23,8 +23,12 @@ class TransferJournal {
   // Look-ahead staging is recorded before any data is sent. Only the ordered
   // commit worker activates a step; future files never advance the prefix.
   void stage_pending(size_t index, const Filepath& stage);
+  void directory_pending(size_t index, const Filepath& destination);
+  bool owns_pending_directory(size_t index) const;
   void pending_phase(size_t index, const char* phase);
   void prepare_inputs();            // Remote inspection belongs on the worker, never startup/UI.
+  int64_t operation_bytes(size_t index) const;
+  int64_t total_bytes() const;
   void finish_step(const JobSpec&); // job mutex held
   void checkpoint(const JobSnapshot&, JobState, bool force = true);
   // Only explicit Resume calls this: validate remaining work, reconcile proven

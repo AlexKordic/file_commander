@@ -320,7 +320,8 @@ class StreamWriter:
         self.worker.start()
 
     def progress(self):
-        return dict(bytes=self.written, verified=self.verified, durable=self.durable, flushes=self.flushes)
+        with self.cv:
+            return dict(bytes=self.written, verified=self.verified, durable=self.durable, flushes=self.flushes)
 
     def write(self, data):
         with self.io_lock:
@@ -372,7 +373,8 @@ class StreamWriter:
                     if not block:
                         raise OSError(errno.EIO, 'Unexpected EOF during destination verification')
                     h.update(block)
-                    self.verified += len(block)
+                    with self.cv:
+                        self.verified += len(block)
                     self.emit(WIRE_EVENT, self.progress())
                 if finished:
                     if written != self.size or h.digest() != self.expected_hash:
@@ -381,17 +383,20 @@ class StreamWriter:
                     # metadata and directory durability are handled separately.
                     if not self.flushes or self.durable != written:
                         os.fsync(self.fd)
-                        self.flushes += 1
-                    self.durable = written
+                        with self.cv:
+                            self.flushes += 1
+                    with self.cv:
+                        self.durable = written
                     if (source_identity(os.fstat(self.fd)) != self.end_identity or
                             source_identity(os.stat(self.value, follow_symlinks=False)) != self.end_identity):
                         raise OSError(errno.ESTALE, 'Staging file changed during verification')
-                    self.emit(WIRE_RESULT, self.progress())
+                    self.emit(WIRE_RESULT, {**self.progress(), 'stamp': stamp(self.value)})
                     return
                 if written - self.durable >= self.checkpoint_bytes:
                     os.fsync(self.fd)
-                    self.flushes += 1
-                    self.durable = written
+                    with self.cv:
+                        self.flushes += 1
+                        self.durable = written
                     self.emit(WIRE_EVENT, self.progress())
         except Exception as error:
             self.fail(error)

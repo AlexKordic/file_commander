@@ -59,6 +59,7 @@ struct StreamFile::Impl {
   std::condition_variable cv;
   std::deque<std::string> blocks;
   std::string source_digest;
+  j::object destination_proof;
   bool source_done = false, sink_done = false, server_copy = false;
   std::exception_ptr failure;
   std::atomic<uint64_t> sent{0}, written{0}, verified{0}, durable{0}, flushes{0};
@@ -139,7 +140,7 @@ struct LocalSink {
           file.durable = written;
           if (descriptor_stamp(descriptor.fd) != end_stamp || inspect(file.stage).stamp() != end_stamp)
             throw std::runtime_error("Staging file changed during verification");
-          std::lock_guard done(file.mutex); file.sink_done = true; file.cv.notify_all(); return;
+          std::lock_guard done(file.mutex); file.destination_proof = end_stamp; file.sink_done = true; file.cv.notify_all(); return;
         }
         if (written - file.durable >= uint64_t(1024) * 1024 * 1024) {
           if (::fsync(descriptor.fd)) throw std::system_error(errno, std::generic_category());
@@ -220,7 +221,16 @@ struct Peer {
           if (frame.kind == Wire::Result) {
             if (written != uint64_t(file->expected.size) || verified != written || durable != written)
               throw ConnectionError("Incomplete SSH verification result");
-            std::lock_guard lock(file->mutex); file->sink_done = true; file->cv.notify_all();
+            auto proof = value.at("stamp").as_object();
+            j::object normalized;
+            for (auto key : {"exists", "mode", "dev", "ino", "uid", "gid", "size", "mtime_ns", "ctime_ns"})
+              normalized[key] = proof.at(key);
+            normalized["link"] = "";
+            if (!normalized.at("exists").as_bool() ||
+                (normalized.at("mode").to_number<uint64_t>() & S_IFMT) != S_IFREG ||
+                normalized.at("size").to_number<uint64_t>() != written)
+              throw ConnectionError("Invalid SSH verification proof");
+            std::lock_guard lock(file->mutex); file->destination_proof = std::move(normalized); file->sink_done = true; file->cv.notify_all();
           }
         } else throw ConnectionError("Unexpected SSH stream frame");
         if (frame.kind == Wire::Result || frame.kind == Wire::Error) {
@@ -238,7 +248,13 @@ struct Peer {
 StreamFile::Impl::~Impl() { local_sink.reset(); }
 StreamFile::StreamFile(std::shared_ptr<Impl> value) : impl(std::move(value)) {}
 StreamProgress StreamFile::progress() const {
-  return {impl->sent, impl->written, impl->verified, impl->durable, impl->flushes};
+  const auto verified = impl->verified.load(), durable = impl->durable.load(), written = impl->written.load();
+  return {impl->sent, written, std::min(verified, written), std::min(durable, written), impl->flushes};
+}
+boost::json::object StreamFile::verified_stamp() const {
+  std::lock_guard lock(impl->mutex); impl->check();
+  if (!impl->sink_done) throw std::runtime_error("Destination verification is incomplete");
+  return impl->destination_proof;
 }
 bool StreamFile::ready() const { std::lock_guard lock(impl->mutex); return impl->sink_done || bool(impl->failure); }
 void StreamFile::wait() const {

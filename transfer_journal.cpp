@@ -199,6 +199,16 @@ void validate_tree(const j::array& entries) {
 bool terminal(JobState state) {
   return state == JobState::CANCELLED || state == JobState::COMPLETED || state == JobState::COMPLETED_WITH_ERRORS;
 }
+int64_t input_bytes(const j::object& input) {
+  const auto op = decode(input.at("operation").as_object());
+  if (op.kind != Operation::Kind::CopyFile && op.kind != Operation::Kind::MoveEntry) return 0;
+  int64_t bytes = 0;
+  for (const auto& value : input.at("source").as_array()) {
+    const auto& s = value.as_object().at("stamp").as_object();
+    if (exists(s) && (number(s.at("mode")) & S_IFMT) == S_IFREG) bytes += std::max<int64_t>(0, number(s.at("size")));
+  }
+  return bytes;
+}
 void validate_staging(const j::object& record, const Operation& op) {
   const Filepath root(text(record.at("stage_root"))), stage(text(record.at("stage")));
   const auto prefix = op.kind == Operation::Kind::MoveEntry ? ".fc-move-" : ".fc-copy-";
@@ -220,6 +230,15 @@ struct TransferJournal::Impl {
   std::string phase() const { return text(state.at("phase")); }
   Operation op() const { return decode(plan.at("steps").as_array().at(index()).as_object().at("operation").as_object()); }
   const j::object& input() const { return plan.at("steps").as_array().at(index()).as_object(); }
+  bool owns_directory(size_t index, const Filepath& path) const {
+    if (!state.contains("pending")) return false;
+    for (const auto& value : state.at("pending").as_array()) {
+      const auto& entry = value.as_object();
+      if (entry.at("index").to_number<size_t>() == index && text(entry.at("phase")) == "directory")
+        return text(entry.at("destination")) == path.native() && identity(stamp(path), entry.at("stamp").as_object());
+    }
+    return false;
+  }
   void stats(const JobStats& job, const std::vector<DirItem>& errors) {
     state["done"] = job._items_done; state["failed"] = job._items_failed; state["skipped"] = job._items_skipped;
     state["bytes"] = job._bytes_processed; state["total"] = job._bytes_total;
@@ -245,9 +264,11 @@ struct TransferJournal::Impl {
   }
   void complete_proven_commit() {
     const auto operation = op();
+    const auto bytes = is_remote(operation.source) || is_remote(operation.destination)
+        ? input_bytes(input()) : std::max<int64_t>(0, operation.bytes);
     state["next"] = index() + 1;
     state["done"] = number(state.at("done")) + 1;
-    state["bytes"] = state.at("bytes").to_number<double>() + std::max(int64_t(0), operation.bytes);
+    state["bytes"] = state.at("bytes").to_number<double>() + bytes;
     state["partial"] = 0; state["phase"] = "ready";
     save();
   }
@@ -306,6 +327,17 @@ void TransferJournal::prepare_inputs() {
   impl->plan["steps"] = std::move(steps);
   impl->plan["prepared"] = true;
   save(impl->plan_path, impl->plan);
+}
+
+int64_t TransferJournal::operation_bytes(size_t index) const {
+  std::lock_guard lock(impl->mutex);
+  return input_bytes(impl->plan.at("steps").as_array().at(index).as_object());
+}
+int64_t TransferJournal::total_bytes() const {
+  std::lock_guard lock(impl->mutex);
+  int64_t result = 0;
+  for (const auto& value : impl->plan.at("steps").as_array()) result += input_bytes(value.as_object());
+  return result;
 }
 
 std::vector<std::shared_ptr<JobSpec>> TransferJournal::restore(const Filepath& directory, uint64_t& next_id,
@@ -368,9 +400,14 @@ std::vector<std::shared_ptr<JobSpec>> TransferJournal::restore(const Filepath& d
           auto n = entry.at("index").to_number<size_t>();
           if (n >= plan->steps.size() || !seen.insert(n).second) throw std::runtime_error("Invalid pending transfer index");
           const auto& op = plan->steps.at(n);
-          if (op.kind != Operation::Kind::CopyFile && op.kind != Operation::Kind::MoveEntry)
-            throw std::runtime_error("Invalid pending transfer operation");
           const auto phase = text(entry.at("phase"));
+          if (op.kind == Operation::Kind::CreateDirectory && phase == "directory") {
+            if (text(entry.at("destination")) != op.destination.native() || !::Perun::directory(entry.at("stamp").as_object()))
+              throw std::runtime_error("Invalid pending directory ownership");
+            continue;
+          }
+          if (op.kind != Operation::Kind::CopyFile && op.kind != Operation::Kind::MoveEntry && op.kind != Operation::Kind::CreateSymlink)
+            throw std::runtime_error("Invalid pending transfer operation");
           if (phase != "staging" && phase != "written" && phase != "verified")
             throw std::runtime_error("Invalid pending transfer phase");
           validate_staging(entry, op);
@@ -411,6 +448,7 @@ void TransferJournal::begin_step(size_t index) {
     for (const auto& value : impl->state.at("pending").as_array()) {
       const auto& entry = value.as_object();
       if (entry.at("index").to_number<size_t>() != index) continue;
+      if (text(entry.at("phase")) == "directory") break;
       for (auto key : {"stage", "stage_root", "stage_identity"}) impl->state[key] = entry.at(key);
       impl->state["phase"] = "staging";
       break;
@@ -444,6 +482,28 @@ void TransferJournal::pending_phase(size_t index, const char* phase) {
     if (entry.at("index").to_number<size_t>() == index) { entry["phase"] = phase; impl->save(); return; }
   }
   throw std::runtime_error("Missing pending transfer record");
+}
+
+void TransferJournal::directory_pending(size_t index, const Filepath& destination) {
+  std::lock_guard lock(impl->mutex);
+  if (!impl->state.contains("pending")) impl->state["pending"] = j::array{};
+  auto& pending = impl->state.at("pending").as_array();
+  const auto op = decode(impl->plan.at("steps").as_array().at(index).as_object().at("operation").as_object());
+  if (index < impl->index() || op.kind != Operation::Kind::CreateDirectory || op.destination != destination || pending.size() >= 32)
+    throw std::runtime_error("Invalid pending directory index");
+  for (const auto& value : pending)
+    if (value.as_object().at("index").to_number<size_t>() == index) throw std::runtime_error("Duplicate pending directory index");
+  auto s = stamp(destination);
+  if (!directory(s)) throw std::runtime_error("Pending directory is unavailable");
+  pending.emplace_back(j::object{{"index", index}, {"phase", "directory"}, {"destination", destination.native()}, {"stamp", s}});
+  if (number(impl->plan.at("version")) == 1) { impl->plan["version"] = 2; save(impl->plan_path, impl->plan); }
+  impl->state["version"] = 2; impl->save();
+}
+
+bool TransferJournal::owns_pending_directory(size_t index) const {
+  std::lock_guard lock(impl->mutex);
+  const auto op = decode(impl->plan.at("steps").as_array().at(index).as_object().at("operation").as_object());
+  return impl->owns_directory(index, op.destination);
 }
 
 void TransferJournal::finish_step(const JobSpec& job) {
@@ -487,6 +547,8 @@ int TransferJournal::transaction(const char* phase, const Filepath& stage, const
     impl->state["stage"] = stage.native(); impl->state["stage_root"] = stage.parent_path().native();
     impl->state["stage_identity"] = stamp(stage.parent_path());
   } else if (std::string_view(phase) == "commit_ready") {
+    if (!identity(stamp(stage.parent_path()), impl->state.at("stage_identity").as_object()))
+      throw std::runtime_error("Transfer staging ownership changed before commit; source retained");
     auto output = tree(stage);
     sync_tree(stage, output);
     impl->state["output"] = std::move(output);
@@ -532,7 +594,7 @@ void TransferJournal::prepare_resume(JobSpec& job) {
       } else impl->complete_proven_commit();
     } else if (impl->phase() == "committed" || impl->phase() == "source_remove") {
       throw std::runtime_error("Committed destination changed; source cleanup is blocked. Review files, then cancel recovery or start a new transfer.");
-    } else if (!unchanged(stamp(op.destination), input.at("destination").as_object())) {
+    } else if (!unchanged(stamp(op.destination), input.at("destination").as_object()) && !impl->owns_directory(impl->index(), op.destination)) {
       throw std::runtime_error("Destination changed during interruption; completion is uncertain. Review files before restarting the transfer.");
     }
   }
@@ -543,7 +605,7 @@ void TransferJournal::prepare_resume(JobSpec& job) {
     if (i == impl->index() && cleanup_pending()) continue;
     if (!op.source.empty() && !matches_tree(op.source, input.at("source").as_array(), false, op.kind == Operation::Kind::CopyFile, op.kind == Operation::Kind::MoveEntry))
       throw std::runtime_error("Source changed or is unavailable: " + op.source.native() + ". Cancel recovery and start a new transfer after reviewing it.");
-    if (!op.destination.empty() && !unchanged(stamp(op.destination), input.at("destination").as_object()))
+    if (!op.destination.empty() && !unchanged(stamp(op.destination), input.at("destination").as_object()) && !impl->owns_directory(i, op.destination))
       throw std::runtime_error("Destination conflict: " + op.destination.native() + ". Resolve it before Resume, or cancel and start a new transfer.");
     if (op.kind == Operation::Kind::CopyFile && !RemoteFS::access(op.source, R_OK))
       throw std::runtime_error("Source is not readable: " + op.source.native());
@@ -566,6 +628,11 @@ void TransferJournal::prepare_resume(JobSpec& job) {
     auto& pending = impl->state.at("pending").as_array();
     for (const auto& value : pending) {
       const auto& entry = value.as_object();
+      if (text(entry.at("phase")) == "directory") {
+        if (!identity(stamp(text(entry.at("destination"))), entry.at("stamp").as_object()))
+          throw std::runtime_error("Pending directory ownership changed; cleanup blocked");
+        continue;
+      }
       const auto current = stamp(text(entry.at("stage_root")));
       if (exists(current) && !identity(current, entry.at("stage_identity").as_object()))
         throw std::runtime_error("Pending transfer staging ownership changed; cleanup blocked");
@@ -573,6 +640,7 @@ void TransferJournal::prepare_resume(JobSpec& job) {
     j::array retained;
     for (const auto& value : pending) {
       const auto& entry = value.as_object();
+      if (text(entry.at("phase")) == "directory") { retained.push_back(value); continue; }
       if (cleanup_pending() && entry.at("index").to_number<size_t>() == impl->index()) {
         retained.push_back(value); continue;
       }

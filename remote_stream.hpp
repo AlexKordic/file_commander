@@ -21,6 +21,7 @@ private:
   friend class StreamSession;
 public:
   StreamProgress progress() const;
+  boost::json::object verified_stamp() const;
   bool ready() const;
   // Completes only after independent destination readback and durability.
   void wait() const;

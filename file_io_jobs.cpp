@@ -1226,40 +1226,14 @@ class ThreadedFileJobs : public FileJobs {
       std::lock_guard lock(job->_m);
       job->_journal->prepare_resume(*job);
     }
-    if (job->_journal)
+    if (job->_journal) {
       job->_journal->prepare_inputs();
+      std::lock_guard lock(job->_m);
+      job->_bytes_total = job->_journal->total_bytes();
+    }
     auto checkpoint = [&] {
       if (job->_cancel_requested || !wait_for_resume(job))
         throw ConnectionError("Transfer interrupted; Resume requires validation");
-    };
-    // The window restarts whenever the limit changes, so a new limit applies
-    // at once without a stall (lowered) or a burst to catch up (raised).
-    auto copy_started = std::chrono::steady_clock::now();
-    int64_t window_bytes = 0;
-    uint64_t window_rate = _transfer_rate.load();
-    auto progress = [&](int64_t n) {
-      checkpoint();
-      auto rate = _transfer_rate.load();
-      if (rate != window_rate) {
-        window_rate = rate;
-        copy_started = std::chrono::steady_clock::now();
-        window_bytes = n;
-      }
-      if (rate) {
-        auto deadline = copy_started + std::chrono::duration_cast<std::chrono::steady_clock::duration>(
-                                           std::chrono::duration<double>(double(n - window_bytes) / rate));
-        while (std::chrono::steady_clock::now() < deadline) {
-          checkpoint();
-          std::this_thread::sleep_for(std::chrono::milliseconds(20));
-        }
-      }
-      {
-        std::lock_guard lock(job->_m);
-        job->_copy_bytes = n;
-        job->_current_item.current_size = n;
-        job->_total.update(int64_t(job->_bytes_processed) + n, int64_t(job->_bytes_total));
-      }
-      job->updated();
     };
     struct CopiedDirectory {
       Filepath source, destination;
@@ -1290,52 +1264,15 @@ class ThreadedFileJobs : public FileJobs {
       }
       attributes(target, values);
     };
-    std::function<void(const Filepath &, const Filepath &)> copy_tree;
-    copy_tree = [&](const Filepath &source, const Filepath &target) {
-      checkpoint();
-      auto before = inspect(source);
-      if (!before.exists)
-        throw std::runtime_error("Source is unavailable: " + source.native());
-      if (before.directory()) {
-        mkdir(target);
-        for (auto &entry : list(source, &job->_cancel_requested))
-          copy_tree(entry.path, target / entry.path.filename());
-      } else if (before.symlink())
-        symlink(before.link, target);
-      else if ((before.mode & S_IFMT) == S_IFREG) {
-        copy_started = std::chrono::steady_clock::now();
-        auto l = Location::decode(source.native()), r = Location::decode(target.native());
-        if (l.remote() && r.remote() && l.ssh == r.ssh) {
-          auto p = params(source);
-          p["destination"] = r.local.native();
-          p["checkpoint"] = true;
-          request(l.ssh, "copy", std::move(p), &job->_cancel_requested, true, progress);
-        } else {
-          write(target, 0, "", true);
-          uint64_t offset = 0;
-          for (;;) {
-            checkpoint();
-            auto bytes = read(source, offset, 1024 * 1024);
-            if (bytes.empty())
-              break;
-            write(target, offset, bytes);
-            offset += bytes.size();
-            progress(offset);
-          }
-        }
-        if (digest(source, &job->_cancel_requested) != digest(target, &job->_cancel_requested))
-          throw std::runtime_error("Transfer digest mismatch; destination was not published");
-      } else
-        throw std::runtime_error("SSH transfers support regular files, directories and symbolic links");
-      if (inspect(source).stamp() != before.stamp())
-        throw std::runtime_error("Source changed while copying; destination was not published");
-      copy_attributes(source, target);
-      metadata(target, before);
-      sync(target);
-    };
+    RemoteCopyCallbacks copy_callbacks{
+        checkpoint, [this] { return _transfer_rate.load(); }, copy_attributes,
+        [&](const auto &source, const auto &destination, const auto &metadata) {
+          directories.push_back({source, destination, metadata});
+        }};
     for (size_t index = job->_resume_index; index < job->_plan->steps.size(); ++index) {
       checkpoint();
       const auto &op = job->_plan->steps[index];
+      const auto step_bytes = job->_journal ? job->_journal->operation_bytes(index) : op.bytes;
       bool skipped = false;
       if (job->_journal && job->_journal->cleanup_pending()) {
         job->_journal->remove_source(op.source, op.destination);
@@ -1354,11 +1291,14 @@ class ThreadedFileJobs : public FileJobs {
           auto existing = inspect(op.destination);
           if (existing.exists && !existing.directory())
             throw std::runtime_error("Directory destination is occupied");
+          bool owned = job->_journal && job->_journal->owns_pending_directory(index);
           if (!existing.exists) {
             mkdir(op.destination);
-            if (!op.source.empty())
-              directories.push_back({op.source, op.destination, inspect(op.source, true)});
+            if (job->_journal) job->_journal->directory_pending(index, op.destination);
+            owned = true;
           }
+          if (owned && !op.source.empty())
+            directories.push_back({op.source, op.destination, inspect(op.source, true)});
         } else if (op.kind == Operation::Kind::DeleteEntry) {
           if (Location::decode(op.source.native()).local == "/")
             throw std::runtime_error("Deleting a filesystem root is forbidden");
@@ -1402,8 +1342,7 @@ class ThreadedFileJobs : public FileJobs {
             }
             if (!renamed) {
               if (S_ISREG(before.mode) && op.kind != Operation::Kind::CreateSymlink) {
-                index = copy_remote_pipeline(*job, index,
-                    {checkpoint, [this] { return _transfer_rate.load(); }, copy_attributes}) - 1;
+                index = copy_remote_pipeline(*job, index, copy_callbacks) - 1;
                 continue;
               }
               if (destination.directory())
@@ -1420,7 +1359,7 @@ class ThreadedFileJobs : public FileJobs {
                 symlink(op.link_text.native(), stage);
                 metadata(stage, before);
               } else
-                copy_tree(op.source, stage);
+                copy_remote_tree(*job, op.source, stage, copy_callbacks);
               checkpoint();
               if (inspect(op.destination).stamp() != destination.stamp())
                 throw std::runtime_error("Destination changed before commit; source retained");
@@ -1444,7 +1383,7 @@ class ThreadedFileJobs : public FileJobs {
         std::lock_guard lock(job->_m);
         ++job->_items_done;
         job->_items_skipped += skipped;
-        job->_bytes_processed += skipped ? 0 : std::max(int64_t(0), op.bytes);
+        job->_bytes_processed += skipped ? 0 : std::max(int64_t(0), step_bytes);
         job->_current_item_index = int(index + 1);
         job->_current_item.current_size = 0;
         if (job->_journal)
