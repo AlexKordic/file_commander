@@ -1268,6 +1268,24 @@ class ThreadedFileJobs : public FileJobs {
       for (auto &op : restored)
         directories.push_back({op.source, op.destination, inspect(op.source, true)});
     }
+    auto copy_attributes = [&](const Filepath &source, const Filepath &target) {
+      auto attrs = attributes(source);
+      auto target_attrs = attributes(target);
+      if (attrs.at("acl").as_bool())
+        throw std::runtime_error("Extended ACLs are not supported in SSH transfers; source retained");
+      auto &values = attrs.at("attributes").as_object();
+      if (attrs.at("platform") != target_attrs.at("platform")) {
+        values.erase(base64("com.apple.provenance"));
+        if (!values.empty()) {
+          // A metadata warning must not mark the job failed or prevent its
+          // verified content from being published (including move cleanup).
+          report_error("[Transfer warning] " + source.native() +
+                       ": skipping extended attributes that cannot be translated between these platforms");
+          values.clear();
+        }
+      }
+      attributes(target, values);
+    };
     std::function<void(const Filepath &, const Filepath &)> copy_tree;
     copy_tree = [&](const Filepath &source, const Filepath &target) {
       checkpoint();
@@ -1307,17 +1325,7 @@ class ThreadedFileJobs : public FileJobs {
         throw std::runtime_error("SSH transfers support regular files, directories and symbolic links");
       if (inspect(source).stamp() != before.stamp())
         throw std::runtime_error("Source changed while copying; destination was not published");
-      auto attrs = attributes(source);
-      auto target_attrs = attributes(target);
-      if (attrs.at("acl").as_bool())
-        throw std::runtime_error("Extended ACLs are not supported in SSH transfers; source retained");
-      if (attrs.at("platform") != target_attrs.at("platform")) {
-        attrs.at("attributes").as_object().erase(base64("com.apple.provenance"));
-      }
-      if (!attrs.at("attributes").as_object().empty() && attrs.at("platform") != target_attrs.at("platform"))
-        throw std::runtime_error(
-            "Extended attributes cannot be translated between these platforms; source retained");
-      attributes(target, attrs.at("attributes").as_object());
+      copy_attributes(source, target);
       metadata(target, before);
       sync(target);
     };
@@ -1436,14 +1444,7 @@ class ThreadedFileJobs : public FileJobs {
       job->updated();
     }
     for (auto it = directories.rbegin(); it != directories.rend(); ++it) {
-      auto attrs = attributes(it->source), target = attributes(it->destination);
-      if (attrs.at("platform") != target.at("platform"))
-        attrs.at("attributes").as_object().erase(base64("com.apple.provenance"));
-      if (attrs.at("acl").as_bool() ||
-          (!attrs.at("attributes").as_object().empty() && attrs.at("platform") != target.at("platform")))
-        throw std::runtime_error(
-            "Directory access metadata cannot be preserved over SSH; review the paused copy");
-      attributes(it->destination, attrs.at("attributes").as_object());
+      copy_attributes(it->source, it->destination);
       metadata(it->destination, it->metadata);
       sync(it->destination);
     }

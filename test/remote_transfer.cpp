@@ -16,6 +16,94 @@ static std::shared_ptr<JobSpec> copy_job(const Filepath &source, const Filepath 
   plan->steps.push_back({Operation::Kind::CopyFile, source, dest, {}, "", RemoteFS::inspect(source).size});
   return std::make_shared<JobSpec>(plan);
 }
+static void metadata_contracts(FileJobs &jobs, const test::Fixture &local, const Filepath &remote) {
+  const auto name = RemoteFS::base64("user.fc.transfer-warning");
+  const boost::json::object attrs{{name, RemoteFS::base64("metadata retained on matching platforms")}};
+  test::write(local / "attrs-file", "file with metadata");
+  RemoteFS::attributes(local / "attrs-file", attrs);
+#if defined(__APPLE__)
+  const char *other_platform = "linux";
+#else
+  const char *other_platform = "darwin";
+#endif
+  RemoteFS::close_connections();
+  setenv("FC_SSH_FIXTURE_PLATFORM", other_platform, 1);
+  auto warned = [&](const std::shared_ptr<JobSpec> &job, const Filepath &source, const Filepath &target) {
+    done(jobs, job);
+    require(job->_items_failed == 0 && job->_errors.empty(), "Metadata warning marked the job failed");
+    bool found = false;
+    for (const auto &error : jobs.get_errors(100))
+      found |= error.message.starts_with("[Transfer warning]") &&
+               error.message.find(source.native()) != std::string::npos;
+    require(found, "Skipped metadata was not reported as a warning: " + source.native());
+    require(!RemoteFS::attributes(target).at("attributes").as_object().contains(name),
+            "Cross-platform attribute was applied to the target");
+    jobs.clear_errors();
+  };
+  auto copy = [&](const Filepath &source, const Filepath &target) {
+    auto job = copy_job(source, target);
+    jobs.add_job(job);
+    warned(job, source, target);
+    require(RemoteFS::digest(source) == RemoteFS::digest(target), "Metadata warning changed file content");
+    require(RemoteFS::attributes(source).at("attributes").as_object().at(name) == attrs.at(name),
+            "Copy discarded source metadata");
+  };
+  copy(local / "attrs-file", remote / "attrs-file");
+  RemoteFS::attributes(remote / "attrs-file", attrs);
+  copy(remote / "attrs-file", local / "attrs-download");
+
+  // CopyPlanner applies directory metadata after its individual file steps.
+  boost::filesystem::create_directory(local / "attrs-tree");
+  test::write(local / "attrs-tree/child", "directory child");
+  RemoteFS::attributes(local / "attrs-tree", attrs);
+  auto copy_directory = [&](const Filepath &source, const Filepath &parent) {
+    CopyRequest request;
+    request.sources = {source};
+    request.destination = parent;
+    CopyPlanner planner(request);
+    test::until([&] { return !planner._running.load(); }, "Metadata discovery timeout");
+    auto job = std::make_shared<JobSpec>(planner.take_plan());
+    jobs.add_job(job);
+    auto target = parent / source.filename();
+    warned(job, source, target);
+    require(RemoteFS::read(target / "child", 0, 1024) == "directory child", "Directory copy lost content");
+  };
+  copy_directory(local / "attrs-tree", remote);
+  RemoteFS::attributes(remote / "attrs-tree", attrs);
+  boost::filesystem::create_directory(local / "attrs-tree-download");
+  copy_directory(remote / "attrs-tree", local / "attrs-tree-download");
+
+  // A cross-filesystem directory move uses the recursive staging path instead.
+  auto plan = std::make_shared<OperationPlan>();
+  plan->type = OperationType::MOVE;
+  plan->steps.push_back({Operation::Kind::MoveEntry, local / "attrs-tree", remote / "attrs-moved"});
+  auto move = std::make_shared<JobSpec>(plan);
+  jobs.add_job(move);
+  warned(move, local / "attrs-tree", remote / "attrs-moved");
+  require(!RemoteFS::inspect(local / "attrs-tree").exists &&
+              RemoteFS::read(remote / "attrs-moved/child", 0, 1024) == "directory child",
+          "Metadata warning blocked verified move cleanup");
+
+  // An ACL still blocks publication, even when ordinary xattrs are nonfatal.
+  RemoteFS::close_connections();
+  setenv("FC_SSH_FIXTURE_ACL", "1", 1);
+  auto acl = copy_job(remote / "attrs-file", local / "attrs-acl-blocked");
+  jobs.add_job(acl);
+  test::until([&] { return jobs.idle(); }, "ACL validation timeout");
+  require(acl->_state == JobState::PAUSED && !RemoteFS::inspect(local / "attrs-acl-blocked").exists &&
+              acl->snapshot()->_recovery_note.find("Extended ACLs") != std::string::npos,
+          "Unsupported ACL was treated as a nonfatal xattr warning");
+  unsetenv("FC_SSH_FIXTURE_ACL");
+  unsetenv("FC_SSH_FIXTURE_PLATFORM");
+  RemoteFS::close_connections();
+  jobs.clear_errors();
+  auto preserved = copy_job(local / "attrs-file", remote / "attrs-preserved");
+  jobs.add_job(preserved);
+  done(jobs, preserved);
+  require(RemoteFS::attributes(remote / "attrs-preserved").at("attributes").as_object().at(name) ==
+              attrs.at(name) && jobs.get_errors(100).empty(),
+          "Same-platform metadata was skipped or reported as a warning");
+}
 int main(int argc, char **argv) {
   std::string host = argc > 1 ? argv[1] : "fixture";
   auto remote = Location::decode("ssh://" + host + "/tmp/" +
@@ -113,6 +201,7 @@ int main(int argc, char **argv) {
     done(*jobs, deletions);
     require(!RemoteFS::inspect(remote / "tree").exists, "Remote delete failed");
     if (host == "fixture") {
+      metadata_contracts(*jobs, local, remote);
       RemoteFS::close_connections();
       setenv("FC_SSH_FIXTURE_DROP_RENAME", (local / "lost-ack").c_str(), 1);
       auto lost = copy_job(local / "alpha", remote / "lost-ack-copy");

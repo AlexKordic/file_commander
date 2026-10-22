@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""OpenSSH test double: run FC's exact helper, optionally lose a commit reply."""
+"""Run FC's exact SSH helper with optional reply loss or metadata overrides."""
 import os
 from pathlib import Path
 import re
@@ -13,10 +13,12 @@ if sys.argv[-2] == "fixture-offline":
 command = shlex.split(sys.argv[-1])
 assert command[:3] == ['python3', '-u', '-c']
 marker = os.environ.get('FC_SSH_FIXTURE_DROP_RENAME')
-if not marker:
+platform = os.environ.get('FC_SSH_FIXTURE_PLATFORM')
+acl = os.environ.get('FC_SSH_FIXTURE_ACL')
+if not (marker or platform or acl):
     os.execv(sys.executable, [sys.executable, *command[1:]])
-# Test only: proxy the exact helper and drop its acknowledgement after it has
-# renamed the staging entry. The coordinator must reconcile, never replay.
+# Test only: proxy the exact helper to exercise cross-platform metadata policy
+# without needing another OS, or lose an acknowledgement after commit.
 length = int(re.search(r'read\((\d+)\)', command[-1])[1])
 source = sys.stdin.buffer.read(length)
 child = subprocess.Popen([sys.executable, '-u', '-c', source.decode()], stdin=subprocess.PIPE, stdout=subprocess.PIPE)
@@ -29,9 +31,17 @@ for line in sys.stdin.buffer:
         if not reply:
             sys.exit(92)
         value = json.loads(reply)
-        if 'result' in value and request['method'] == 'rename' and not Path(marker).exists():
+        if marker and 'result' in value and request['method'] == 'rename' and not Path(marker).exists():
             Path(marker).touch(); child.terminate(); child.wait(timeout=3); sys.exit(91)
+        if 'result' in value and request['method'] == 'attributes':
+            if platform:
+                value['result']['platform'] = platform
+            if acl:
+                value['result']['acl'] = True
+            reply = (json.dumps(value) + '\n').encode()
         sys.stdout.buffer.write(reply); sys.stdout.buffer.flush()
         if 'result' in value or 'error' in value:
             break
+        if request['method'] == 'copy' and request['params'].get('checkpoint'):
+            child.stdin.write(sys.stdin.buffer.readline()); child.stdin.flush()
 child.terminate(); child.wait(timeout=3)

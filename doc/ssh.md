@@ -70,8 +70,13 @@ What is preserved:
 - Owner and group become those of the account you log in with on the
   receiving side. Numeric user and group IDs are not translated between
   machines.
-- If an ACL or extended attribute can't be carried over, the job pauses before
-  the file is published and the source stays in place.
+- Extended attributes are preserved between matching platforms. Between
+  different platforms, incompatible extended attributes are skipped with a
+  **Transfer warning** in the error list; copying continues. This applies to
+  files and directories, including moves that copy before deleting the source.
+  A completed move does not retain a source copy of the skipped attributes.
+- Unsupported ACLs and failures to read or apply same-platform attributes still
+  pause the job. File content must pass verification before publication.
 - Symbolic links are copied as links unless you choose **Follow Links in
   Source**.
 
