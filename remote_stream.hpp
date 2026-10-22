@@ -11,6 +11,7 @@ struct StreamControl {
   uint64_t rate = 0;
   bool operator==(const StreamControl &) const = default;
 };
+struct StreamBuffers { size_t bytes = 0, blocks = 0, waiting = 0; };
 class StreamSession;
 class StreamFile {
 public:
@@ -39,5 +40,6 @@ public:
   std::shared_ptr<StreamFile> prepare(const Filepath &source, const Filepath &stage, const Metadata &expected);
   void transfer(const std::shared_ptr<StreamFile> &, const std::function<void(uint64_t)> &progress = {});
   void cancel();
+  StreamBuffers buffers() const; // Qualification/diagnostics; never a wire operation.
 };
 } // namespace RemoteFS

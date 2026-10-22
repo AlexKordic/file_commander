@@ -18,10 +18,18 @@ struct Budget {
   std::condition_variable cv;
   size_t used = 0;
   size_t blocks = 0;
+  size_t waiting = 0;
+  const void *active = nullptr;
   std::atomic<bool> stopped{false};
-  bool reserve(size_t n) {
+  bool reserve(size_t n, const void *source) {
     std::unique_lock lock(mutex);
-    cv.wait(lock, [&] { return stopped || (used + n <= 32 * Wire::block_size && blocks < 128); });
+    auto allowed = [&] {
+      // Future sources cannot occupy the last frame/one MiB. Otherwise a
+      // faster future host can fill the budget and deadlock the current host.
+      const bool current = source == active;
+      return stopped || (used + n <= (current ? 32 : 31) * Wire::block_size && blocks < (current ? 128 : 127));
+    };
+    if (!allowed()) { ++waiting; cv.wait(lock, allowed); --waiting; }
     if (stopped) return false;
     used += n; ++blocks; return true;
   }
@@ -77,7 +85,7 @@ struct StreamFile::Impl {
     if (budget->stopped) throw ConnectionError("Transfer interrupted; Resume requires validation");
   }
   void push(std::string block) {
-    if (!budget->reserve(block.size())) return;
+    if (!budget->reserve(block.size(), this)) return;
     std::lock_guard lock(mutex); blocks.push_back(std::move(block)); cv.notify_all();
   }
 };
@@ -351,6 +359,10 @@ struct StreamSession::Impl {
         Sha256 hash;
         uint64_t offset = 0;
         while (offset < uint64_t(file->expected.size) && !budget->stopped) {
+          if (file->io && file->io->fault) {
+            const int error = file->io->fault(file->io->context, "stream_source_read");
+            if (error) throw std::system_error(error, std::generic_category(), "stream_source_read");
+          }
           std::string bytes(std::min<uint64_t>(Wire::block_size, file->expected.size - offset), '\0');
           auto n = ::read(fd.fd, bytes.data(), bytes.size());
           if (n < 0 && errno == EINTR) continue;
@@ -369,6 +381,10 @@ StreamSession::StreamSession(std::function<StreamControl()> c, const boost::file
     : impl(std::make_unique<Impl>(std::move(c), io)) {}
 StreamSession::~StreamSession() = default;
 void StreamSession::cancel() { impl->cancel(); }
+StreamBuffers StreamSession::buffers() const {
+  std::lock_guard lock(impl->budget->mutex);
+  return {impl->budget->used, impl->budget->blocks, impl->budget->waiting};
+}
 std::shared_ptr<StreamFile> StreamSession::prepare(const Filepath &source, const Filepath &stage, const Metadata &expected) {
   if (!expected.exists || !S_ISREG(expected.mode) || expected.size < 0) throw std::runtime_error("Expected a regular source file");
   auto file = std::make_shared<StreamFile::Impl>();
@@ -401,6 +417,11 @@ std::shared_ptr<StreamFile> StreamSession::prepare(const Filepath &source, const
 }
 void StreamSession::transfer(const std::shared_ptr<StreamFile> &handle, const std::function<void(uint64_t)> &progress) {
   auto &file = *handle->impl;
+  struct Current {
+    Budget &budget;
+    explicit Current(Budget &b, const void *file) : budget(b) { std::lock_guard lock(b.mutex); b.active = file; b.cv.notify_all(); }
+    ~Current() { std::lock_guard lock(budget.mutex); budget.active = nullptr; budget.cv.notify_all(); }
+  } current(*file.budget, &file);
   if (file.server_copy) {
     // The copy worker on the host consumes its queued files continuously. Its
     // data stream does not wait for this coordinator or a verification result.

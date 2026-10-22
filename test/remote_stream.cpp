@@ -41,6 +41,39 @@ static void remote_controls(const test::Fixture &local, const Filepath &remote, 
   } catch (...) { session.cancel(); if (sender.joinable()) sender.join(); throw; }
   require(RemoteFS::digest(target) == RemoteFS::digest(remote / "one"), "Controlled stream changed content");
 }
+static void future_host_cannot_starve_current_source(const test::Fixture &local, const Filepath &remote) {
+  const std::string data(40 * 1024 * 1024, char(0x9a));
+  test::write(local / "current-source", data);
+  RemoteFS::write(remote / "future-source", 0, data, true);
+  test::Gate source_gate;
+  boost::filesystem::copy_file_io_hooks io{};
+  io.context = &source_gate;
+  io.fault = [](void *context, const char *phase) {
+    return std::strcmp(phase, "stream_source_read") == 0 &&
+        !static_cast<test::Gate *>(context)->arrive() ? ETIMEDOUT : 0;
+  };
+  RemoteFS::StreamSession session({}, &io);
+  auto first = session.prepare(local / "current-source", local / "current-output", RemoteFS::inspect(local / "current-source"));
+  auto future = session.prepare(remote / "future-source", local / "future-output", RemoteFS::inspect(remote / "future-source"));
+  test::Gate::Release release{source_gate};
+  source_gate.await();
+  test::until([&] { return session.buffers().waiting > 0; }, "Future host did not exercise bounded read-ahead");
+  require(session.buffers().bytes <= 31 * 1024 * 1024, "Future host consumed the current source's reserved capacity");
+  source_gate.open();
+  std::atomic<bool> finished{false};
+  std::exception_ptr error;
+  std::thread sender([&] {
+    try { session.transfer(first); session.transfer(future); } catch (...) { error = std::current_exception(); }
+    finished = true;
+  });
+  try {
+    test::until([&] { return finished.load(); }, "Future host starved the current source");
+    sender.join(); if (error) std::rethrow_exception(error);
+    first->wait(); future->wait();
+  } catch (...) { session.cancel(); if (sender.joinable()) sender.join(); throw; }
+  require(test::read(local / "current-output") == data && test::read(local / "future-output") == data,
+          "Reserved read-ahead capacity changed content");
+}
 static void batch(const std::vector<std::pair<Filepath, Filepath>> &paths) {
   RemoteFS::StreamSession session;
   std::vector<std::shared_ptr<RemoteFS::StreamFile>> files;
@@ -70,6 +103,7 @@ int main(int argc, char **argv) {
     download_without_waiting_for_fsync(local, remote);
     remote_controls(local, remote, false);
     remote_controls(local, remote, true);
+    future_host_cannot_starve_current_source(local, remote);
     if (host == "fixture") {
       auto other = Location::decode("ssh://fixture-other" + Location::decode(remote.native()).local.native()).resource();
       batch({{remote / "one", other / "relay"}, {remote / "two", other / "relay-two"}});
