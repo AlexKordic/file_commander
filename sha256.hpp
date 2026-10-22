@@ -1,10 +1,12 @@
 #pragma once
 #include <array>
+#include <algorithm>
 #include <cstdint>
+#include <cstring>
 #include <string>
 #include <string_view>
 // FIPS 180-4 SHA-256, used to verify unpublished transfer data on both endpoints.
-class Sha256 {
+class PortableSha256 {
   std::array<uint32_t, 8> h{0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a,
                             0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19};
   std::array<unsigned char, 64> pending{};
@@ -54,15 +56,16 @@ class Sha256 {
 public:
   void update(std::string_view data) {
     count += data.size();
-    for (unsigned char c : data) {
-      pending[used++] = c;
-      if (used == 64) {
-        block(pending.data());
-        used = 0;
-      }
+    if (used) {
+      auto n = std::min(data.size(), 64 - used);
+      std::memcpy(pending.data() + used, data.data(), n);
+      used += n; data.remove_prefix(n);
+      if (used == 64) { block(pending.data()); used = 0; }
     }
+    while (data.size() >= 64) { block(reinterpret_cast<const unsigned char *>(data.data())); data.remove_prefix(64); }
+    if (!data.empty()) { std::memcpy(pending.data(), data.data(), data.size()); used = data.size(); }
   }
-  std::string finish() {
+  std::string finish_raw() {
     auto bits = count * 8;
     update(std::string(1, char(0x80)));
     while (used != 56)
@@ -71,11 +74,39 @@ public:
     for (int i = 7; i >= 0; --i)
       tail += char(bits >> (i * 8));
     update(tail);
-    constexpr char hex[] = "0123456789abcdef";
     std::string out;
     for (auto v : h)
-      for (int i = 7; i >= 0; --i)
-        out += hex[(v >> (i * 4)) & 15];
+      for (int i = 3; i >= 0; --i) out += char(v >> (i * 8));
+    return out;
+  }
+};
+
+#if defined(__APPLE__)
+#include <CommonCrypto/CommonDigest.h>
+class NativeSha256 {
+  CC_SHA256_CTX state;
+public:
+  NativeSha256() { CC_SHA256_Init(&state); }
+  void update(std::string_view data) {
+    while (!data.empty()) {
+      auto n = std::min<size_t>(data.size(), UINT32_MAX);
+      CC_SHA256_Update(&state, data.data(), CC_LONG(n)); data.remove_prefix(n);
+    }
+  }
+  std::string finish_raw() {
+    std::string out(CC_SHA256_DIGEST_LENGTH, '\0');
+    CC_SHA256_Final(reinterpret_cast<unsigned char *>(out.data()), &state); return out;
+  }
+};
+#else
+using NativeSha256 = PortableSha256;
+#endif
+class Sha256 : public NativeSha256 {
+public:
+  std::string finish() {
+    constexpr char hex[] = "0123456789abcdef";
+    std::string out;
+    for (uint8_t c : finish_raw()) { out += hex[c >> 4]; out += hex[c & 15]; }
     return out;
   }
 };

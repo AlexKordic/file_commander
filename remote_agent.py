@@ -13,6 +13,8 @@ import shutil
 import stat
 import sys
 import time
+import threading
+import queue
 
 if "wire_read" not in globals():
     from remote_protocol import *
@@ -274,23 +276,245 @@ def dispatch(method, p, send):
     raise ValueError("Unknown filesystem method: " + method)
 
 
+def source_identity(s):
+    return (s.st_dev, s.st_ino, s.st_mode, s.st_uid, s.st_gid,
+            s.st_size, s.st_mtime_ns, s.st_ctime_ns)
+
+
+def stream_source(value, expected, consume):
+    fd = os.open(value, os.O_RDONLY | os.O_NOFOLLOW)
+    try:
+        before = os.fstat(fd)
+        current = stamp(value)
+        if (not stat.S_ISREG(before.st_mode) or
+                any(current.get(key, b'' if key == 'link' else None) != data
+                    for key, data in expected.items())):
+            raise OSError(errno.ESTALE, 'Source changed before streaming', value)
+        h, total = hashlib.sha256(), 0
+        while total < before.st_size:
+            block = os.read(fd, min(WIRE_BLOCK, before.st_size - total))
+            if not block:
+                raise OSError(errno.EIO, 'Unexpected EOF while streaming', value)
+            h.update(block)
+            consume(block)
+            total += len(block)
+        if (source_identity(os.fstat(fd)) != source_identity(before) or
+                source_identity(os.stat(value, follow_symlinks=False)) != source_identity(before)):
+            raise OSError(errno.ESTALE, 'Source changed while streaming', value)
+        return {'sha256': h.digest(), 'bytes': total}
+    finally:
+        os.close(fd)
+
+
+class StreamWriter:
+    """One open staging FD; write ingress never waits for hash or fsync work."""
+    def __init__(self, value, size, emit, checkpoint_bytes=1024**3):
+        self.value, self.size, self.emit = value, size, emit
+        self.checkpoint_bytes = checkpoint_bytes
+        self.fd = os.open(value, os.O_RDWR | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+        self.cv, self.io_lock = threading.Condition(), threading.Lock()
+        self.written = self.verified = self.durable = self.flushes = 0
+        self.finished = self.closed = False
+        self.failure = self.expected_hash = self.end_identity = None
+        self.worker = threading.Thread(target=self.verify, daemon=True)
+        self.worker.start()
+
+    def progress(self):
+        return dict(bytes=self.written, verified=self.verified, durable=self.durable, flushes=self.flushes)
+
+    def write(self, data):
+        with self.io_lock:
+            if self.failure or self.finished or self.closed:
+                raise OSError(errno.ECANCELED, 'Staging writer is closed')
+            if self.written + len(data) > self.size:
+                raise OSError(errno.EFBIG, 'Stream exceeds expected file length')
+            view, offset = memoryview(data), self.written
+            while view:
+                n = os.pwrite(self.fd, view, offset)
+                if n <= 0:
+                    raise OSError(errno.EIO, 'Short staging write')
+                offset += n
+                view = view[n:]
+            with self.cv:
+                self.written = offset
+                self.cv.notify_all()
+
+    def end(self, digest):
+        if len(digest) != 32:
+            raise ValueError('Invalid SHA-256 digest length')
+        with self.io_lock, self.cv:
+            if self.finished or self.closed:
+                raise ValueError('Duplicate stream end')
+            self.expected_hash = digest
+            self.end_identity = source_identity(os.fstat(self.fd))
+            self.finished = True
+            self.cv.notify_all()
+
+    def fail(self, error):
+        with self.cv:
+            first = self.failure is None
+            self.failure = error
+            self.cv.notify_all()
+        if first:
+            self.emit(WIRE_ERROR, {'message': str(error), 'errno': getattr(error, 'errno', 0) or errno.EIO})
+
+    def verify(self):
+        try:
+            h = hashlib.sha256()
+            while True:
+                with self.cv:
+                    self.cv.wait_for(lambda: self.failure or self.written > self.verified or self.finished)
+                    if self.failure:
+                        return
+                    written, finished = self.written, self.finished
+                while self.verified < written:
+                    block = os.pread(self.fd, min(WIRE_BLOCK, written - self.verified), self.verified)
+                    if not block:
+                        raise OSError(errno.EIO, 'Unexpected EOF during destination verification')
+                    h.update(block)
+                    self.verified += len(block)
+                    self.emit(WIRE_EVENT, self.progress())
+                if finished:
+                    if written != self.size or h.digest() != self.expected_hash:
+                        raise OSError(errno.EIO, 'Transfer digest mismatch; destination was not published')
+                    # EOF and a GiB boundary share one data fsync. Commit-time
+                    # metadata and directory durability are handled separately.
+                    if not self.flushes or self.durable != written:
+                        os.fsync(self.fd)
+                        self.flushes += 1
+                    self.durable = written
+                    if (source_identity(os.fstat(self.fd)) != self.end_identity or
+                            source_identity(os.stat(self.value, follow_symlinks=False)) != self.end_identity):
+                        raise OSError(errno.ESTALE, 'Staging file changed during verification')
+                    self.emit(WIRE_RESULT, self.progress())
+                    return
+                if written - self.durable >= self.checkpoint_bytes:
+                    os.fsync(self.fd)
+                    self.flushes += 1
+                    self.durable = written
+                    self.emit(WIRE_EVENT, self.progress())
+        except Exception as error:
+            self.fail(error)
+        finally:
+            with self.io_lock:
+                self.closed = True
+                os.close(self.fd)
+
+
+class StreamControls:
+    def __init__(self):
+        self.cv = threading.Condition()
+        self.paused = self.cancelled = False
+        self.rate = self.total = self.base = 0
+        self.started = time.monotonic()
+
+    def update(self, p):
+        with self.cv:
+            rate = p.get('rate', 0)
+            if rate != self.rate or self.paused != p.get('paused', False):
+                self.started, self.base = time.monotonic(), self.total
+            self.rate, self.paused, self.cancelled = rate, p.get('paused', False), p.get('cancelled', False)
+            self.cv.notify_all()
+
+    def consume(self, n):
+        with self.cv:
+            self.total += n
+            while True:
+                if self.cancelled:
+                    raise OSError(errno.ECANCELED, 'Transfer interrupted')
+                if self.paused:
+                    self.cv.wait()
+                    continue
+                delay = self.started + (self.total - self.base) / self.rate - time.monotonic() if self.rate else 0
+                if delay <= 0:
+                    return
+                self.cv.wait(delay)
+
+
 def main():
     sys.stdout.buffer.write(WIRE_HELLO)
     sys.stdout.buffer.flush()
-    while (frame := wire_read(sys.stdin.buffer)) is not None:
-        kind, operation, identity, payload = frame
-        if kind != WIRE_REQUEST:
-            raise ValueError("Expected an SSH request")
+    output_lock, writers_lock = threading.Lock(), threading.Lock()
+    writers, controls = {}, StreamControls()
+    copies = queue.Queue(maxsize=32)
 
-        def send(data):
-            wire_write(sys.stdout.buffer, WIRE_EVENT, operation, identity, wire_encode(data))
+    def emitter(operation, identity):
+        def emit(kind, value):
+            with output_lock:
+                wire_write(sys.stdout.buffer, kind, operation, identity, wire_encode(value))
+            if kind in (WIRE_RESULT, WIRE_ERROR):
+                with writers_lock:
+                    writers.pop(identity, None)
+        return emit
 
-        try:
-            result = dispatch(WIRE_METHODS[operation], wire_decode(payload), send)
-            wire_write(sys.stdout.buffer, WIRE_RESULT, operation, identity, wire_encode(result))
-        except Exception as error:
-            wire_write(sys.stdout.buffer, WIRE_ERROR, operation, identity,
-                       wire_encode({"message": str(error), "errno": getattr(error, "errno", 0) or 0}))
+    def copy_worker():
+        while (work := copies.get()) is not None:
+            writer, p = work
+            try:
+                def consume(block):
+                    controls.consume(len(block))
+                    writer.write(block)
+                    writer.emit(WIRE_EVENT, writer.progress())
+                result = stream_source(path(p, 'source'), p['expected'], consume)
+                writer.emit(WIRE_EVENT, {**writer.progress(), 'phase': 'written'})
+                writer.end(result['sha256'])
+            except Exception as error:
+                writer.fail(error)
+
+    threading.Thread(target=copy_worker, daemon=True).start()
+    try:
+        while (frame := wire_read(sys.stdin.buffer)) is not None:
+            kind, operation, identity, payload = frame
+            method = WIRE_METHODS[operation]
+            emit = emitter(operation, identity)
+            try:
+                if method == 'stream_control' and kind == WIRE_REQUEST and identity == 0:
+                    controls.update(wire_decode(payload))
+                    continue  # One-way control; never a data-block credit/ACK.
+                if kind in (WIRE_DATA, WIRE_END) and method == 'stream_write':
+                    with writers_lock:
+                        writer = writers.get(identity)
+                    if writer is None:
+                        raise ValueError('Unknown or closed stream writer')
+                    if kind == WIRE_DATA:
+                        writer.write(payload)
+                        emit(WIRE_EVENT, writer.progress())
+                    else:
+                        writer.end(payload)
+                    continue
+                if kind != WIRE_REQUEST:
+                    raise ValueError('Expected an SSH request')
+                p = wire_decode(payload)
+                if method == 'stream_read':
+                    def consume(block):
+                        with output_lock:
+                            wire_write(sys.stdout.buffer, WIRE_DATA, operation, identity, block)
+                    emit(WIRE_RESULT, stream_source(path(p), p['expected'], consume))
+                elif method in ('stream_write', 'stream_copy'):
+                    with writers_lock:
+                        if len(writers) >= 32 or identity in writers:
+                            raise ValueError('Too many or duplicate staging streams')
+                        writer = StreamWriter(path(p), p['size'], emit)
+                        writers[identity] = writer
+                    if method == 'stream_copy':
+                        copies.put((writer, p))
+                else:
+                    emit(WIRE_RESULT, dispatch(method, p, lambda value: emit(WIRE_EVENT, value)))
+            except Exception as error:
+                with writers_lock:
+                    writer = writers.get(identity)
+                if writer is not None:
+                    writer.fail(error)
+                else:
+                    emit(WIRE_ERROR, {'message': str(error), 'errno': getattr(error, 'errno', 0) or errno.EIO})
+    finally:
+        controls.update({'cancelled': True})
+        with writers_lock:
+            remaining = list(writers.values())
+        for writer in remaining:
+            with writer.cv:
+                writer.failure = EOFError('Copy coordinator disconnected')
+                writer.cv.notify_all()
 
 
 if __name__ == "__main__":

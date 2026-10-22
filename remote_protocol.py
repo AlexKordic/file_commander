@@ -12,7 +12,7 @@ WIRE_FIELDS = ('', 'path', 'destination', 'target', 'follow', 'offset', 'length'
                'recursive', 'replace', 'expected', 'mode', 'mtime_ns', 'ctime_ns', 'exists', 'dev', 'ino',
                'uid', 'gid', 'size', 'link', 'owner', 'group', 'target_dir', 'entries', 'name', 'relative',
                'stamp', 'attributes', 'platform', 'acl', 'allowed', 'sha256', 'bytes', 'errno', 'message',
-               'checkpoint', 'verified', 'durable', 'rate', 'paused', 'cancelled', 'source', 'phase')
+               'checkpoint', 'verified', 'durable', 'rate', 'paused', 'cancelled', 'source', 'phase', 'flushes')
 _WIRE_KEYS = {key: n for n, key in enumerate(WIRE_FIELDS) if n}
 
 
@@ -127,6 +127,11 @@ def wire_read(stream):
 def wire_write(stream, kind, operation, identity, payload):
     if len(payload) > WIRE_LIMIT or (kind == WIRE_DATA and len(payload) > WIRE_BLOCK):
         raise ValueError('SSH frame exceeds limit')
-    stream.write(struct.pack('!BBHQI', kind, 0, operation, identity, len(payload)))
-    stream.write(payload)
+    for part in (struct.pack('!BBHQI', kind, 0, operation, identity, len(payload)), payload):
+        view = memoryview(part)
+        while view:
+            count = stream.write(view)
+            if not count:
+                raise EOFError('SSH binary stream closed while writing')
+            view = view[count:]
     stream.flush()

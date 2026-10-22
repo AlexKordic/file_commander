@@ -83,7 +83,7 @@ configure_file(cmake/remote_agent_source.hpp.in generated/remote_agent_source.hp
 set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS remote_agent.py remote_protocol.py)
 add_library(fc_core STATIC
   commander.cpp operation.cpp copy_planner.cpp file_io_jobs.cpp archive.cpp location.cpp
-  traversal.cpp settings.cpp workspace.cpp transfer_journal.cpp runtime_paths.cpp scheduled_updates.cpp file_metadata.cpp log.cpp err.cpp remote_fs.cpp
+  traversal.cpp settings.cpp workspace.cpp transfer_journal.cpp runtime_paths.cpp scheduled_updates.cpp file_metadata.cpp log.cpp err.cpp remote_fs.cpp remote_stream.cpp
   sevenzip.cpp archive_formats.cpp)
 target_include_directories(fc_core PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
 target_include_directories(fc_core PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/generated")
@@ -141,6 +141,13 @@ if(BUILD_TESTING)
   add_test(NAME fc.remote.protocol_python COMMAND "${Python3_EXECUTABLE}"
     "${CMAKE_CURRENT_SOURCE_DIR}/test/test_remote_protocol.py" $<TARGET_FILE:fc_remote_protocol_tests>)
   set_tests_properties(fc.remote.protocol fc.remote.protocol_python PROPERTIES LABELS "core;unit;remote" TIMEOUT 15)
+  add_executable(fc_remote_stream_tests test/remote_stream.cpp)
+  target_link_libraries(fc_remote_stream_tests PRIVATE fc_core)
+  add_test(NAME fc.remote.stream COMMAND fc_remote_stream_tests)
+  set_tests_properties(fc.remote.stream PROPERTIES LABELS "core;integration;remote" TIMEOUT 90
+    ENVIRONMENT "FC_SSH_BIN=${CMAKE_CURRENT_SOURCE_DIR}/test/ssh_fixture.py")
+  add_test(NAME fc.remote.verifier COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/test/test_remote_verifier.py")
+  set_tests_properties(fc.remote.verifier PROPERTIES LABELS "core;unit;remote" TIMEOUT 20)
   add_executable(fc_remote_transfer_tests test/remote_transfer.cpp)
   target_link_libraries(fc_remote_transfer_tests PRIVATE fc_core)
   add_test(NAME fc.remote.transfers COMMAND fc_remote_transfer_tests)

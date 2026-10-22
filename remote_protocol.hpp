@@ -23,7 +23,7 @@ inline constexpr std::array fields{
     "recursive", "replace", "expected", "mode", "mtime_ns", "ctime_ns", "exists", "dev", "ino",
     "uid", "gid", "size", "link", "owner", "group", "target_dir", "entries", "name", "relative",
     "stamp", "attributes", "platform", "acl", "allowed", "sha256", "bytes", "errno", "message",
-    "checkpoint", "verified", "durable", "rate", "paused", "cancelled", "source", "phase"};
+    "checkpoint", "verified", "durable", "rate", "paused", "cancelled", "source", "phase", "flushes"};
 inline uint16_t opcode(std::string_view name) {
   for (uint16_t n = 1; n < methods.size(); ++n)
     if (name == methods[n]) return n;

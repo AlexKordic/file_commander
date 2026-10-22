@@ -19,6 +19,7 @@ struct Transport {
   pid_t pid = -1;
   int input = -1, output = -1, diagnostic = -1;
   uint64_t sequence = 0;
+  bool unlimited_idle = false; // Streaming channels may be explicitly paused indefinitely.
   ~Transport() { stop(); }
   void stop() {
     if (input >= 0)
@@ -43,7 +44,7 @@ struct Transport {
     while (offset < size) {
       if (cancelled && cancelled->load())
         throw ConnectionError("SSH operation interrupted");
-      if (std::chrono::steady_clock::now() >= deadline)
+      if (!unlimited_idle && std::chrono::steady_clock::now() >= deadline)
         throw ConnectionError("SSH response timed out; operation outcome needs reconciliation");
       pollfd p{output, POLLIN, 0};
       int rc = poll(&p, 1, 100);
@@ -92,7 +93,7 @@ struct Transport {
         error = ECANCELED;
         break;
       }
-      if (std::chrono::steady_clock::now() >= deadline) {
+      if (!unlimited_idle && std::chrono::steady_clock::now() >= deadline) {
         error = ETIMEDOUT;
         break;
       }
