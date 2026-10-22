@@ -36,6 +36,7 @@ std::string read(const Filepath &, uint64_t offset, size_t length);
 void write(const Filepath &, uint64_t offset, std::string_view data, bool exclusive = false);
 void mkdir(const Filepath &);
 void remove(const Filepath &, bool recursive = false);
+void remove_staging(const Filepath &, uint64_t dev, uint64_t ino);
 void rename(const Filepath &, const Filepath &, bool replace = false, const Metadata *expected = nullptr);
 void symlink(std::string_view target, const Filepath &);
 void metadata(const Filepath &, const Metadata &);

@@ -266,6 +266,25 @@ int64_t input_bytes(const j::object& input) {
   }
   return bytes;
 }
+std::vector<RemoteFS::Entry> decode_entries(const Filepath& root, const j::array& entries) {
+  std::vector<RemoteFS::Entry> out;
+  out.reserve(entries.size());
+  for (const auto& value : entries) {
+    const auto& entry = value.as_object();
+    const auto& s = entry.at("stamp").as_object();
+    RemoteFS::Metadata m; m.exists = exists(s);
+    if (m.exists) {
+      m.mode = number(s.at("mode")); m.dev = number(s.at("dev")); m.ino = number(s.at("ino"));
+      m.uid = number(s.at("uid")); m.gid = number(s.at("gid")); m.size = number(s.at("size"));
+      m.mtime_ns = number(s.at("mtime")) * 1000000000 + number(s.at("mtime_ns"));
+      m.ctime_ns = number(s.at("ctime")) * 1000000000 + number(s.at("ctime_ns"));
+      if (s.contains("link")) m.link = text(s.at("link"));
+    }
+    const auto relative = text(entry.at("relative"));
+    out.push_back({relative.empty() ? root : root / relative, std::move(m)});
+  }
+  return out;
+}
 void validate_staging(const j::object& record, const Operation& op) {
   const Filepath root(text(record.at("stage_root"))), stage(text(record.at("stage")));
   const auto prefix = op.kind == Operation::Kind::MoveEntry ? ".fc-move-" : ".fc-copy-";
@@ -301,6 +320,7 @@ struct TransferJournal::Impl {
     state["bytes"] = job._bytes_processed; state["total"] = job._bytes_total;
     state["partial"] = job._current_item.current_size;
     state["streaming"] = job._streaming;
+    state["renamed_bytes"] = job._transfer_renamed;
     j::array list; for (const auto& e : errors)
       list.emplace_back(j::object{{"path", e.path_ref().native()}, {"message", e.warning_ref().value_or("")}});
     state["errors"] = std::move(list);
@@ -313,10 +333,12 @@ struct TransferJournal::Impl {
     job._bytes_total = state.at("total").to_number<double>();
     job._current_item.current_size = number(state.at("partial"));
     job._streaming = state.contains("streaming") && state.at("streaming").as_bool();
+    job._transfer_renamed = state.contains("renamed_bytes") ? state.at("renamed_bytes").to_number<uint64_t>() : 0;
     if (job._streaming) {
       // Uncommitted data is restarted after Resume; only the committed prefix
       // is a trustworthy progress watermark after process death.
-      job._transfer_written = job._transfer_verified = job._transfer_durable = uint64_t(job._bytes_processed);
+      job._transfer_written = job._transfer_verified = job._transfer_durable =
+          uint64_t(job._bytes_processed) - std::min<uint64_t>(job._transfer_renamed, uint64_t(job._bytes_processed));
       job._current_item.current_size = 0;
     }
     job._total.update(int64_t(job._bytes_processed) + job._current_item.current_size, int64_t(job._bytes_total));
@@ -327,13 +349,14 @@ struct TransferJournal::Impl {
       job.report_error(std::move(item), text(e.at("message")));
     }
   }
-  void complete_proven_commit() {
+  void complete_proven_commit(bool renamed = false) {
     const auto operation = op();
     const auto bytes = is_remote(operation.source) || is_remote(operation.destination)
         ? input_bytes(input()) : std::max<int64_t>(0, operation.bytes);
     state["next"] = index() + 1;
     state["done"] = number(state.at("done")) + 1;
     state["bytes"] = state.at("bytes").to_number<double>() + bytes;
+    if (renamed) state["renamed_bytes"] = (state.contains("renamed_bytes") ? state.at("renamed_bytes").to_number<uint64_t>() : 0) + bytes;
     state["partial"] = 0; state["phase"] = "ready";
     save();
   }
@@ -356,7 +379,7 @@ std::shared_ptr<TransferJournal> TransferJournal::create(const Filepath& directo
         {"operation", encode(op)},
         {"source", remote || op.source.empty() ? j::array{}
                                                : tree(op.source, op.kind == Operation::Kind::CopyFile,
-                                                      op.kind == Operation::Kind::MoveEntry)},
+                                                      op.kind == Operation::Kind::CopyFile || op.kind == Operation::Kind::MoveEntry)},
         {"destination", remote || op.destination.empty() ? j::object{} : stamp(op.destination)},
         {"source_anchor", remote || op.source.empty() ? j::object{} : anchor(op.source)},
         {"destination_anchor", remote || op.destination.empty() ? j::object{} : anchor(op.destination)}});
@@ -384,7 +407,7 @@ void TransferJournal::prepare_inputs() {
     auto op = decode(input.at("operation").as_object());
     input["source"] = op.source.empty() ? j::array{}
                                         : tree(op.source, op.kind == Operation::Kind::CopyFile,
-                                               op.kind == Operation::Kind::MoveEntry);
+                                               op.kind == Operation::Kind::CopyFile || op.kind == Operation::Kind::MoveEntry);
     input["destination"] = op.destination.empty() ? j::object{} : stamp(op.destination);
     input["source_anchor"] = op.source.empty() ? j::object{} : anchor(op.source);
     input["destination_anchor"] = op.destination.empty() ? j::object{} : anchor(op.destination);
@@ -403,6 +426,37 @@ int64_t TransferJournal::total_bytes() const {
   int64_t result = 0;
   for (const auto& value : impl->plan.at("steps").as_array()) result += input_bytes(value.as_object());
   return result;
+}
+std::vector<RemoteFS::Entry> TransferJournal::source_entries(size_t index) const {
+  std::lock_guard lock(impl->mutex);
+  const auto& input = impl->plan.at("steps").as_array().at(index).as_object();
+  const auto op = decode(input.at("operation").as_object());
+  return decode_entries(op.source, input.at("source").as_array());
+}
+std::vector<RemoteFS::Entry> TransferJournal::snapshot_source(const Operation& op) {
+  if (op.source.empty()) return {};
+  return decode_entries(op.source, tree(op.source, op.kind == Operation::Kind::CopyFile,
+      op.kind == Operation::Kind::CopyFile || op.kind == Operation::Kind::MoveEntry));
+}
+void TransferJournal::validate_source(size_t index) const {
+  std::lock_guard lock(impl->mutex);
+  const auto& input = impl->plan.at("steps").as_array().at(index).as_object();
+  const auto op = decode(input.at("operation").as_object());
+  if (!op.source.empty() && !matches_tree(op.source, input.at("source").as_array(), false,
+      op.kind == Operation::Kind::CopyFile, op.kind == Operation::Kind::CopyFile || op.kind == Operation::Kind::MoveEntry))
+    throw std::runtime_error("Source changed before publication; source retained: " + op.source.native());
+}
+void TransferJournal::refresh_inputs(size_t index) {
+  std::lock_guard lock(impl->mutex);
+  if (index < impl->index()) throw std::runtime_error("Cannot refresh committed transfer inputs");
+  auto& input = impl->plan.at("steps").as_array().at(index).as_object();
+  const auto op = decode(input.at("operation").as_object());
+  input["source"] = op.source.empty() ? j::array{} : tree(op.source, op.kind == Operation::Kind::CopyFile,
+      op.kind == Operation::Kind::CopyFile || op.kind == Operation::Kind::MoveEntry);
+  input["destination"] = op.destination.empty() ? j::object{} : stamp(op.destination);
+  input["source_anchor"] = op.source.empty() ? j::object{} : anchor(op.source);
+  input["destination_anchor"] = op.destination.empty() ? j::object{} : anchor(op.destination);
+  save(impl->plan_path, impl->plan);
 }
 
 std::vector<std::shared_ptr<JobSpec>> TransferJournal::restore(const Filepath& directory, uint64_t& next_id,
@@ -542,9 +596,17 @@ void TransferJournal::stage_pending(size_t index, const Filepath& stage) {
 
 void TransferJournal::pending_phase(size_t index, const char* phase) {
   std::lock_guard lock(impl->mutex);
+  if (index < impl->index()) return;
+  const auto rank = [](std::string_view phase) {
+    return phase == "staging" ? 0 : phase == "written" ? 1 : phase == "verified" ? 2 : -1;
+  };
+  if (rank(phase) < 1) throw std::runtime_error("Invalid pending transfer phase");
   for (auto& value : impl->state.at("pending").as_array()) {
     auto& entry = value.as_object();
-    if (entry.at("index").to_number<size_t>() == index) { entry["phase"] = phase; impl->save(); return; }
+    if (entry.at("index").to_number<size_t>() == index) {
+      if (rank(text(entry.at("phase"))) < rank(phase)) { entry["phase"] = phase; impl->save(); }
+      return;
+    }
   }
   throw std::runtime_error("Missing pending transfer record");
 }
@@ -604,7 +666,8 @@ void TransferJournal::checkpoint(const JobSnapshot& job, JobState state, bool fo
   impl->stats(job, job._errors); impl->state["state"] = int(state); impl->save();
 }
 
-int TransferJournal::transaction(const char* phase, const Filepath& stage, const Filepath& destination) {
+int TransferJournal::transaction(const char* phase, const Filepath& stage, const Filepath& destination,
+                                 const std::vector<RemoteFS::Entry>* verified) {
   std::lock_guard lock(impl->mutex);
   // Exceptions are caught by the synchronous worker; no C ABI boundary is crossed.
   impl->state["phase"] = phase;
@@ -615,6 +678,17 @@ int TransferJournal::transaction(const char* phase, const Filepath& stage, const
     if (!identity(stamp(stage.parent_path()), impl->state.at("stage_identity").as_object()))
       throw std::runtime_error("Transfer staging ownership changed before commit; source retained");
     auto output = tree(stage);
+    if (verified) {
+      std::map<std::string, j::object> expected;
+      for (const auto& entry : *verified) {
+        auto s = entry.metadata.stamp();
+        if (!entry.metadata.symlink()) s.erase("link");
+        expected.emplace(entry.path == stage ? "" : entry.path.lexically_relative(stage).native(), remote_stamp(s));
+      }
+      j::array proof;
+      for (auto& [relative, stamp] : expected) proof.emplace_back(j::object{{"relative", relative}, {"stamp", std::move(stamp)}});
+      if (output != proof) throw std::runtime_error("Verified staging tree changed before publication; source retained");
+    }
     sync_tree(stage, output);
     impl->state["output"] = std::move(output);
   } else if (std::string_view(phase) == "committed") sync_path(destination.parent_path());
@@ -651,7 +725,7 @@ void TransferJournal::prepare_resume(JobSpec& job) {
     bool committed = impl->state.contains("output") && matches_tree(op.destination, impl->state.at("output").as_array(), true);
     if (op.kind == Operation::Kind::MoveEntry && !exists(stamp(op.source)) &&
         matches_tree(op.destination, input.at("source").as_array(), true)) {
-      impl->complete_proven_commit(); // Same-filesystem rename completed before the journal update.
+      impl->complete_proven_commit(true); // Same-filesystem rename completed before the journal update.
     } else if (committed) {
       if (op.kind == Operation::Kind::MoveEntry) {
         impl->state["phase"] = "committed";
@@ -668,7 +742,8 @@ void TransferJournal::prepare_resume(JobSpec& job) {
     const auto op = decode(input.at("operation").as_object());
     check_anchor(input.at("source_anchor").as_object()); check_anchor(input.at("destination_anchor").as_object());
     if (i == impl->index() && cleanup_pending()) continue;
-    if (!op.source.empty() && !matches_tree(op.source, input.at("source").as_array(), false, op.kind == Operation::Kind::CopyFile, op.kind == Operation::Kind::MoveEntry))
+    if (!op.source.empty() && !matches_tree(op.source, input.at("source").as_array(), false, op.kind == Operation::Kind::CopyFile,
+        op.kind == Operation::Kind::CopyFile || op.kind == Operation::Kind::MoveEntry))
       throw std::runtime_error("Source changed or is unavailable: " + op.source.native() + ". Cancel recovery and start a new transfer after reviewing it.");
     if (!op.destination.empty() && !unchanged(stamp(op.destination), input.at("destination").as_object()) && !impl->owns_directory(i, op.destination))
       throw std::runtime_error("Destination conflict: " + op.destination.native() + ". Resolve it before Resume, or cancel and start a new transfer.");
@@ -710,7 +785,11 @@ void TransferJournal::prepare_resume(JobSpec& job) {
         retained.push_back(value); continue;
       }
       Filepath root(text(entry.at("stage_root")));
-      if (exists(stamp(root))) { RemoteFS::remove(root, true); sync_path(root.parent_path()); }
+      if (exists(stamp(root))) {
+        const auto& identity = entry.at("stage_identity").as_object();
+        RemoteFS::remove_staging(root, identity.at("dev").to_number<uint64_t>(), identity.at("ino").to_number<uint64_t>());
+        sync_path(root.parent_path());
+      }
     }
     pending = std::move(retained); impl->save();
   }
@@ -721,7 +800,8 @@ void TransferJournal::prepare_resume(JobSpec& job) {
     if (exists(current)) {
       if (!identity(current, impl->state.at("stage_identity").as_object())) throw std::runtime_error("Recovery staging ownership changed; cleanup blocked");
       if (is_remote(root)) {
-        RemoteFS::remove(root, true);
+        const auto& identity = impl->state.at("stage_identity").as_object();
+        RemoteFS::remove_staging(root, identity.at("dev").to_number<uint64_t>(), identity.at("ino").to_number<uint64_t>());
       } else {
         // Graceful shutdown restored original directory permissions. Temporarily
         // allow cleanup of our staging child, then restore access before returning.

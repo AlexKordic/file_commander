@@ -214,7 +214,7 @@ JobInfo job_info(const JobSnapshot& job) {
   out.bytes_total     = job._bytes_total;
   out.streaming = job._streaming;
   out.bytes_written = job._transfer_written; out.bytes_verified = job._transfer_verified; out.bytes_durable = job._transfer_durable;
-  if (job._streaming) out.bytes_done = job._transfer_written;
+  if (job._streaming) out.bytes_done = std::max<double>(job._bytes_processed, job._total.current_size);
   out.mbps            = job._total.Mbps;
   out.average_mbps    = job._total.average_Mbps;
   out.current_percent = job._current_item.percentage;

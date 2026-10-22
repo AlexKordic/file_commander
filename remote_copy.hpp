@@ -9,8 +9,7 @@ struct RemoteCopyCallbacks {
   std::function<void(const Filepath &, const Filepath &)> attributes;
   std::function<void(const Filepath &, const Filepath &, const RemoteFS::Metadata &)> directory;
 };
-// Streams a consecutive regular-file run, committing its completed prefix on
-// a separate worker. Returns the first operation that belongs to the caller.
+// Streams independent copy/move operations, including whole directory trees,
+// while separate workers verify metadata and publish the completed prefix.
 size_t copy_remote_pipeline(JobSpec &, size_t begin, const RemoteCopyCallbacks &);
-void copy_remote_tree(JobSpec &, const Filepath& source, const Filepath& stage, const RemoteCopyCallbacks &);
 }

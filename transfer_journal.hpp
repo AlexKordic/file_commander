@@ -3,6 +3,7 @@
 #include <functional>
 #include <memory>
 #include <vector>
+namespace RemoteFS { struct Entry; }
 
 namespace Perun {
 struct JobSpec;
@@ -29,6 +30,10 @@ class TransferJournal {
   void prepare_inputs();            // Remote inspection belongs on the worker, never startup/UI.
   int64_t operation_bytes(size_t index) const;
   int64_t total_bytes() const;
+  std::vector<RemoteFS::Entry> source_entries(size_t index) const;
+  static std::vector<RemoteFS::Entry> snapshot_source(const Operation&);
+  void validate_source(size_t index) const;
+  void refresh_inputs(size_t index); // After an earlier operation changed this step's namespace.
   void finish_step(const JobSpec&); // job mutex held
   void checkpoint(const JobSnapshot&, JobState, bool force = true);
   // Only explicit Resume calls this: validate remaining work, reconcile proven
@@ -37,7 +42,8 @@ class TransferJournal {
   void prepare_copy_directories(std::vector<Operation>&);
   bool cleanup_pending() const;
   void cleanup_committed_staging(); // Identity checked; only an empty directory is removed.
-  int transaction(const char* phase, const Filepath& stage, const Filepath& destination);
+  int transaction(const char* phase, const Filepath& stage, const Filepath& destination,
+                  const std::vector<RemoteFS::Entry>* verified = nullptr);
   int remove_source(const Filepath& source, const Filepath& destination,
                     const boost::filesystem::copy_file_io_hooks* io = nullptr);
   void dismiss();

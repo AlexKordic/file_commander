@@ -342,6 +342,20 @@ void remove(const Filepath &p, bool recursive) {
   else
     boost::filesystem::remove(p);
 }
+void remove_staging(const Filepath &p, uint64_t dev, uint64_t ino) {
+  if (is_remote(p)) {
+    auto a = params(p); a["owner"] = true;
+    a["expected"] = j::object{{"dev", dev}, {"ino", ino}};
+    request(Location::decode(p.native()).ssh, "remove", std::move(a));
+    return;
+  }
+  const auto actual = inspect(p);
+  if (!actual.directory() || actual.dev != dev || actual.ino != ino)
+    throw std::runtime_error("Recovery staging ownership changed; cleanup blocked");
+  boost::system::error_code error;
+  Perun::remove_owned_staging(p, error);
+  if (error) throw std::system_error(error.value(), std::generic_category(), "Cannot clean interrupted staging");
+}
 void rename(const Filepath &p, const Filepath &dst, bool replace, const Metadata *expected) {
   if (is_remote(p) || is_remote(dst)) {
     auto l = Location::decode(p.native()), r = Location::decode(dst.native());

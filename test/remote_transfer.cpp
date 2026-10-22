@@ -7,6 +7,7 @@
 #include "transfer_journal.hpp"
 #include <iostream>
 #include <sstream>
+#include <sys/stat.h>
 using namespace Perun;
 using test::require;
 static void done(FileJobs &jobs, const std::shared_ptr<JobSpec> &job) {
@@ -20,6 +21,7 @@ static std::shared_ptr<JobSpec> copy_job(const Filepath &source, const Filepath 
 }
 static void streaming_pipeline_contracts(FileJobs &jobs, const test::Fixture &local, const Filepath &remote) {
   const std::string data(2 * 1024 * 1024 + 17, char(0xac));
+  Sha256 tree_hash; tree_hash.update(data); const auto expected_digest = tree_hash.finish();
   test::write(local / "gap-first", data);
   boost::filesystem::create_directory(local / "gap-dir");
   test::write(local / "gap-dir/second", data);
@@ -59,6 +61,34 @@ static void streaming_pipeline_contracts(FileJobs &jobs, const test::Fixture &lo
   unsetenv("FC_SSH_FIXTURE_STREAM_GATE"); unsetenv("FC_SSH_FIXTURE_STREAM_TRACE");
   RemoteFS::close_connections();
 
+  // Whole directory moves share the same pipeline: publication of the first
+  // tree must not be needed to start the second tree's data stream.
+  for (bool same_host : {false, true}) {
+    const auto name = same_host ? "server-trees" : "move-trees";
+    const auto tree_gate = local / name;
+    auto trees = std::make_shared<OperationPlan>();
+    trees->type = same_host ? OperationType::COPY : OperationType::MOVE;
+    for (int n = 0; n < 2; ++n) {
+      const auto source = same_host ? remote / (std::string(name) + std::to_string(n))
+                                    : local / (std::string(name) + std::to_string(n));
+      RemoteFS::mkdir(source);
+      RemoteFS::write(source / "child", 0, data, true);
+      trees->steps.push_back({same_host ? Operation::Kind::CopyFile : Operation::Kind::MoveEntry,
+                             source, remote / (std::string(name) + "-out" + std::to_string(n))});
+    }
+    setenv("FC_SSH_FIXTURE_STREAM_GATE", tree_gate.c_str(), 1);
+    RemoteFS::close_connections();
+    auto transfer = std::make_shared<JobSpec>(trees);
+    jobs.add_job(transfer); done(jobs, transfer);
+    require(boost::filesystem::exists(Filepath(tree_gate.native() + ".second-ended")),
+            "Next tree waited for the previous tree's verification or publication");
+    for (const auto &op : trees->steps) {
+      require(RemoteFS::digest(op.destination / "child") == expected_digest, "Whole-tree pipeline changed data");
+      require(RemoteFS::inspect(op.source).exists == same_host, "Whole-tree move cleanup was incorrect");
+    }
+    unsetenv("FC_SSH_FIXTURE_STREAM_GATE"); RemoteFS::close_connections();
+  }
+
   for (const auto &fault : {"corrupt", "disk-full"}) {
     setenv("FC_SSH_FIXTURE_STREAM_FAULT", fault, 1);
     auto fault_plan = std::make_shared<OperationPlan>();
@@ -77,6 +107,60 @@ static void streaming_pipeline_contracts(FileJobs &jobs, const test::Fixture &lo
     for (const auto &op : fault_plan->steps)
       require(RemoteFS::digest(op.destination) == RemoteFS::digest(op.source), "Resumed fault published incorrect bytes");
   }
+}
+static void move_cleanup_contract(const test::Fixture &local, const Filepath &remote) {
+  struct Fault { bool once = true; } fault;
+  auto hooks = std::make_shared<boost::filesystem::copy_file_io_hooks>();
+  hooks->context = &fault;
+  hooks->fault = [](void *context, const char *phase) {
+    auto &f = *static_cast<Fault *>(context);
+    if (std::string_view(phase) == "recovery_source_item" && f.once) { f.once = false; return EIO; }
+    return 0;
+  };
+  FileJobServices services; services.file_io = hooks;
+  auto jobs = make_file_jobs({}, services); jobs->enable_recovery(local / "cleanup-journal");
+  auto plan = std::make_shared<OperationPlan>(); plan->type = OperationType::MOVE;
+  for (int n = 0; n < 2; ++n) {
+    auto source = local / ("cleanup-source" + std::to_string(n));
+    RemoteFS::mkdir(source); test::write(source / "a", "first"); test::write(source / "b", "second");
+    plan->steps.push_back({Operation::Kind::MoveEntry, source, remote / source.filename()});
+  }
+  auto job = std::make_shared<JobSpec>(plan); jobs->add_job(job);
+  test::until([&] { return jobs->idle(); }, "Interrupted source cleanup did not pause");
+  require(job->_state == JobState::PAUSED && RemoteFS::inspect(plan->steps[0].source).exists &&
+              RemoteFS::read(plan->steps[0].destination / "a", 0, 20) == "first" &&
+              RemoteFS::read(plan->steps[0].destination / "b", 0, 20) == "second",
+          "Interrupted move cleanup lost verified output or incorrectly completed");
+  jobs->resume(job->_job_id); done(*jobs, job);
+  for (const auto &op : plan->steps)
+    require(!RemoteFS::inspect(op.source).exists && RemoteFS::read(op.destination / "b", 0, 20) == "second",
+            "Resume did not finish cleanup and the next tree safely");
+}
+static void verified_stage_contract(const test::Fixture &local, const Filepath &remote) {
+  struct Tamper { Filepath remote; bool once = true; } tamper{remote};
+  auto hooks = std::make_shared<boost::filesystem::copy_file_io_hooks>(); hooks->context = &tamper;
+  hooks->fault = [](void *context, const char *phase) {
+    auto &t = *static_cast<Tamper *>(context);
+    if (std::string_view(phase) != "remote_before_publish" || !t.once) return 0;
+    t.once = false;
+    for (const auto &entry : RemoteFS::list(t.remote)) {
+      if (!entry.path.filename().native().starts_with(".fc-copy-")) continue;
+      RemoteFS::write(entry.path / "data", 0, "tampered");
+      return 0;
+    }
+    return EIO;
+  };
+  FileJobServices services; services.file_io = hooks;
+  auto jobs = make_file_jobs({}, services); jobs->enable_recovery(local / "proof-journal");
+  test::write(local / "proof-source", "original verified source");
+  auto job = copy_job(local / "proof-source", remote / "proof-target"); jobs->add_job(job);
+  test::until([&] { return jobs->idle(); }, "Staging drift did not stop publication");
+  require(job->_state == JobState::PAUSED && !RemoteFS::inspect(remote / "proof-target").exists &&
+              test::read(local / "proof-source") == "original verified source",
+          "Modified verified staging output was published");
+  jobs->resume(job->_job_id); done(*jobs, job);
+  require(RemoteFS::read(remote / "proof-target", 0, 100) == "original verified source",
+          "Staging drift recovery published modified data");
 }
 static void pending_recovery_contracts(const test::Fixture &local, const Filepath &remote) {
   {
@@ -115,6 +199,12 @@ static void pending_recovery_contracts(const test::Fixture &local, const Filepat
       RemoteFS::mkdir(root); roots.push_back(root);
       record->stage_pending(n, root / "data");
       RemoteFS::write(root / "data", 0, "partial", true);
+      if (!replaced) {
+        RemoteFS::mkdir(root / "readonly");
+        RemoteFS::write(root / "readonly/child", 0, "discard partial output", true);
+        auto readonly = RemoteFS::inspect(root / "readonly"); readonly.mode = S_IFDIR | 0555;
+        RemoteFS::metadata(root / "readonly", readonly);
+      }
     }
     record->checkpoint(*job->snapshot(), JobState::RUNNING);
     if (replaced) {
@@ -331,6 +421,8 @@ int main(int argc, char **argv) {
     require(!RemoteFS::inspect(remote / "tree").exists, "Remote delete failed");
     if (host == "fixture") {
       streaming_pipeline_contracts(*jobs, local, remote);
+      move_cleanup_contract(local, remote);
+      verified_stage_contract(local, remote);
       pending_recovery_contracts(local, remote);
       metadata_contracts(*jobs, local, remote);
       RemoteFS::close_connections();

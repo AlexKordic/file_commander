@@ -85,6 +85,7 @@ std::shared_ptr<const JobSnapshot> JobSpec::snapshot(bool details, bool journal)
   view->_streaming = _streaming;
   view->_transfer_written = _transfer_written; view->_transfer_verified = _transfer_verified; view->_transfer_durable = _transfer_durable;
   view->_transfer_data_flushes = _transfer_data_flushes;
+  view->_transfer_renamed = _transfer_renamed;
   if (!details && !journal && is_stopped()) _completed_summary = view;
   return view;
 }
@@ -1280,8 +1281,11 @@ class ThreadedFileJobs : public FileJobs {
       const auto step_bytes = job->_journal ? job->_journal->operation_bytes(index) : op.bytes;
       bool skipped = false;
       if (job->_journal && job->_journal->cleanup_pending()) {
-        job->_journal->remove_source(op.source, op.destination);
+        const int error = job->_journal->remove_source(op.source, op.destination, job->_journal_io);
+        if (error) throw std::system_error(error, std::generic_category(), "Move source cleanup interrupted; Resume required");
         job->_journal->cleanup_committed_staging();
+        std::lock_guard lock(job->_m);
+        job->_transfer_written += step_bytes; job->_transfer_verified += step_bytes; job->_transfer_durable += step_bytes;
       } else {
         if (job->_journal)
           job->_journal->begin_step(index);
@@ -1346,40 +1350,12 @@ class ThreadedFileJobs : public FileJobs {
               }
             }
             if (!renamed) {
-              if (S_ISREG(before.mode) && op.kind != Operation::Kind::CreateSymlink) {
-                index = copy_remote_pipeline(*job, index, copy_callbacks) - 1;
-                continue;
-              }
-              if (destination.directory())
-                throw std::runtime_error("Cannot replace a directory with a file");
-              auto root = location_parent(op.destination) /
-                          boost::filesystem::unique_path(op.kind == Operation::Kind::MoveEntry
-                                                             ? ".fc-move-%%%%%%%%-%%%%%%%%"
-                                                             : ".fc-copy-%%%%%%%%-%%%%%%%%");
-              mkdir(root);
-              auto stage = root / (op.kind == Operation::Kind::MoveEntry ? "entry" : "data");
-              if (job->_journal)
-                job->_journal->transaction("staging", stage, op.destination);
-              if (op.kind == Operation::Kind::CreateSymlink) {
-                symlink(op.link_text.native(), stage);
-                metadata(stage, before);
-              } else
-                copy_remote_tree(*job, op.source, stage, copy_callbacks);
-              checkpoint();
-              if (inspect(op.destination).stamp() != destination.stamp())
-                throw std::runtime_error("Destination changed before commit; source retained");
-              if (job->_journal)
-                job->_journal->transaction("commit_ready", stage, op.destination);
-              rename(stage, op.destination, destination.exists, &destination);
-              if (job->_journal)
-                job->_journal->transaction("committed", stage, op.destination);
-              if (op.kind == Operation::Kind::MoveEntry) {
-                if (!job->_journal)
-                  throw std::runtime_error("Cross-filesystem move requires a transfer journal; destination "
-                                           "copied and source retained");
-                job->_journal->remove_source(op.source, op.destination);
-              }
-              RemoteFS::remove(root);
+              index = copy_remote_pipeline(*job, index, copy_callbacks) - 1;
+              continue;
+            }
+            {
+              std::lock_guard lock(job->_m);
+              job->_transfer_renamed += std::max<int64_t>(0, step_bytes);
             }
           }
         }

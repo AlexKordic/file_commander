@@ -77,6 +77,7 @@ struct JobStats {
   bool _streaming = false;
   uint64_t _transfer_written = 0, _transfer_verified = 0, _transfer_durable = 0;
   uint64_t _transfer_data_flushes = 0;
+  uint64_t _transfer_renamed = 0;
 };
 // Published under the job mutex; observers retain an immutable view for a frame.
 struct JobSnapshot : JobInstructions, JobStats {

@@ -193,6 +193,37 @@ def dispatch(method, p, send):
         sync_directory(os.path.dirname(value))
         return {}
     if method == "remove":
+        if p.get("owner"):
+            # Only recovery's private root takes this path. Work through open
+            # directories and never follow links while restoring owner access.
+            expected = p["expected"]
+            fd = os.open(value, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+            try:
+                info = os.fstat(fd)
+                if info.st_dev != expected["dev"] or info.st_ino != expected["ino"]:
+                    raise OSError(errno.ESTALE, "Recovery staging ownership changed")
+                def clear(directory):
+                    os.fchmod(directory, stat.S_IMODE(os.fstat(directory).st_mode) | 0o700)
+                    for name in os.listdir(directory):
+                        info = os.stat(name, dir_fd=directory, follow_symlinks=False)
+                        if stat.S_ISDIR(info.st_mode):
+                            child = os.open(name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=directory)
+                            try:
+                                clear(child)
+                            finally:
+                                os.close(child)
+                            os.rmdir(name, dir_fd=directory)
+                        else:
+                            os.unlink(name, dir_fd=directory)
+                clear(fd)
+                current = os.lstat(value)
+                if (current.st_dev, current.st_ino) != (info.st_dev, info.st_ino):
+                    raise OSError(errno.ESTALE, "Recovery staging ownership changed")
+                os.rmdir(value)
+            finally:
+                os.close(fd)
+            sync_directory(os.path.dirname(value))
+            return {}
         if stat.S_ISDIR(os.lstat(value).st_mode):
             if p.get("recursive"):
                 shutil.rmtree(value)
