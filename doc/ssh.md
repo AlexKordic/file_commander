@@ -5,12 +5,12 @@ browse it, copy and move between local and remote tabs (or between two hosts),
 rename, create directories, delete, search with `F3`, and edit remote files in
 the same editor as local ones.
 
-Nothing has to be installed on the remote machine except Python 3.
+Nothing has to be installed on the remote machine except Python 3.8 or later.
 
 ## Requirements
 
 - OpenSSH (`ssh`) on your machine.
-- `python3` on the remote machine, available in the login shell's `PATH`.
+- Python 3.8 or later as `python3` in the remote login shell's `PATH`.
 
 FC uses your normal SSH setup. Host aliases, ports, users, keys, jump hosts and
 agents all come from `~/.ssh/config` and your SSH agent.
@@ -60,8 +60,24 @@ All file operations from the [user guide](user_guide.md) work in SSH tabs:
 - A copy within one host runs entirely on that host.
 - Each file is written under a temporary name, verified with SHA-256, then
   renamed into place.
+- File data travels as raw binary frames over persistent SSH channels. There
+  is no JSON, base64, per-block acknowledgement or scheduled delay between
+  blocks. Read-ahead prepares subsequent files, including files in the next
+  selected directory, while the current file streams.
+- Source hashing and independent destination readback run alongside copying.
+  The next file can stream while earlier files are being verified and synced.
+  Bounded buffers apply backpressure when storage or verification falls behind.
+- File data is synced after approximately each GiB and at the end of a file;
+  a GiB checkpoint at EOF counts once. Journal, metadata and directory syncs
+  still protect publication and recovery.
 - A move within one remote filesystem is a rename. Otherwise FC copies first
   and deletes the source only after the copy is complete and verified.
+
+Transfer details show **written**, **verified** and **synced** bytes separately.
+Reaching the written total does not finish the job: verification, durable
+publication and any move source cleanup must also succeed. Independent files
+stream ahead; operations that depend on an earlier rename or destination wait
+for that dependency.
 
 What is preserved:
 
@@ -87,6 +103,12 @@ interrupted copy or move appears **paused** the next time you start FC, and
 only continues when you press `r` in the job list (`F9`). FC checks both sides
 before continuing; a partly copied file starts again from its beginning. See
 [after a crash or quit](user_guide.md#after-a-crash-or-quit).
+
+The journal records a committed prefix and pending private staging roots.
+Startup performs no remote cleanup or transfer. On explicit Resume, FC checks
+ownership of all pending roots before discarding uncommitted output and
+restarting those files. A published move resumes source cleanup rather than
+copying its verified destination again.
 
 Staging folders named `.fc-copy-*` or `.fc-move-*` can remain on the remote
 side after a cancelled transfer or an unreachable host. Delete them once you no

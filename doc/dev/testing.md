@@ -303,6 +303,34 @@ The tests create uniquely named directories under `/tmp` on the host and
 remove them. If the connection drops first, a `/tmp/fc-*` directory may be left
 behind.
 
+The binary protocol and stream contracts additionally cover raw byte paths and
+digests, bounded framing, corruption, disk-full failures, live pause/rate
+controls, blocked fsyncs, source read-ahead starvation, consecutive directory
+transfers and interrupted move cleanup. Gates deliberately hold the first
+file's fsync until the next file has arrived, detecting an accidental EOF or
+publication barrier without relying on timing thresholds.
+
+To qualify throughput with independently generated, incompressible files:
+
+```sh
+python3 tools/benchmark_ssh_copy.py --host myhost --build build-macos --gib 1 --files 2
+```
+
+This creates and removes its own local and remote temporary directories. It
+measures complete FC upload, download and same-host jobs, raw SSH and SFTP
+baselines, local storage, process CPU, peak RSS, data-fsync count and plaintext
+FC protocol byte counts. Protocol counts exclude SSH/TCP framing. Each job
+includes destination readback, syncing and publication; generating the source
+files is outside the timed interval. Use `--gib 10 --files 1` for a larger file.
+Results and per-job metrics go under the build's `test-logs/ssh-copy-*` folder,
+or `--output PATH`.
+
+For software qualification without an SSH host, add `--fixture`. That mode runs
+the exact helper over local pipes and reports a local-process baseline; it
+does not measure encryption, a network or SFTP. It cannot establish network
+link saturation. The benchmark is an explicit command, not a CTest release
+timing requirement.
+
 ## Adding a test
 
 Pick the cheapest kind of test that reaches the behavior. For every test:

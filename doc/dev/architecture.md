@@ -44,7 +44,7 @@ wait on the dispatcher for at most 16 ms. When the terminal is handed to
 another program (Fresh, SSH authentication, log flushing), the dispatcher is
 suspended and keeps queued work until the terminal returns.
 
-SSH support installs nothing remotely; the host needs only `python3`.
+SSH support installs nothing remotely; the host needs Python 3.8 or later.
 Interactive authentication happens only from the Connect SSH dialog, with the
 terminal handed to `ssh`. Background connections then run `ssh` in `BatchMode`
 over the shared ControlMaster socket, send `remote_agent.py` over stdin to
@@ -52,9 +52,33 @@ over the shared ControlMaster socket, send `remote_agent.py` over stdin to
 (kind, flags, operation, request ID and payload length). Control values use
 typed binary integers, byte strings and containers with numeric field IDs;
 paths, attributes, data and SHA-256 digests travel as raw bytes. Decoders bound
-frame lengths, container sizes and nesting before allocating. Each host gets
-one channel for metadata and listings and one for bulk reads, writes and
-digests, so a large transfer does not stall browsing.
+frame lengths, container sizes and nesting before allocating. Metadata and
+listings use an RPC channel; each transfer session adds persistent source,
+destination or same-host-copy channels as needed over the shared SSH master.
+Bulk data does not hold the browsing channel.
+
+`remote_stream` opens files once, sends raw data frames of up to one MiB and
+hashes source bytes as they are read. There are no per-block acknowledgements.
+A 32 MiB/128-frame read-ahead budget reserves capacity for the current source,
+so a faster future host cannot starve it. Destination workers independently
+read back and hash completed ranges, syncing data at approximately one GiB
+intervals and EOF. They accept subsequent files while earlier verification or
+fsync runs. Same-host transfers keep payload data entirely on that host.
+
+`remote_copy` separates preparation, sending, verification/metadata and ordered
+publication. Up to 16 groups and 16 file items can be pending, including whole
+directory moves. A boundary between independent files or selected trees does
+not wait for the previous publication. Actual namespace dependencies and
+bounded resource backpressure can wait. The publisher checks cached verified
+staging identities, commits the original operation order and removes move
+sources only after verified, durable publication. Metadata and namespace
+durability are separate from the coarse data-fsync policy.
+
+Remote journals use version 2, recording the committed prefix and owned
+pending roots; version 1 remains readable. Interrupted jobs always restore as
+paused. Explicit Resume validates inputs, destinations and every pending
+ownership record before cleanup or replay. Non-UTF-8 paths use tagged byte
+strings in the on-disk JSON journal only; the SSH wire remains binary.
 
 ## Source layout and build targets
 
