@@ -434,6 +434,9 @@ struct JobBar: View {
   }
 
   private func detail(_ job: JobInfo) -> String {
+    if job.streaming {
+      return "Written \(Format.bytes(job.bytesWritten)) · Verified \(Format.bytes(job.bytesVerified)) · Synced \(Format.bytes(job.bytesDurable))"
+    }
     if job.type == "COPY" || job.type == "DELETE" || job.type == "MOVE" {
       if job.bytesTotal > 0 { return "\(Format.bytes(job.bytesDone)) of \(Format.bytes(job.bytesTotal))" }
     }

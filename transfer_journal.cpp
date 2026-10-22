@@ -243,6 +243,7 @@ struct TransferJournal::Impl {
     state["done"] = job._items_done; state["failed"] = job._items_failed; state["skipped"] = job._items_skipped;
     state["bytes"] = job._bytes_processed; state["total"] = job._bytes_total;
     state["partial"] = job._current_item.current_size;
+    state["streaming"] = job._streaming;
     j::array list; for (const auto& e : errors)
       list.emplace_back(j::object{{"path", e.path_ref().native()}, {"message", e.warning_ref().value_or("")}});
     state["errors"] = std::move(list);
@@ -254,6 +255,13 @@ struct TransferJournal::Impl {
     job._bytes_processed = state.at("bytes").to_number<double>();
     job._bytes_total = state.at("total").to_number<double>();
     job._current_item.current_size = number(state.at("partial"));
+    job._streaming = state.contains("streaming") && state.at("streaming").as_bool();
+    if (job._streaming) {
+      // Uncommitted data is restarted after Resume; only the committed prefix
+      // is a trustworthy progress watermark after process death.
+      job._transfer_written = job._transfer_verified = job._transfer_durable = uint64_t(job._bytes_processed);
+      job._current_item.current_size = 0;
+    }
     job._total.update(int64_t(job._bytes_processed) + job._current_item.current_size, int64_t(job._bytes_total));
     job._errors.clear(); job._error_count_total = 0;
     for (const auto& value : state.at("errors").as_array()) {

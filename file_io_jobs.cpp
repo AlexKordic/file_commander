@@ -58,6 +58,7 @@ bool ProgressInfo::update(int64_t new_size, int64_t source_size) {
 
 std::shared_ptr<const JobSnapshot> JobSpec::snapshot(bool details) {
   std::lock_guard lock(_m);
+  if (_poll_transfer) _poll_transfer(*this);
   if (!details && _completed_summary) return _completed_summary;
   auto view = std::make_shared<JobSnapshot>();
   if (details) static_cast<JobInstructions&>(*view) = static_cast<const JobInstructions&>(*this);

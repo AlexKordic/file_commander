@@ -107,6 +107,8 @@ public struct JobInfo: Hashable, Sendable, Identifiable {
   public var percent = 0.0, currentPercent = 0.0, mbps = 0.0, averageMbps = 0.0
   public var itemsDone: Int64 = 0, itemsTotal: Int64 = 0, itemsFailed: Int64 = 0, itemsSkipped: Int64 = 0, errors: Int64 = 0
   public var bytesDone = 0.0, bytesTotal = 0.0
+  public var streaming = false
+  public var bytesWritten = 0.0, bytesVerified = 0.0, bytesDurable = 0.0
   public var current = "", recoveryNote = "", firstError = ""
   public var queued = -1.0, started = -1.0, finished = -1.0
 
@@ -128,7 +130,13 @@ public struct JobInfo: Hashable, Sendable, Identifiable {
   public var stateTitle: String {
     switch state {
     case "queued": return "Queued"
-    case "running": return "Running"
+    case "running":
+      if streaming && bytesTotal > 0 && bytesWritten >= bytesTotal {
+        if bytesVerified < bytesWritten { return "Verifying" }
+        if bytesDurable < bytesWritten { return "Syncing" }
+        return "Finishing"
+      }
+      return "Running"
     case "paused": return "Paused"
     case "cancelled": return "Cancelled"
     case "completed": return "Finished"

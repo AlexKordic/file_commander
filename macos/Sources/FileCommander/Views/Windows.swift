@@ -84,6 +84,10 @@ struct JobRow: View {
         Text("\(job.itemsDone) of \(job.itemsTotal) items" + (job.bytesTotal > 0 ? " · \(Format.bytes(job.bytesDone)) of \(Format.bytes(job.bytesTotal))" : "")
              + (job.errors > 0 ? " · \(job.errors) errors" : ""))
           .font(.caption).foregroundStyle(.secondary)
+        if job.streaming {
+          Text("Written \(Format.bytes(job.bytesWritten)) · Verified \(Format.bytes(job.bytesVerified)) · Synced \(Format.bytes(job.bytesDurable))")
+            .font(.caption).foregroundStyle(.secondary)
+        }
       }
     }
     .padding(.vertical, 3)
@@ -131,6 +135,11 @@ struct JobDetailView: View {
         Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 6) {
           GridRow { Text("Items").foregroundStyle(.secondary); Text("\(job.itemsDone) of \(job.itemsTotal), \(job.itemsFailed) failed, \(job.itemsSkipped) skipped") }
           GridRow { Text("Bytes").foregroundStyle(.secondary); Text("\(Format.bytes(job.bytesDone)) of \(Format.bytes(job.bytesTotal))") }
+          if job.streaming {
+            GridRow { Text("Written").foregroundStyle(.secondary); Text(Format.bytes(job.bytesWritten)) }
+            GridRow { Text("Verified").foregroundStyle(.secondary); Text(Format.bytes(job.bytesVerified)) }
+            GridRow { Text("Synced").foregroundStyle(.secondary); Text(Format.bytes(job.bytesDurable)) }
+          }
           if job.isRunning {
             GridRow { Text("Speed").foregroundStyle(.secondary); Text(String(format: "%.1f MB/s now, %.1f MB/s average", job.mbps / 8, job.averageMbps / 8)) }
           }

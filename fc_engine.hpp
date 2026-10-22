@@ -225,6 +225,8 @@ struct JobInfo {
   double      percent = 0, current_percent = 0, mbps = 0, average_mbps = 0;
   int64_t     items_done = 0, items_total = 0, items_failed = 0, items_skipped = 0, errors = 0;
   double      bytes_done = 0, bytes_total = 0;
+  bool        streaming = false;
+  double      bytes_written = 0, bytes_verified = 0, bytes_durable = 0;
   std::string current, recovery_note, first_error;
   double      queued = -1, started = -1, finished = -1;
 };

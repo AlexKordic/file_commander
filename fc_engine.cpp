@@ -212,14 +212,18 @@ JobInfo job_info(const JobSnapshot& job) {
   // Copies count the file in progress too, as the progress bar does.
   out.bytes_done      = std::max<double>(job._bytes_processed, job._type == OperationType::COPY ? double(job._total.current_size) : 0.0);
   out.bytes_total     = job._bytes_total;
+  out.streaming = job._streaming;
+  out.bytes_written = job._transfer_written; out.bytes_verified = job._transfer_verified; out.bytes_durable = job._transfer_durable;
+  if (job._streaming) out.bytes_done = job._transfer_written;
   out.mbps            = job._total.Mbps;
   out.average_mbps    = job._total.average_Mbps;
   out.current_percent = job._current_item.percentage;
-  if (job._type == OperationType::COPY) out.percent = job._total.percentage;
+  if (job._streaming || job._type == OperationType::COPY) out.percent = job._total.percentage;
   else if (job._type == OperationType::DELETE && job._bytes_total > 0) out.percent = 100.0 * job._bytes_processed / job._bytes_total;
   else if (out.items_total > 0) out.percent = 100.0 * double(job._items_done) / double(out.items_total);
   else out.percent = job.is_stopped() ? 100 : 0;
   out.percent = std::clamp(out.percent, 0.0, 100.0);
+  if (job._state == JobState::COMPLETED) out.percent = 100;
   if (job._focused_item) out.current = job._focused_item->path_ref().native();
   out.recovery_note = job._recovery_note;
   for (const auto& error : job._step_errors)

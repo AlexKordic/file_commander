@@ -170,7 +170,8 @@ void JobListDialog::rebuild_list() {
     auto refresh=[&](const auto& job) {
       if(job && job->_job_id==id) {
         auto summary=job->snapshot(false);
-        if(summary->_items_done!=detail_job->_items_done || summary->_state!=detail_job->_state || summary->_error_count!=detail_job->_error_count || summary->_recovery_note!=detail_job->_recovery_note)
+        if(summary->_items_done!=detail_job->_items_done || summary->_state!=detail_job->_state || summary->_error_count!=detail_job->_error_count || summary->_recovery_note!=detail_job->_recovery_note ||
+           summary->_transfer_written!=detail_job->_transfer_written || summary->_transfer_verified!=detail_job->_transfer_verified || summary->_transfer_durable!=detail_job->_transfer_durable)
           detail_job=job->snapshot();
       }
     };
@@ -294,6 +295,11 @@ JobListDialog::JobListDialog(std::function<void()> close_dialog) : Dialog(nullpt
     else if (state == JobState::CANCELLED)       detail = std::format("{}/{} files  cancelled", items_done, items_total);
     else if (state == JobState::RUNNING)         detail = std::format("{}/{} files  running", items_done, items_total);
     else                                         detail = "queued";
+    if (state == JobState::RUNNING && job->_streaming && job->_transfer_written >= uint64_t(job->_bytes_total)) {
+      if (job->_transfer_verified < job->_transfer_written) detail += " — verifying";
+      else if (job->_transfer_durable < job->_transfer_written) detail += " — syncing";
+      else detail += " — finishing";
+    }
 
     auto row = hbox({
       text(std::format("[#{}] ", job->_job_id)),
@@ -494,6 +500,11 @@ Element JobListDialog::render_detail() {
   Elements info;
   info.push_back(text(std::format("  Items:   {} total, {} done, {} remaining", items_total, items_done, remaining)));
   info.push_back(text(std::format("  Bytes:   {} / {}", format_bytes(detail_job->_bytes_processed), format_bytes(detail_job->_bytes_total))));
+  if (detail_job->_streaming) {
+    info.push_back(text(std::format("  Written: {}", format_bytes(detail_job->_transfer_written))));
+    info.push_back(text(std::format("  Verified:{}", format_bytes(detail_job->_transfer_verified))));
+    info.push_back(text(std::format("  Synced:  {}", format_bytes(detail_job->_transfer_durable))));
+  }
   info.push_back(text(std::format("  Time:    {}", duration)));
   info.push_back(text(std::format("  Errors:  {}", errors)));
   info.push_back(separator());

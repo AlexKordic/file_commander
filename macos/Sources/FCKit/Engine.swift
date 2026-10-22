@@ -406,7 +406,8 @@ public final class Engine {
     JobInfo(id: j.id, type: String(j.type), state: String(j.state), stopped: j.stopped, percent: j.percent,
             currentPercent: j.current_percent, mbps: j.mbps, averageMbps: j.average_mbps, itemsDone: j.items_done,
             itemsTotal: j.items_total, itemsFailed: j.items_failed, itemsSkipped: j.items_skipped, errors: j.errors,
-            bytesDone: j.bytes_done, bytesTotal: j.bytes_total, current: String(j.current),
+            bytesDone: j.bytes_done, bytesTotal: j.bytes_total, streaming: j.streaming,
+            bytesWritten: j.bytes_written, bytesVerified: j.bytes_verified, bytesDurable: j.bytes_durable, current: String(j.current),
             recoveryNote: String(j.recovery_note), firstError: String(j.first_error), queued: j.queued, started: j.started,
             finished: j.finished)
   }
