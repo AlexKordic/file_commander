@@ -46,6 +46,8 @@ boost::json::object attributes(const Filepath &);
 void attributes(const Filepath &, const boost::json::object &);
 boost::json::object params(const Filepath &);
 void close_connections();
+struct ProtocolStats { uint64_t sent = 0, received = 0; };
+ProtocolStats protocol_stats(); // Plaintext FC bytes, including helper bootstrap; excludes SSH/TCP framing.
 std::string control_path(const std::string &host);
 int authenticate(const std::string &host); // foreground terminal owns prompts
 // The ssh program for a host: a registered override, else FC_SSH_BIN, else ssh.

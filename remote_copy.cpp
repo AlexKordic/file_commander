@@ -25,15 +25,17 @@ struct Pipeline {
   bool prepared = false, sent = false;
   size_t end = 0;
   uint64_t written = 0, verified = 0, durable = 0;
+  uint64_t flushes = 0;
   std::exception_ptr failure;
   void poll(JobSpec &job) { // job mutex held; never hold this mutex while taking it.
     std::lock_guard lock(mutex);
-    uint64_t w = written, v = verified, d = durable;
+    uint64_t w = written, v = verified, d = durable, f = flushes;
     for (auto &[index, pending] : active) if (pending->stream) {
-      auto p = pending->stream->progress(); w += p.written; v += p.verified; d += p.durable;
+      auto p = pending->stream->progress(); w += p.written; v += p.verified; d += p.durable; f += p.flushes;
     }
     job._streaming = true;
     job._transfer_written = w; job._transfer_verified = v; job._transfer_durable = d;
+    job._transfer_data_flushes = f;
     job._total.update(w, int64_t(job._bytes_total));
     if (!active.empty() && active.begin()->second->stream) {
       const auto &file = active.begin()->second;
@@ -90,7 +92,8 @@ size_t copy_remote_pipeline(JobSpec &job, size_t begin, const RemoteCopyCallback
   auto state = std::make_shared<Pipeline>();
   state->end = begin;
   state->written = state->verified = state->durable = uint64_t(job._bytes_processed);
-  StreamSession session([&] { return StreamControl{job._pause_requested, job._cancel_requested, callbacks.rate()}; });
+  state->flushes = job._transfer_data_flushes;
+  StreamSession session([&] { return StreamControl{job._pause_requested, job._cancel_requested, callbacks.rate()}; }, job._journal_io);
   auto failure = [&](std::exception_ptr e) {
     { std::lock_guard lock(state->mutex); if (!state->failure) state->failure = e; state->cv.notify_all(); }
     // Wake explicit-pause waiters too. A recovery error remains PAUSED; it is
@@ -231,7 +234,7 @@ size_t copy_remote_pipeline(JobSpec &job, size_t begin, const RemoteCopyCallback
           }
           { std::lock_guard lock(state->mutex);
             if (pending->stream) {
-              auto p = pending->stream->progress(); state->written += p.written; state->verified += p.verified; state->durable += p.durable;
+              auto p = pending->stream->progress(); state->written += p.written; state->verified += p.verified; state->durable += p.durable; state->flushes += p.flushes;
             }
             state->active.erase(pending->index); state->cv.notify_all();
           }
@@ -254,7 +257,8 @@ void copy_remote_tree(JobSpec &job, const Filepath &source, const Filepath &stag
   // directory remains one uncommitted transaction until every child is proven.
   auto state = std::make_shared<Pipeline>();
   state->written = state->verified = state->durable = uint64_t(job._bytes_processed);
-  StreamSession session([&] { return StreamControl{job._pause_requested, job._cancel_requested, callbacks.rate()}; });
+  state->flushes = job._transfer_data_flushes;
+  StreamSession session([&] { return StreamControl{job._pause_requested, job._cancel_requested, callbacks.rate()}; }, job._journal_io);
   struct Directory { Filepath source, target; Metadata metadata, identity; };
   std::vector<Directory> directories;
   auto failure = [&](std::exception_ptr e) {
@@ -316,7 +320,7 @@ void copy_remote_tree(JobSpec &job, const Filepath &source, const Filepath &stag
           callbacks.attributes(pending->op.source, pending->stage);
           metadata(pending->stage, pending->source); if (!job._journal) sync(pending->stage);
           { std::lock_guard lock(state->mutex);
-            auto p = pending->stream->progress(); state->written += p.written; state->verified += p.verified; state->durable += p.durable;
+            auto p = pending->stream->progress(); state->written += p.written; state->verified += p.verified; state->durable += p.durable; state->flushes += p.flushes;
             state->active.erase(pending->index); state->cv.notify_all();
           }
           job.updated();

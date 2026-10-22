@@ -143,15 +143,17 @@ if(BUILD_TESTING)
   set_tests_properties(fc.remote.protocol fc.remote.protocol_python PROPERTIES LABELS "core;unit;remote" TIMEOUT 15)
   add_executable(fc_remote_stream_tests test/remote_stream.cpp)
   target_link_libraries(fc_remote_stream_tests PRIVATE fc_core)
+  add_executable(fc_remote_copy_benchmark test/remote_copy_benchmark.cpp)
+  target_link_libraries(fc_remote_copy_benchmark PRIVATE fc_core)
   add_test(NAME fc.remote.stream COMMAND fc_remote_stream_tests)
-  set_tests_properties(fc.remote.stream PROPERTIES LABELS "core;integration;remote" TIMEOUT 90
+  set_tests_properties(fc.remote.stream PROPERTIES LABELS "core;integration;remote;lifetime" TIMEOUT 90
     ENVIRONMENT "FC_SSH_BIN=${CMAKE_CURRENT_SOURCE_DIR}/test/ssh_fixture.py")
   add_test(NAME fc.remote.verifier COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/test/test_remote_verifier.py")
   set_tests_properties(fc.remote.verifier PROPERTIES LABELS "core;unit;remote" TIMEOUT 20)
   add_executable(fc_remote_transfer_tests test/remote_transfer.cpp)
   target_link_libraries(fc_remote_transfer_tests PRIVATE fc_core)
   add_test(NAME fc.remote.transfers COMMAND fc_remote_transfer_tests)
-  set_tests_properties(fc.remote.transfers PROPERTIES LABELS "core;integration;remote" TIMEOUT 90
+  set_tests_properties(fc.remote.transfers PROPERTIES LABELS "core;integration;remote;lifetime" TIMEOUT 90
     ENVIRONMENT "FC_SSH_BIN=${CMAKE_CURRENT_SOURCE_DIR}/test/ssh_fixture.py")
   add_executable(fc_remote_fs_tests test/remote_fs.cpp)
   target_link_libraries(fc_remote_fs_tests PRIVATE fc_core)

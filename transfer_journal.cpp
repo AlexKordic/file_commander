@@ -130,17 +130,74 @@ void check_anchor(const j::object& a) {
   if (!a.empty() && !identity(a.at("stamp").as_object(), stamp(text(a.at("path")), true)))
     throw std::runtime_error("Transfer parent or mounted volume changed; review it before starting a new transfer");
 }
+bool valid_utf8(std::string_view value) {
+  for (size_t i = 0; i < value.size();) {
+    auto lead = uint8_t(value[i++]);
+    if (lead < 0x80) continue;
+    if (lead < 0xc2 || lead > 0xf4) return false;
+    unsigned count = lead < 0xe0 ? 1 : lead < 0xf0 ? 2 : 3;
+    uint32_t code = lead & (0x7f >> (count + 1));
+    if (value.size() - i < count) return false;
+    for (unsigned n = 0; n < count; ++n) {
+      auto byte = uint8_t(value[i++]);
+      if ((byte & 0xc0) != 0x80) return false;
+      code = (code << 6) | (byte & 0x3f);
+    }
+    if (code < (count == 1 ? 0x80u : count == 2 ? 0x800u : 0x10000u) ||
+        (code >= 0xd800 && code <= 0xdfff) || code > 0x10ffff) return false;
+  }
+  return true;
+}
+j::value journal_strings(const j::value& value, bool encode) {
+  // JSON is an on-disk format only. Tag invalid UTF-8 byte strings so raw
+  // filenames survive restart; none of this encoding crosses the SSH wire.
+  if (encode && value.is_string() && !valid_utf8(value.as_string())) {
+    constexpr char hex[] = "0123456789abcdef";
+    std::string out;
+    for (uint8_t c : value.as_string()) { out += hex[c >> 4]; out += hex[c & 15]; }
+    return j::object{{"$fc_raw", out}};
+  }
+  if (value.is_array()) {
+    j::array out;
+    for (const auto& item : value.as_array()) out.push_back(journal_strings(item, encode));
+    return out;
+  }
+  if (value.is_object()) {
+    const auto& object = value.as_object();
+    if (!encode && object.size() == 1 && object.contains("$fc_raw")) {
+      const auto raw = object.at("$fc_raw").as_string();
+      if (raw.size() % 2) throw std::runtime_error("Invalid journal byte string");
+      auto nibble = [](char c) -> uint8_t {
+        if (c >= '0' && c <= '9') return c - '0';
+        if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+        throw std::runtime_error("Invalid journal byte string");
+      };
+      std::string out;
+      for (size_t i = 0; i < raw.size(); i += 2) out += char((nibble(raw[i]) << 4) | nibble(raw[i + 1]));
+      return j::string(out);
+    }
+    j::object out;
+    for (const auto& item : object) out[item.key()] = journal_strings(item.value(), encode);
+    return out;
+  }
+  return value;
+}
 j::object read(const Filepath& path, uint64_t limit = 64 * 1024 * 1024) {
   if (fs::file_size(path) > limit) throw std::runtime_error("Transfer journal exceeds size limit");
   std::ifstream in(path.native());
   if (!in) throw std::runtime_error("Cannot read transfer journal");
   auto o = j::parse(std::string(std::istreambuf_iterator<char>(in), {})).as_object();
+  if (o.contains("byte_strings")) {
+    if (number(o.at("byte_strings")) != 1) throw std::runtime_error("Unsupported journal byte string format");
+    o = journal_strings(o, false).as_object(); o.erase("byte_strings");
+  }
   auto version = number(o.at("version"));
   if (version != 1 && version != 2) throw std::runtime_error("Unsupported transfer journal version");
   return o;
 }
 void save(const Filepath& path, const j::object& o) {
-  auto bytes = j::serialize(o) + "\n";
+  auto encoded = journal_strings(o, true).as_object(); encoded["byte_strings"] = 1;
+  auto bytes = j::serialize(encoded) + "\n";
   if (bytes.size() > 64 * 1024 * 1024) throw std::runtime_error("Transfer journal exceeds size limit");
   SettingsStore::atomic_write(path, bytes);
 }

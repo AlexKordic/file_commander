@@ -1,4 +1,5 @@
 #include "remote_protocol.hpp"
+#include "sha256.hpp"
 #include "support/contracts.hpp"
 #include <iostream>
 using namespace RemoteFS;
@@ -12,6 +13,14 @@ static boost::json::object sample() {
 int main(int argc, char **argv) {
   try {
     auto original = sample();
+    const std::string hash_data(16 * 1024 + 17, char(0xa5));
+    for (size_t chunk : {size_t(1), size_t(63), size_t(64), size_t(65), size_t(1024 * 1024)}) {
+      PortableSha256 portable; Sha256 native;
+      for (size_t at = 0; at < hash_data.size(); at += std::min(chunk, hash_data.size() - at)) {
+        auto part = std::string_view(hash_data).substr(at, chunk); portable.update(part); native.update(part);
+      }
+      require(portable.finish_raw() == native.finish_raw(), "Portable and native incremental SHA-256 differ");
+    }
     auto encoded = Wire::encode(original);
     if (argc > 1 && std::string(argv[1]) == "--emit") {
       std::cout.write(encoded.data(), encoded.size()); return 0;

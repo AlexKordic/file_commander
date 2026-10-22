@@ -2,7 +2,45 @@
 #include "support/contracts.hpp"
 #include <iostream>
 #include <random>
+#include <cstring>
 using test::require;
+static void download_without_waiting_for_fsync(const test::Fixture &local, const Filepath &remote) {
+  struct Context { test::Gate gate; std::atomic<int> calls{0}; } context;
+  boost::filesystem::copy_file_io_hooks io{};
+  io.context = &context;
+  io.fault = [](void *value, const char *phase) {
+    auto &c = *static_cast<Context *>(value);
+    return std::strcmp(phase, "stream_fsync") == 0 && c.calls.fetch_add(1) == 0 && !c.gate.arrive() ? ETIMEDOUT : 0;
+  };
+  RemoteFS::StreamSession session({}, &io);
+  auto first = session.prepare(remote / "one", local / "gated-first", RemoteFS::inspect(remote / "one"));
+  auto second = session.prepare(remote / "two", local / "gated-second", RemoteFS::inspect(remote / "two"));
+  test::Gate::Release release{context.gate};
+  session.transfer(first); context.gate.await();
+  session.transfer(second);
+  test::until([&] { return second->ready(); }, "Second download waited for the first fsync");
+  second->wait(); require(!first->ready(), "Blocked destination completed before its fsync");
+  context.gate.open(); first->wait();
+}
+static void remote_controls(const test::Fixture &local, const Filepath &remote, bool onhost) {
+  std::atomic<bool> paused{true};
+  std::atomic<uint64_t> rate{512 * 1024};
+  RemoteFS::StreamSession session([&] { return RemoteFS::StreamControl{paused, false, rate}; });
+  const auto target = onhost ? remote / "controlled-copy" : local / "controlled-download";
+  auto file = session.prepare(remote / "one", target, RemoteFS::inspect(remote / "one"));
+  std::atomic<bool> finished{false};
+  std::exception_ptr error;
+  std::thread sender([&] { try { session.transfer(file); } catch (...) { error = std::current_exception(); } finished = true; });
+  try {
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    require(file->progress().written == 0, "Initially paused remote stream wrote data");
+    rate = 0; paused = false;
+    test::until([&] { return finished.load(); }, "Remote stream could not receive Resume/rate changes during a file");
+    sender.join(); if (error) std::rethrow_exception(error);
+    file->wait();
+  } catch (...) { session.cancel(); if (sender.joinable()) sender.join(); throw; }
+  require(RemoteFS::digest(target) == RemoteFS::digest(remote / "one"), "Controlled stream changed content");
+}
 static void batch(const std::vector<std::pair<Filepath, Filepath>> &paths) {
   RemoteFS::StreamSession session;
   std::vector<std::shared_ptr<RemoteFS::StreamFile>> files;
@@ -29,6 +67,9 @@ int main(int argc, char **argv) {
     batch({{local / "one", remote / "one"}, {local / "two", remote / "two"}, {local / "empty", remote / "empty"}});
     batch({{remote / "one", local / "download"}, {remote / "two", local / "download-two"}, {remote / "empty", local / "download-empty"}});
     batch({{remote / "one", remote / "onhost"}, {remote / "two", remote / "onhost-two"}, {remote / "empty", remote / "onhost-empty"}});
+    download_without_waiting_for_fsync(local, remote);
+    remote_controls(local, remote, false);
+    remote_controls(local, remote, true);
     if (host == "fixture") {
       auto other = Location::decode("ssh://fixture-other" + Location::decode(remote.native()).local.native()).resource();
       batch({{remote / "one", other / "relay"}, {remote / "two", other / "relay-two"}});

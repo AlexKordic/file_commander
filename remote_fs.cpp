@@ -150,6 +150,7 @@ void close_connections() {
   std::lock_guard guard(registry_mutex);
   clients.clear();
 }
+ProtocolStats protocol_stats() { return {detail::protocol_sent.load(), detail::protocol_received.load()}; }
 std::string control_path(const std::string &host) {
   auto dir = std::string("/tmp/fcmd-ssh-") + std::to_string(getuid());
   if (::mkdir(dir.c_str(), 0700) && errno != EEXIST)

@@ -56,12 +56,13 @@ bool ProgressInfo::update(int64_t new_size, int64_t source_size) {
   return true;
 }
 
-std::shared_ptr<const JobSnapshot> JobSpec::snapshot(bool details) {
+std::shared_ptr<const JobSnapshot> JobSpec::snapshot(bool details, bool journal) {
   std::lock_guard lock(_m);
   if (_poll_transfer) _poll_transfer(*this);
-  if (!details && _completed_summary) return _completed_summary;
+  if (!details && !journal && _completed_summary) return _completed_summary;
   auto view = std::make_shared<JobSnapshot>();
   if (details) static_cast<JobInstructions&>(*view) = static_cast<const JobInstructions&>(*this);
+  else if (journal) view->_errors = _errors;
   view->_recovery_note = _recovery_note;
   view->_type = _type; view->_copy_conflict = _copy_conflict; view->_plan = details ? _plan : nullptr;
   view->_item_count = _retained_item_count >= 0 ? _retained_item_count : _items.size(); view->_error_count = _error_count_total;
@@ -83,7 +84,8 @@ std::shared_ptr<const JobSnapshot> JobSpec::snapshot(bool details) {
   view->_bytes_total = _bytes_total;
   view->_streaming = _streaming;
   view->_transfer_written = _transfer_written; view->_transfer_verified = _transfer_verified; view->_transfer_durable = _transfer_durable;
-  if (!details && is_stopped()) _completed_summary = view;
+  view->_transfer_data_flushes = _transfer_data_flushes;
+  if (!details && !journal && is_stopped()) _completed_summary = view;
   return view;
 }
 
@@ -617,7 +619,7 @@ class ThreadedFileJobs : public FileJobs {
   void bind_updates(const std::shared_ptr<JobSpec>& job) {
     job->updated = [updates = _updates, weak=std::weak_ptr<JobSpec>(job)] {
       updates->notify();if(auto job=weak.lock()) {
-        auto snapshot=job->snapshot(job->_journal != nullptr);auto state=snapshot->_state.load();
+        auto snapshot=job->snapshot(false, job->_journal != nullptr);auto state=snapshot->_state.load();
         if (job->_journal) {
           auto persisted = job->_user_cancel_requested ? JobState::CANCELLED
             : job->_shutdown_requested && !job->is_stopped() ? JobState::PAUSED : state;
@@ -1221,6 +1223,7 @@ class ThreadedFileJobs : public FileJobs {
 
   void run_remote(JobSpec *job) {
     using namespace RemoteFS;
+    job->_journal_io = _services.file_io.get();
     if (job->_type == OperationType::ARCHIVE_CREATE || job->_type == OperationType::CLIPBOARD)
       throw std::runtime_error("This operation is not supported in SSH tabs");
     if (job->_resume_validate.exchange(false)) {
@@ -1249,10 +1252,11 @@ class ThreadedFileJobs : public FileJobs {
     }
     auto copy_attributes = [&](const Filepath &source, const Filepath &target) {
       auto attrs = attributes(source);
-      auto target_attrs = attributes(target);
       if (attrs.at("acl").as_bool())
         throw std::runtime_error("Extended ACLs are not supported in SSH transfers; source retained");
       auto &values = attrs.at("attributes").as_object();
+      if (values.empty()) return;
+      auto target_attrs = attributes(target);
       if (attrs.at("platform") != target_attrs.at("platform")) {
         values.erase("com.apple.provenance");
         if (!values.empty()) {
@@ -1263,7 +1267,7 @@ class ThreadedFileJobs : public FileJobs {
           values.clear();
         }
       }
-      attributes(target, values);
+      if (!values.empty()) attributes(target, values);
     };
     RemoteCopyCallbacks copy_callbacks{
         checkpoint, [this] { return _transfer_rate.load(); }, copy_attributes,
@@ -1393,6 +1397,7 @@ class ThreadedFileJobs : public FileJobs {
       job->updated();
     }
     for (auto it = directories.rbegin(); it != directories.rend(); ++it) {
+      checkpoint();
       copy_attributes(it->source, it->destination);
       metadata(it->destination, it->metadata);
       sync(it->destination);

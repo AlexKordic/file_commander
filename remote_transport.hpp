@@ -14,6 +14,7 @@
 #include <unistd.h>
 extern char **environ;
 namespace RemoteFS::detail {
+inline std::atomic<uint64_t> protocol_sent{0}, protocol_received{0};
 struct Transport {
   std::mutex mutex;
   pid_t pid = -1;
@@ -62,6 +63,7 @@ struct Transport {
         throw ConnectionError(len > 0 ? std::string(detail, size_t(len)) : "SSH connection closed");
       }
       offset += size_t(n);
+      protocol_received.fetch_add(size_t(n), std::memory_order_relaxed);
       deadline = std::chrono::steady_clock::now() + std::chrono::seconds(30);
     }
     return bytes;
@@ -115,6 +117,7 @@ struct Transport {
         break;
       }
       bytes.remove_prefix(size_t(n));
+      protocol_sent.fetch_add(size_t(n), std::memory_order_relaxed);
       deadline = std::chrono::steady_clock::now() + std::chrono::seconds(30);
     }
     if (error == EPIPE) {

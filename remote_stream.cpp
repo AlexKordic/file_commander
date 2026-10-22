@@ -17,14 +17,15 @@ struct Budget {
   std::mutex mutex;
   std::condition_variable cv;
   size_t used = 0;
+  size_t blocks = 0;
   std::atomic<bool> stopped{false};
   bool reserve(size_t n) {
     std::unique_lock lock(mutex);
-    cv.wait(lock, [&] { return stopped || used + n <= 32 * Wire::block_size; });
+    cv.wait(lock, [&] { return stopped || (used + n <= 32 * Wire::block_size && blocks < 128); });
     if (stopped) return false;
-    used += n; return true;
+    used += n; ++blocks; return true;
   }
-  void release(size_t n) { std::lock_guard lock(mutex); used -= n; cv.notify_all(); }
+  void release(size_t n) { std::lock_guard lock(mutex); used -= n; --blocks; cv.notify_all(); }
 };
 struct LocalSink;
 struct Peer;
@@ -66,6 +67,7 @@ struct StreamFile::Impl {
   Peer *sink_peer = nullptr;
   uint64_t sink_id = 0;
   std::unique_ptr<LocalSink> local_sink;
+  const boost::filesystem::copy_file_io_hooks *io = nullptr;
   ~Impl();
   void fail(std::exception_ptr e) {
     std::lock_guard lock(mutex); if (!failure) failure = e; cv.notify_all();
@@ -94,6 +96,12 @@ struct LocalSink {
       : file(file), descriptor(::open(file.stage.c_str(), O_RDWR | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, 0600)),
         worker([this] { verify(); }) {}
   ~LocalSink() { stop(); if (worker.joinable()) worker.join(); }
+  void fault(const char *phase) {
+    if (file.io && file.io->fault) {
+      const int error = file.io->fault(file.io->context, phase);
+      if (error) throw std::system_error(error, std::generic_category(), phase);
+    }
+  }
   void stop() { std::lock_guard lock(mutex); stopped = true; cv.notify_all(); }
   void write(std::string_view bytes) {
     std::lock_guard io(io_mutex);
@@ -102,6 +110,7 @@ struct LocalSink {
     if (bytes.size() > uint64_t(file.expected.size) - offset)
       throw std::runtime_error("Stream exceeds expected file length");
     while (!bytes.empty()) {
+      fault("stream_write");
       auto n = ::pwrite(descriptor.fd, bytes.data(), bytes.size(), off_t(offset));
       if (n < 0 && errno == EINTR) continue;
       if (n <= 0) throw std::system_error(n < 0 ? errno : EIO, std::generic_category());
@@ -125,6 +134,7 @@ struct LocalSink {
         lock.unlock();
         while (file.verified < written) {
           auto offset = file.verified.load();
+          fault("stream_verify_read");
           auto n = ::pread(descriptor.fd, buffer.data(), std::min<uint64_t>(buffer.size(), written - offset), off_t(offset));
           if (n < 0 && errno == EINTR) continue;
           if (n <= 0) throw std::system_error(n < 0 ? errno : EIO, std::generic_category(), "Destination readback failed");
@@ -134,6 +144,7 @@ struct LocalSink {
           if (written != uint64_t(file.expected.size) || hash.finish_raw() != expected_digest)
             throw std::runtime_error("Transfer digest mismatch; destination was not published");
           if (!file.flushes || file.durable != written) {
+            fault("stream_fsync");
             if (::fsync(descriptor.fd)) throw std::system_error(errno, std::generic_category());
             ++file.flushes;
           }
@@ -143,6 +154,7 @@ struct LocalSink {
           std::lock_guard done(file.mutex); file.destination_proof = end_stamp; file.sink_done = true; file.cv.notify_all(); return;
         }
         if (written - file.durable >= uint64_t(1024) * 1024 * 1024) {
+          fault("stream_fsync");
           if (::fsync(descriptor.fd)) throw std::system_error(errno, std::generic_category());
           ++file.flushes; file.durable = written;
         }
@@ -212,10 +224,11 @@ struct Peer {
             throw ConnectionError("Invalid SSH stream progress");
           file->written = std::max(file->written.load(), written);
           file->verified = std::max(file->verified.load(), verified);
-          file->durable = std::max(file->durable.load(), durable); file->flushes = number(value, "flushes");
+          file->durable = std::max(file->durable.load(), durable);
+          file->flushes = std::max(file->flushes.load(), number(value, "flushes"));
           if (file->server_copy) file->sent = file->written.load();
           { std::lock_guard lock(file->mutex);
-            if (file->server_copy && value.contains("phase") && value.at("phase") == "written") file->source_done = true;
+            if (file->server_copy && number(value, "phase") == 1) file->source_done = true;
             file->cv.notify_all();
           }
           if (frame.kind == Wire::Result) {
@@ -265,14 +278,21 @@ void StreamFile::wait() const {
 struct StreamSession::Impl {
   std::shared_ptr<Budget> budget = std::make_shared<Budget>();
   std::function<StreamControl()> control;
+  const boost::filesystem::copy_file_io_hooks *io = nullptr;
   std::mutex peers_mutex, files_mutex, source_mutex, control_mutex;
   std::condition_variable source_cv, control_cv;
   std::map<std::pair<std::string, uint16_t>, std::unique_ptr<Peer>> peers;
   std::vector<std::weak_ptr<StreamFile::Impl>> files;
   std::deque<std::shared_ptr<StreamFile::Impl>> sources;
   std::thread source_worker, control_worker;
-  explicit Impl(std::function<StreamControl()> c) : control(std::move(c)),
-      source_worker([this] { read_local(); }), control_worker([this] { monitor(); }) {}
+  explicit Impl(std::function<StreamControl()> c, const boost::filesystem::copy_file_io_hooks *io) : control(std::move(c)), io(io) {
+    try {
+      source_worker = std::thread([this] { read_local(); });
+      control_worker = std::thread([this] { monitor(); });
+    } catch (...) {
+      cancel(); if (source_worker.joinable()) source_worker.join(); throw;
+    }
+  }
   ~Impl() { cancel(); source_worker.join(); control_worker.join(); peers.clear(); }
   void cancel() {
     { std::lock_guard lock(budget->mutex); budget->stopped = true; budget->cv.notify_all(); }
@@ -289,7 +309,7 @@ struct StreamSession::Impl {
     auto &p = peers[{host, operation}];
     if (!p) {
       p = std::make_unique<Peer>(host, operation, budget);
-      if (control && operation == Wire::opcode("stream_copy")) p->control(control());
+      if (control && (operation == Wire::opcode("stream_copy") || operation == Wire::opcode("stream_read"))) p->control(control());
     }
     return *p;
   }
@@ -302,7 +322,8 @@ struct StreamSession::Impl {
           if (state.cancelled) { cancel(); return; }
           if (state != previous) {
             std::lock_guard lock(peers_mutex);
-            for (auto &[key, p] : peers) if (key.second == Wire::opcode("stream_copy")) p->control(state);
+            for (auto &[key, p] : peers)
+              if (key.second == Wire::opcode("stream_copy") || key.second == Wire::opcode("stream_read")) p->control(state);
             previous = state;
           }
         }
@@ -344,13 +365,15 @@ struct StreamSession::Impl {
     }
   }
 };
-StreamSession::StreamSession(std::function<StreamControl()> c) : impl(std::make_unique<Impl>(std::move(c))) {}
+StreamSession::StreamSession(std::function<StreamControl()> c, const boost::filesystem::copy_file_io_hooks *io)
+    : impl(std::make_unique<Impl>(std::move(c), io)) {}
 StreamSession::~StreamSession() = default;
 void StreamSession::cancel() { impl->cancel(); }
 std::shared_ptr<StreamFile> StreamSession::prepare(const Filepath &source, const Filepath &stage, const Metadata &expected) {
   if (!expected.exists || !S_ISREG(expected.mode) || expected.size < 0) throw std::runtime_error("Expected a regular source file");
   auto file = std::make_shared<StreamFile::Impl>();
   file->source = source; file->stage = stage; file->expected = expected; file->budget = impl->budget;
+  file->io = impl->io;
   auto left = Location::decode(source.native()), right = Location::decode(stage.native());
   if (left.remote() && right.remote() && left.ssh == right.ssh) {
     file->server_copy = true;
@@ -404,10 +427,16 @@ void StreamSession::transfer(const std::shared_ptr<StreamFile> &handle, const st
       return; // Deliberately no destination ACK, hash, or fsync wait at EOF.
     }
     file.budget->release(bytes.size());
-    if (file.local_sink) file.local_sink->write(bytes);
-    else file.sink_peer->send(Wire::Data, Wire::opcode("stream_write"), file.sink_id, bytes);
-    file.sent += bytes.size();
-    if (progress) progress(file.sent);
+    std::string_view remaining(bytes);
+    while (!remaining.empty()) {
+      const auto rate = impl->control ? impl->control().rate : 0;
+      const size_t limit = rate ? std::max<uint64_t>(1, std::min<uint64_t>(Wire::block_size, rate / 10)) : Wire::block_size;
+      const auto block = remaining.substr(0, limit);
+      if (file.local_sink) file.local_sink->write(block);
+      else file.sink_peer->send(Wire::Data, Wire::opcode("stream_write"), file.sink_id, block);
+      file.sent += block.size(); remaining.remove_prefix(block.size());
+      if (progress) progress(file.sent);
+    }
   }
 }
 } // namespace RemoteFS

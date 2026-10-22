@@ -76,6 +76,7 @@ struct JobStats {
   double _bytes_total     = 0;
   bool _streaming = false;
   uint64_t _transfer_written = 0, _transfer_verified = 0, _transfer_durable = 0;
+  uint64_t _transfer_data_flushes = 0;
 };
 // Published under the job mutex; observers retain an immutable view for a frame.
 struct JobSnapshot : JobInstructions, JobStats {
@@ -121,7 +122,7 @@ struct JobSpec : JobInstructions, JobStats, JobInterface {
   int64_t item_count() const { return _items_pending > 0 ? _items_pending : _items.size(); }
   // Not in FileJobs books
   bool    is_stopped() const { return _stopped.load(std::memory_order_acquire); };
-  std::shared_ptr<const JobSnapshot> snapshot(bool details = true);
+  std::shared_ptr<const JobSnapshot> snapshot(bool details = true, bool journal = false);
   std::function<void(std::shared_ptr<const JobSnapshot>)> completed;
   std::shared_ptr<const JobSnapshot> _completed_summary;
   std::vector<std::string> _step_errors;

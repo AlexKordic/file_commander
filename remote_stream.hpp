@@ -33,7 +33,8 @@ class StreamSession {
   struct Impl;
   std::unique_ptr<Impl> impl;
 public:
-  explicit StreamSession(std::function<StreamControl()> control = {});
+  explicit StreamSession(std::function<StreamControl()> control = {},
+                         const boost::filesystem::copy_file_io_hooks *io = nullptr);
   ~StreamSession();
   std::shared_ptr<StreamFile> prepare(const Filepath &source, const Filepath &stage, const Metadata &expected);
   void transfer(const std::shared_ptr<StreamFile> &, const std::function<void(uint64_t)> &progress = {});

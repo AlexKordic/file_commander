@@ -134,4 +134,5 @@ def wire_write(stream, kind, operation, identity, payload):
             if not count:
                 raise EOFError('SSH binary stream closed while writing')
             view = view[count:]
-    stream.flush()
+    if kind != WIRE_DATA:
+        stream.flush()

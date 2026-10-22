@@ -79,6 +79,24 @@ static void streaming_pipeline_contracts(FileJobs &jobs, const test::Fixture &lo
   }
 }
 static void pending_recovery_contracts(const test::Fixture &local, const Filepath &remote) {
+  {
+    auto plan = std::make_shared<OperationPlan>();
+    const auto raw = std::string("raw-\xff", 5);
+    plan->steps.push_back({Operation::Kind::CopyFile, remote / raw, local / raw});
+    auto job = std::make_shared<JobSpec>(plan); job->_job_id = 400;
+    const auto profile = local / "raw-journal";
+    boost::filesystem::create_directory(profile);
+    auto record = TransferJournal::create(profile, *job);
+    // The journal remains valid JSON, independently of whether this OS allows
+    // such a filename. Startup must preserve it without touching either host.
+    boost::json::parse(test::read(profile / "400.plan.json"));
+    auto recovery = make_file_jobs(); recovery->enable_recovery(profile);
+    const auto history = recovery->get_job_history();
+    require(history.size() == 1 && history[0]->_state == JobState::PAUSED &&
+                history[0]->_plan->steps[0].source.native() == plan->steps[0].source.native() &&
+                history[0]->_plan->steps[0].destination.native() == plan->steps[0].destination.native(),
+            "Non-UTF-8 paths changed or vanished across journal recovery");
+  }
   for (bool replaced : {false, true}) {
     auto prefix = replaced ? "pending-blocked" : "pending";
     auto plan = std::make_shared<OperationPlan>();

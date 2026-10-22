@@ -281,7 +281,7 @@ def source_identity(s):
             s.st_size, s.st_mtime_ns, s.st_ctime_ns)
 
 
-def stream_source(value, expected, consume):
+def stream_source(value, expected, consume, block_size=lambda: WIRE_BLOCK):
     fd = os.open(value, os.O_RDONLY | os.O_NOFOLLOW)
     try:
         before = os.fstat(fd)
@@ -292,7 +292,7 @@ def stream_source(value, expected, consume):
             raise OSError(errno.ESTALE, 'Source changed before streaming', value)
         h, total = hashlib.sha256(), 0
         while total < before.st_size:
-            block = os.read(fd, min(WIRE_BLOCK, before.st_size - total))
+            block = os.read(fd, min(block_size(), before.st_size - total))
             if not block:
                 raise OSError(errno.EIO, 'Unexpected EOF while streaming', value)
             h.update(block)
@@ -316,12 +316,26 @@ class StreamWriter:
         self.written = self.verified = self.durable = self.flushes = 0
         self.finished = self.closed = False
         self.failure = self.expected_hash = self.end_identity = None
+        self.reported = (0, 0, 0)
+        self.reported_time = time.monotonic()
         self.worker = threading.Thread(target=self.verify, daemon=True)
         self.worker.start()
 
     def progress(self):
         with self.cv:
             return dict(bytes=self.written, verified=self.verified, durable=self.durable, flushes=self.flushes)
+
+    def report(self, force=False):
+        with self.cv:
+            before = self.reported
+            now = time.monotonic()
+            if (not force and now - self.reported_time < 0.2 and self.written - before[0] < 8 * WIRE_BLOCK
+                    and self.verified - before[1] < 8 * WIRE_BLOCK and self.durable == before[2]):
+                return
+            self.reported = (self.written, self.verified, self.durable)
+            self.reported_time = now
+            value = self.progress()
+        self.emit(WIRE_EVENT, value)
 
     def write(self, data):
         with self.io_lock:
@@ -375,7 +389,7 @@ class StreamWriter:
                     h.update(block)
                     with self.cv:
                         self.verified += len(block)
-                    self.emit(WIRE_EVENT, self.progress())
+                    self.report()
                 if finished:
                     if written != self.size or h.digest() != self.expected_hash:
                         raise OSError(errno.EIO, 'Transfer digest mismatch; destination was not published')
@@ -397,7 +411,7 @@ class StreamWriter:
                     with self.cv:
                         self.flushes += 1
                         self.durable = written
-                    self.emit(WIRE_EVENT, self.progress())
+                    self.report(force=True)
         except Exception as error:
             self.fail(error)
         finally:
@@ -435,6 +449,10 @@ class StreamControls:
                     return
                 self.cv.wait(delay)
 
+    def block_size(self):
+        with self.cv:
+            return max(1, min(WIRE_BLOCK, self.rate // 10)) if self.rate else WIRE_BLOCK
+
 
 def main():
     sys.stdout.buffer.write(WIRE_HELLO)
@@ -442,6 +460,7 @@ def main():
     output_lock, writers_lock = threading.Lock(), threading.Lock()
     writers, controls = {}, StreamControls()
     copies = queue.Queue(maxsize=32)
+    reads = queue.Queue(maxsize=32)
 
     def emitter(operation, identity):
         def emit(kind, value):
@@ -459,14 +478,28 @@ def main():
                 def consume(block):
                     controls.consume(len(block))
                     writer.write(block)
-                    writer.emit(WIRE_EVENT, writer.progress())
-                result = stream_source(path(p, 'source'), p['expected'], consume)
-                writer.emit(WIRE_EVENT, {**writer.progress(), 'phase': 'written'})
+                    writer.report()
+                result = stream_source(path(p, 'source'), p['expected'], consume, controls.block_size)
+                writer.emit(WIRE_EVENT, {**writer.progress(), 'phase': 1})
                 writer.end(result['sha256'])
             except Exception as error:
                 writer.fail(error)
 
     threading.Thread(target=copy_worker, daemon=True).start()
+
+    def read_worker():
+        while (work := reads.get()) is not None:
+            operation, identity, p, emit = work
+            try:
+                def consume(block):
+                    controls.consume(len(block))
+                    with output_lock:
+                        wire_write(sys.stdout.buffer, WIRE_DATA, operation, identity, block)
+                emit(WIRE_RESULT, stream_source(path(p), p['expected'], consume, controls.block_size))
+            except Exception as error:
+                emit(WIRE_ERROR, {'message': str(error), 'errno': getattr(error, 'errno', 0) or errno.EIO})
+
+    threading.Thread(target=read_worker, daemon=True).start()
     try:
         while (frame := wire_read(sys.stdin.buffer)) is not None:
             kind, operation, identity, payload = frame
@@ -483,18 +516,16 @@ def main():
                         raise ValueError('Unknown or closed stream writer')
                     if kind == WIRE_DATA:
                         writer.write(payload)
-                        emit(WIRE_EVENT, writer.progress())
+                        writer.report()
                     else:
+                        writer.report(force=True)
                         writer.end(payload)
                     continue
                 if kind != WIRE_REQUEST:
                     raise ValueError('Expected an SSH request')
                 p = wire_decode(payload)
                 if method == 'stream_read':
-                    def consume(block):
-                        with output_lock:
-                            wire_write(sys.stdout.buffer, WIRE_DATA, operation, identity, block)
-                    emit(WIRE_RESULT, stream_source(path(p), p['expected'], consume))
+                    reads.put((operation, identity, p, emit))
                 elif method in ('stream_write', 'stream_copy'):
                     with writers_lock:
                         if len(writers) >= 32 or identity in writers:
