@@ -12,6 +12,7 @@
 #include <fstream>
 #include <limits>
 #include <map>
+#include <set>
 #include <sys/stat.h>
 #include <unistd.h>
 
@@ -134,7 +135,8 @@ j::object read(const Filepath& path, uint64_t limit = 64 * 1024 * 1024) {
   std::ifstream in(path.native());
   if (!in) throw std::runtime_error("Cannot read transfer journal");
   auto o = j::parse(std::string(std::istreambuf_iterator<char>(in), {})).as_object();
-  if (number(o.at("version")) != 1) throw std::runtime_error("Unsupported transfer journal version");
+  auto version = number(o.at("version"));
+  if (version != 1 && version != 2) throw std::runtime_error("Unsupported transfer journal version");
   return o;
 }
 void save(const Filepath& path, const j::object& o) {
@@ -196,6 +198,14 @@ void validate_tree(const j::array& entries) {
 }
 bool terminal(JobState state) {
   return state == JobState::CANCELLED || state == JobState::COMPLETED || state == JobState::COMPLETED_WITH_ERRORS;
+}
+void validate_staging(const j::object& record, const Operation& op) {
+  const Filepath root(text(record.at("stage_root"))), stage(text(record.at("stage")));
+  const auto prefix = op.kind == Operation::Kind::MoveEntry ? ".fc-move-" : ".fc-copy-";
+  if (root.parent_path() != op.destination.parent_path() || !root.filename().native().starts_with(prefix) ||
+      stage.parent_path() != root || stage.filename() != (op.kind == Operation::Kind::MoveEntry ? "entry" : "data"))
+    throw std::runtime_error("Invalid recovery staging path");
+  record.at("stage_identity").as_object().at("exists").as_bool();
 }
 }
 
@@ -265,13 +275,14 @@ std::shared_ptr<TransferJournal> TransferJournal::create(const Filepath& directo
         {"source_anchor", remote || op.source.empty() ? j::object{} : anchor(op.source)},
         {"destination_anchor", remote || op.destination.empty() ? j::object{} : anchor(op.destination)}});
   }
-  p->plan = {{"version", 1},
+  p->plan = {{"version", remote ? 2 : 1},
              {"id", job._job_id},
              {"type", int(job._type)},
              {"conflict", int(job._copy_conflict)},
              {"steps", std::move(steps)},
              {"prepared", !remote}};
-  p->state = {{"version", 1}, {"next", 0}, {"phase", "ready"}, {"state", int(JobState::QUEUED)}, {"directories", j::array{}}};
+  p->state = {{"version", remote ? 2 : 1}, {"next", 0}, {"phase", "ready"}, {"state", int(JobState::QUEUED)}, {"directories", j::array{}}};
+  if (remote) p->state["pending"] = j::array{};
   p->stats(job, job._errors);
   save(p->plan_path, p->plan); p->save();
   return std::shared_ptr<TransferJournal>(new TransferJournal(std::move(p)));
@@ -343,15 +354,27 @@ std::vector<std::shared_ptr<JobSpec>> TransferJournal::restore(const Filepath& d
         if (!std::isfinite(p->state.at(key).to_number<double>()) || p->state.at(key).to_number<double>() < 0)
           throw std::runtime_error("Invalid recovery byte count");
       if (p->state.contains("stage_root")) {
-        auto root = Filepath(text(p->state.at("stage_root")));
-        auto stage = Filepath(text(p->state.at("stage")));
         // The last completed operation can still have a staging record.
         auto index = phase == "ready" && p->index() ? p->index() - 1 : p->index();
         const auto op = plan->steps.at(index);
-        const auto prefix = op.kind == Operation::Kind::MoveEntry ? ".fc-move-" : ".fc-copy-";
-        if (root.parent_path() != op.destination.parent_path() || !root.filename().native().starts_with(prefix) ||
-            stage.parent_path() != root || stage.filename() != (op.kind == Operation::Kind::MoveEntry ? "entry" : "data"))
-          throw std::runtime_error("Invalid recovery staging path");
+        validate_staging(p->state, op);
+      }
+      if (p->state.contains("pending")) {
+        std::set<size_t> seen;
+        const auto& pending = p->state.at("pending").as_array();
+        if (pending.size() > 32) throw std::runtime_error("Too many pending transfer files");
+        for (const auto& value : pending) {
+          const auto& entry = value.as_object();
+          auto n = entry.at("index").to_number<size_t>();
+          if (n >= plan->steps.size() || !seen.insert(n).second) throw std::runtime_error("Invalid pending transfer index");
+          const auto& op = plan->steps.at(n);
+          if (op.kind != Operation::Kind::CopyFile && op.kind != Operation::Kind::MoveEntry)
+            throw std::runtime_error("Invalid pending transfer operation");
+          const auto phase = text(entry.at("phase"));
+          if (phase != "staging" && phase != "written" && phase != "verified")
+            throw std::runtime_error("Invalid pending transfer phase");
+          validate_staging(entry, op);
+        }
       }
       for (const auto& value : p->state.at("directories").as_array()) {
         const auto n = number(value.as_object().at("index"));
@@ -384,7 +407,43 @@ void TransferJournal::begin_step(size_t index) {
   impl->state["phase"] = "executing";
   if (!terminal(static_cast<JobState>(number(impl->state.at("state"))))) impl->state["state"] = int(JobState::RUNNING);
   impl->state.erase("stage"); impl->state.erase("stage_root"); impl->state.erase("stage_identity"); impl->state.erase("output");
+  if (impl->state.contains("pending"))
+    for (const auto& value : impl->state.at("pending").as_array()) {
+      const auto& entry = value.as_object();
+      if (entry.at("index").to_number<size_t>() != index) continue;
+      for (auto key : {"stage", "stage_root", "stage_identity"}) impl->state[key] = entry.at(key);
+      impl->state["phase"] = "staging";
+      break;
+    }
   impl->save();
+}
+
+void TransferJournal::stage_pending(size_t index, const Filepath& stage) {
+  std::lock_guard lock(impl->mutex);
+  if (index < impl->index() || index >= impl->plan.at("steps").as_array().size())
+    throw std::runtime_error("Invalid pending transfer index");
+  if (!impl->state.contains("pending")) impl->state["pending"] = j::array{};
+  auto& pending = impl->state.at("pending").as_array();
+  if (pending.size() >= 32) throw std::runtime_error("Too many pending transfer files");
+  for (const auto& value : pending)
+    if (value.as_object().at("index").to_number<size_t>() == index) throw std::runtime_error("Duplicate pending transfer index");
+  j::object entry{{"index", index}, {"phase", "staging"}, {"stage", stage.native()},
+                  {"stage_root", stage.parent_path().native()}, {"stage_identity", stamp(stage.parent_path())}};
+  const auto op = decode(impl->plan.at("steps").as_array().at(index).as_object().at("operation").as_object());
+  validate_staging(entry, op);
+  pending.push_back(std::move(entry));
+  if (number(impl->plan.at("version")) == 1) { impl->plan["version"] = 2; save(impl->plan_path, impl->plan); }
+  impl->state["version"] = 2;
+  impl->save();
+}
+
+void TransferJournal::pending_phase(size_t index, const char* phase) {
+  std::lock_guard lock(impl->mutex);
+  for (auto& value : impl->state.at("pending").as_array()) {
+    auto& entry = value.as_object();
+    if (entry.at("index").to_number<size_t>() == index) { entry["phase"] = phase; impl->save(); return; }
+  }
+  throw std::runtime_error("Missing pending transfer record");
 }
 
 void TransferJournal::finish_step(const JobSpec& job) {
@@ -396,6 +455,12 @@ void TransferJournal::finish_step(const JobSpec& job) {
     auto s = stamp(op.destination);
     if (directory(s)) impl->state.at("directories").as_array().emplace_back(
       j::object{{"index", impl->index()}, {"stamp", std::move(s)}});
+  }
+  if (impl->state.contains("pending")) {
+    auto& pending = impl->state.at("pending").as_array();
+    for (auto i = pending.begin(); i != pending.end();)
+      if (i->as_object().at("index").to_number<size_t>() == impl->index()) i = pending.erase(i);
+      else ++i;
   }
   impl->state["next"] = size_t(job._current_item_index);
   impl->state["phase"] = "ready";
@@ -494,6 +559,27 @@ void TransferJournal::prepare_resume(JobSpec& job) {
       if (!owned && !RemoteFS::access(parent, W_OK | X_OK))
         throw std::runtime_error("Destination directory is not writable: " + parent.native());
     }
+  }
+  // All look-ahead output is uncommitted except the primary transaction, which
+  // was reconciled above. Validate every ownership record before any cleanup.
+  if (impl->state.contains("pending")) {
+    auto& pending = impl->state.at("pending").as_array();
+    for (const auto& value : pending) {
+      const auto& entry = value.as_object();
+      const auto current = stamp(text(entry.at("stage_root")));
+      if (exists(current) && !identity(current, entry.at("stage_identity").as_object()))
+        throw std::runtime_error("Pending transfer staging ownership changed; cleanup blocked");
+    }
+    j::array retained;
+    for (const auto& value : pending) {
+      const auto& entry = value.as_object();
+      if (cleanup_pending() && entry.at("index").to_number<size_t>() == impl->index()) {
+        retained.push_back(value); continue;
+      }
+      Filepath root(text(entry.at("stage_root")));
+      if (exists(stamp(root))) { RemoteFS::remove(root, true); sync_path(root.parent_path()); }
+    }
+    pending = std::move(retained); impl->save();
   }
   // Only remove a private staging tree after explicit Resume and an identity check.
   if (!cleanup_pending() && impl->state.contains("stage_root")) {

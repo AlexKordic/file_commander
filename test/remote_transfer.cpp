@@ -16,6 +16,55 @@ static std::shared_ptr<JobSpec> copy_job(const Filepath &source, const Filepath 
   plan->steps.push_back({Operation::Kind::CopyFile, source, dest, {}, "", RemoteFS::inspect(source).size});
   return std::make_shared<JobSpec>(plan);
 }
+static void pending_recovery_contracts(const test::Fixture &local, const Filepath &remote) {
+  for (bool replaced : {false, true}) {
+    auto prefix = replaced ? "pending-blocked" : "pending";
+    auto plan = std::make_shared<OperationPlan>();
+    for (int n = 0; n < 2; ++n) {
+      const auto name = std::string(prefix) + std::to_string(n);
+      test::write(local / name, "complete pending content");
+      plan->steps.push_back({Operation::Kind::CopyFile, local / name, remote / name, {}, "", 24});
+    }
+    auto job = std::make_shared<JobSpec>(plan); job->_job_id = 300;
+    auto directory = local / (std::string(prefix) + "-journal");
+    boost::filesystem::create_directory(directory);
+    auto record = TransferJournal::create(directory, *job); record->prepare_inputs();
+    std::vector<Filepath> roots;
+    for (int n = 0; n < 2; ++n) {
+      auto root = remote / boost::filesystem::unique_path(".fc-copy-%%%%%%%%-%%%%%%%%");
+      RemoteFS::mkdir(root); roots.push_back(root);
+      record->stage_pending(n, root / "data");
+      RemoteFS::write(root / "data", 0, "partial", true);
+    }
+    record->checkpoint(*job->snapshot(), JobState::RUNNING);
+    if (replaced) {
+      RemoteFS::rename(roots[1], remote / "replaced-stage-backup");
+      RemoteFS::mkdir(roots[1]);
+      RemoteFS::write(roots[1] / "unrelated", 0, "keep", true);
+    }
+    auto recovery = make_file_jobs(); recovery->enable_recovery(directory);
+    auto history = recovery->get_job_history();
+    require(history.size() == 1 && history[0]->_state == JobState::PAUSED && recovery->idle(),
+            "Pending pipeline performed work at startup");
+    require(RemoteFS::inspect(roots[0] / "data").exists, "Startup removed pending output without Resume");
+    recovery->resume(300);
+    test::until([&] { return recovery->idle(); }, "Pending pipeline recovery timed out");
+    if (replaced) {
+      require(history[0]->_state == JobState::PAUSED &&
+                  history[0]->snapshot()->_recovery_note.find("ownership changed") != std::string::npos,
+              "Replaced pending stage did not block recovery");
+      require(RemoteFS::inspect(roots[0] / "data").exists && RemoteFS::inspect(roots[1] / "unrelated").exists,
+              "Recovery cleaned stages before checking all ownership records");
+    } else {
+      done(*recovery, history[0]);
+      for (int n = 0; n < 2; ++n) {
+        require(!RemoteFS::inspect(roots[n]).exists, "Resume left incomplete look-ahead output");
+        const auto name = std::string(prefix) + std::to_string(n);
+        require(RemoteFS::read(remote / name, 0, 100) == "complete pending content", "Resume published partial output");
+      }
+    }
+  }
+}
 static void metadata_contracts(FileJobs &jobs, const test::Fixture &local, const Filepath &remote) {
   const std::string name = "user.fc.transfer-warning";
   const boost::json::object attrs{{name, "metadata retained on matching platforms"}};
@@ -201,6 +250,7 @@ int main(int argc, char **argv) {
     done(*jobs, deletions);
     require(!RemoteFS::inspect(remote / "tree").exists, "Remote delete failed");
     if (host == "fixture") {
+      pending_recovery_contracts(local, remote);
       metadata_contracts(*jobs, local, remote);
       RemoteFS::close_connections();
       setenv("FC_SSH_FIXTURE_DROP_RENAME", (local / "lost-ack").c_str(), 1);

@@ -6,6 +6,7 @@
 #include "file_metadata.hpp"
 #include "log.hpp"
 #include "remote_fs.hpp"
+#include "remote_copy.hpp"
 #include "transfer_journal.hpp"
 
 #include <algorithm>
@@ -79,11 +80,14 @@ std::shared_ptr<const JobSnapshot> JobSpec::snapshot(bool details) {
   view->_finished_time = _finished_time;
   view->_bytes_processed = _bytes_processed;
   view->_bytes_total = _bytes_total;
+  view->_streaming = _streaming;
+  view->_transfer_written = _transfer_written; view->_transfer_verified = _transfer_verified; view->_transfer_durable = _transfer_durable;
   if (!details && is_stopped()) _completed_summary = view;
   return view;
 }
 
 void JobSpec::_calculate_transfer_stats() {
+  if (_poll_transfer) { _poll_transfer(*this); return; }
   const bool current_index_valid = _current_item_index >= 0 && _current_item_index < _items.size();
   if (!current_index_valid) return;
   const DirItem& item = _items.at(_current_item_index);
@@ -1397,6 +1401,11 @@ class ThreadedFileJobs : public FileJobs {
               }
             }
             if (!renamed) {
+              if (S_ISREG(before.mode) && op.kind != Operation::Kind::CreateSymlink) {
+                index = copy_remote_pipeline(*job, index,
+                    {checkpoint, [this] { return _transfer_rate.load(); }, copy_attributes}) - 1;
+                continue;
+              }
               if (destination.directory())
                 throw std::runtime_error("Cannot replace a directory with a file");
               auto root = location_parent(op.destination) /

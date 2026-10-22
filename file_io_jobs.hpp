@@ -74,6 +74,8 @@ struct JobStats {
   double _finished_time   = -1;
   double _bytes_processed = 0;
   double _bytes_total     = 0;
+  bool _streaming = false;
+  uint64_t _transfer_written = 0, _transfer_verified = 0, _transfer_durable = 0;
 };
 // Published under the job mutex; observers retain an immutable view for a frame.
 struct JobSnapshot : JobInstructions, JobStats {
@@ -97,6 +99,7 @@ struct JobInterface {
 // Specifies single operation to be performed on a set of files.
 // Operation steps are defined in advance and FileJobs will execute them in order
 struct JobSpec : JobInstructions, JobStats, JobInterface {
+  std::function<void(JobSpec &)> _poll_transfer; // Called only under the job mutex.
   uint64_t           _job_id = 0;
   std::shared_ptr<TransferJournal> _journal;
   std::atomic<bool> _recovery_waiting{false};

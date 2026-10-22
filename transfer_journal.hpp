@@ -20,6 +20,10 @@ class TransferJournal {
   static std::vector<std::shared_ptr<JobSpec>> restore(const Filepath& directory,
       uint64_t& next_id, const std::function<void(std::string)>& error);
   void begin_step(size_t index);
+  // Look-ahead staging is recorded before any data is sent. Only the ordered
+  // commit worker activates a step; future files never advance the prefix.
+  void stage_pending(size_t index, const Filepath& stage);
+  void pending_phase(size_t index, const char* phase);
   void prepare_inputs();            // Remote inspection belongs on the worker, never startup/UI.
   void finish_step(const JobSpec&); // job mutex held
   void checkpoint(const JobSnapshot&, JobState, bool force = true);

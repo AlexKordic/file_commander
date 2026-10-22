@@ -83,7 +83,7 @@ configure_file(cmake/remote_agent_source.hpp.in generated/remote_agent_source.hp
 set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS remote_agent.py remote_protocol.py)
 add_library(fc_core STATIC
   commander.cpp operation.cpp copy_planner.cpp file_io_jobs.cpp archive.cpp location.cpp
-  traversal.cpp settings.cpp workspace.cpp transfer_journal.cpp runtime_paths.cpp scheduled_updates.cpp file_metadata.cpp log.cpp err.cpp remote_fs.cpp remote_stream.cpp
+  traversal.cpp settings.cpp workspace.cpp transfer_journal.cpp runtime_paths.cpp scheduled_updates.cpp file_metadata.cpp log.cpp err.cpp remote_fs.cpp remote_stream.cpp remote_copy.cpp
   sevenzip.cpp archive_formats.cpp)
 target_include_directories(fc_core PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
 target_include_directories(fc_core PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/generated")
