@@ -1,14 +1,12 @@
 """FC filesystem agent. Embedded into fc and sent to python3 over SSH stdin.
 
-Paths are base64 encoded OS bytes. Mutations never resolve the final symlink.
-The helper speaks protocol 1 on stdout; stderr is reserved for diagnostics.
+Paths and data are raw OS bytes. Mutations never resolve the final symlink.
+The helper speaks binary protocol 2 on stdout; stderr is reserved for diagnostics.
 """
-import base64
 import errno
 import ctypes
 import grp
 import hashlib
-import json
 import os
 import pwd
 import shutil
@@ -16,10 +14,13 @@ import stat
 import sys
 import time
 
+if "wire_read" not in globals():
+    from remote_protocol import *
+
 
 def attributes(value):
     if hasattr(os, "listxattr"):
-        return {encode(name): base64.b64encode(os.getxattr(value, name, follow_symlinks=False)).decode("ascii")
+        return {os.fsencode(name): os.getxattr(value, name, follow_symlinks=False)
                 for name in os.listxattr(value, follow_symlinks=False)}
     if sys.platform != "darwin":
         raise OSError(errno.ENOTSUP, "Cannot inspect extended attributes")
@@ -42,7 +43,7 @@ def attributes(value):
         count = libc.getxattr(raw, name, data, size, 0, 1)
         if count < 0:
             raise OSError(ctypes.get_errno(), "Cannot read extended attribute")
-        out[encode(name)] = base64.b64encode(data.raw[:count]).decode("ascii")
+        out[name] = data.raw[:count]
     return out
 
 
@@ -65,12 +66,8 @@ def acl_present(value):
         libc.acl_free(acl)
 
 
-def encode(value):
-    return base64.b64encode(os.fsencode(value)).decode("ascii")
-
-
 def path(params, key="path"):
-    value = os.fsdecode(base64.b64decode(params[key + "64"], validate=True))
+    value = os.fsdecode(params[key])
     if not os.path.isabs(value) or "\0" in value:
         raise ValueError("An absolute filesystem path is required")
     return os.path.normpath(value)
@@ -85,7 +82,7 @@ def stamp(value, follow=False):
                   uid=s.st_uid, gid=s.st_gid, size=s.st_size,
                   mtime_ns=s.st_mtime_ns, ctime_ns=s.st_ctime_ns)
     if stat.S_ISLNK(s.st_mode):
-        result["link64"] = encode(os.readlink(value))
+        result["link"] = os.fsencode(os.readlink(value))
     try:
         result["owner"] = pwd.getpwuid(s.st_uid).pw_name
     except KeyError:
@@ -113,7 +110,7 @@ def digest(value, send):
             h.update(block)
             total += len(block)
             send({"bytes": total})
-    return h.hexdigest()
+    return h.digest()
 
 
 def rename_exclusive(source, destination):
@@ -131,7 +128,7 @@ def rename_exclusive(source, destination):
 
 
 def dispatch(method, p, send):
-    value = path(p) if "path64" in p else None
+    value = path(p) if "path" in p else None
     if method == "stat":
         return stamp(value, p.get("follow", False))
     if method == "list":
@@ -141,7 +138,7 @@ def dispatch(method, p, send):
                 info = stamp(entry.path)
                 if not info["exists"]:
                     continue
-                info["name64"] = encode(entry.name)
+                info["name"] = os.fsencode(entry.name)
                 if entry.is_symlink():
                     info["target_dir"] = entry.is_dir()
                 entries.append(info)
@@ -150,11 +147,11 @@ def dispatch(method, p, send):
                     entries = []
         return {"entries": entries}
     if method == "realpath":
-        return {"path64": encode(os.path.realpath(value))}
+        return {"path": os.fsencode(os.path.realpath(value))}
     if method == "read":
         with open(value, "rb") as f:
             f.seek(p["offset"])
-            return {"data": base64.b64encode(f.read(min(p["length"], 1024 * 1024))).decode("ascii")}
+            return {"data": f.read(min(p["length"], 1024 * 1024))}
     if method == "write":
         flags = os.O_WRONLY | os.O_NOFOLLOW
         if p.get("exclusive"):
@@ -162,7 +159,7 @@ def dispatch(method, p, send):
         fd = os.open(value, flags, 0o600)
         try:
             os.lseek(fd, p["offset"], os.SEEK_SET)
-            data = base64.b64decode(p["data"], validate=True)
+            data = p["data"]
             while data:
                 n = os.write(fd, data)
                 data = data[n:]
@@ -207,7 +204,7 @@ def dispatch(method, p, send):
         destination = path(p, "destination")
         if "expected" in p:
             current = stamp(destination)
-            if any(current.get(key, "" if key == "link64" else None) != data for key, data in p["expected"].items()):
+            if any(current.get(key, "" if key == "link" else None) != data for key, data in p["expected"].items()):
                 raise OSError(errno.ESTALE, "Destination changed before commit", destination)
         if p.get("replace"):
             os.rename(value, destination)
@@ -217,7 +214,7 @@ def dispatch(method, p, send):
         sync_directory(os.path.dirname(value))
         return {}
     if method == "symlink":
-        os.symlink(os.fsdecode(base64.b64decode(p["target64"], validate=True)), value)
+        os.symlink(os.fsdecode(p["target"]), value)
         return {}
     if method == "metadata":
         if not stat.S_ISLNK(os.lstat(value).st_mode):
@@ -233,23 +230,23 @@ def dispatch(method, p, send):
     if method == "access":
         return {"allowed": os.access(value, p["mode"])}
     if method == "tree":
-        entries = [{"relative64": "", "stamp": stamp(value, p.get("follow", False))}]
+        entries = [{"relative": b"", "stamp": stamp(value, p.get("follow", False))}]
         if p.get("recursive", True) and stat.S_ISDIR(entries[0]["stamp"].get("mode", 0)):
             for root, directories, files in os.walk(value, followlinks=False):
                 for name in directories + files:
                     child = os.path.join(root, name)
-                    entries.append({"relative64": encode(os.path.relpath(child, value)), "stamp": stamp(child)})
+                    entries.append({"relative": os.fsencode(os.path.relpath(child, value)), "stamp": stamp(child)})
                     if len(entries) >= 256:
                         send({"entries": entries})
                         entries = []
         return {"entries": entries}
     if method == "attributes":
         attrs = attributes(value)
-        acl = acl_present(value) or any(base64.b64decode(name).startswith(b"system.posix_acl_") for name in attrs)
+        acl = acl_present(value) or any(os.fsencode(name).startswith(b"system.posix_acl_") for name in attrs)
         return {"attributes": attrs, "platform": sys.platform, "acl": acl}
     if method == "set_attributes":
         for name, data in p["attributes"].items():
-            name, data = base64.b64decode(name), base64.b64decode(data)
+            name = os.fsencode(name)
             if hasattr(os, "setxattr"):
                 os.setxattr(value, os.fsdecode(name), data, follow_symlinks=False)
             elif sys.platform == "darwin":
@@ -271,8 +268,6 @@ def dispatch(method, p, send):
                 target.write(block)
                 total += len(block)
                 send({"bytes": total})
-                if p.get("checkpoint") and sys.stdin.readline() != "continue\n":
-                    raise OSError(errno.ECANCELED, "Copy coordinator disconnected")
             target.flush()
             os.fsync(target.fileno())
         return {"bytes": total}
@@ -280,20 +275,22 @@ def dispatch(method, p, send):
 
 
 def main():
-    print(json.dumps({"ready": 1, "version": 1}), flush=True)
-    for line in sys.stdin:
-        request = json.loads(line)
-        request_id = request["id"]
+    sys.stdout.buffer.write(WIRE_HELLO)
+    sys.stdout.buffer.flush()
+    while (frame := wire_read(sys.stdin.buffer)) is not None:
+        kind, operation, identity, payload = frame
+        if kind != WIRE_REQUEST:
+            raise ValueError("Expected an SSH request")
 
         def send(data):
-            print(json.dumps({"id": request_id, "data": data}, ensure_ascii=True), flush=True)
+            wire_write(sys.stdout.buffer, WIRE_EVENT, operation, identity, wire_encode(data))
 
         try:
-            result = dispatch(request["method"], request["params"], send)
-            print(json.dumps({"id": request_id, "result": result}, ensure_ascii=True), flush=True)
+            result = dispatch(WIRE_METHODS[operation], wire_decode(payload), send)
+            wire_write(sys.stdout.buffer, WIRE_RESULT, operation, identity, wire_encode(result))
         except Exception as error:
-            print(json.dumps({"id": request_id, "error": str(error),
-                              "errno": getattr(error, "errno", 0) or 0}, ensure_ascii=True), flush=True)
+            wire_write(sys.stdout.buffer, WIRE_ERROR, operation, identity,
+                       wire_encode({"message": str(error), "errno": getattr(error, "errno", 0) or 0}))
 
 
 if __name__ == "__main__":

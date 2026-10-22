@@ -45,8 +45,6 @@ std::string digest(const Filepath &, const std::atomic<bool> *cancelled = nullpt
 boost::json::object attributes(const Filepath &);
 void attributes(const Filepath &, const boost::json::object &);
 boost::json::object params(const Filepath &);
-std::string base64(std::string_view);
-std::string unbase64(std::string_view);
 void close_connections();
 std::string control_path(const std::string &host);
 int authenticate(const std::string &host); // foreground terminal owns prompts

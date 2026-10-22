@@ -76,9 +76,11 @@ file(GLOB _boost_lib_include_dirs "${boost_SOURCE_DIR}/libs/*/include")
 set(BOOST_LIBRARY_INCLUDES ${_boost_lib_include_dirs} CACHE INTERNAL "Boost library include paths for config checks")
 add_subdirectory(boost/filesystem)
 
+file(READ "${CMAKE_CURRENT_SOURCE_DIR}/remote_protocol.py" _fc_protocol_source)
 file(READ "${CMAKE_CURRENT_SOURCE_DIR}/remote_agent.py" _fc_agent_source)
+string(PREPEND _fc_agent_source "${_fc_protocol_source}\n")
 configure_file(cmake/remote_agent_source.hpp.in generated/remote_agent_source.hpp @ONLY)
-set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS remote_agent.py)
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS remote_agent.py remote_protocol.py)
 add_library(fc_core STATIC
   commander.cpp operation.cpp copy_planner.cpp file_io_jobs.cpp archive.cpp location.cpp
   traversal.cpp settings.cpp workspace.cpp transfer_journal.cpp runtime_paths.cpp scheduled_updates.cpp file_metadata.cpp log.cpp err.cpp remote_fs.cpp
@@ -132,6 +134,13 @@ target_compile_definitions(fc_core PRIVATE FC_SEVENZIP_LIB_DEFAULT="${_fc_sevenz
 # sevenzip.cpp includes 7-Zip's interface headers, and nothing else from the source.
 target_include_directories(fc_core SYSTEM PRIVATE "${FC_SEVENZIP_SOURCE_DIR}")
 if(BUILD_TESTING)
+  find_package(Python3 3.12 REQUIRED COMPONENTS Interpreter)
+  add_executable(fc_remote_protocol_tests test/remote_protocol.cpp)
+  target_link_libraries(fc_remote_protocol_tests PRIVATE fc_core)
+  add_test(NAME fc.remote.protocol COMMAND fc_remote_protocol_tests)
+  add_test(NAME fc.remote.protocol_python COMMAND "${Python3_EXECUTABLE}"
+    "${CMAKE_CURRENT_SOURCE_DIR}/test/test_remote_protocol.py" $<TARGET_FILE:fc_remote_protocol_tests>)
+  set_tests_properties(fc.remote.protocol fc.remote.protocol_python PROPERTIES LABELS "core;unit;remote" TIMEOUT 15)
   add_executable(fc_remote_transfer_tests test/remote_transfer.cpp)
   target_link_libraries(fc_remote_transfer_tests PRIVATE fc_core)
   add_test(NAME fc.remote.transfers COMMAND fc_remote_transfer_tests)

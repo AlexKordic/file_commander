@@ -48,7 +48,11 @@ SSH support installs nothing remotely; the host needs only `python3`.
 Interactive authentication happens only from the Connect SSH dialog, with the
 terminal handed to `ssh`. Background connections then run `ssh` in `BatchMode`
 over the shared ControlMaster socket, send `remote_agent.py` over stdin to
-`python3`, and speak a versioned JSON-lines protocol with it. Each host gets
+`python3`, and speak binary protocol 2 with it. A frame has a 16-byte header
+(kind, flags, operation, request ID and payload length). Control values use
+typed binary integers, byte strings and containers with numeric field IDs;
+paths, attributes, data and SHA-256 digests travel as raw bytes. Decoders bound
+frame lengths, container sizes and nesting before allocating. Each host gets
 one channel for metadata and listings and one for bulk reads, writes and
 digests, so a large transfer does not stall browsing.
 

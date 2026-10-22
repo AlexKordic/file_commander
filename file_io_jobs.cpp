@@ -1275,7 +1275,7 @@ class ThreadedFileJobs : public FileJobs {
         throw std::runtime_error("Extended ACLs are not supported in SSH transfers; source retained");
       auto &values = attrs.at("attributes").as_object();
       if (attrs.at("platform") != target_attrs.at("platform")) {
-        values.erase(base64("com.apple.provenance"));
+        values.erase("com.apple.provenance");
         if (!values.empty()) {
           // A metadata warning must not mark the job failed or prevent its
           // verified content from being published (including move cleanup).
@@ -1303,7 +1303,7 @@ class ThreadedFileJobs : public FileJobs {
         auto l = Location::decode(source.native()), r = Location::decode(target.native());
         if (l.remote() && r.remote() && l.ssh == r.ssh) {
           auto p = params(source);
-          p["destination64"] = base64(r.local.native());
+          p["destination"] = r.local.native();
           p["checkpoint"] = true;
           request(l.ssh, "copy", std::move(p), &job->_cancel_requested, true, progress);
         } else {

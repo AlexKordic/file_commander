@@ -17,8 +17,8 @@ static std::shared_ptr<JobSpec> copy_job(const Filepath &source, const Filepath 
   return std::make_shared<JobSpec>(plan);
 }
 static void metadata_contracts(FileJobs &jobs, const test::Fixture &local, const Filepath &remote) {
-  const auto name = RemoteFS::base64("user.fc.transfer-warning");
-  const boost::json::object attrs{{name, RemoteFS::base64("metadata retained on matching platforms")}};
+  const std::string name = "user.fc.transfer-warning";
+  const boost::json::object attrs{{name, "metadata retained on matching platforms"}};
   test::write(local / "attrs-file", "file with metadata");
   RemoteFS::attributes(local / "attrs-file", attrs);
 #if defined(__APPLE__)

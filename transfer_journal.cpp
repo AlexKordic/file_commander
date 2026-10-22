@@ -36,8 +36,8 @@ j::object remote_stamp(const j::object &s) {
     out[key] = ns / 1000000000;
     out[std::string(key) + "_ns"] = ns % 1000000000;
   }
-  if (s.contains("link64"))
-    out["link"] = RemoteFS::unbase64(s.at("link64").as_string());
+  if (s.contains("link"))
+    out["link"] = s.at("link");
   return out;
 }
 
@@ -85,7 +85,7 @@ j::array tree(const Filepath& path, bool follow = false, bool recursive = true) 
     std::map<std::string, j::object> entries;
     for (auto &value : result.as_object().at("entries").as_array()) {
       auto &entry = value.as_object();
-      entries.emplace(RemoteFS::unbase64(entry.at("relative64").as_string()),
+      entries.emplace(std::string(entry.at("relative").as_string()),
                       remote_stamp(entry.at("stamp").as_object()));
     }
     j::array out;
