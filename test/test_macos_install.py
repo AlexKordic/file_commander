@@ -187,5 +187,43 @@ class BuildFailureTests(unittest.TestCase):
         self.check_failure('swift')
 
 
+class XcodeBuildFailureTests(unittest.TestCase):
+    def check_failure(self, configuration):
+        with tempfile.TemporaryDirectory(prefix='fc-xcode-build-') as temporary:
+            root = Path(temporary)
+            tools = root / 'macos/tools'
+            tools.mkdir(parents=True)
+            script = tools / 'xcode_build_app.sh'
+            shutil.copy2(ROOT / 'macos/tools/xcode_build_app.sh', script)
+            build = tools.parent / 'build_app.sh'
+            build.write_text('#!/bin/bash\n'
+                             'printf "%s\\n" "$FC_CODESIGN_IDENTITY" "$@" > "$FC_TEST_BUILD_TRACE"\n'
+                             'exit 37\n')
+            build.chmod(0o755)
+            product = root / 'Xcode products/File Commander.app/Contents/MacOS/FileCommander'
+            product.parent.mkdir(parents=True)
+            product.write_text('previous build')
+            trace = root / 'trace'
+            env = dict(os.environ,
+                       CONFIGURATION=configuration,
+                       TARGET_BUILD_DIR=str(root / 'Xcode products'),
+                       EXECUTABLE_FOLDER_PATH='File Commander.app/Contents/MacOS',
+                       UNLOCALIZED_RESOURCES_FOLDER_PATH='File Commander.app/Contents/Resources',
+                       WRAPPER_NAME='File Commander.app',
+                       DERIVED_FILE_DIR=str(root / 'Derived'),
+                       FC_CODESIGN_IDENTITY='inherited signing identity',
+                       FC_TEST_BUILD_TRACE=str(trace))
+            result = run(['/bin/bash', str(script)], env=env, capture_output=True, text=True, timeout=15)
+            self.assertEqual(result.returncode, 37, result.stdout + result.stderr)
+            self.assertEqual(product.read_text(), 'previous build')
+            self.assertEqual(trace.read_text().splitlines(), ['-', '--debug'] if configuration == 'Debug' else ['-'])
+
+    def test_failed_debug_build_preserves_previous_xcode_product(self):
+        self.check_failure('Debug')
+
+    def test_failed_release_build_preserves_previous_xcode_product(self):
+        self.check_failure('Release')
+
+
 if __name__ == '__main__':
     unittest.main()

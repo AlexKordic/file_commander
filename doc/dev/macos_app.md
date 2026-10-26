@@ -98,6 +98,38 @@ fc_core              unchanged                     locations, plans, jobs, journ
 
 ## Build
 
+### Xcode and signing
+
+Open `macos/FileCommander.xcodeproj`, select the **FileCommander** target, and
+choose your **Team** in **Signing & Capabilities**. The shared **FileCommander**
+scheme builds and runs the complete app. Use **Product › Archive** for the
+Release configuration. For public releases, use Organizer's Developer ID
+distribution workflow to sign and submit the app for notarization.
+
+```sh
+open macos/FileCommander.xcodeproj
+```
+
+The app target calls the existing CMake and Swift package build through
+`tools/xcode_build_app.sh`; it does not maintain a second list of app sources.
+It copies the app's executables and resources into Xcode's product directory,
+signs the embedded code with Xcode's selected identity, and leaves the final
+app signature to Xcode. Missing signing credentials stop the Xcode build rather
+than falling back to ad hoc. The intermediate bundle in `build-macos` is still
+signed ad hoc explicitly; use the app in Xcode's Products directory or its
+archive for the Xcode-signed result.
+
+Debug builds use the Swift package's debug configuration. Release builds enable
+hardened runtime, including the JIT exceptions needed by the `fc` and `fresh`
+helpers. The project builds for the current Mac's architecture. CMake, Ninja,
+Rust and the pinned dependency checkouts are required as for the script build
+below. User-specific Xcode workspace files are ignored by Git.
+
+You can still open `macos/Package.swift` for Swift package development and tests;
+that package alone does not assemble or sign the final app bundle.
+
+### Script build
+
 ```sh
 macos/build_app.sh            # release build: build-macos/File Commander.app
 macos/build_app.sh --debug    # faster Swift compile
