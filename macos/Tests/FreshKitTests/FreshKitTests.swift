@@ -41,6 +41,7 @@ final class SceneWireTests: XCTestCase {
   /// the schema Fresh decodes agree on every field number.
   func testMessagesMatchTheSchema() {
     XCTAssertEqual(hex(SceneInput.hello(telemetry: true).payload()), "08011001")
+    XCTAssertEqual(hex(SceneInput.hello(telemetry: false, richCompose: true).payload()), "08011801")
     XCTAssertEqual(hex(SceneInput.key(WireKey.with { $0.key = "x"; $0.ctrl = true; $0.shift = true }).payload()), "0a017818013001")
     let wheel = WireMouse.with { $0.kind = .scrollDown; $0.col = 10; $0.row = 5; $0.n = 1 }
     XCTAssertEqual(hex(SceneInput.mouse(wheel).payload()), "0806180a20052801")

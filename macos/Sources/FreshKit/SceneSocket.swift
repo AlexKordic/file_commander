@@ -53,7 +53,7 @@ public final class SceneSocket: @unchecked Sendable {
 
   /// Connects and says hello; `telemetry` asks Fresh for frame timing. Blocks
   /// briefly for the connect; call it off the main thread when that matters.
-  public func open(telemetry: Bool) throws {
+  public func open(telemetry: Bool, richCompose: Bool = false) throws {
     let fd = socket(AF_UNIX, SOCK_STREAM, 0)
     guard fd >= 0 else { throw Failure.system("socket", errno) }
     var address = sockaddr_un()
@@ -84,7 +84,7 @@ public final class SceneSocket: @unchecked Sendable {
     setsockopt(fd, SOL_SOCKET, SO_RCVBUF, &size, socklen_t(MemoryLayout<Int32>.size))
     setsockopt(fd, SOL_SOCKET, SO_SNDBUF, &size, socklen_t(MemoryLayout<Int32>.size))
     self.fd = fd
-    send(.hello(telemetry: telemetry))
+    send(.hello(telemetry: telemetry, richCompose: richCompose))
     let thread = Thread { [weak self] in self?.readLoop() }
     thread.name = "fc.scene.read"
     thread.qualityOfService = .userInteractive

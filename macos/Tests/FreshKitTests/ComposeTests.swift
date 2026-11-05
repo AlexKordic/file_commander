@@ -1,8 +1,118 @@
 import XCTest
 import CoreText
+import ImageIO
 @testable import FreshKit
 
 final class ComposeTests: XCTestCase {
+  private func wirePane(_ text: String) -> WireComposePane {
+    WireComposePane.with {
+      $0.text = text
+      $0.sourceEnd = UInt64(text.utf8.count)
+      $0.documentLen = $0.sourceEnd
+      $0.projectionRevision = 1
+      if !text.isEmpty {
+        $0.segments = [WireComposeSegment.with { $0.sourceEnd = UInt64(text.utf8.count); $0.displayEnd = $0.sourceEnd }]
+      }
+    }
+  }
+
+  func testSemanticTypographyRendersThroughTheNativeDrawingPath() throws {
+    let source = "Compose typography\n\nProportional prose with bold and italic, café 👩🏽‍💻.\n\nA smaller heading\n\nlet answer = 42;\n"
+    var pane = wirePane(source)
+    func span(_ text: String, role: UInt32 = 0, flags: UInt32 = 0) -> WireComposeSpan {
+      let range = source.range(of: text)!
+      return WireComposeSpan.with {
+        $0.start = UInt64(source[..<range.lowerBound].utf8.count)
+        $0.end = UInt64(source[..<range.upperBound].utf8.count)
+        $0.role = role
+        $0.flags = flags
+      }
+    }
+    pane.spans = [span("Compose typography", role: 1), span("bold", flags: 1), span("italic", flags: 2),
+                  span("A smaller heading", role: 2), span("let answer = 42;", role: 7)]
+    let mono = CTFontCreateWithName("Menlo" as CFString, 16, nil)
+    let layout = try XCTUnwrap(ComposePaneLayout(pane: pane, body: font(16), monospace: mono, width: 500))
+    XCTAssertGreaterThan(layout.text.fragments[0].rect.height, 29)
+    let fonts = layout.text.fragments.flatMap { CTLineGetGlyphRuns($0.line) as! [CTRun] }.map {
+      (CTRunGetAttributes($0) as NSDictionary)[kCTFontAttributeName] as! CTFont
+    }
+    XCTAssertTrue(fonts.contains { CTFontGetSize($0) > 28 })
+    XCTAssertTrue(fonts.contains { CTFontGetSymbolicTraits($0).contains(.traitItalic) })
+    XCTAssertTrue(fonts.contains { (CTFontCopyPostScriptName($0) as String).contains("Menlo") })
+    let width = 560, height = Int(ceil(layout.text.size.height)) + 48
+    let context = try XCTUnwrap(CGContext(data: nil, width: width * 2, height: height * 2,
+      bitsPerComponent: 8, bytesPerRow: width * 8, space: CGColorSpaceCreateDeviceRGB(),
+      bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
+    context.scaleBy(x: 2, y: 2)
+    context.translateBy(x: 0, y: CGFloat(height))
+    context.scaleBy(x: 1, y: -1)
+    let bounds = CGRect(x: 0, y: 0, width: width, height: height)
+    layout.draw(in: context, origin: CGPoint(x: 24, y: 24), clip: bounds, dirty: bounds,
+      foreground: CGColor(gray: 0.1, alpha: 1), background: CGColor(gray: 1, alpha: 1),
+      selection: CGColor(red: 0.7, green: 0.8, blue: 1, alpha: 1))
+    let image = try XCTUnwrap(context.makeImage())
+    let pixels = context.data!.assumingMemoryBound(to: UInt8.self)
+    let ink = (0..<(width * 2 * height * 2)).filter { i in
+      pixels[i * 4] < 128 && pixels[i * 4 + 1] < 128 && pixels[i * 4 + 2] < 128
+    }.count
+    XCTAssertGreaterThan(ink, 2000, "the shared native draw path painted shaped text")
+    if let path = ProcessInfo.processInfo.environment["FC_COMPOSE_PREVIEW_FILE"] {
+      let destination = try XCTUnwrap(CGImageDestinationCreateWithURL(URL(fileURLWithPath: path) as CFURL,
+        "public.png" as CFString, 1, nil))
+      CGImageDestinationAddImage(destination, image, nil)
+      XCTAssertTrue(CGImageDestinationFinalize(destination))
+    }
+  }
+
+  func testCursorOnlyFramesReuseLayoutWhileResizeAndTypographyInvalidateIt() throws {
+    var pane = wirePane("A heading\nbody")
+    pane.spans = [WireComposeSpan.with { $0.end = 9; $0.role = 1 }]
+    let mono = CTFontCreateWithName("Menlo" as CFString, 16, nil)
+    let first = try XCTUnwrap(ComposePaneLayout(pane: pane, body: font(16), monospace: mono, width: 200))
+    pane.cursors = [WireComposeSelection.with { $0.position = 10 }]
+    let moved = try XCTUnwrap(ComposePaneLayout(pane: pane, body: font(16), monospace: mono, width: 200, reuse: first))
+    XCTAssertTrue(first.text === moved.text)
+    let resized = try XCTUnwrap(ComposePaneLayout(pane: pane, body: font(16), monospace: mono, width: 100, reuse: moved))
+    XCTAssertFalse(resized.text === moved.text)
+    let zoomed = try XCTUnwrap(ComposePaneLayout(pane: pane, body: font(20), monospace: mono, width: 200, reuse: moved))
+    XCTAssertFalse(zoomed.text === moved.text)
+  }
+
+  func testSelectionUsesWrappedMeasuredLinesAndKeepsUTF8SourceRanges() throws {
+    let projection = try copied("Héllo words that wrap on several lines", start: 30)
+    let layout = try XCTUnwrap(ComposeTextLayout(projection: projection, font: font(22), width: 130))
+    let rects = layout.selectionRects(for: 30..<projection.source.upperBound)
+    XCTAssertEqual(rects.count, layout.fragments.count)
+    for (rect, line) in zip(rects, layout.fragments) {
+      XCTAssertEqual(rect.minY, line.rect.minY)
+      XCTAssertEqual(rect.height, line.rect.height)
+      XCTAssertGreaterThan(rect.width, 0)
+    }
+    XCTAssertTrue(layout.selectionRects(for: 31..<31).isEmpty)
+  }
+
+  func testWireProjectionRefusesUnknownKindsAndUnrepresentableCoordinates() {
+    var pane = wirePane("ok")
+    pane.segments[0].kind = 99
+    XCTAssertNil(ComposeProjection(pane))
+    pane = wirePane("ok")
+    pane.sourceEnd = UInt64.max
+    XCTAssertNil(ComposeProjection(pane))
+  }
+  func testInsertedPaddingKeepsCopiedTextAndBothBoundaryAffinities() throws {
+    let projection = try XCTUnwrap(ComposeProjection(source: 40..<43, text: "    abc   ", segments: [
+      .init(source: 40..<40, display: 0..<4, kind: .insertion),
+      .init(source: 40..<43, display: 4..<7, kind: .copy),
+      .init(source: 43..<43, display: 7..<10, kind: .insertion),
+    ]))
+    XCTAssertEqual(projection.sourcePosition(at: 5), 41)
+    XCTAssertEqual(projection.sourcePosition(at: 2), 40)
+    XCTAssertEqual(projection.sourcePosition(at: 9), 43)
+    XCTAssertEqual(projection.displayPosition(for: 40, affinity: .upstream), 0)
+    XCTAssertEqual(projection.displayPosition(for: 40, affinity: .downstream), 4)
+    XCTAssertEqual(projection.displayPosition(for: 43, affinity: .upstream), 7)
+    XCTAssertEqual(projection.displayPosition(for: 43, affinity: .downstream), 10)
+  }
   private func copied(_ text: String, start: Int = 0) throws -> ComposeProjection {
     try XCTUnwrap(ComposeProjection(source: start..<(start + text.utf8.count), text: text,
       segments: text.isEmpty ? [] : [.init(source: start..<(start + text.utf8.count), display: 0..<text.utf8.count, kind: .copy)]))

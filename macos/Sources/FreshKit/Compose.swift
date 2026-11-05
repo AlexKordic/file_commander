@@ -6,7 +6,7 @@ import CoreGraphics
 /// are UTF-8 bytes. Core Text's UTF-16 indices stay inside ComposeTextLayout.
 public struct ComposeProjection {
   public enum Affinity { case upstream, downstream }
-  public enum Kind { case copy, hidden, replacement }
+  public enum Kind { case copy, hidden, replacement, insertion }
 
   public struct Segment {
     public var source: Range<Int>
@@ -38,18 +38,20 @@ public struct ComposeProjection {
     var sourceEnd = source.lowerBound
     var displayEnd = 0
     for segment in segments {
-      guard segment.source.lowerBound == sourceEnd, !segment.source.isEmpty,
+      guard segment.source.lowerBound == sourceEnd,
             segment.source.upperBound <= source.upperBound,
             segment.display.lowerBound == displayEnd,
             boundaries.contains(segment.display.lowerBound),
             boundaries.contains(segment.display.upperBound) else { return nil }
       switch segment.kind {
       case .copy:
-        guard segment.source.count == segment.display.count else { return nil }
+        guard !segment.source.isEmpty, segment.source.count == segment.display.count else { return nil }
       case .hidden:
-        guard segment.display.isEmpty else { return nil }
+        guard !segment.source.isEmpty, segment.display.isEmpty else { return nil }
       case .replacement:
-        guard !segment.display.isEmpty else { return nil }
+        guard !segment.source.isEmpty, !segment.display.isEmpty else { return nil }
+      case .insertion:
+        guard segment.source.isEmpty, !segment.display.isEmpty else { return nil }
       }
       sourceEnd = segment.source.upperBound
       displayEnd = segment.display.upperBound
@@ -59,6 +61,27 @@ public struct ComposeProjection {
     self.text = text
     self.segments = segments
     self.boundaries = boundaries
+  }
+
+  /// Validate the server's map before using it for graphical input. Unknown
+  /// segment kinds and integers that cannot be represented locally are refused.
+  public init?(_ wire: WireComposePane) {
+    guard let start = Int(exactly: wire.sourceStart), let end = Int(exactly: wire.sourceEnd), start <= end else { return nil }
+    var segments: [Segment] = []
+    for segment in wire.segments {
+      guard let a = Int(exactly: segment.sourceStart), let b = Int(exactly: segment.sourceEnd), a <= b,
+            let c = Int(exactly: segment.displayStart), let d = Int(exactly: segment.displayEnd), c <= d else { return nil }
+      let kind: Kind
+      switch segment.kind {
+      case 0: kind = .copy
+      case 1: kind = .hidden
+      case 2: kind = .replacement
+      case 3: kind = .insertion
+      default: return nil
+      }
+      segments.append(.init(source: a..<b, display: c..<d, kind: kind))
+    }
+    self.init(source: start..<end, text: wire.text, segments: segments)
   }
 
   public func sourcePosition(at display: Int, affinity: Affinity = .downstream) -> Int? {
@@ -87,6 +110,7 @@ public struct ComposeProjection {
       let display: Int
       switch segment.kind {
       case .copy: display = segment.display.lowerBound + source - segment.source.lowerBound
+      case .insertion: display = affinity == .upstream ? segment.display.lowerBound : segment.display.upperBound
       default:
         if source == segment.source.lowerBound { display = segment.display.lowerBound }
         else if source == segment.source.upperBound { display = segment.display.upperBound }
@@ -145,7 +169,8 @@ public final class ComposeTextLayout {
       byteToUTF16[byte] = unit
     }
     let attributed = NSMutableAttributedString(string: projection.text,
-      attributes: [NSAttributedString.Key(kCTFontAttributeName as String): font])
+      attributes: [NSAttributedString.Key(kCTFontAttributeName as String): font,
+        NSAttributedString.Key(kCTForegroundColorFromContextAttributeName as String): true])
     for run in fonts {
       guard let start = byteToUTF16[run.display.lowerBound], let end = byteToUTF16[run.display.upperBound] else { return nil }
       attributed.addAttribute(NSAttributedString.Key(kCTFontAttributeName as String), value: run.font,
@@ -229,5 +254,24 @@ public final class ComposeTextLayout {
     guard let fragment = affinity == .upstream ? matches.first : matches.last else { return nil }
     let x = CTLineGetOffsetForStringIndex(fragment.line, index, nil)
     return CGRect(x: x, y: fragment.rect.minY, width: 1, height: fragment.rect.height)
+  }
+
+  /// Selection geometry in layout coordinates. Concealed syntax stays in the
+  /// source selection while the visible part uses the very same shaped lines
+  /// as the caret and text. A selected line ending extends to the line edge.
+  public func selectionRects(for source: Range<Int>) -> [CGRect] {
+    guard !source.isEmpty,
+          let start = projection.displayPosition(for: max(source.lowerBound, projection.source.lowerBound), affinity: .downstream),
+          let end = projection.displayPosition(for: min(source.upperBound, projection.source.upperBound), affinity: .upstream),
+          let a = byteToUTF16[start], let b = byteToUTF16[end], a <= b else { return [] }
+    return fragments.compactMap { fragment in
+      let from = max(a, fragment.range.location)
+      let to = min(b, fragment.contentEnd)
+      let newline = b > fragment.contentEnd && b >= NSMaxRange(fragment.range)
+      guard from < to || (newline && from <= fragment.contentEnd) else { return nil }
+      let x0 = CTLineGetOffsetForStringIndex(fragment.line, from, nil)
+      let x1 = newline ? fragment.rect.width : CTLineGetOffsetForStringIndex(fragment.line, to, nil)
+      return CGRect(x: min(x0, x1), y: fragment.rect.minY, width: max(1, abs(x1 - x0)), height: fragment.rect.height)
+    }
   }
 }

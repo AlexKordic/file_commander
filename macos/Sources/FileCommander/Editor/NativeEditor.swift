@@ -2,6 +2,7 @@ import AppKit
 import ExplainerKit
 import FCKit
 import FreshKit
+import SwiftProtobuf
 
 /// The native editor: Fresh's session drawn by the app, over the session's
 /// scene channel. Fresh lays out and renders; this view draws the cells and
@@ -32,6 +33,18 @@ final class NativeEditor: NSObject, CellGridDelegate {
   private var pendingShow = false
   private var menusWanted = false
   private var observers: [NSObjectProtocol] = []
+  // Development gate until measured navigation, images and recovery pass the
+  // plan's end-to-end checks. The shipped path remains the existing grid.
+  private let richCompose = ProcessInfo.processInfo.environment["FC_NATIVE_RICH_COMPOSE"] == "1"
+  private enum PendingInput {
+    case message(SceneInput)
+    case pointer(ComposePresentation.Identity, CGPoint, extend: Bool, count: Int)
+  }
+  private var composeQueue: [PendingInput] = []
+  private var nextComposeID: UInt64 = 0
+  private var pendingComposeID: UInt64?
+  private var pendingComposePane: ComposePresentation.Identity?
+  private var composeInFlight = false
 
   /// Connected to the session's scene.
   var connected: Bool { socket?.isOpen == true }
@@ -82,7 +95,7 @@ final class NativeEditor: NSObject, CellGridDelegate {
     applyTheme()
     Task.detached {
       do {
-        try socket.open(telemetry: EditorTelemetry.shared.isOn)
+        try socket.open(telemetry: EditorTelemetry.shared.isOn, richCompose: self.richCompose)
         await MainActor.run { [weak self] in
           Trace.write("editor: connected")
           guard let self, self.socket === socket else { return }
@@ -140,6 +153,11 @@ final class NativeEditor: NSObject, CellGridDelegate {
   private func disconnect() {
     socket?.close()
     socket = nil
+    composeQueue.removeAll()
+    pendingComposeID = nil
+    pendingComposePane = nil
+    composeInFlight = false
+    nextComposeID = 0
   }
 
   private func connectionEnded(_ reason: String?) {
@@ -187,6 +205,15 @@ final class NativeEditor: NSObject, CellGridDelegate {
     // moment here gets the newest scene next rather than every one in between.
     if message.isHello { lastAck = 0 }
     socket?.send(.applied(seq: UInt64(message.sequence)))
+    if message.frame.hasInputReply, message.frame.inputReply.id == pendingComposeID {
+      composeInFlight = false
+      if message.frame.inputReply.accepted {
+        if !composeQueue.isEmpty { composeQueue.removeFirst() }
+        pendingComposeID = nil
+        pendingComposePane = nil
+      }
+    }
+    pumpComposeInput()
     if let ack = message.timing?.ack { noteAck(ack) }
     if let watch = benchWatch, store.lines.contains(where: { $0.contains(watch.text) }) {
       benchWatch = nil
@@ -273,7 +300,12 @@ final class NativeEditor: NSObject, CellGridDelegate {
 
   // MARK: CellGridDelegate
 
-  func grid(_ grid: CellGridView, send input: SceneInput) { socket?.send(input) }
+  func grid(_ grid: CellGridView, send input: SceneInput) { send(input) }
+
+  func grid(_ grid: CellGridView, point: CGPoint, in pane: ComposePresentation, extend: Bool, count: Int) {
+    composeQueue.append(.pointer(pane.identity, point, extend: extend, count: count))
+    pumpComposeInput()
+  }
 
   func gridDidResize(_ grid: CellGridView, columns: Int, rows: Int) {
     socket?.send(.resize(cols: columns, rows: rows))
@@ -290,7 +322,7 @@ final class NativeEditor: NSObject, CellGridDelegate {
 
   func gridPaste(_ grid: CellGridView) {
     guard let text = NSPasteboard.general.string(forType: .string), !text.isEmpty else { return }
-    socket?.send(.paste(text))
+    send(.paste(text))
   }
 
   var optionAsAlt: Bool { app?.preferences.optionAsAlt ?? false }
@@ -323,11 +355,61 @@ final class NativeEditor: NSObject, CellGridDelegate {
     return window.convertToScreen(grid.convert(grid.rect(column: col, row: row, count: count), to: nil))
   }
 
-  func send(_ input: SceneInput) { socket?.send(input) }
+  func send(_ input: SceneInput) {
+    guard richCompose else { socket?.send(input); return }
+    switch input {
+    case .key, .mouse, .paste, .action, .widget, .settingsClick, .kbEditClick:
+      composeQueue.append(.message(input))
+      pumpComposeInput()
+    default:
+      socket?.send(input)
+    }
+  }
+
+  /// Send one event, wait for its scene/reply, then bind the next event to the
+  /// resulting source map. A stale event keeps its id and is measured again.
+  private func pumpComposeInput() {
+    guard let socket, socket.isOpen, !composeInFlight, let queued = composeQueue.first else { return }
+    if pendingComposeID == nil {
+      nextComposeID += 1
+      pendingComposeID = nextComposeID
+      if case .message(let input) = queued {
+        switch input {
+        case .key, .paste, .action:
+          pendingComposePane = grid?.focusedCompose.flatMap { $0.pane.compose.keyboard ? $0.identity : nil }
+        default: break
+        }
+      }
+    }
+    var input = WireComposeInput()
+    input.id = pendingComposeID ?? 0
+    switch queued {
+    case .message(let message):
+      input.kind = UInt32(message.kind.rawValue)
+      input.payload = Data(message.payload())
+      if let identity = pendingComposePane {
+        guard let pane = grid?.composePanes[identity.leaf], pane.identity == identity else { return }
+        if pane.pane.compose.keyboard {
+          input.scope = pane.scope
+        } else {
+          pendingComposePane = nil
+        }
+      }
+    case .pointer(let identity, let location, let extend, let count):
+      guard let pane = grid?.composePanes[identity.leaf], pane.identity == identity,
+            let position = pane.position(at: location) else { return }
+      input.scope = pane.scope
+      input.position = UInt64(position)
+      input.extend = extend
+      input.clickCount = UInt32(clamping: count)
+    }
+    composeInFlight = true
+    socket.send(.composeInput(input))
+  }
 
   /// A click on a native panel: sent to Fresh, and the keyboard stays with the editor.
   private func sendFromPanel(_ input: SceneInput) {
-    socket?.send(input)
+    send(input)
     focus()
   }
 

@@ -25,6 +25,7 @@ public enum SceneWire {
     case kbEditClick = 24
     case configure = 25
     case applied = 26
+    case composeInput = 27
   }
 
   /// The protocol version the app speaks; Fresh refuses another.
@@ -98,7 +99,7 @@ public enum SceneWire {
 
 /// A message the app sends.
 public enum SceneInput: Sendable {
-  case hello(telemetry: Bool)
+  case hello(telemetry: Bool, richCompose: Bool = false)
   case key(WireKey)
   case mouse(WireMouse)
   case resize(cols: Int, rows: Int)
@@ -111,6 +112,7 @@ public enum SceneInput: Sendable {
   case kbEditClick(row: Int?)
   case configure(telemetry: Bool)
   case applied(seq: UInt64)
+  case composeInput(WireComposeInput)
 
   public var kind: SceneWire.Kind {
     switch self {
@@ -125,6 +127,7 @@ public enum SceneInput: Sendable {
     case .kbEditClick: return .kbEditClick
     case .configure: return .configure
     case .applied: return .applied
+    case .composeInput: return .composeInput
     }
   }
 
@@ -132,10 +135,11 @@ public enum SceneInput: Sendable {
   public func payload() -> [UInt8] {
     let message: any SwiftProtobuf.Message
     switch self {
-    case .hello(let telemetry):
+    case .hello(let telemetry, let richCompose):
       message = WireClientHello.with {
         $0.version = SceneWire.version
         $0.telemetry = telemetry
+        $0.richCompose = richCompose
       }
     case .key(let key): message = key
     case .mouse(let mouse): message = mouse
@@ -159,6 +163,7 @@ public enum SceneInput: Sendable {
     case .kbEditClick(let row): message = WireKbEditClick.with { if let row { $0.row = UInt64(clamping: row) } }
     case .configure(let telemetry): message = WireConfigure.with { $0.telemetry = telemetry }
     case .applied(let seq): message = WireApplied.with { $0.seq = seq }
+    case .composeInput(let input): message = input
     }
     // A message built from these types always serializes.
     return (try? message.serializedBytes()) ?? []
@@ -178,6 +183,7 @@ public enum SceneInput: Sendable {
     case .kbEditClick: return ("kbedit", nil)
     case .configure: return ("configure", nil)
     case .applied: return ("applied", nil)
+    case .composeInput: return ("composeInput", nil)
     }
   }
 

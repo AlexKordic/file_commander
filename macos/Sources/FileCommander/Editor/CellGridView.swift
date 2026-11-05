@@ -12,6 +12,7 @@ protocol CellGridDelegate: AnyObject {
   /// editor must not see; returns true when the owner handled it.
   func grid(_ grid: CellGridView, handleAppChord event: NSEvent) -> Bool
   func gridPaste(_ grid: CellGridView)
+  func grid(_ grid: CellGridView, point: CGPoint, in pane: ComposePresentation, extend: Bool, count: Int)
   var optionAsAlt: Bool { get }
 }
 
@@ -48,6 +49,10 @@ final class CellGridView: NSView, @preconcurrency NSTextInputClient {
   private var lastHoverCell: (Int, Int)?
   private var scrollRemainder: CGFloat = 0
   private var horizontalRemainder: CGFloat = 0
+  private(set) var composePanes: [UInt64: ComposePresentation] = [:]
+  private var composeDrag: UInt64?
+  private var bodyFont = NSFont.systemFont(ofSize: 15)
+  private var monoFont = NSFont.monospacedSystemFont(ofSize: 15, weight: .regular)
 
   init(store: SceneStore) {
     self.store = store
@@ -66,6 +71,8 @@ final class CellGridView: NSView, @preconcurrency NSTextInputClient {
   // MARK: Metrics
 
   func setFont(_ font: NSFont) {
+    bodyFont = .systemFont(ofSize: font.pointSize + 2)
+    monoFont = .monospacedSystemFont(ofSize: font.pointSize + 2, weight: .regular)
     let base = NSFontManager.shared.convert(font, toNotHaveTrait: [.boldFontMask, .italicFontMask])
     let bold = NSFontManager.shared.convert(base, toHaveTrait: .boldFontMask)
     let italic = NSFontManager.shared.convert(base, toHaveTrait: .italicFontMask)
@@ -82,6 +89,7 @@ final class CellGridView: NSView, @preconcurrency NSTextInputClient {
     ascent = ceil(CTFontGetAscent(ct))
     cellHeight = ascent + ceil(CTFontGetDescent(ct)) + ceil(max(0, CTFontGetLeading(ct)))
     reportSize()
+    rebuildCompose()
     needsDisplay = true
   }
 
@@ -121,6 +129,10 @@ final class CellGridView: NSView, @preconcurrency NSTextInputClient {
 
   /// Redraws what a scene message changed.
   func apply(_ change: SceneChange) {
+    if change.isHello || change.sizeChanged || change.themeChanged || change.regions.contains("panes") {
+      rebuildCompose()
+      needsDisplay = true
+    }
     if change.sizeChanged || change.themeChanged || change.isHello {
       needsDisplay = true
       return
@@ -131,6 +143,38 @@ final class CellGridView: NSView, @preconcurrency NSTextInputClient {
       NSAccessibility.post(element: self, notification: .selectedTextChanged)
     }
     if !change.rows.isEmpty { NSAccessibility.post(element: self, notification: .valueChanged) }
+  }
+
+  private func rebuildCompose() {
+    let previous = composePanes
+    composePanes = Dictionary(uniqueKeysWithValues: store.panes.compactMap { pane in
+      ComposePresentation(pane: pane, window: UInt64(store.windowID),
+        cell: CGSize(width: cellWidth, height: cellHeight), body: bodyFont, monospace: monoFont,
+        reuse: previous[pane.leaf]).map { (pane.leaf, $0) }
+    })
+  }
+
+  var composeInputAllowed: Bool {
+    store.palette == nil && store.trustDialog == nil && store.settings == nil
+      && store.keybindingEditor == nil && store.contextMenu == nil
+  }
+
+  var focusedCompose: ComposePresentation? {
+    guard composeInputAllowed, let cursor = store.cursor else { return nil }
+    let cell = rect(column: cursor.column, row: cursor.row)
+    return composePanes.values.first { $0.pane.compose.focused && $0.bounds.contains(CGPoint(x: cell.midX, y: cell.midY)) }
+  }
+
+  private func compose(at point: CGPoint) -> ComposePresentation? {
+    guard composeInputAllowed else { return nil }
+    let cell = cell(at: point)
+    if store.popups.contains(where: { CellRect($0.rect).contains(column: cell.column, row: cell.row) }) { return nil }
+    return composePanes.values.first { $0.bounds.contains(point) }
+  }
+
+  var caretRect: CGRect? {
+    if let rect = focusedCompose?.caret { return rect }
+    return store.cursor.map { rect(column: $0.column, row: $0.row) }
   }
 
   private func rowRect(_ row: Int) -> NSRect {
@@ -157,8 +201,7 @@ final class CellGridView: NSView, @preconcurrency NSTextInputClient {
     let scale = window?.backingScaleFactor ?? 2
     let firstRow = max(0, Int(dirtyRect.minY / cellHeight))
     let lastRow = min(store.grid.count - 1, Int(dirtyRect.maxY / cellHeight))
-    guard firstRow <= lastRow else { return drawCaret(context) }
-    for row in firstRow...lastRow {
+    if firstRow <= lastRow { for row in firstRow...lastRow {
       let top = CGFloat(row) * cellHeight
       var column = 0
       for run in store.grid[row] {
@@ -181,6 +224,10 @@ final class CellGridView: NSView, @preconcurrency NSTextInputClient {
         }
         column += run.cells
       }
+    } }
+    for pane in composePanes.values {
+      pane.draw(in: context, dirty: dirtyRect, foreground: defaultForeground, background: defaultBackground,
+                selection: store.theme.selection.map(NSColor.init(scene:)) ?? .selectedTextBackgroundColor)
     }
     drawCaret(context)
   }
@@ -239,20 +286,23 @@ final class CellGridView: NSView, @preconcurrency NSTextInputClient {
   }
 
   private func drawCaret(_ context: CGContext) {
-    guard let cursor = store.cursor, cursor.row < store.height else { return }
-    let cell = rect(column: cursor.column, row: cursor.row)
+    guard let cell = caretRect else { return }
+    context.saveGState()
+    defer { context.restoreGState() }
+    if let compose = focusedCompose { context.clip(to: compose.bounds) }
     if !marked.isEmpty {
       // Text being composed in an input method, drawn at the caret until it is committed.
       let attributes: [NSAttributedString.Key: Any] = [
-        .font: fonts[0], NSAttributedString.Key(kCTForegroundColorFromContextAttributeName as String): true,
+        .font: focusedCompose?.body ?? fonts[0], NSAttributedString.Key(kCTForegroundColorFromContextAttributeName as String): true,
         NSAttributedString.Key(kCTUnderlineStyleAttributeName as String): CTUnderlineStyle.single.rawValue,
       ]
-      let width = CGFloat(marked.count) * cellWidth
-      defaultBackground.setFill()
-      NSRect(x: cell.minX, y: cell.minY, width: width, height: cellHeight).fill()
       let line = CTLineCreateWithAttributedString(NSAttributedString(string: marked, attributes: attributes))
+      let width = CGFloat(CTLineGetTypographicBounds(line, nil, nil, nil))
+      defaultBackground.setFill()
+      NSRect(x: cell.minX, y: cell.minY, width: width, height: cell.height).fill()
       context.setFillColor(defaultForeground.cgColor)
-      context.textPosition = CGPoint(x: cell.minX, y: -(cell.minY + ascent))
+      let baseline = focusedCompose.map { CTFontGetAscent($0.body) } ?? ascent
+      context.textPosition = CGPoint(x: cell.minX, y: cell.minY + baseline)
       CTLineDraw(line, context)
       context.textPosition = .zero
       return
@@ -263,7 +313,9 @@ final class CellGridView: NSView, @preconcurrency NSTextInputClient {
     if !focused {
       context.stroke(cell.insetBy(dx: 0.5, dy: 0.5), width: 1)
     } else if caretOn {
-      context.fill(CGRect(x: cell.minX, y: cell.minY, width: 2, height: cellHeight))
+      for rect in focusedCompose?.carets ?? [cell] {
+        context.fill(CGRect(x: rect.minX, y: rect.minY, width: 2, height: rect.height))
+      }
     }
   }
 
@@ -274,9 +326,10 @@ final class CellGridView: NSView, @preconcurrency NSTextInputClient {
   override func accessibilityRole() -> NSAccessibility.Role? { .textArea }
   override func accessibilityRoleDescription() -> String? { "editor" }
   override func accessibilityLabel() -> String? { title }
-  override func accessibilityValue() -> Any? { store.lines.joined(separator: "\n") }
+  override func accessibilityValue() -> Any? { focusedCompose?.pane.compose.text ?? store.lines.joined(separator: "\n") }
 
   override func accessibilitySelectedTextRange() -> NSRange {
+    if let compose = focusedCompose { return compose.selectedRange }
     guard let cursor = store.cursor else { return NSRange(location: 0, length: 0) }
     let before = store.lines.prefix(cursor.row).reduce(0) { $0 + ($1 as NSString).length + 1 }
     let line = cursor.row < store.grid.count ? store.text(row: cursor.row) : ""
@@ -302,6 +355,7 @@ final class CellGridView: NSView, @preconcurrency NSTextInputClient {
   }
 
   private func setNeedsDisplayCaret() {
+    if let compose = focusedCompose { setNeedsDisplay(compose.bounds); return }
     guard let cursor = store.cursor else { return }
     setNeedsDisplay(rowRect(cursor.row))
   }
@@ -395,8 +449,7 @@ final class CellGridView: NSView, @preconcurrency NSTextInputClient {
   override func doCommand(by selector: Selector) {}
 
   func firstRect(forCharacterRange range: NSRange, actualRange: NSRangePointer?) -> NSRect {
-    guard let cursor = store.cursor, let window else { return .zero }
-    let local = rect(column: cursor.column, row: cursor.row)
+    guard let local = caretRect, let window else { return .zero }
     return window.convertToScreen(convert(local, to: nil))
   }
 
@@ -428,17 +481,30 @@ final class CellGridView: NSView, @preconcurrency NSTextInputClient {
   override func mouseDown(with event: NSEvent) {
     window?.makeFirstResponder(self)
     lastDragCell = nil
+    let point = point(of: event)
+    if let pane = compose(at: point) {
+      composeDrag = pane.identity.leaf
+      delegate?.grid(self, point: point, in: pane, extend: event.modifierFlags.contains(.shift), count: event.clickCount)
+      return
+    }
     sendMouse(.down, event, count: event.clickCount)
   }
 
   override func mouseDragged(with event: NSEvent) {
+    if let leaf = composeDrag, let pane = composePanes[leaf] {
+      delegate?.grid(self, point: point(of: event), in: pane, extend: true, count: 1)
+      return
+    }
     let cell = cell(at: convert(event.locationInWindow, from: nil))
     guard lastDragCell.map({ $0 != cell }) ?? true else { return }
     lastDragCell = cell
     sendMouse(.drag, event)
   }
 
-  override func mouseUp(with event: NSEvent) { sendMouse(.up, event) }
+  override func mouseUp(with event: NSEvent) {
+    if composeDrag != nil { composeDrag = nil; return }
+    sendMouse(.up, event)
+  }
   override func rightMouseDown(with event: NSEvent) {
     window?.makeFirstResponder(self)
     sendMouse(.down, event, button: .right)
@@ -448,6 +514,7 @@ final class CellGridView: NSView, @preconcurrency NSTextInputClient {
   override func otherMouseUp(with event: NSEvent) { sendMouse(.up, event, button: .middle) }
 
   override func mouseMoved(with event: NSEvent) {
+    if compose(at: point(of: event)) != nil { return }
     let cell = cell(at: convert(event.locationInWindow, from: nil))
     guard lastHoverCell.map({ $0 != cell }) ?? true else { return }
     lastHoverCell = cell
