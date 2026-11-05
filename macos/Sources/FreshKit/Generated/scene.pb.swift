@@ -130,6 +130,29 @@ public nonisolated enum WireMouseButton: SwiftProtobuf.Enum, Swift.CaseIterable 
 
 }
 
+/// A bounded binary image payload, multiplexed with normal input/scene frames.
+public nonisolated struct WireComposeAssetChunk: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var id: UInt64 = 0
+
+  public var offset: UInt64 = 0
+
+  public var total: UInt64 = 0
+
+  public var data: Data = Data()
+
+  public var error: String = String()
+
+  public var done: Bool = false
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
 /// A rectangle of cells.
 public nonisolated struct WireRect: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
@@ -1377,6 +1400,8 @@ public nonisolated struct WireComposePane: Sendable {
   public var selectionRevision: UInt64 = 0
 
   public var keyboard: Bool = false
+
+  public var assetAuthority: UInt64 = 0
 
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
@@ -2830,6 +2855,11 @@ public nonisolated struct WireFrame: @unchecked Sendable {
   /// Clears the value of `inputReply`. Subsequent reads from it will return its default value.
   public mutating func clearInputReply() {_uniqueStorage()._inputReply = nil}
 
+  public var composeAssets: [WireComposeAssetChunk] {
+    get {_storage._composeAssets}
+    set {_uniqueStorage()._composeAssets = newValue}
+  }
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
@@ -2999,6 +3029,39 @@ public nonisolated struct WireComposeInput: @unchecked Sendable {
   public init() {}
 
   fileprivate var _storage = _StorageClass.defaultInstance
+}
+
+/// Type 28: read the image annotation identified by this source range through
+/// its document authority. No client-supplied path. Cancellation needs only id.
+public nonisolated struct WireComposeAssetRequest: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var id: UInt64 = 0
+
+  public var scope: WireComposeScope {
+    get {_scope ?? WireComposeScope()}
+    set {_scope = newValue}
+  }
+  /// Returns true if `scope` has been explicitly set.
+  public var hasScope: Bool {self._scope != nil}
+  /// Clears the value of `scope`. Subsequent reads from it will return its default value.
+  public mutating func clearScope() {self._scope = nil}
+
+  public var start: UInt64 = 0
+
+  public var end: UInt64 = 0
+
+  public var cancel: Bool = false
+
+  public var authority: UInt64 = 0
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+
+  fileprivate var _scope: WireComposeScope? = nil
 }
 
 /// Measured geometry belongs to this client. Reused by id until source,
@@ -3291,6 +3354,61 @@ nonisolated extension WireMouseKind: SwiftProtobuf._ProtoNameProviding {
 
 nonisolated extension WireMouseButton: SwiftProtobuf._ProtoNameProviding {
   public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0MOUSE_BUTTON_LEFT\0\u{1}MOUSE_BUTTON_RIGHT\0\u{1}MOUSE_BUTTON_MIDDLE\0")
+}
+
+nonisolated extension WireComposeAssetChunk: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".ComposeAssetChunk"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}id\0\u{1}offset\0\u{1}total\0\u{1}data\0\u{1}error\0\u{1}done\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularUInt64Field(value: &self.id) }()
+      case 2: try { try decoder.decodeSingularUInt64Field(value: &self.offset) }()
+      case 3: try { try decoder.decodeSingularUInt64Field(value: &self.total) }()
+      case 4: try { try decoder.decodeSingularBytesField(value: &self.data) }()
+      case 5: try { try decoder.decodeSingularStringField(value: &self.error) }()
+      case 6: try { try decoder.decodeSingularBoolField(value: &self.done) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if self.id != 0 {
+      try visitor.visitSingularUInt64Field(value: self.id, fieldNumber: 1)
+    }
+    if self.offset != 0 {
+      try visitor.visitSingularUInt64Field(value: self.offset, fieldNumber: 2)
+    }
+    if self.total != 0 {
+      try visitor.visitSingularUInt64Field(value: self.total, fieldNumber: 3)
+    }
+    if !self.data.isEmpty {
+      try visitor.visitSingularBytesField(value: self.data, fieldNumber: 4)
+    }
+    if !self.error.isEmpty {
+      try visitor.visitSingularStringField(value: self.error, fieldNumber: 5)
+    }
+    if self.done != false {
+      try visitor.visitSingularBoolField(value: self.done, fieldNumber: 6)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: WireComposeAssetChunk, rhs: WireComposeAssetChunk) -> Bool {
+    if lhs.id != rhs.id {return false}
+    if lhs.offset != rhs.offset {return false}
+    if lhs.total != rhs.total {return false}
+    if lhs.data != rhs.data {return false}
+    if lhs.error != rhs.error {return false}
+    if lhs.done != rhs.done {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
 }
 
 nonisolated extension WireRect: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
@@ -5400,7 +5518,7 @@ nonisolated extension WirePane: SwiftProtobuf.Message, SwiftProtobuf._MessageImp
 
 nonisolated extension WireComposePane: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".ComposePane"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}buffer_revision\0\u{3}projection_revision\0\u{3}source_start\0\u{3}source_end\0\u{1}text\0\u{1}segments\0\u{1}spans\0\u{1}images\0\u{1}cursors\0\u{1}focused\0\u{3}top_byte\0\u{3}document_len\0\u{3}selection_revision\0\u{1}keyboard\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}buffer_revision\0\u{3}projection_revision\0\u{3}source_start\0\u{3}source_end\0\u{1}text\0\u{1}segments\0\u{1}spans\0\u{1}images\0\u{1}cursors\0\u{1}focused\0\u{3}top_byte\0\u{3}document_len\0\u{3}selection_revision\0\u{1}keyboard\0\u{3}asset_authority\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -5422,6 +5540,7 @@ nonisolated extension WireComposePane: SwiftProtobuf.Message, SwiftProtobuf._Mes
       case 12: try { try decoder.decodeSingularUInt64Field(value: &self.documentLen) }()
       case 13: try { try decoder.decodeSingularUInt64Field(value: &self.selectionRevision) }()
       case 14: try { try decoder.decodeSingularBoolField(value: &self.keyboard) }()
+      case 15: try { try decoder.decodeSingularUInt64Field(value: &self.assetAuthority) }()
       default: break
       }
     }
@@ -5470,6 +5589,9 @@ nonisolated extension WireComposePane: SwiftProtobuf.Message, SwiftProtobuf._Mes
     if self.keyboard != false {
       try visitor.visitSingularBoolField(value: self.keyboard, fieldNumber: 14)
     }
+    if self.assetAuthority != 0 {
+      try visitor.visitSingularUInt64Field(value: self.assetAuthority, fieldNumber: 15)
+    }
     try unknownFields.traverse(visitor: &visitor)
   }
 
@@ -5488,6 +5610,7 @@ nonisolated extension WireComposePane: SwiftProtobuf.Message, SwiftProtobuf._Mes
     if lhs.documentLen != rhs.documentLen {return false}
     if lhs.selectionRevision != rhs.selectionRevision {return false}
     if lhs.keyboard != rhs.keyboard {return false}
+    if lhs.assetAuthority != rhs.assetAuthority {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
@@ -7705,7 +7828,7 @@ nonisolated extension WireSettingsUpdate: SwiftProtobuf.Message, SwiftProtobuf._
 
 nonisolated extension WireFrame: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".Frame"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}seq\0\u{1}width\0\u{1}height\0\u{3}window_id\0\u{1}theme\0\u{1}clipboard\0\u{1}cursor\0\u{3}grid_len\0\u{1}copies\0\u{1}rows\0\u{3}pane_len\0\u{1}panes\0\u{1}menus\0\u{3}status_bar\0\u{3}file_explorer\0\u{1}separators\0\u{1}popups\0\u{1}palette\0\u{3}trust_dialog\0\u{3}context_menu\0\u{3}keybinding_editor\0\u{1}settings\0\u{1}timing\0\u{3}input_reply\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}seq\0\u{1}width\0\u{1}height\0\u{3}window_id\0\u{1}theme\0\u{1}clipboard\0\u{1}cursor\0\u{3}grid_len\0\u{1}copies\0\u{1}rows\0\u{3}pane_len\0\u{1}panes\0\u{1}menus\0\u{3}status_bar\0\u{3}file_explorer\0\u{1}separators\0\u{1}popups\0\u{1}palette\0\u{3}trust_dialog\0\u{3}context_menu\0\u{3}keybinding_editor\0\u{1}settings\0\u{1}timing\0\u{3}input_reply\0\u{3}compose_assets\0")
 
   fileprivate class _StorageClass {
     var _seq: UInt64 = 0
@@ -7732,6 +7855,7 @@ nonisolated extension WireFrame: SwiftProtobuf.Message, SwiftProtobuf._MessageIm
     var _settings: WireSettingsUpdate? = nil
     var _timing: WireTiming? = nil
     var _inputReply: WireInputReply? = nil
+    var _composeAssets: [WireComposeAssetChunk] = []
 
       // This property is used as the initial default value for new instances of the type.
       // The type itself is protecting the reference to its storage via CoW semantics.
@@ -7766,6 +7890,7 @@ nonisolated extension WireFrame: SwiftProtobuf.Message, SwiftProtobuf._MessageIm
       _settings = source._settings
       _timing = source._timing
       _inputReply = source._inputReply
+      _composeAssets = source._composeAssets
     }
   }
 
@@ -7808,6 +7933,7 @@ nonisolated extension WireFrame: SwiftProtobuf.Message, SwiftProtobuf._MessageIm
         case 22: try { try decoder.decodeSingularMessageField(value: &_storage._settings) }()
         case 23: try { try decoder.decodeSingularMessageField(value: &_storage._timing) }()
         case 24: try { try decoder.decodeSingularMessageField(value: &_storage._inputReply) }()
+        case 25: try { try decoder.decodeRepeatedMessageField(value: &_storage._composeAssets) }()
         default: break
         }
       }
@@ -7892,6 +8018,9 @@ nonisolated extension WireFrame: SwiftProtobuf.Message, SwiftProtobuf._MessageIm
       try { if let v = _storage._inputReply {
         try visitor.visitSingularMessageField(value: v, fieldNumber: 24)
       } }()
+      if !_storage._composeAssets.isEmpty {
+        try visitor.visitRepeatedMessageField(value: _storage._composeAssets, fieldNumber: 25)
+      }
     }
     try unknownFields.traverse(visitor: &visitor)
   }
@@ -7925,6 +8054,7 @@ nonisolated extension WireFrame: SwiftProtobuf.Message, SwiftProtobuf._MessageIm
         if _storage._settings != rhs_storage._settings {return false}
         if _storage._timing != rhs_storage._timing {return false}
         if _storage._inputReply != rhs_storage._inputReply {return false}
+        if _storage._composeAssets != rhs_storage._composeAssets {return false}
         return true
       }
       if !storagesAreEqual {return false}
@@ -8233,6 +8363,65 @@ nonisolated extension WireComposeInput: SwiftProtobuf.Message, SwiftProtobuf._Me
       }
       if !storagesAreEqual {return false}
     }
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension WireComposeAssetRequest: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".ComposeAssetRequest"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}id\0\u{1}scope\0\u{1}start\0\u{1}end\0\u{1}cancel\0\u{1}authority\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularUInt64Field(value: &self.id) }()
+      case 2: try { try decoder.decodeSingularMessageField(value: &self._scope) }()
+      case 3: try { try decoder.decodeSingularUInt64Field(value: &self.start) }()
+      case 4: try { try decoder.decodeSingularUInt64Field(value: &self.end) }()
+      case 5: try { try decoder.decodeSingularBoolField(value: &self.cancel) }()
+      case 6: try { try decoder.decodeSingularUInt64Field(value: &self.authority) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
+    if self.id != 0 {
+      try visitor.visitSingularUInt64Field(value: self.id, fieldNumber: 1)
+    }
+    try { if let v = self._scope {
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 2)
+    } }()
+    if self.start != 0 {
+      try visitor.visitSingularUInt64Field(value: self.start, fieldNumber: 3)
+    }
+    if self.end != 0 {
+      try visitor.visitSingularUInt64Field(value: self.end, fieldNumber: 4)
+    }
+    if self.cancel != false {
+      try visitor.visitSingularBoolField(value: self.cancel, fieldNumber: 5)
+    }
+    if self.authority != 0 {
+      try visitor.visitSingularUInt64Field(value: self.authority, fieldNumber: 6)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: WireComposeAssetRequest, rhs: WireComposeAssetRequest) -> Bool {
+    if lhs.id != rhs.id {return false}
+    if lhs._scope != rhs._scope {return false}
+    if lhs.start != rhs.start {return false}
+    if lhs.end != rhs.end {return false}
+    if lhs.cancel != rhs.cancel {return false}
+    if lhs.authority != rhs.authority {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }

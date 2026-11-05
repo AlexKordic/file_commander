@@ -26,6 +26,7 @@ public enum SceneWire {
     case configure = 25
     case applied = 26
     case composeInput = 27
+    case composeAsset = 28
   }
 
   /// The protocol version the app speaks; Fresh refuses another.
@@ -113,6 +114,7 @@ public enum SceneInput: Sendable {
   case configure(telemetry: Bool)
   case applied(seq: UInt64)
   case composeInput(WireComposeInput)
+  case composeAsset(WireComposeAssetRequest)
 
   public var kind: SceneWire.Kind {
     switch self {
@@ -128,6 +130,7 @@ public enum SceneInput: Sendable {
     case .configure: return .configure
     case .applied: return .applied
     case .composeInput: return .composeInput
+    case .composeAsset: return .composeAsset
     }
   }
 
@@ -164,6 +167,7 @@ public enum SceneInput: Sendable {
     case .configure(let telemetry): message = WireConfigure.with { $0.telemetry = telemetry }
     case .applied(let seq): message = WireApplied.with { $0.seq = seq }
     case .composeInput(let input): message = input
+    case .composeAsset(let request): message = request
     }
     // A message built from these types always serializes.
     return (try? message.serializedBytes()) ?? []
@@ -184,6 +188,7 @@ public enum SceneInput: Sendable {
     case .configure: return ("configure", nil)
     case .applied: return ("applied", nil)
     case .composeInput: return ("composeInput", nil)
+    case .composeAsset: return ("composeAsset", nil)
     }
   }
 
