@@ -43,6 +43,7 @@ let package = Package(
     .testTarget(name: "FCKitTests", dependencies: ["FCKit"], swiftSettings: [.interoperabilityMode(.Cxx)]),
     .testTarget(name: "ExplainerKitTests", dependencies: ["ExplainerKit"]),
     .testTarget(name: "FreshKitTests", dependencies: ["FreshKit"], resources: [.copy("Fixtures")]),
+    .testTarget(name: "NativeEditorTests", dependencies: ["FileCommander", "FreshKit"], swiftSettings: [.interoperabilityMode(.Cxx)]),
   ],
   swiftLanguageModes: [.v5],
   cxxLanguageStandard: .cxx20

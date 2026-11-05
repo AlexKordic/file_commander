@@ -349,6 +349,49 @@ A connected scene client counts as attached: the session does not shut down
 idle, and `prepare-restart` refuses while one is connected, so the app
 disconnects its window before Restart Editor Backend and reconnects after.
 
+### Experimental rich Compose
+
+The native development path can request rich Compose with
+`FC_NATIVE_RICH_COMPOSE=1`. It requires a matching development backend and
+consumer; the packaged Fresh pin has not been advanced for this experiment.
+Grid Compose remains the default. Terminal clients keep their cell layout.
+
+The experimental client hello opts into source-preserving Compose projections.
+Fresh owns source buffers, selections, undo, saving, and filesystem authority;
+the native consumer measures text and images with Core Text. Source coordinates
+are UTF-8 bytes, and native layout feedback is scoped to a window, split,
+buffer, source revision, projection revision, and selection revision.
+
+- Type 27, `ComposeInput`, serializes document commands and returns an
+  `InputReply`. Accepted and cancelled requests are terminal and consume their
+  sequential id; a nonterminal rejection retains its id for refreshed geometry.
+  A cancelled request includes an explanation and cannot run later. A buffer
+  lifetime token prevents queued input from addressing a replacement buffer
+  with the same numeric id. Modal UI input remains separate from a deferred
+  document command.
+- Pointer input captures a source position, affinity, and source revision when
+  the event occurs. Fresh rebases that position through its edit history. The
+  consumer never hit-tests a queued screen point against a newer layout.
+  Unmappable positions, changed image annotations, and retired targets terminate
+  explicitly rather than selecting unrelated text or holding up later input.
+- Type 29, `ComposeViewportRequest`, updates a per-client source marker and
+  pixel offset. Its acknowledgments and coalescing are independent of the text
+  input queue. It changes neither the source cursor nor the terminal viewport.
+  Geometry needed outside the visible region travels in a separate Compose
+  projection in the input reply, so measuring a pending command does not move
+  the reading position.
+- Type 28, `ComposeAssetRequest`, identifies a parsed image annotation rather
+  than accepting a client-supplied path. Fresh reads it through the document's
+  local or SSH filesystem and sends bounded binary chunks. The native consumer
+  bounds assembly, decoding and cache use. Resource refresh and complete
+  interactive/SSH qualification remain development work.
+
+These additive prototype messages retain the current scene version during
+development. Audit the final protocol version and update the dependency pin,
+bundle, consumer, and recovery qualification together before enabling the
+feature for users. Native queue checks are described in
+[macOS app tests](macos_app.md#tests).
+
 ## Timeouts
 
 | Bound | Enforced by | On expiry |

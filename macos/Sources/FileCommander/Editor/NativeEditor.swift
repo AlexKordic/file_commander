@@ -39,11 +39,20 @@ final class NativeEditor: NSObject, CellGridDelegate {
   private let richCompose = ProcessInfo.processInfo.environment["FC_NATIVE_RICH_COMPOSE"] == "1"
   private enum PendingInput {
     case message(SceneInput)
-    case pointer(ComposePresentation.Identity, CGPoint, extend: Bool, count: Int)
+    case pointer(ComposePointer)
+  }
+  private struct InputTarget {
+    var identity: ComposePresentation.Identity
+    var scope: WireComposeScope
+    var epoch: UInt64
+    @MainActor init(_ pane: ComposePresentation) {
+      identity = pane.identity; scope = pane.scope; epoch = pane.pane.compose.viewport.epoch
+    }
   }
   private struct QueuedInput {
     var input: PendingInput
     var scrollGeneration: UInt64
+    var target: InputTarget?
   }
   private var composeQueue: [QueuedInput] = []
   private var nextComposeID: UInt64 = 0
@@ -57,6 +66,7 @@ final class NativeEditor: NSObject, CellGridDelegate {
   private var pendingComposeProjection: WireComposePane?
   private var pendingComposeBefore: (revision: UInt64, cursors: [WireComposeSelection])?
   private var viewportRefreshQueued = false
+  private var lastComposeCancellation: String?
   private lazy var composeViewports = ComposeViewportController { [weak self] request in
     self?.socket?.send(.composeViewport(request))
   }
@@ -202,6 +212,7 @@ final class NativeEditor: NSObject, CellGridDelegate {
     composeRegionSent = false
     pendingComposeProjection = nil
     pendingComposeBefore = nil
+    lastComposeCancellation = nil
   }
 
   private func connectionEnded(_ reason: String?) {
@@ -264,17 +275,20 @@ final class NativeEditor: NSObject, CellGridDelegate {
     if message.frame.hasInputReply, message.frame.inputReply.id == pendingComposeID {
       composeInFlight = false
       let reply = message.frame.inputReply
-      if reply.accepted {
-        let identity: ComposePresentation.Identity?
-        if case .pointer(let target, _, _, _)? = composeQueue.first?.input { identity = target }
-        else { identity = pendingComposePane }
-        grid?.applyComposeCarets(reply.carets, identity: identity)
-        if let identity, let queued = composeQueue.first,
+      if reply.accepted || reply.cancelled {
+        let identity = pendingComposePane
+        if reply.accepted { grid?.applyComposeCarets(reply.carets, identity: identity) }
+        if reply.accepted, let identity, let queued = composeQueue.first,
            queued.scrollGeneration == composeViewports.userScrollGeneration,
            let before = pendingComposeBefore, let pane = grid?.composePanes[identity.leaf], pane.identity == identity,
            before.revision != pane.pane.compose.bufferRevision || before.cursors != pane.pane.compose.cursors {
           revealComposeCaret(pane)
         }
+        if reply.cancelled, !reply.error.isEmpty, lastComposeCancellation != reply.error {
+          lastComposeCancellation = reply.error
+          app?.engine.reportError(reply.error)
+          Trace.write("editor input cancelled: \(reply.error)")
+        } else if reply.accepted { lastComposeCancellation = nil }
         if !composeQueue.isEmpty { composeQueue.removeFirst() }
         pendingComposeID = nil
         pendingComposePane = nil
@@ -423,9 +437,9 @@ final class NativeEditor: NSObject, CellGridDelegate {
   func grid(_ grid: CellGridView, send input: SceneInput) { send(input) }
 
   func grid(_ grid: CellGridView, point: CGPoint, in pane: ComposePresentation, extend: Bool, count: Int) {
-    guard receivedHello else { return }
-    composeQueue.append(.init(input: .pointer(pane.identity, point, extend: extend, count: count), scrollGeneration: composeViewports.userScrollGeneration))
-    pumpComposeInput()
+    guard receivedHello, let hit = pane.hit(at: point),
+          let pointer = ComposePointer(scope: pane.scope, epoch: pane.pane.compose.viewport.epoch, hit: hit, extend: extend, count: count) else { return }
+    enqueueCompose(.pointer(pointer), target: pane)
   }
 
   func grid(_ grid: CellGridView, scroll delta: CGFloat, in pane: ComposePresentation) {
@@ -490,7 +504,7 @@ final class NativeEditor: NSObject, CellGridDelegate {
     guard richCompose else { socket?.send(input); return }
     // A modal that appeared while navigation awaited geometry must remain
     // usable. Its ordinary input does not replace the deferred document action.
-    if pendingComposeLayout, let identity = pendingComposePane {
+    if !composeQueue.isEmpty, let identity = pendingComposePane {
       let pane = grid?.composePanes[identity.leaf]
       if pane?.identity != identity || pane?.pane.compose.keyboard != true {
         socket?.send(input)
@@ -499,11 +513,21 @@ final class NativeEditor: NSObject, CellGridDelegate {
     }
     switch input {
     case .key, .mouse, .paste, .action, .widget, .settingsClick, .kbEditClick:
-      composeQueue.append(.init(input: .message(input), scrollGeneration: composeViewports.userScrollGeneration))
-      pumpComposeInput()
+      let target: ComposePresentation?
+      switch input {
+      case .key, .paste, .action: target = grid?.focusedCompose
+      default: target = nil
+      }
+      enqueueCompose(.message(input), target: target)
     default:
       socket?.send(input)
     }
+  }
+
+  private func enqueueCompose(_ input: PendingInput, target: ComposePresentation?) {
+    if composeQueue.isEmpty { lastComposeCancellation = nil }
+    composeQueue.append(.init(input: input, scrollGeneration: composeViewports.userScrollGeneration, target: target.map(InputTarget.init)))
+    pumpComposeInput()
   }
 
   /// Send one event, wait for its scene/reply, then bind the next event to the
@@ -513,13 +537,7 @@ final class NativeEditor: NSObject, CellGridDelegate {
     if pendingComposeID == nil {
       nextComposeID += 1
       pendingComposeID = nextComposeID
-      if case .message(let input) = queued.input {
-        switch input {
-        case .key, .paste, .action:
-          pendingComposePane = grid?.focusedCompose.flatMap { $0.pane.compose.keyboard ? $0.identity : nil }
-        default: break
-        }
-      }
+      pendingComposePane = queued.target?.identity
     }
     var input = WireComposeInput()
     input.id = pendingComposeID ?? 0
@@ -528,7 +546,21 @@ final class NativeEditor: NSObject, CellGridDelegate {
       input.kind = UInt32(message.kind.rawValue)
       input.payload = Data(message.payload())
       if let identity = pendingComposePane {
-        guard let visible = grid?.composePanes[identity.leaf], visible.identity == identity else { return }
+        input.bufferEpoch = queued.target?.epoch ?? 0
+        guard let visible = grid?.composePanes[identity.leaf], visible.identity == identity else {
+          // A modal can temporarily hide a still-open Compose view. Its raw
+          // UI input remains usable; Fresh proactively cancels this request if
+          // its tab, buffer lifetime, presentation or keyboard focus changes.
+          if pendingComposeLayout { return }
+          input.scope = queued.target?.scope ?? WireComposeScope()
+          composeInFlight = true
+          socket.send(.composeInput(input))
+          return
+        }
+        if visible.pane.compose.viewport.epoch != input.bufferEpoch {
+          input.cancel = true
+          break
+        }
         let pane = pendingComposeProjection.flatMap { grid?.composeMeasurement(identity: identity, projection: $0) } ?? visible
         pendingComposeBefore = (visible.pane.compose.bufferRevision, visible.pane.compose.cursors)
         if pane.pane.compose.keyboard {
@@ -546,22 +578,14 @@ final class NativeEditor: NSObject, CellGridDelegate {
           }
         } else {
           if pendingComposeLayout { return }
-          pendingComposePane = nil
+          input.scope = queued.target?.scope ?? pane.scope
         }
       }
-    case .pointer(let identity, let location, let extend, let count):
-      guard let pane = grid?.composePanes[identity.leaf], pane.identity == identity,
-            let hit = pane.hit(at: location) else { return }
-      pendingComposeBefore = (pane.pane.compose.bufferRevision, pane.pane.compose.cursors)
-      input.scope = pane.scope
-      input.position = UInt64(hit.source)
-      if let attachment = hit.attachment, !extend {
-        input.attachmentStart = UInt64(attachment.lowerBound)
-        input.position = UInt64(attachment.upperBound)
+    case .pointer(let pointer):
+      input = pointer.input(id: input.id)
+      if let identity = pendingComposePane, let pane = grid?.composePanes[identity.leaf], pane.identity == identity {
+        pendingComposeBefore = (pane.pane.compose.bufferRevision, pane.pane.compose.cursors)
       }
-      input.affinity = hit.affinity == .upstream ? 1 : 0
-      input.extend = extend
-      input.clickCount = UInt32(clamping: count)
     }
     composeInFlight = true
     socket.send(.composeInput(input))

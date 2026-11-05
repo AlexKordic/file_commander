@@ -1596,7 +1596,8 @@ public nonisolated struct WireComposeSelection: Sendable {
   fileprivate var _anchor: UInt64? = nil
 }
 
-/// A revisioned input was applied exactly once, or requires a fresh layout.
+/// A revisioned input was applied exactly once, requires a fresh layout,
+/// or was cancelled with a terminal explanation. Cancelled ids are consumed.
 public nonisolated struct WireInputReply: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
@@ -1636,6 +1637,10 @@ public nonisolated struct WireInputReply: Sendable {
   public var hasCompose: Bool {self._compose != nil}
   /// Clears the value of `compose`. Subsequent reads from it will return its default value.
   public mutating func clearCompose() {self._compose = nil}
+
+  public var cancelled: Bool = false
+
+  public var error: String = String()
 
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
@@ -3064,7 +3069,10 @@ public nonisolated struct WireComposeScope: Sendable {
 
 /// Type 27: serialized input for a rich client. kind/payload carry an existing
 /// input message unchanged. A pointer instead supplies a source position.
-/// Fresh acknowledges even a no-op. Rejected input is retried after the frame.
+/// Fresh acknowledges even a no-op. Nonterminal rejections are retried after
+/// the frame. A source_revision pointer is rebased from event-time coordinates;
+/// buffer_epoch prevents reusing them after buffer replacement. cancel consumes
+/// this id and clears its deferred action without executing it.
 public nonisolated struct WireComposeInput: @unchecked Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
@@ -3149,6 +3157,25 @@ public nonisolated struct WireComposeInput: @unchecked Sendable {
   public var hasAttachmentStart: Bool {_storage._attachmentStart != nil}
   /// Clears the value of `attachmentStart`. Subsequent reads from it will return its default value.
   public mutating func clearAttachmentStart() {_uniqueStorage()._attachmentStart = nil}
+
+  public var sourceRevision: UInt64 {
+    get {_storage._sourceRevision ?? 0}
+    set {_uniqueStorage()._sourceRevision = newValue}
+  }
+  /// Returns true if `sourceRevision` has been explicitly set.
+  public var hasSourceRevision: Bool {_storage._sourceRevision != nil}
+  /// Clears the value of `sourceRevision`. Subsequent reads from it will return its default value.
+  public mutating func clearSourceRevision() {_uniqueStorage()._sourceRevision = nil}
+
+  public var bufferEpoch: UInt64 {
+    get {_storage._bufferEpoch}
+    set {_uniqueStorage()._bufferEpoch = newValue}
+  }
+
+  public var cancel: Bool {
+    get {_storage._cancel}
+    set {_uniqueStorage()._cancel = newValue}
+  }
 
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
@@ -6150,7 +6177,7 @@ nonisolated extension WireComposeSelection: SwiftProtobuf.Message, SwiftProtobuf
 
 nonisolated extension WireInputReply: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".InputReply"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}id\0\u{1}accepted\0\u{3}needs_layout\0\u{3}need_region\0\u{1}carets\0\u{3}need_y\0\u{1}compose\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}id\0\u{1}accepted\0\u{3}needs_layout\0\u{3}need_region\0\u{1}carets\0\u{3}need_y\0\u{1}compose\0\u{1}cancelled\0\u{1}error\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -6165,6 +6192,8 @@ nonisolated extension WireInputReply: SwiftProtobuf.Message, SwiftProtobuf._Mess
       case 5: try { try decoder.decodeRepeatedMessageField(value: &self.carets) }()
       case 6: try { try decoder.decodeSingularDoubleField(value: &self._needY) }()
       case 7: try { try decoder.decodeSingularMessageField(value: &self._compose) }()
+      case 8: try { try decoder.decodeSingularBoolField(value: &self.cancelled) }()
+      case 9: try { try decoder.decodeSingularStringField(value: &self.error) }()
       default: break
       }
     }
@@ -6196,6 +6225,12 @@ nonisolated extension WireInputReply: SwiftProtobuf.Message, SwiftProtobuf._Mess
     try { if let v = self._compose {
       try visitor.visitSingularMessageField(value: v, fieldNumber: 7)
     } }()
+    if self.cancelled != false {
+      try visitor.visitSingularBoolField(value: self.cancelled, fieldNumber: 8)
+    }
+    if !self.error.isEmpty {
+      try visitor.visitSingularStringField(value: self.error, fieldNumber: 9)
+    }
     try unknownFields.traverse(visitor: &visitor)
   }
 
@@ -6207,6 +6242,8 @@ nonisolated extension WireInputReply: SwiftProtobuf.Message, SwiftProtobuf._Mess
     if lhs.carets != rhs.carets {return false}
     if lhs._needY != rhs._needY {return false}
     if lhs._compose != rhs._compose {return false}
+    if lhs.cancelled != rhs.cancelled {return false}
+    if lhs.error != rhs.error {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
@@ -8575,7 +8612,7 @@ nonisolated extension WireComposeScope: SwiftProtobuf.Message, SwiftProtobuf._Me
 
 nonisolated extension WireComposeInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".ComposeInput"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}id\0\u{1}scope\0\u{1}kind\0\u{1}payload\0\u{1}position\0\u{1}extend\0\u{3}click_count\0\u{1}layout\0\u{3}layout_id\0\u{1}affinity\0\u{1}region\0\u{3}attachment_start\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}id\0\u{1}scope\0\u{1}kind\0\u{1}payload\0\u{1}position\0\u{1}extend\0\u{3}click_count\0\u{1}layout\0\u{3}layout_id\0\u{1}affinity\0\u{1}region\0\u{3}attachment_start\0\u{3}source_revision\0\u{3}buffer_epoch\0\u{1}cancel\0")
 
   fileprivate class _StorageClass {
     var _id: UInt64 = 0
@@ -8590,6 +8627,9 @@ nonisolated extension WireComposeInput: SwiftProtobuf.Message, SwiftProtobuf._Me
     var _affinity: UInt32 = 0
     var _region: UInt64? = nil
     var _attachmentStart: UInt64? = nil
+    var _sourceRevision: UInt64? = nil
+    var _bufferEpoch: UInt64 = 0
+    var _cancel: Bool = false
 
       // This property is used as the initial default value for new instances of the type.
       // The type itself is protecting the reference to its storage via CoW semantics.
@@ -8612,6 +8652,9 @@ nonisolated extension WireComposeInput: SwiftProtobuf.Message, SwiftProtobuf._Me
       _affinity = source._affinity
       _region = source._region
       _attachmentStart = source._attachmentStart
+      _sourceRevision = source._sourceRevision
+      _bufferEpoch = source._bufferEpoch
+      _cancel = source._cancel
     }
   }
 
@@ -8642,6 +8685,9 @@ nonisolated extension WireComposeInput: SwiftProtobuf.Message, SwiftProtobuf._Me
         case 10: try { try decoder.decodeSingularUInt32Field(value: &_storage._affinity) }()
         case 11: try { try decoder.decodeSingularUInt64Field(value: &_storage._region) }()
         case 12: try { try decoder.decodeSingularUInt64Field(value: &_storage._attachmentStart) }()
+        case 13: try { try decoder.decodeSingularUInt64Field(value: &_storage._sourceRevision) }()
+        case 14: try { try decoder.decodeSingularUInt64Field(value: &_storage._bufferEpoch) }()
+        case 15: try { try decoder.decodeSingularBoolField(value: &_storage._cancel) }()
         default: break
         }
       }
@@ -8690,6 +8736,15 @@ nonisolated extension WireComposeInput: SwiftProtobuf.Message, SwiftProtobuf._Me
       try { if let v = _storage._attachmentStart {
         try visitor.visitSingularUInt64Field(value: v, fieldNumber: 12)
       } }()
+      try { if let v = _storage._sourceRevision {
+        try visitor.visitSingularUInt64Field(value: v, fieldNumber: 13)
+      } }()
+      if _storage._bufferEpoch != 0 {
+        try visitor.visitSingularUInt64Field(value: _storage._bufferEpoch, fieldNumber: 14)
+      }
+      if _storage._cancel != false {
+        try visitor.visitSingularBoolField(value: _storage._cancel, fieldNumber: 15)
+      }
     }
     try unknownFields.traverse(visitor: &visitor)
   }
@@ -8711,6 +8766,9 @@ nonisolated extension WireComposeInput: SwiftProtobuf.Message, SwiftProtobuf._Me
         if _storage._affinity != rhs_storage._affinity {return false}
         if _storage._region != rhs_storage._region {return false}
         if _storage._attachmentStart != rhs_storage._attachmentStart {return false}
+        if _storage._sourceRevision != rhs_storage._sourceRevision {return false}
+        if _storage._bufferEpoch != rhs_storage._bufferEpoch {return false}
+        if _storage._cancel != rhs_storage._cancel {return false}
         return true
       }
       if !storagesAreEqual {return false}

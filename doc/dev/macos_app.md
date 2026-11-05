@@ -196,7 +196,19 @@ needs no Metal toolchain.
 | `fc.model.engine` | The facade end to end: start, rows, glob, jobs, profile lock |
 | `fc.model.editor` | Attaching hands the app the session's scene socket, or the terminal command when there is none |
 | `fc.macos.explainers` | `macos/tools/check_explainers.py`: every step, key, command and anchor in the explainers exists, and every visible command is covered |
-| `swift test --package-path macos` | FCKit drives the real engine; ExplainerKit decodes every explainer and builds captions; FreshKit frames messages by type and length and encodes them as the schema does, applies scenes, maps keys, and replays a scene recorded from a real Fresh session |
+| `swift test --package-path macos` | FCKit drives the real engine; ExplainerKit decodes every explainer and builds captions; FreshKit checks the scene protocol, source maps, measured typography, images, and scrolling; NativeEditorTests drives the production native editor against a private scene peer |
+
+`Tests/NativeEditorTests` imports the application target and controls scene
+timing over a disposable Unix socket. It verifies captured click positions
+through reflow, queued typing bound to its original buffer lifetime, terminal
+cancellation, and modal input while a document command waits for geometry.
+The tests create their own editor view and enable experimental rich Compose
+only for that instance. They do not attach to an existing Fresh session or
+open the installed app. To run the affected editor checks:
+
+```sh
+swift test --package-path macos --filter 'NativeEditorTests|FreshKitTests'
+```
 
 `Tests/FreshKitTests/Fixtures/scene.tlv` comes from
 `macos/tools/record_scene.py`, which starts a throwaway Fresh session, connects
