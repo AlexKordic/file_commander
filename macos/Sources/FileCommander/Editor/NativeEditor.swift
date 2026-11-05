@@ -85,6 +85,8 @@ final class NativeEditor: NSObject, CellGridDelegate {
   private var pendingComposeBefore: (revision: UInt64, cursors: [WireComposeSelection])?
   private var viewportRefreshQueued = false
   private var lastComposeCancellation: String?
+  private(set) var uninsertedText: [String] = [] { didSet { onUninsertedTextChanged?(!uninsertedText.isEmpty) } }
+  var onUninsertedTextChanged: ((Bool) -> Void)?
   private var pendingCaretReveal: (target: InputTarget, scrollGeneration: UInt64)?
   private struct FormattingFailure: Equatable {
     var window, buffer, epoch: UInt64
@@ -209,6 +211,7 @@ final class NativeEditor: NSObject, CellGridDelegate {
 
   private func hide() {
     guard shown else { return }
+    grid?.finishComposition()
     shown = false
     composeImages.update([])
     onPresent?(false)
@@ -223,6 +226,7 @@ final class NativeEditor: NSObject, CellGridDelegate {
   }
 
   private func disconnect() {
+    recoverPendingText()
     composeImages.reset()
     composeViewports.reset()
     socket?.close()
@@ -245,6 +249,7 @@ final class NativeEditor: NSObject, CellGridDelegate {
   }
 
   private func connectionEnded(_ reason: String?) {
+    recoverPendingText()
     composeImages.reset()
     composeViewports.reset()
     socket = nil
@@ -266,6 +271,8 @@ final class NativeEditor: NSObject, CellGridDelegate {
     let menus = FreshMenus(store: store) { [weak self] action, argsJson in self?.send(.action(name: action, argsJson: argsJson)) }
     menus.openSettings = { [weak self] in self?.app?.openSettings(tab: .editor) }
     menus.showFiles = { [weak self] in self?.switchBack() }
+    menus.hasUninsertedText = { [weak self] in self?.uninsertedText.isEmpty == false }
+    menus.copyUninsertedText = { [weak self] in self?.copyUninsertedText() }
     self.menus = menus
     return view
   }
@@ -324,6 +331,9 @@ final class NativeEditor: NSObject, CellGridDelegate {
           app?.engine.reportError(reply.error)
           Trace.write("editor input cancelled: \(reply.error)")
         } else if reply.accepted { lastComposeCancellation = nil }
+        if reply.cancelled, case .replacement(let replacement)? = composeQueue.first?.input {
+          if let grid { self.grid(grid, recover: replacement.text) }
+        }
         if !composeQueue.isEmpty { composeQueue.removeFirst() }
         pendingComposeID = nil
         pendingComposePane = nil
@@ -539,6 +549,30 @@ final class NativeEditor: NSObject, CellGridDelegate {
     enqueueCompose(.replacement(replacement), target: pane)
   }
 
+  func grid(_ grid: CellGridView, commit replacement: ComposeReplacement, in pane: ComposePresentation) {
+    guard receivedHello else { self.grid(grid, recover: replacement.text); return }
+    enqueueCompose(.replacement(replacement), target: pane)
+  }
+
+  func grid(_ grid: CellGridView, recover text: String) {
+    guard !text.isEmpty else { return }
+    uninsertedText.append(text)
+    app?.engine.reportError("Editor text was not inserted. Use Edit > Copy Uninserted Text to recover it.")
+  }
+
+  func copyUninsertedText() {
+    guard !uninsertedText.isEmpty else { return }
+    pasteboard.replaceEditorText(uninsertedText.joined(separator: "\n\n"))
+  }
+
+  private func recoverPendingText() {
+    grid?.cancelComposition(recover: true)
+    for queued in composeQueue {
+      if case .replacement(let replacement) = queued.input, let grid { self.grid(grid, recover: replacement.text) }
+    }
+    composeQueue.removeAll()
+  }
+
   var optionAsAlt: Bool { app?.preferences.optionAsAlt ?? false }
 
   // MARK: Menus
@@ -570,6 +604,7 @@ final class NativeEditor: NSObject, CellGridDelegate {
   }
 
   func send(_ input: SceneInput) {
+    if case .action = input { grid?.finishComposition() }
     switch input {
     case .key, .mouse, .paste, .text, .action, .widget, .settingsClick, .kbEditClick:
       guard receivedHello else { return }
@@ -674,6 +709,8 @@ final class NativeEditor: NSObject, CellGridDelegate {
     case .replacement(let replacement):
       input = replacement.input(id: input.id)
       if let identity = pendingComposePane, let pane = grid?.composePanes[identity.leaf], pane.identity == identity {
+        if pendingComposeLayout, pane.pane.compose.viewport.epoch == input.bufferEpoch,
+           !pane.pane.compose.keyboard || grid?.composeInputAllowed == false { return }
         pendingComposeBefore = (pane.pane.compose.bufferRevision, pane.pane.compose.cursors)
       }
     }

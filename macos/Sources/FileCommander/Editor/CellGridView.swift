@@ -15,6 +15,8 @@ protocol CellGridDelegate: AnyObject {
   func grid(_ grid: CellGridView, point: CGPoint, in pane: ComposePresentation, extend: Bool, count: Int)
   func grid(_ grid: CellGridView, scroll delta: CGFloat, in pane: ComposePresentation)
   func grid(_ grid: CellGridView, replace text: String, range: NSRange, in pane: ComposePresentation)
+  func grid(_ grid: CellGridView, commit replacement: ComposeReplacement, in pane: ComposePresentation)
+  func grid(_ grid: CellGridView, recover text: String)
   var optionAsAlt: Bool { get }
 }
 
@@ -47,6 +49,13 @@ final class CellGridView: NSView, @preconcurrency NSTextInputClient {
   private var caretOn = true
   private var blink: Timer?
   private var marked = ""
+  private struct Composition {
+    let target: ComposePresentation
+    let cursor: UInt64
+    var text: ComposeMarkedText
+  }
+  private var composition: Composition?
+  private var compositionDragAnchor: Int?
   private var lastDragCell: (Int, Int)?
   private var lastHoverCell: (Int, Int)?
   private var scrollRemainder: CGFloat = 0
@@ -165,11 +174,26 @@ final class CellGridView: NSView, @preconcurrency NSTextInputClient {
   }
 
   private func rebuildCompose() {
+    if let composition {
+      let target = composition.target
+      let current = store.panes.first { $0.leaf == target.identity.leaf && $0.hasBuffer && $0.buffer == target.identity.buffer }
+      if UInt64(store.windowID) != target.identity.window || current?.hasCompose != true
+          || current?.compose.viewport.epoch != target.pane.compose.viewport.epoch
+          || current?.compose.focused != true || current?.compose.cursors.contains(where: { $0.id == composition.cursor }) != true {
+        cancelComposition(recover: true, rebuild: false)
+      } else if current?.compose.keyboard == false || !composeInputAllowed {
+        finishComposition(rebuild: false)
+      }
+    }
     let old = focusedCompose
     let previous = composePanes
     composePanes = Dictionary(uniqueKeysWithValues: store.panes.compactMap { pane in
       presentation(pane, reuse: previous[pane.leaf]).map { (pane.leaf, $0) }
     })
+    if let composition, composePanes[composition.target.identity.leaf] == nil {
+      cancelComposition(recover: true, rebuild: false)
+      rebuildCompose(); needsDisplay = true; return
+    }
     updateImageTooltips()
     if window?.firstResponder === self {
       inputContext?.invalidateCharacterCoordinates()
@@ -209,6 +233,15 @@ final class CellGridView: NSView, @preconcurrency NSTextInputClient {
 
   private func presentation(_ input: WirePane, reuse: ComposePresentation? = nil) -> ComposePresentation? {
     var pane = input
+    let preedit = composition.flatMap { value -> ComposeMarkedText? in
+      guard value.target.identity == .init(window: UInt64(store.windowID), leaf: input.leaf, buffer: input.buffer),
+            input.compose.viewport.epoch == value.target.pane.compose.viewport.epoch else { return nil }
+      pane = value.target.pane; pane.content = input.content
+      if input.compose.bufferRevision == pane.compose.bufferRevision {
+        pane.compose.viewport = input.compose.viewport; pane.compose.topByte = input.compose.topByte
+      }
+      return value.text
+    }
     if pane.hasCompose, !pane.compose.formattingReady, let reuse, reuse.pane.compose.formattingReady,
        reuse.identity == .init(window: UInt64(store.windowID), leaf: pane.leaf, buffer: pane.buffer),
        reuse.pane.compose.viewport.epoch == pane.compose.viewport.epoch,
@@ -235,7 +268,7 @@ final class CellGridView: NSView, @preconcurrency NSTextInputClient {
       cell: CGSize(width: cellWidth, height: cellHeight), body: bodyFont, monospace: monoFont,
       typography: composePreferences.typography(zoom: composeZoom), pageWidth: composePreferences.pageWidth * composeZoom,
       reuse: reuse, caretStates: composeCaretIdentity == .init(window: UInt64(store.windowID), leaf: pane.leaf, buffer: pane.buffer)
-        && composeCaretRevision == pane.compose.bufferRevision ? composeCarets : [:], images: images, viewport: viewport)
+        && composeCaretRevision == pane.compose.bufferRevision ? composeCarets : [:], images: images, viewport: viewport, preedit: preedit)
   }
 
   /// Geometry for a deferred key is measured with the same fonts, width and
@@ -410,7 +443,7 @@ final class CellGridView: NSView, @preconcurrency NSTextInputClient {
     context.saveGState()
     defer { context.restoreGState() }
     if let compose = focusedCompose { context.clip(to: compose.bounds) }
-    if !marked.isEmpty {
+    if composition == nil, !marked.isEmpty {
       // Text being composed in an input method, drawn at the caret until it is committed.
       let attributes: [NSAttributedString.Key: Any] = [
         .font: focusedCompose?.body ?? fonts[0], NSAttributedString.Key(kCTForegroundColorFromContextAttributeName as String): true,
@@ -486,6 +519,7 @@ final class CellGridView: NSView, @preconcurrency NSTextInputClient {
   }
 
   override func resignFirstResponder() -> Bool {
+    finishComposition()
     blink?.invalidate()
     setNeedsDisplayCaret()
     return true
@@ -522,7 +556,7 @@ final class CellGridView: NSView, @preconcurrency NSTextInputClient {
     if event.timestamp == showingEvent { return }
     restartBlink()
     if hasMarkedText() {
-      inputContext?.handleEvent(event)
+      if inputContext?.handleEvent(event) != true { interpretKeyEvents([event]) }
       return
     }
     let flags = event.modifierFlags
@@ -538,13 +572,19 @@ final class CellGridView: NSView, @preconcurrency NSTextInputClient {
       delegate?.grid(self, send: .key(key))
       return
     }
-    inputContext?.handleEvent(event)
+    if inputContext?.handleEvent(event) != true { interpretKeyEvents([event]) }
   }
 
   // MARK: Text input
 
   func insertText(_ string: Any, replacementRange: NSRange) {
     let text = (string as? NSAttributedString)?.string ?? (string as? String) ?? ""
+    if var current = composition {
+      guard current.text.update(NSAttributedString(string: text), selected: NSRange(location: text.utf16.count, length: 0), replacement: replacementRange) else {
+        delegate?.grid(self, recover: text); cancelComposition(recover: true); return
+      }
+      composition = current; finishComposition(); return
+    }
     marked = ""
     if let pane = focusedCompose {
       if replacementRange.location != NSNotFound {
@@ -560,20 +600,58 @@ final class CellGridView: NSView, @preconcurrency NSTextInputClient {
   }
 
   func setMarkedText(_ string: Any, selectedRange: NSRange, replacementRange: NSRange) {
+    let text = (string as? NSAttributedString) ?? NSAttributedString(string: string as? String ?? "")
+    if var current = composition {
+      guard current.text.update(text, selected: selectedRange, replacement: replacementRange) else { return }
+      composition = current; rebuildCompose(); needsDisplay = true; return
+    }
+    if let target = focusedCompose, let context = target.textContext, let cursor = target.cursor {
+      let range = replacementRange.location == NSNotFound ? target.textServiceSelectedRange : replacementRange
+      guard let source = target.sourceRange(forTextServiceRange: range),
+            let text = ComposeMarkedText(context: context, range: range, source: source, text: text, selected: selectedRange) else { return }
+      composition = Composition(target: target, cursor: cursor.id, text: text)
+      marked = ""; rebuildCompose(); needsDisplay = true; return
+    }
     marked = (string as? NSAttributedString)?.string ?? (string as? String) ?? ""
     setNeedsDisplayCaret()
   }
 
   func unmarkText() {
+    if composition != nil { finishComposition(); return }
     marked = ""
     setNeedsDisplayCaret()
   }
 
-  func hasMarkedText() -> Bool { !marked.isEmpty }
-  func markedRange() -> NSRange { marked.isEmpty ? NSRange(location: NSNotFound, length: 0) : NSRange(location: 0, length: marked.utf16.count) }
-  func selectedRange() -> NSRange { !marked.isEmpty ? NSRange(location: marked.utf16.count, length: 0) : focusedCompose?.textServiceSelectedRange ?? NSRange(location: 0, length: 0) }
-  func validAttributesForMarkedText() -> [NSAttributedString.Key] { [.underlineStyle] }
+  func finishComposition(rebuild: Bool = true) {
+    guard let current = composition else { return }
+    composition = nil
+    compositionDragAnchor = nil
+    if let replacement = ComposeReplacement(scope: current.target.scope, epoch: current.target.pane.compose.viewport.epoch,
+      source: current.text.source, cursor: current.cursor, text: current.text.draft.string) {
+      delegate?.grid(self, commit: replacement, in: current.target)
+    } else { delegate?.grid(self, recover: current.text.draft.string) }
+    inputContext?.discardMarkedText()
+    if rebuild { rebuildCompose(); needsDisplay = true }
+  }
+
+  func cancelComposition(recover: Bool, rebuild: Bool = true) {
+    guard let current = composition else { return }
+    composition = nil
+    compositionDragAnchor = nil
+    if recover { delegate?.grid(self, recover: current.text.draft.string) }
+    inputContext?.discardMarkedText()
+    if rebuild { rebuildCompose(); needsDisplay = true }
+  }
+
+  func hasMarkedText() -> Bool { composition != nil || !marked.isEmpty }
+  func markedRange() -> NSRange { composition?.text.markedRange ?? (marked.isEmpty ? NSRange(location: NSNotFound, length: 0) : NSRange(location: 0, length: marked.utf16.count)) }
+  func selectedRange() -> NSRange { composition?.text.selectedRange ?? (!marked.isEmpty ? NSRange(location: marked.utf16.count, length: 0) : focusedCompose?.textServiceSelectedRange ?? NSRange(location: 0, length: 0)) }
+  func validAttributesForMarkedText() -> [NSAttributedString.Key] { [.underlineStyle, .markedClauseSegment] }
   func attributedSubstring(forProposedRange range: NSRange, actualRange: NSRangePointer?) -> NSAttributedString? {
+    if let current = composition {
+      guard let result = current.text.substring(for: range) else { actualRange?.pointee = NSRange(location: NSNotFound, length: 0); return nil }
+      actualRange?.pointee = result.range; return result.text
+    }
     guard marked.isEmpty, let pane = focusedCompose, range.location != NSNotFound else { return nil }
     if let context = pane.textContext {
       guard let result = context.substring(forProposedRange: range) else {
@@ -593,9 +671,21 @@ final class CellGridView: NSView, @preconcurrency NSTextInputClient {
     guard marked.isEmpty, let pane = focusedCompose, let window else { return NSNotFound }
     let point = convert(window.convertPoint(fromScreen: point), from: nil)
     guard pane.bounds.contains(point), let hit = pane.hit(at: point) else { return NSNotFound }
+    if composition != nil,
+       let display = pane.layout.text.hitUTF16(at: CGPoint(x: point.x - pane.origin.x, y: point.y - pane.origin.y)) {
+      return pane.preeditDocumentPosition(display) ?? NSNotFound
+    }
     return pane.textServiceIndex(for: hit.source, affinity: hit.affinity) ?? NSNotFound
   }
-  override func doCommand(by selector: Selector) {}
+  override func doCommand(by selector: Selector) {
+    if selector == #selector(NSResponder.cancelOperation(_:)), composition != nil {
+      cancelComposition(recover: false); return
+    }
+    let keys = ["moveLeft:": "ArrowLeft", "moveRight:": "ArrowRight", "moveUp:": "ArrowUp", "moveDown:": "ArrowDown",
+      "deleteBackward:": "Backspace", "deleteForward:": "Delete", "insertNewline:": "Enter", "insertTab:": "Tab"]
+    guard let key = keys[NSStringFromSelector(selector)] else { return }
+    finishComposition(); delegate?.grid(self, send: .key(.with { $0.key = key }))
+  }
 
   func firstRect(forCharacterRange range: NSRange, actualRange: NSRangePointer?) -> NSRect {
     if marked.isEmpty, let pane = focusedCompose, let window {
@@ -608,6 +698,23 @@ final class CellGridView: NSView, @preconcurrency NSTextInputClient {
   }
 
   // MARK: Mouse
+
+  private func selectComposition(at point: CGPoint, extend: Bool) -> Bool {
+    guard var current = composition, let pane = focusedCompose, let draft = pane.layout.draftDisplayRange,
+          let display = pane.layout.text.hitUTF16(at: CGPoint(x: point.x - pane.origin.x, y: point.y - pane.origin.y)) else { return false }
+    let index: Int
+    if compositionDragAnchor != nil { index = min(NSMaxRange(draft), max(draft.location, display)) }
+    else {
+      guard display >= draft.location, display <= NSMaxRange(draft) else { return false }
+      index = display
+    }
+    let position = current.text.originalRange.location + index - draft.location
+    let anchor = extend ? compositionDragAnchor ?? current.text.selectedRange.location : position
+    guard current.text.select(NSRange(location: min(position, anchor), length: abs(position - anchor))) else { return false }
+    compositionDragAnchor = anchor; composition = current
+    rebuildCompose(); needsDisplay = true; inputContext?.invalidateCharacterCoordinates()
+    return true
+  }
 
   private func sendMouse(_ kind: WireMouseKind, _ event: NSEvent, button: WireMouseButton = .left, count: Int = 1, steps: Int = 1) {
     let (column, row) = cell(at: point(of: event))
@@ -636,7 +743,13 @@ final class CellGridView: NSView, @preconcurrency NSTextInputClient {
     window?.makeFirstResponder(self)
     lastDragCell = nil
     let point = point(of: event)
-    if let pane = compose(at: point) {
+    let captured = compose(at: point)
+    if composition != nil {
+      if inputContext?.handleEvent(event) == true { return }
+      if selectComposition(at: point, extend: event.modifierFlags.contains(.shift)) { return }
+      finishComposition()
+    }
+    if let pane = captured ?? compose(at: point) {
       composeDrag = pane.identity.leaf
       delegate?.grid(self, point: point, in: pane, extend: event.modifierFlags.contains(.shift), count: event.clickCount)
       return
@@ -645,6 +758,7 @@ final class CellGridView: NSView, @preconcurrency NSTextInputClient {
   }
 
   override func mouseDragged(with event: NSEvent) {
+    if compositionDragAnchor != nil, composition != nil { _ = selectComposition(at: point(of: event), extend: true); return }
     if let leaf = composeDrag, let pane = composePanes[leaf] {
       delegate?.grid(self, point: point(of: event), in: pane, extend: true, count: 1)
       return
@@ -656,15 +770,17 @@ final class CellGridView: NSView, @preconcurrency NSTextInputClient {
   }
 
   override func mouseUp(with event: NSEvent) {
+    if compositionDragAnchor != nil { compositionDragAnchor = nil; return }
     if composeDrag != nil { composeDrag = nil; return }
     sendMouse(.up, event)
   }
   override func rightMouseDown(with event: NSEvent) {
+    finishComposition()
     window?.makeFirstResponder(self)
     sendMouse(.down, event, button: .right)
   }
   override func rightMouseUp(with event: NSEvent) { sendMouse(.up, event, button: .right) }
-  override func otherMouseDown(with event: NSEvent) { sendMouse(.down, event, button: .middle) }
+  override func otherMouseDown(with event: NSEvent) { finishComposition(); sendMouse(.down, event, button: .middle) }
   override func otherMouseUp(with event: NSEvent) { sendMouse(.up, event, button: .middle) }
 
   override func mouseMoved(with event: NSEvent) {

@@ -22,10 +22,12 @@ final class EditorController {
   private(set) var title = ""
   /// The view the main window shows for the editor.
   private(set) var view: NSView?
+  private(set) var hasUninsertedText = false
 
   init() {
     native.onPresent = { [weak self] shown in self?.present(shown, native: true) }
     native.onTitle = { [weak self] title in self?.setTitle(title) }
+    native.onUninsertedTextChanged = { [weak self] available in self?.hasUninsertedText = available }
     terminal.onPresent = { [weak self] shown in self?.present(shown, native: false) }
     terminal.onTitle = { [weak self] title in self?.setTitle(title) }
   }

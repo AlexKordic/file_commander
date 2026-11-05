@@ -5,6 +5,7 @@ import Foundation
 public struct ComposeReplacement {
   private let captured: WireComposeInput
   public var scope: WireComposeScope { captured.scope }
+  public var text: String { (try? WirePaste(serializedBytes: captured.payload).text) ?? "" }
 
   public init?(scope: WireComposeScope, epoch: UInt64, source: Range<Int>, cursor: UInt64, text: String) {
     guard epoch != 0, source.lowerBound >= 0 else { return nil }

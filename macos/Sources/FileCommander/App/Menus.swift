@@ -23,6 +23,8 @@ struct AppCommands: Commands {
       item("run_script")
     }
     CommandGroup(after: .pasteboard) {
+      Button("Copy Uninserted Text") { app.editor.native.copyUninsertedText() }
+        .disabled(app.menusHeld || !app.editor.hasUninsertedText)
       Divider()
       item("names_to_clipboard")
       item("paths_to_clipboard")

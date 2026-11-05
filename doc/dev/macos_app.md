@@ -270,8 +270,25 @@ notifies selection changes where the platform API is available.
 revision, view lifetime and cursor ID before queueing it. Fresh owns validation,
 conflict cancellation and the atomic edit/undo operation. Committed phrases
 use `SceneInput.text`; clipboard paste retains its separate column-paste
-semantics. Full marked-text drawing/context, focus/reconnect handling and live
-IME qualification remain unfinished and keep rich Compose gated.
+semantics.
+
+`ComposeMarkedText` holds provisional input-method text over the captured raw
+source context. It supports partial replacements and selected subranges without
+changing Fresh's buffer. `ComposePaneLayout` lays out that provisional text
+with the paragraph's typography, wrapping, images and shared caret/selection
+geometry. Marked text is underlined; accessibility selections address the
+provisional displayed value. The projection retains its original source
+revision while unrelated source replies arrive and never supplies navigation
+feedback to Fresh. Unmarking commits once; explicit cancellation restores the
+original presentation. A retired source target or failed commit retains text
+for explicit copying rather than inserting into a replacement view.
+
+**Edit > Copy Uninserted Text** is available in the editor's menu and FC's
+menu after disconnection. Text stays in memory for the application session;
+copying neither clears it nor happens automatically. Application restart
+does not preserve this native recovery list. Multi-caret composition, repeated
+compositions during pending edits and live IME/recovery qualification remain
+unfinished and keep rich Compose gated.
 Tooltip rectangles share the attachment geometry and are replaced only when
 their positions or descriptions change.
 

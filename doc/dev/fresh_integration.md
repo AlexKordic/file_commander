@@ -474,10 +474,25 @@ The native client can replace the complete captured primary selection using
 its cursor's byte bounds; arbitrary ranges outside the known context are
 refused. Context queries can return a bounded, grapheme-adjusted result or nil.
 The accessibility value and its selection retain display-relative coordinates.
-Complete marked-text context/drawing, composition lifecycle and live
-input-method qualification remain open; these transport additions do not
-establish full IME support. Context sizing and scene traffic need performance
-qualification before release.
+Native rich Compose keeps marked text as a provisional replacement over that
+immutable source snapshot. Partial updates, marked/selected subranges and
+context queries use provisional document UTF-16 positions. The same measured
+layout draws the replacement, underline and selection and positions the caret
+and candidates. Provisional geometry never travels back as Fresh navigation
+feedback. A new source revision cannot relabel the captured replacement.
+`insertText` or `unmarkText` commits once through the captured source range;
+explicit cancellation leaves the source unchanged. Losing the target view,
+buffer lifetime or cursor cancels the composition into native recovery text.
+Modal UI can defer its committed replacement using the existing input ID.
+
+Uninserted text is retained in FC memory for the application session and can
+be copied explicitly from **Edit > Copy Uninserted Text**, including after
+disconnection. Failure never overwrites the system clipboard, and copying
+does not erase the retained text. This is not a persistent crash checkpoint.
+Multi-caret composition, consecutive compositions while edits await replies,
+interactive input-method behavior and recovery qualification remain open;
+this development implementation does not establish full IME support. Context
+sizing and scene traffic still need performance qualification before release.
 
 Visible images are checked on a five-second prototype interval and when the
 editor is shown again. POSIX local/SSH stats include file identity plus

@@ -156,6 +156,104 @@ private final class ScenePeer: @unchecked Sendable {
 
 final class ComposeInputTests: XCTestCase {
   @MainActor
+  func testMarkedCommitWaitsForModalOwnershipAndResigningCommitsOnlyOnce() async throws {
+    let initial = pane("original\n"), peer = try ScenePeer(pane: initial)
+    defer { peer.close() }
+    let editor = richEditor()
+    defer { editor.detachAll() }
+    editor.attach(socketPath: peer.path, app: nil)
+    try await eventually { editor.grid?.focusedCompose != nil }
+    let grid = try XCTUnwrap(editor.grid)
+    grid.setMarkedText("日本", selectedRange: NSRange(location: 2, length: 0), replacementRange: NSRange(location: NSNotFound, length: 0))
+    var modal = initial; modal.compose.keyboard = false
+    peer.show(modal)
+    try await eventually { peer.inputs.count == 1 }
+    let waiting = peer.reply(.with { $0.id = 1; $0.needsLayout = true }, pane: modal)
+    try await eventually { peer.lastApplied >= waiting }
+    XCTAssertFalse(grid.hasMarkedText())
+    editor.send(.key(.with { $0.key = "Escape" }))
+    try await eventually { peer.keys.count == 1 }
+    XCTAssertEqual(peer.inputs.count, 1, "a waiting replacement must not spin or bypass a modal")
+    peer.show(initial)
+    try await eventually { peer.inputs.count == 2 }
+    XCTAssertEqual(peer.inputs[1].id, 1)
+    XCTAssertEqual(try WirePaste(serializedBytes: peer.inputs[1].payload).text, "日本")
+    let accepted = peer.reply(.with { $0.id = 1; $0.accepted = true }, pane: initial)
+    try await eventually { peer.lastApplied >= accepted }
+    grid.setMarkedText("次", selectedRange: NSRange(location: 1, length: 0), replacementRange: NSRange(location: NSNotFound, length: 0))
+    XCTAssertTrue(grid.resignFirstResponder()); grid.unmarkText()
+    try await eventually { peer.inputs.count == 3 }
+    XCTAssertEqual(peer.inputs[2].id, 2)
+    XCTAssertEqual(try WirePaste(serializedBytes: peer.inputs[2].payload).text, "次")
+  }
+
+  @MainActor
+  func testMarkedTextReflowsAndCommitsItsCapturedSourceOnceThenRetainsRejectedTextForExplicitCopy() async throws {
+    let source = "before café after\n"
+    var initial = pane(source, width: 24)
+    initial.compose.cursors[0].position = 12; initial.compose.cursors[0].anchor = 7
+    initial.compose.textContext.selectionStart = 7; initial.compose.textContext.selectionEnd = 11
+    let peer = try ScenePeer(pane: initial)
+    defer { peer.close() }
+    let clipboard = MemoryPasteboard(), editor = richEditor(pasteboard: clipboard)
+    defer { editor.detachAll() }
+    editor.attach(socketPath: peer.path, app: nil)
+    try await eventually { editor.grid?.focusedCompose != nil }
+    let grid = try XCTUnwrap(editor.grid), draft = String(repeating: "日本語 ", count: 8)
+    grid.setMarkedText(NSAttributedString(string: draft, attributes: [.markedClauseSegment: 1]),
+      selectedRange: NSRange(location: 2, length: 1), replacementRange: NSRange(location: NSNotFound, length: 0))
+    XCTAssertTrue(grid.hasMarkedText())
+    XCTAssertEqual(grid.markedRange(), NSRange(location: 7, length: draft.utf16.count))
+    XCTAssertEqual(grid.selectedRange(), NSRange(location: 9, length: 1))
+    XCTAssertEqual(grid.accessibilitySelectedTextRange(), NSRange(location: 9, length: 1))
+    var actual = NSRange(location: NSNotFound, length: 0)
+    XCTAssertEqual(grid.attributedSubstring(forProposedRange: grid.markedRange(), actualRange: &actual)?.string, draft)
+    let presentation = try XCTUnwrap(grid.focusedCompose)
+    XCTAssertNotNil(presentation.textServiceRect(for: grid.selectedRange()))
+    XCTAssertGreaterThan(presentation.layout.text.fragments.count, 1)
+    var external = pane("prefix " + source, revision: 5, width: 48)
+    external.compose.cursors[0].position = 19; external.compose.cursors[0].anchor = 14
+    peer.show(external)
+    try await eventually { peer.lastApplied >= 2 }
+    XCTAssertTrue(peer.inputs.isEmpty, "marked-text updates never edit the source")
+    XCTAssertEqual(grid.focusedCompose?.pane.compose.bufferRevision, 4, "the provisional snapshot must not relabel old source coordinates")
+    XCTAssertEqual(grid.selectedRange(), NSRange(location: 9, length: 1))
+    grid.unmarkText(); grid.unmarkText()
+    try await eventually { peer.inputs.count == 1 }
+    XCTAssertFalse(grid.hasMarkedText())
+    let input = peer.inputs[0]
+    XCTAssertEqual(input.replacementStart, 7); XCTAssertEqual(input.replacementEnd, 12)
+    XCTAssertEqual(input.sourceRevision, 4)
+    XCTAssertEqual(try WirePaste(serializedBytes: input.payload).text, draft)
+    let sequence = peer.reply(.with { $0.id = input.id; $0.cancelled = true; $0.error = "The original range changed." }, pane: external)
+    try await eventually { peer.lastApplied >= sequence }
+    XCTAssertEqual(editor.uninsertedText, [draft]); XCTAssertNil(clipboard.editorText)
+    editor.copyUninsertedText()
+    XCTAssertEqual(clipboard.editorText, draft); XCTAssertEqual(editor.uninsertedText, [draft], "copying must not destroy the recovery text")
+  }
+
+  @MainActor
+  func testCompositionCancellationAndRetiredBufferNeverCommitIntoAnotherView() async throws {
+    let peer = try ScenePeer(pane: pane("original\n"))
+    defer { peer.close() }
+    let editor = richEditor()
+    defer { editor.detachAll() }
+    editor.attach(socketPath: peer.path, app: nil)
+    try await eventually { editor.grid?.focusedCompose != nil }
+    let grid = try XCTUnwrap(editor.grid)
+    grid.setMarkedText("取消", selectedRange: NSRange(location: 2, length: 0), replacementRange: NSRange(location: NSNotFound, length: 0))
+    grid.doCommand(by: #selector(NSResponder.cancelOperation(_:)))
+    XCTAssertFalse(grid.hasMarkedText()); XCTAssertTrue(editor.uninsertedText.isEmpty)
+    grid.setMarkedText("保存", selectedRange: NSRange(location: 2, length: 0), replacementRange: NSRange(location: NSNotFound, length: 0))
+    var replacement = pane("replacement\n"); replacement.compose.viewport.epoch = 8
+    peer.show(replacement)
+    try await eventually { peer.lastApplied >= 2 }
+    XCTAssertFalse(grid.hasMarkedText()); XCTAssertTrue(peer.inputs.isEmpty)
+    XCTAssertEqual(editor.uninsertedText, ["保存"])
+    XCTAssertEqual(grid.focusedCompose?.pane.compose.text, "replacement\n")
+  }
+
+  @MainActor
   func testLargePrimarySelectionCanBeReplacedBeyondTheBoundedTextContext() async throws {
     let prefix = String(repeating: "文", count: 4000), source = prefix + "Tail"
     var last = pane(source)

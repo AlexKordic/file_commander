@@ -17,6 +17,8 @@ final class FreshMenus: NSObject, NSMenuDelegate {
   var openSettings: (() -> Void)?
   /// Hides the editor and shows the files.
   var showFiles: (() -> Void)?
+  var hasUninsertedText: (() -> Bool)?
+  var copyUninsertedText: (() -> Void)?
   private var saved: NSMenu?
   private var installed: NSMenu?
   private var repairPending = false
@@ -151,6 +153,7 @@ final class FreshMenus: NSObject, NSMenuDelegate {
 
   @objc private func settings() { openSettings?() }
   @objc private func files() { showFiles?() }
+  @objc private func copyUninserted() { copyUninsertedText?() }
 
   // MARK: Fresh's items
 
@@ -201,6 +204,11 @@ final class FreshMenus: NSObject, NSMenuDelegate {
       }
     }
     while menu.items.last?.isSeparatorItem == true { menu.removeItem(at: menu.items.count - 1) }
+    if path.count == 1, items.contains(where: { if case .action(let action)? = $0.item { return action.action == "copy" }; return false }),
+       hasUninsertedText?() == true {
+      menu.addItem(.separator())
+      menu.addItem(item("Copy Uninserted Text", key: "", action: #selector(copyUninserted)))
+    }
   }
 
   @objc private func choose(_ sender: NSMenuItem) {
