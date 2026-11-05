@@ -31,6 +31,7 @@ final class NativeEditor: NSObject, CellGridDelegate {
   private var menus: FreshMenus?
   private var clipboardSequence: Int?
   private var pendingShow = false
+  private var receivedHello = false
   private var menusWanted = false
   private var observers: [NSObjectProtocol] = []
   // Development gate until measured navigation, images and recovery pass the
@@ -54,7 +55,7 @@ final class NativeEditor: NSObject, CellGridDelegate {
   }
 
   /// Connected to the session's scene.
-  var connected: Bool { socket?.isOpen == true }
+  var connected: Bool { receivedHello && socket?.isOpen == true }
   /// Shown in the main window.
   private(set) var shown = false
   /// Called when the editor wants to be shown (true) or hidden (false).
@@ -89,6 +90,7 @@ final class NativeEditor: NSObject, CellGridDelegate {
     }
     Trace.write("editor: connecting to \(path)")
     disconnect()
+    hide()
     let socket = SceneSocket(path: path)
     socket.onMessage = { [weak self, weak socket] message in
       guard let self, let socket, self.socket === socket else { return }
@@ -114,7 +116,6 @@ final class NativeEditor: NSObject, CellGridDelegate {
           Trace.write("editor: connected")
           guard let self, self.socket === socket else { return }
           self.grid?.resendSize()
-          if self.pendingShow { self.show() }
         }
       } catch {
         await MainActor.run { [weak self] in
@@ -129,6 +130,7 @@ final class NativeEditor: NSObject, CellGridDelegate {
   }
 
   func show() {
+    guard receivedHello else { pendingShow = true; return }
     pendingShow = false
     grid?.showingEvent = NSApp.currentEvent.flatMap { $0.type == .keyDown ? $0.timestamp : nil }
     shown = true
@@ -170,6 +172,7 @@ final class NativeEditor: NSObject, CellGridDelegate {
     composeImages.reset()
     socket?.close()
     socket = nil
+    receivedHello = false
     composeQueue.removeAll()
     pendingComposeID = nil
     pendingComposePane = nil
@@ -184,6 +187,7 @@ final class NativeEditor: NSObject, CellGridDelegate {
   private func connectionEnded(_ reason: String?) {
     composeImages.reset()
     socket = nil
+    receivedHello = false
     hide()
     if let reason { Trace.write("editor connection ended: \(reason)") }
   }
@@ -222,7 +226,9 @@ final class NativeEditor: NSObject, CellGridDelegate {
 
   private func received(_ message: SceneMessage) {
     let started = ProcessInfo.processInfo.systemUptime
+    if message.isHello { receivedHello = true }
     store.apply(message)
+    if message.isHello, pendingShow { show() }
     composeImages.receive(message.frame.composeAssets)
     if benchFrameDelay > 0 { Thread.sleep(forTimeInterval: benchFrameDelay) }
     // Fresh sends only a couple of frames ahead of what was applied, so a slow
@@ -356,6 +362,7 @@ final class NativeEditor: NSObject, CellGridDelegate {
   func grid(_ grid: CellGridView, send input: SceneInput) { send(input) }
 
   func grid(_ grid: CellGridView, point: CGPoint, in pane: ComposePresentation, extend: Bool, count: Int) {
+    guard receivedHello else { return }
     composeQueue.append(.pointer(pane.identity, point, extend: extend, count: count))
     pumpComposeInput()
   }
@@ -409,6 +416,11 @@ final class NativeEditor: NSObject, CellGridDelegate {
   }
 
   func send(_ input: SceneInput) {
+    switch input {
+    case .key, .mouse, .paste, .action, .widget, .settingsClick, .kbEditClick:
+      guard receivedHello else { return }
+    default: break
+    }
     guard richCompose else { socket?.send(input); return }
     // A modal that appeared while navigation awaited geometry must remain
     // usable. Its ordinary input does not replace the deferred document action.
@@ -431,7 +443,7 @@ final class NativeEditor: NSObject, CellGridDelegate {
   /// Send one event, wait for its scene/reply, then bind the next event to the
   /// resulting source map. A stale event keeps its id and is measured again.
   private func pumpComposeInput() {
-    guard let socket, socket.isOpen, !composeInFlight, let queued = composeQueue.first else { return }
+    guard receivedHello, let socket, socket.isOpen, !composeInFlight, let queued = composeQueue.first else { return }
     if pendingComposeID == nil {
       nextComposeID += 1
       pendingComposeID = nextComposeID
