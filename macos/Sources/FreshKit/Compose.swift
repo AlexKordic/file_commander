@@ -120,6 +120,65 @@ public struct ComposeProjection {
     }
     return affinity == .upstream ? positions.min() : positions.max()
   }
+
+  public struct Object {
+    public let source: Range<Int>
+    public let display: Range<Int>
+  }
+
+  /// Substitute presentation objects without changing the source map. An
+  /// existing atomic replacement cannot be split at an invented boundary.
+  public func replacingObjects(_ ranges: [Range<Int>]) -> (projection: Self, objects: [Object])? {
+    let ordered = ranges.sorted { $0.lowerBound < $1.lowerBound }
+    guard !ordered.isEmpty else { return (self, []) }
+    let bytes = Array(text.utf8)
+    var result = "", mapped: [Segment] = [], objects: [Object] = []
+    func append(_ source: Range<Int>, _ display: Range<Int>, _ kind: Kind) -> Bool {
+      guard boundaries.contains(display.lowerBound), boundaries.contains(display.upperBound) else { return false }
+      let start = result.utf8.count
+      result += String(decoding: bytes[display], as: UTF8.self)
+      mapped.append(.init(source: source, display: start..<result.utf8.count, kind: kind))
+      return true
+    }
+    func gap(_ range: Range<Int>) -> Bool {
+      for segment in segments {
+        if segment.kind == .insertion {
+          let at = segment.source.lowerBound
+          if (range.contains(at) || at == source.upperBound && range.upperBound == at),
+             !ordered.contains(where: { at >= $0.lowerBound && at <= $0.upperBound }),
+             !append(segment.source, segment.display, .insertion) { return false }
+          continue
+        }
+        let from = max(range.lowerBound, segment.source.lowerBound), to = min(range.upperBound, segment.source.upperBound)
+        guard from < to else { continue }
+        switch segment.kind {
+        case .copy:
+          let a = segment.display.lowerBound + from - segment.source.lowerBound
+          if !append(from..<to, a..<(a + to - from), .copy) { return false }
+        case .hidden:
+          if !append(from..<to, segment.display, .hidden) { return false }
+        case .replacement:
+          guard from == segment.source.lowerBound, to == segment.source.upperBound,
+                append(from..<to, segment.display, .replacement) else { return false }
+        case .insertion: break
+        }
+      }
+      return true
+    }
+    var from = source.lowerBound
+    for range in ordered {
+      guard !range.isEmpty, range.lowerBound >= from, range.upperBound <= source.upperBound,
+            gap(from..<range.lowerBound) else { return nil }
+      let start = result.utf8.count
+      result += "\u{fffc}"
+      let display = start..<result.utf8.count
+      mapped.append(.init(source: range, display: display, kind: .replacement))
+      objects.append(.init(source: range, display: display))
+      from = range.upperBound
+    }
+    guard gap(from..<source.upperBound), let projection = Self(source: source, text: result, segments: mapped) else { return nil }
+    return (projection, objects)
+  }
 }
 
 /// Measured Compose text with one geometry shared by painting and hit testing.
@@ -128,7 +187,26 @@ public final class ComposeTextLayout {
   public struct Hit {
     public var source: Int
     public var affinity: ComposeProjection.Affinity
+    public var attachment: Range<Int>? = nil
   }
+
+  public struct Attachment {
+    public let source: Range<Int>
+    public let display: Range<Int>
+    public let size: CGSize
+    public init(source: Range<Int>, display: Range<Int>, size: CGSize) {
+      self.source = source; self.display = display; self.size = size
+    }
+  }
+  public struct PlacedAttachment {
+    public let attachment: Attachment
+    public let rect: CGRect
+  }
+  private final class Metrics {
+    let size: CGSize
+    init(_ size: CGSize) { self.size = size }
+  }
+  static let attachmentKey = NSAttributedString.Key("fc.compose.attachment")
   public struct FontRun {
     public var display: Range<Int>
     public var font: CTFont
@@ -153,6 +231,7 @@ public final class ComposeTextLayout {
   public let projection: ComposeProjection
   public let fragments: [Fragment]
   public let size: CGSize
+  public let attachments: [PlacedAttachment]
   private let utf16ToByte: [Int: Int]
   private let byteToUTF16: [Int: Int]
   private let string: NSString
@@ -160,7 +239,7 @@ public final class ComposeTextLayout {
   /// Width and vertical geometry are in points. No rounding to terminal cells
   /// takes place. Invalid font ranges fail instead of quietly mis-styling text.
   public init?(projection: ComposeProjection, font: CTFont, width: CGFloat,
-               lineSpacing: CGFloat = 3, fonts: [FontRun] = []) {
+               lineSpacing: CGFloat = 3, fonts: [FontRun] = [], attachments: [Attachment] = []) {
     guard width.isFinite, width > 0, lineSpacing.isFinite, lineSpacing >= 0 else { return nil }
     let string = projection.text as NSString
     var utf16ToByte = [0: 0]
@@ -180,10 +259,32 @@ public final class ComposeTextLayout {
       attributed.addAttribute(NSAttributedString.Key(kCTFontAttributeName as String), value: run.font,
                               range: NSRange(location: start, length: end - start))
     }
+    for (index, attachment) in attachments.enumerated() {
+      guard attachment.size.width.isFinite, attachment.size.height.isFinite,
+            attachment.size.width > 0, attachment.size.height > 0,
+            let start = byteToUTF16[attachment.display.lowerBound], let end = byteToUTF16[attachment.display.upperBound],
+            end - start == 1, string.character(at: start) == 0xfffc else { return nil }
+      let metrics = Unmanaged.passRetained(Metrics(attachment.size)).toOpaque()
+      var callbacks = CTRunDelegateCallbacks(version: kCTRunDelegateCurrentVersion,
+        dealloc: { Unmanaged<Metrics>.fromOpaque($0).release() },
+        getAscent: { Unmanaged<Metrics>.fromOpaque($0).takeUnretainedValue().size.height },
+        getDescent: { _ in 0 },
+        getWidth: { Unmanaged<Metrics>.fromOpaque($0).takeUnretainedValue().size.width })
+      guard let delegate = CTRunDelegateCreate(&callbacks, metrics) else {
+        Unmanaged<Metrics>.fromOpaque(metrics).release(); return nil
+      }
+      attributed.addAttributes([
+        NSAttributedString.Key(kCTRunDelegateAttributeName as String): delegate,
+        Self.attachmentKey: index,
+        NSAttributedString.Key(kCTForegroundColorFromContextAttributeName as String): false,
+        NSAttributedString.Key(kCTForegroundColorAttributeName as String): CGColor(gray: 0, alpha: 0),
+      ], range: NSRange(location: start, length: 1))
+    }
     let typesetter = CTTypesetterCreateWithAttributedString(attributed)
     var lines: [Fragment] = []
     var from = 0
     var top: CGFloat = 0
+    var placed: [PlacedAttachment] = []
     let baseHeight = CTFontGetAscent(font) + CTFontGetDescent(font) + CTFontGetLeading(font)
     func append(_ range: NSRange) {
       let line = CTTypesetterCreateLine(typesetter, CFRange(location: range.location, length: range.length))
@@ -204,6 +305,15 @@ public final class ComposeTextLayout {
       lines.append(Fragment(line: line, range: range,
         rect: CGRect(x: 0, y: top, width: width, height: height),
         baseline: top + ascent, contentEnd: contentEnd))
+      for run in CTLineGetGlyphRuns(line) as! [CTRun] {
+        let attributes = CTRunGetAttributes(run) as NSDictionary
+        guard let index = attributes[Self.attachmentKey] as? Int, attachments.indices.contains(index) else { continue }
+        var position = CGPoint.zero
+        CTRunGetPositions(run, CFRange(location: 0, length: 1), &position)
+        let attachment = attachments[index]
+        placed.append(.init(attachment: attachment,
+          rect: CGRect(x: position.x, y: top + ascent - attachment.size.height, width: attachment.size.width, height: attachment.size.height)))
+      }
       top += height
     }
     while from < string.length {
@@ -228,11 +338,13 @@ public final class ComposeTextLayout {
     self.utf16ToByte = utf16ToByte
     self.byteToUTF16 = byteToUTF16
     self.string = string
+    self.attachments = placed
   }
 
   /// A hit returns a source-byte caret, snapping to a complete grapheme. It
   /// never returns the middle of a surrogate pair, CRLF, or composed character.
   public func sourcePosition(at point: CGPoint, affinity: ComposeProjection.Affinity = .downstream) -> Int? {
+    if let object = attachmentHit(at: point) { return object.source }
     guard let (_, boundary) = hitIndex(at: point), let byte = utf16ToByte[boundary] else { return nil }
     return projection.sourcePosition(at: byte, affinity: affinity)
   }
@@ -240,10 +352,18 @@ public final class ComposeTextLayout {
   /// Preserve which side of a wrapped line was clicked. Source bytes alone
   /// cannot distinguish a line's end from the following line's beginning.
   public func hit(at point: CGPoint) -> Hit? {
+    if let object = attachmentHit(at: point) { return object }
     guard let (fragment, boundary) = hitIndex(at: point), let byte = utf16ToByte[boundary] else { return nil }
     let affinity: ComposeProjection.Affinity = boundary == fragment.contentEnd && boundary > fragment.range.location ? .upstream : .downstream
     guard let source = projection.sourcePosition(at: byte, affinity: affinity) else { return nil }
     return Hit(source: source, affinity: affinity)
+  }
+
+  private func attachmentHit(at point: CGPoint) -> Hit? {
+    guard let placed = attachments.first(where: { $0.rect.contains(point) }) else { return nil }
+    let range = placed.attachment.source
+    let before = point.x < placed.rect.midX
+    return Hit(source: before ? range.lowerBound : range.upperBound, affinity: before ? .downstream : .upstream, attachment: range)
   }
 
   private func hitIndex(at point: CGPoint) -> (Fragment, Int)? {

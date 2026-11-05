@@ -50,6 +50,7 @@ final class CellGridView: NSView, @preconcurrency NSTextInputClient {
   private var scrollRemainder: CGFloat = 0
   private var horizontalRemainder: CGFloat = 0
   private(set) var composePanes: [UInt64: ComposePresentation] = [:]
+  weak var composeImageController: ComposeImageController?
   private var composeDrag: UInt64?
   private var composeCaretIdentity: ComposePresentation.Identity?
   private var composeCaretRevision: UInt64 = 0
@@ -151,11 +152,33 @@ final class CellGridView: NSView, @preconcurrency NSTextInputClient {
   private func rebuildCompose() {
     let previous = composePanes
     composePanes = Dictionary(uniqueKeysWithValues: store.panes.compactMap { pane in
-      ComposePresentation(pane: pane, window: UInt64(store.windowID),
+      let scope = WireComposeScope.with { $0.windowID = UInt64(store.windowID); $0.buffer = pane.buffer }
+      let images = Dictionary(uniqueKeysWithValues: pane.compose.images.map { image in
+        (image.start, composeImageController?.state(scope: scope, image: image,
+          authority: pane.compose.assetAuthority, document: pane.compose.assetDocument) ?? .loading)
+      })
+      return ComposePresentation(pane: pane, window: UInt64(store.windowID),
         cell: CGSize(width: cellWidth, height: cellHeight), body: bodyFont, monospace: monoFont,
         reuse: previous[pane.leaf], caretStates: composeCaretIdentity == .init(window: UInt64(store.windowID), leaf: pane.leaf, buffer: pane.buffer)
-          && composeCaretRevision == pane.compose.bufferRevision ? composeCarets : [:]).map { (pane.leaf, $0) }
+          && composeCaretRevision == pane.compose.bufferRevision ? composeCarets : [:], images: images).map { (pane.leaf, $0) }
     })
+  }
+
+  func refreshComposeImages() { rebuildCompose(); needsDisplay = true }
+
+  func composeImageDemands() -> [ComposeImageController.Demand] {
+    let scale = window?.backingScaleFactor ?? 2
+    return composePanes.values.flatMap { pane in
+      let near = pane.bounds.insetBy(dx: 0, dy: -pane.bounds.height / 2)
+      return pane.layout.text.attachments.compactMap { placed -> (CGFloat, ComposeImageController.Demand)? in
+        let rect = placed.rect.offsetBy(dx: pane.origin.x, dy: pane.origin.y)
+        guard rect.intersects(near), let image = pane.pane.compose.images.first(where: { $0.start == UInt64(placed.attachment.source.lowerBound) }) else { return nil }
+        let maximum = image.block ? max(min(760, pane.bounds.width - 32), 480) : CTFontGetSize(pane.body) * 8
+        return (abs(rect.midY - pane.bounds.midY), .init(scope: pane.scope, image: image,
+          authority: pane.pane.compose.assetAuthority, document: pane.pane.compose.assetDocument,
+          maximumDimension: Int(ceil(maximum * scale))))
+      }
+    }.sorted { $0.0 < $1.0 }.map(\.1)
   }
 
   func applyComposeCarets(_ states: [WireComposeCaret], identity: ComposePresentation.Identity?) {
@@ -338,7 +361,7 @@ final class CellGridView: NSView, @preconcurrency NSTextInputClient {
   override func accessibilityRole() -> NSAccessibility.Role? { .textArea }
   override func accessibilityRoleDescription() -> String? { "editor" }
   override func accessibilityLabel() -> String? { title }
-  override func accessibilityValue() -> Any? { focusedCompose?.pane.compose.text ?? store.lines.joined(separator: "\n") }
+  override func accessibilityValue() -> Any? { focusedCompose?.layout.text.projection.text ?? store.lines.joined(separator: "\n") }
 
   override func accessibilitySelectedTextRange() -> NSRange {
     if let compose = focusedCompose { return compose.selectedRange }

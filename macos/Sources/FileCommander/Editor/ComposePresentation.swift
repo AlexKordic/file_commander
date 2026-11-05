@@ -21,14 +21,14 @@ final class ComposePresentation {
   private let styleRevision: UInt64
 
   init?(pane: WirePane, window: UInt64, cell: CGSize, body: NSFont, monospace: NSFont, reuse: ComposePresentation? = nil,
-        caretStates: [UInt64: WireComposeCaret] = [:]) {
+        caretStates: [UInt64: WireComposeCaret] = [:], images: [UInt64: ComposeImageState] = [:]) {
     guard pane.hasCompose, pane.hasBuffer else { return nil }
     let rect = pane.content
     let bounds = CGRect(x: CGFloat(rect.x) * cell.width, y: CGFloat(rect.y) * cell.height,
                         width: CGFloat(rect.w) * cell.width, height: CGFloat(rect.h) * cell.height)
     let width = min(760, bounds.width - 32)
     guard width > 0, let layout = ComposePaneLayout(pane: pane.compose, body: body as CTFont,
-      monospace: monospace as CTFont, width: width, reuse: reuse?.layout) else { return nil }
+      monospace: monospace as CTFont, width: width, images: images, reuse: reuse?.layout) else { return nil }
     self.pane = pane
     self.layout = layout
     self.bounds = bounds
@@ -42,7 +42,17 @@ final class ComposePresentation {
     if let reuse, reuse.layout.text === layout.text, reuse.bounds.height == bounds.height { navigation = reuse.navigation }
     identity = .init(window: window, leaf: pane.leaf, buffer: pane.buffer)
     let top = Int(exactly: pane.compose.topByte).flatMap { layout.text.caret(for: $0)?.minY } ?? 0
-    origin = CGPoint(x: bounds.midX - width / 2, y: bounds.minY + 12 - top)
+    var y = bounds.minY + 12 - top
+    if let reuse, reuse.identity == identity,
+       reuse.pane.compose.bufferRevision == pane.compose.bufferRevision,
+       reuse.pane.compose.topByte == pane.compose.topByte,
+       reuse.pane.compose.assetDocument == pane.compose.assetDocument,
+       let anchor = reuse.layout.text.hit(at: CGPoint(x: 0, y: max(0, reuse.bounds.minY + 12 - reuse.origin.y))),
+       let before = reuse.layout.text.caret(for: anchor.source, affinity: anchor.affinity),
+       let after = layout.text.caret(for: anchor.source, affinity: anchor.affinity) {
+      y = bounds.minY + before.minY + reuse.origin.y - reuse.bounds.minY - after.minY
+    }
+    origin = CGPoint(x: bounds.midX - width / 2, y: y)
   }
 
   var scope: WireComposeScope {
@@ -99,7 +109,7 @@ final class ComposePresentation {
           let anchor = Int(exactly: cursor.hasAnchor ? cursor.anchor : cursor.position),
           let a = layout.text.projection.displayPosition(for: min(position, anchor)),
           let b = layout.text.projection.displayPosition(for: max(position, anchor)) else { return NSRange(location: 0, length: 0) }
-    let bytes = Array(pane.compose.text.utf8)
+    let bytes = Array(layout.text.projection.text.utf8)
     let start = String(decoding: bytes[..<a], as: UTF8.self).utf16.count
     let end = String(decoding: bytes[..<b], as: UTF8.self).utf16.count
     return NSRange(location: start, length: max(0, end - start))

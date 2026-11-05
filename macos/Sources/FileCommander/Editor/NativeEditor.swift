@@ -49,6 +49,9 @@ final class NativeEditor: NSObject, CellGridDelegate {
   private var pendingComposeY: CGFloat?
   private var pendingComposeRegion: UInt64?
   private var composeRegionSent = false
+  private lazy var composeImages = ComposeImageController { [weak self] request in
+    self?.socket?.send(.composeAsset(request))
+  }
 
   /// Connected to the session's scene.
   var connected: Bool { socket?.isOpen == true }
@@ -61,6 +64,10 @@ final class NativeEditor: NSObject, CellGridDelegate {
 
   override init() {
     super.init()
+    composeImages.onChange = { [weak self] in
+      self?.grid?.refreshComposeImages()
+      self?.updateImageDemands()
+    }
     store.onChange = { [weak self] change in self?.sceneChanged(change) }
     let center = NotificationCenter.default
     for name in [NSWindow.didBecomeKeyNotification, NSWindow.didResignKeyNotification] {
@@ -125,6 +132,7 @@ final class NativeEditor: NSObject, CellGridDelegate {
     pendingShow = false
     grid?.showingEvent = NSApp.currentEvent.flatMap { $0.type == .keyDown ? $0.timestamp : nil }
     shown = true
+    updateImageDemands()
     onPresent?(true)
     updateMenus()
     Trace.write("editor: shown")
@@ -146,6 +154,7 @@ final class NativeEditor: NSObject, CellGridDelegate {
   private func hide() {
     guard shown else { return }
     shown = false
+    composeImages.update([])
     onPresent?(false)
     updateMenus()
   }
@@ -158,6 +167,7 @@ final class NativeEditor: NSObject, CellGridDelegate {
   }
 
   private func disconnect() {
+    composeImages.reset()
     socket?.close()
     socket = nil
     composeQueue.removeAll()
@@ -172,6 +182,7 @@ final class NativeEditor: NSObject, CellGridDelegate {
   }
 
   private func connectionEnded(_ reason: String?) {
+    composeImages.reset()
     socket = nil
     hide()
     if let reason { Trace.write("editor connection ended: \(reason)") }
@@ -184,6 +195,7 @@ final class NativeEditor: NSObject, CellGridDelegate {
     if let view { return view }
     let view = EditorHostView(store: store) { [weak self] input in self?.sendFromPanel(input) }
     view.grid.delegate = self
+    view.grid.composeImageController = composeImages
     self.view = view
     let menus = FreshMenus(store: store) { [weak self] action, argsJson in self?.send(.action(name: action, argsJson: argsJson)) }
     menus.openSettings = { [weak self] in self?.app?.openSettings(tab: .editor) }
@@ -211,6 +223,7 @@ final class NativeEditor: NSObject, CellGridDelegate {
   private func received(_ message: SceneMessage) {
     let started = ProcessInfo.processInfo.systemUptime
     store.apply(message)
+    composeImages.receive(message.frame.composeAssets)
     if benchFrameDelay > 0 { Thread.sleep(forTimeInterval: benchFrameDelay) }
     // Fresh sends only a couple of frames ahead of what was applied, so a slow
     // moment here gets the newest scene next rather than every one in between.
@@ -324,6 +337,11 @@ final class NativeEditor: NSObject, CellGridDelegate {
     } else if change.isHello && clipboardSequence == nil {
       clipboardSequence = store.clipboard?.sequence ?? 0
     }
+    updateImageDemands()
+  }
+
+  private func updateImageDemands() {
+    composeImages.update(shown && richCompose ? grid?.composeImageDemands() ?? [] : [])
   }
 
   /// The active tab of the focused pane, for the window title.
@@ -456,6 +474,10 @@ final class NativeEditor: NSObject, CellGridDelegate {
             let hit = pane.hit(at: location) else { return }
       input.scope = pane.scope
       input.position = UInt64(hit.source)
+      if let attachment = hit.attachment, !extend {
+        input.attachmentStart = UInt64(attachment.lowerBound)
+        input.position = UInt64(attachment.upperBound)
+      }
       input.affinity = hit.affinity == .upstream ? 1 : 0
       input.extend = extend
       input.clickCount = UInt32(clamping: count)
