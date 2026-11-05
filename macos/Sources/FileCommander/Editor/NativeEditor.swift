@@ -258,6 +258,10 @@ final class NativeEditor: NSObject, CellGridDelegate {
     grid.defaultBackground = theme.background.map(NSColor.init(scene:)) ?? app.theme.nsColor("editor.background")
     grid.defaultForeground = theme.foreground.map(NSColor.init(scene:)) ?? app.theme.nsColor("editor.text")
     grid.caretColor = theme.accent.map(NSColor.init(scene:)) ?? .controlAccentColor
+    grid.composePalette = .init(link: grid.caretColor.cgColor,
+      quote: (theme.muted.map(NSColor.init(scene:)) ?? grid.defaultForeground.withAlphaComponent(0.75)).cgColor,
+      code: grid.defaultForeground.cgColor, codeBackground: grid.defaultForeground.withAlphaComponent(0.07).cgColor)
+    grid.setComposePreferences(app.preferences.compose, zoom: app.preferences.zoom)
     view?.applyLook(dark: theme.isDark)
     chrome?.themeChanged()
     grid.needsDisplay = true

@@ -102,6 +102,28 @@ final class ComposeImageTests: XCTestCase {
     XCTAssertLessThanOrEqual(narrow.text.attachments[0].rect.maxX, 100)
   }
 
+  func testBlockImageAndPlaceholderFitTheIndentedQuoteAndListMeasure() throws {
+    let source = "![pic](x.png)\n"
+    var input = pane(source)
+    let annotation = image(source, "![pic](x.png)", block: true)
+    input.images = [annotation]
+    input.spans = [9, 10, 11].map { role in .with { $0.end = input.sourceEnd; $0.role = UInt32(role) } }
+    let font = CTFontCreateWithName("Helvetica" as CFString, 16, nil)
+    let asset = try ComposeImageAsset.decode(encode(bitmap(600, 300)))
+    for state: ComposeImageState in [.loading, .ready(asset), .failed("Unavailable")] {
+      let layout = try XCTUnwrap(ComposePaneLayout(pane: input, body: font, monospace: font, width: 260,
+        images: [annotation.start: state]))
+      let placed = try XCTUnwrap(layout.text.attachments.first)
+      XCTAssertEqual(placed.rect.minX, 48, accuracy: 0.001)
+      XCTAssertLessThanOrEqual(placed.rect.maxX, 260)
+      let hit = try XCTUnwrap(layout.text.hit(at: CGPoint(x: placed.rect.maxX - 1, y: placed.rect.midY)))
+      XCTAssertEqual(hit.attachment, Int(annotation.start)..<Int(annotation.end))
+      XCTAssertEqual(hit.source, Int(annotation.end))
+      let caret = try XCTUnwrap(layout.text.caret(for: Int(annotation.end), affinity: .upstream))
+      XCTAssertEqual(caret.minX, placed.rect.maxX, accuracy: 0.001)
+    }
+  }
+
   func testImagesDrawInsideTextAndAsBlocksThroughTheNativePath() throws {
     let source = "Compose images\n\nBefore ![inline](x.png) after text.\n\n![block](x.png)\n\nEnd."
     var input = pane(source)

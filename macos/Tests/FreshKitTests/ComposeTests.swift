@@ -85,8 +85,109 @@ final class ComposeTests: XCTestCase {
     }
   }
 
+  func testParagraphSpacingAndNestedIndentsShareCaretHitSelectionAndNavigationGeometry() throws {
+    let quote = "Quoted café 👩🏽‍💻 words that wrap across the available width and remain editable.\r\n"
+    let source = quote + "\r\nNested item with more words to wrap.\r\n"
+    var pane = wirePane(source)
+    pane.spans = [
+      .with { $0.end = UInt64(quote.utf8.count); $0.role = 9 },
+      .with { $0.end = UInt64(quote.utf8.count); $0.role = 11 },
+      .with { $0.start = UInt64(quote.utf8.count + 2); $0.end = pane.sourceEnd; $0.role = 10 },
+      .with { $0.start = UInt64(quote.utf8.count + 2); $0.end = pane.sourceEnd; $0.role = 10 },
+      .with { $0.start = UInt64(quote.utf8.count + 2); $0.end = pane.sourceEnd; $0.role = 13 },
+    ]
+    let mono = CTFontCreateWithName("Menlo" as CFString, 16, nil)
+    let base = try XCTUnwrap(ComposePaneLayout(pane: pane, body: font(16), monospace: mono, width: 190,
+      typography: .init(paragraphSpacing: 0)))
+    let spaced = try XCTUnwrap(ComposePaneLayout(pane: pane, body: font(16), monospace: mono, width: 190,
+      typography: .init(paragraphSpacing: 14)))
+    XCTAssertEqual(spaced.text.size.height - base.text.size.height, 14, accuracy: 0.001,
+      "paragraph spacing applies once at the block edge, not at every soft wrap")
+    XCTAssertEqual(spaced.text.fragments[0].rect.minX, 24)
+    let nested = try XCTUnwrap(spaced.text.caret(for: quote.utf8.count + 2))
+    XCTAssertEqual(nested.minX, 48)
+    let café = source[..<source.range(of: "café")!.lowerBound].utf8.count
+    let caret = try XCTUnwrap(spaced.text.caret(for: café))
+    XCTAssertEqual(spaced.text.sourcePosition(at: CGPoint(x: caret.minX + 0.01, y: caret.midY)), café)
+    XCTAssertEqual(spaced.text.selectionRects(for: 0..<quote.utf8.count).first?.minX, 24)
+    let navigation = try XCTUnwrap(spaced.text.navigation(id: 8, pageHeight: 500, documentLength: pane.documentLen, positions: [0]))
+    for line in navigation.lines {
+      for stop in line.stops {
+        let caret = try XCTUnwrap(spaced.text.caret(for: Int(stop.source), affinity: stop.affinity == 1 ? .upstream : .downstream))
+        XCTAssertEqual(Double(caret.minX), stop.x, accuracy: 0.001)
+      }
+    }
+    XCTAssertEqual(spaced.text.projection.text, source)
+  }
+
+  func testAllHeadingScalesAndSpacingInvalidateLayoutWithoutChangingSource() throws {
+    let source = (1...6).map { "Heading \($0)\r\n" }.joined()
+    var pane = wirePane(source), offset: UInt64 = 0
+    pane.spans = (1...6).map { level in
+      let length = UInt64("Heading \(level)\r\n".utf8.count)
+      defer { offset += length }
+      return .with { $0.start = offset; $0.end = offset + length; $0.role = UInt32(level) }
+    }
+    let mono = CTFontCreateWithName("Menlo" as CFString, 16, nil)
+    let original = try XCTUnwrap(ComposePaneLayout(pane: pane, body: font(16), monospace: mono, width: 400))
+    let scales: [CGFloat] = [2.4, 2, 1.8, 1.6, 1.4, 1.2]
+    let changed = try XCTUnwrap(ComposePaneLayout(pane: pane, body: font(16), monospace: mono, width: 400,
+      typography: .init(headingScales: scales, lineSpacing: 7), reuse: original))
+    XCTAssertFalse(original.text === changed.text)
+    for (fragment, scale) in zip(changed.text.fragments, scales) {
+      let run = try XCTUnwrap((CTLineGetGlyphRuns(fragment.line) as! [CTRun]).first)
+      let font = (CTRunGetAttributes(run) as NSDictionary)[kCTFontAttributeName] as! CTFont
+      XCTAssertEqual(CTFontGetSize(font), 16 * scale, accuracy: 0.001)
+      XCTAssertTrue(CTFontGetSymbolicTraits(font).contains(.traitBold))
+    }
+    XCTAssertEqual(changed.text.projection.text, source)
+    XCTAssertNil(ComposePaneLayout(pane: pane, body: font(16), monospace: mono, width: 400,
+      typography: .init(headingScales: [1])))
+  }
+
+  func testNativeDrawPaintsLinkColorAndTextDecorationsInLightAndDarkAppearances() throws {
+    let source = "Linked words and struck words\n"
+    var pane = wirePane(source)
+    pane.spans = [.with { $0.end = 12; $0.flags = 4 | 16 }, .with { $0.start = 17; $0.end = 29; $0.flags = 8 }]
+    let layout = try XCTUnwrap(ComposePaneLayout(pane: pane, body: font(20), monospace: font(20), width: 360))
+    let link = CGColor(red: 0.1, green: 0.35, blue: 0.95, alpha: 1)
+    for dark in [false, true] {
+      let context = try XCTUnwrap(CGContext(data: nil, width: 400, height: 80, bitsPerComponent: 8,
+        bytesPerRow: 1600, space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
+      context.translateBy(x: 0, y: 80); context.scaleBy(x: 1, y: -1)
+      let foreground = CGColor(gray: dark ? 0.95 : 0.05, alpha: 1), background = CGColor(gray: dark ? 0.05 : 1, alpha: 1)
+      let bounds = CGRect(x: 0, y: 0, width: 400, height: 80)
+      layout.draw(in: context, origin: CGPoint(x: 12, y: 12), clip: bounds, dirty: bounds, foreground: foreground,
+        background: background, selection: foreground,
+        palette: .init(link: link, quote: foreground, code: foreground, codeBackground: background))
+      if let path = ProcessInfo.processInfo.environment["FC_COMPOSE_STYLE_PREVIEW"] {
+        let image = try XCTUnwrap(context.makeImage())
+        let destination = try XCTUnwrap(CGImageDestinationCreateWithURL(URL(fileURLWithPath: path + (dark ? "-dark.png" : "-light.png")) as CFURL,
+          "public.png" as CFString, 1, nil))
+        CGImageDestinationAddImage(destination, image, nil)
+        XCTAssertTrue(CGImageDestinationFinalize(destination))
+      }
+      let pixels = context.data!.assumingMemoryBound(to: UInt8.self)
+      let blue = (0..<(400 * 80)).filter { pixels[$0 * 4 + 2] > 180 && Int(pixels[$0 * 4 + 2]) > Int(pixels[$0 * 4]) + 50 }.count
+      XCTAssertGreaterThan(blue, 100, "link text and its underline use the theme color")
+      let fragment = layout.text.fragments[0]
+      let underline = Int(12 + fragment.baseline - CTFontGetUnderlinePosition(font(20)))
+      let strike = Int(12 + fragment.baseline - CTFontGetXHeight(font(20)) * 0.5)
+      func painted(at x: Int, y: Int) -> Bool {
+        let index = (y * 400 + x) * 4
+        return dark ? pixels[index] > 180 : pixels[index] < 80
+      }
+      XCTAssertTrue((underline...underline + 2).contains { y in
+        let index = (y * 400 + 25) * 4
+        return pixels[index + 2] > 180 && Int(pixels[index + 2]) > Int(pixels[index]) + 50
+      }, "the underline is painted below the baseline")
+      let struck = try XCTUnwrap(layout.text.caret(for: 17))
+      XCTAssertTrue((strike...strike + 2).contains { painted(at: Int(12 + struck.minX + 2), y: $0) }, "strikethrough is painted across the run")
+    }
+  }
+
   func testSemanticTypographyRendersThroughTheNativeDrawingPath() throws {
-    let source = "Compose typography\n\nProportional prose with bold and italic, café 👩🏽‍💻.\n\nA smaller heading\n\nlet answer = 42;\n"
+    let source = "Compose typography\n\nProportional prose with bold and italic, café 👩🏽‍💻.\n\nA smaller heading\n\nlet answer = 42;\n\nQuoted words with a link and removed text.\n\n• A list item with words that wrap across the page while preserving its source mapping.\n"
     var pane = wirePane(source)
     func span(_ text: String, role: UInt32 = 0, flags: UInt32 = 0) -> WireComposeSpan {
       let range = source.range(of: text)!
@@ -98,7 +199,12 @@ final class ComposeTests: XCTestCase {
       }
     }
     pane.spans = [span("Compose typography", role: 1), span("bold", flags: 1), span("italic", flags: 2),
-                  span("A smaller heading", role: 2), span("let answer = 42;", role: 7)]
+                  span("A smaller heading", role: 2), span("let answer = 42;", role: 7),
+                  span("Quoted words with a link and removed text.", role: 9),
+                  span("Quoted words with a link and removed text.", role: 11),
+                  span("a link", flags: 4 | 16), span("removed text", flags: 8),
+                  span("• A list item with words that wrap across the page while preserving its source mapping.", role: 10),
+                  span("• A list item with words that wrap across the page while preserving its source mapping.", role: 13)]
     let mono = CTFontCreateWithName("Menlo" as CFString, 16, nil)
     let layout = try XCTUnwrap(ComposePaneLayout(pane: pane, body: font(16), monospace: mono, width: 500))
     XCTAssertGreaterThan(layout.text.fragments[0].rect.height, 29)
@@ -118,7 +224,9 @@ final class ComposeTests: XCTestCase {
     let bounds = CGRect(x: 0, y: 0, width: width, height: height)
     layout.draw(in: context, origin: CGPoint(x: 24, y: 24), clip: bounds, dirty: bounds,
       foreground: CGColor(gray: 0.1, alpha: 1), background: CGColor(gray: 1, alpha: 1),
-      selection: CGColor(red: 0.7, green: 0.8, blue: 1, alpha: 1))
+      selection: CGColor(red: 0.7, green: 0.8, blue: 1, alpha: 1),
+      palette: .init(link: CGColor(red: 0.1, green: 0.35, blue: 0.9, alpha: 1), quote: CGColor(gray: 0.4, alpha: 1),
+        code: CGColor(gray: 0.15, alpha: 1), codeBackground: CGColor(gray: 0.95, alpha: 1)))
     let image = try XCTUnwrap(context.makeImage())
     let pixels = context.data!.assumingMemoryBound(to: UInt8.self)
     let ink = (0..<(width * 2 * height * 2)).filter { i in

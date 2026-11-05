@@ -204,6 +204,9 @@ through reflow, queued typing bound to its original buffer lifetime, terminal
 cancellation, modal input while a document command waits for geometry, and
 formatting readiness. Readiness checks cover holding the previous source map,
 waiting input, delayed caret reveal, and editable source fallback on failure.
+Typography checks cover profile persistence and font fallback, retaining the
+source reading anchor when fonts or spacing change, and invalidating obsolete
+navigation measurements.
 The tests create their own editor view and enable experimental rich Compose
 only for that instance. They do not attach to an existing Fresh session or
 open the installed app. To run the affected editor checks:
@@ -211,6 +214,24 @@ open the installed app. To run the affected editor checks:
 ```sh
 swift test --package-path macos --filter 'NativeEditorTests|FreshKitTests'
 ```
+
+The development mode `FC_NATIVE_RICH_COMPOSE=1` exposes **Settings › Editor ›
+Markdown Compose**. `ComposePreferences` stores body/code font families, body
+size, six heading scales, line and paragraph spacing, list/quote indentation,
+and page width under `compose` in `app_settings.json`. Missing fields retain
+defaults; numerical values are bounded, missing fonts fall back to system
+fonts, and code/table fonts must remain monospaced. Defaults are 16 pt body
+text, heading scales of 1.8/1.5/1.25/1.15/1.05/1, 3 pt additional line spacing,
+6 pt paragraph spacing, 24 pt indentation, and a 760 pt page measure. The
+app's zoom scales native Compose fonts and spacing as well.
+
+`ComposeTextLayout` measures indentation, block spacing, image attachments,
+and styled fonts together. Drawing, hit testing, selection and navigation use
+those fragments. Link colors, quote text/rules and code backgrounds follow
+Fresh's theme; underline and strikethrough are drawn from Fresh's semantic
+flags. The same rendering path produces the checked bitmap previews. These
+controls remain gated with rich Compose until interactive and release
+qualification is complete.
 
 `Tests/FreshKitTests/Fixtures/scene.tlv` comes from
 `macos/tools/record_scene.py`, which starts a throwaway Fresh session, connects

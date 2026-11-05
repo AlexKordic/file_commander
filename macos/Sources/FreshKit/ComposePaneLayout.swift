@@ -9,21 +9,22 @@ public final class ComposePaneLayout {
   public let text: ComposeTextLayout
   private let body, monospace: CTFont
   private let width: CGFloat
-  private let headingScales: [CGFloat]
+  private let typography: ComposeTypography
   private let images: [UInt64: ComposeImageState]
   private let imageSizes: [Int: CGSize]
 
   public init?(pane: WireComposePane, body: CTFont, monospace: CTFont, width: CGFloat,
-               headingScales: [CGFloat] = [1.8, 1.5, 1.25, 1.15, 1.05, 1],
+               typography: ComposeTypography = .init(),
                images: [UInt64: ComposeImageState] = [:], reuse: ComposePaneLayout? = nil) {
-    guard let baseProjection = ComposeProjection(pane), headingScales.count == 6,
-          headingScales.allSatisfy({ $0.isFinite && $0 > 0 }) else { return nil }
+    guard let baseProjection = ComposeProjection(pane), typography.isValid else { return nil }
     let rendered = pane.images.filter(\.rendered)
     var sourceRanges: [Range<Int>] = [], sizes: [Int: CGSize] = [:]
     for image in rendered {
       guard let start = Int(exactly: image.start), let end = Int(exactly: image.end), start < end else { return nil }
       sourceRanges.append(start..<end)
-      sizes[start] = (images[image.start] ?? .loading).size(body: CTFontGetSize(body), width: width, block: image.block)
+      let containers = pane.spans.filter { ($0.role == 9 || $0.role == 10) && $0.start <= image.start && image.start < $0.end }.count
+      let available = width - min(CGFloat(containers) * typography.indent, width * 0.6)
+      sizes[start] = (images[image.start] ?? .loading).size(body: CTFontGetSize(body), width: available, block: image.block)
     }
     let objects = baseProjection.replacingObjects(sourceRanges)
     let projection = objects?.projection ?? baseProjection
@@ -35,18 +36,18 @@ public final class ComposePaneLayout {
     self.body = body
     self.monospace = monospace
     self.width = width
-    self.headingScales = headingScales
+    self.typography = typography
     self.images = images
     self.imageSizes = sizes
     if let reuse, pane.projectionRevision == reuse.pane.projectionRevision,
        pane.text == reuse.pane.text, pane.segments == reuse.pane.segments,
        pane.spans == reuse.pane.spans, pane.images == reuse.pane.images, sizes == reuse.imageSizes,
-       width == reuse.width, headingScales == reuse.headingScales,
+       width == reuse.width, typography == reuse.typography,
        CFEqual(body, reuse.body), CFEqual(monospace, reuse.monospace) {
       text = reuse.text
       return
     }
-    struct Span { var range: Range<Int>; var role, flags: UInt32 }
+    struct Span { var source, range: Range<Int>; var role, flags: UInt32 }
     var spans: [Span] = []
     for span in pane.spans {
       guard let a = Int(exactly: span.start), let b = Int(exactly: span.end), a <= b else { return nil }
@@ -54,7 +55,7 @@ public final class ComposePaneLayout {
       guard from < to,
             let start = projection.displayPosition(for: from, affinity: .downstream),
             let end = projection.displayPosition(for: to, affinity: .upstream), start < end else { continue }
-      spans.append(Span(range: start..<end, role: span.role, flags: span.flags))
+      spans.append(Span(source: a..<b, range: start..<end, role: span.role, flags: span.flags))
     }
     let boundaries = Set([0, projection.text.utf8.count] + spans.flatMap { [$0.range.lowerBound, $0.range.upperBound] }).sorted()
     var fonts: [ComposeTextLayout.FontRun] = []
@@ -62,30 +63,69 @@ public final class ComposePaneLayout {
       let active = spans.filter { $0.range.contains(start) }
       let heading = active.map(\.role).filter { (1...6).contains($0) }.min()
       let flags = active.reduce(UInt32(0)) { $0 | $1.flags }
-      let mono = active.contains { $0.role == 7 || $0.role == 8 }
-      let pointSize = CTFontGetSize(body) * (heading.map { headingScales[Int($0) - 1] } ?? 1)
+      let mono = active.contains { $0.role == 7 || $0.role == 8 || $0.role == 12 }
+      let pointSize = CTFontGetSize(body) * (heading.map { typography.headingScales[Int($0) - 1] } ?? 1)
       let base = CTFontCreateCopyWithAttributes(mono ? monospace : body, pointSize, nil, nil)
       var traits: CTFontSymbolicTraits = []
       if heading != nil || flags & 1 != 0 { traits.insert(.traitBold) }
       if flags & 2 != 0 { traits.insert(.traitItalic) }
       let font = CTFontCreateCopyWithSymbolicTraits(base, pointSize, nil, traits, [.traitBold, .traitItalic]) ?? base
-      fonts.append(.init(display: start..<end, font: font))
+      let role: UInt32 = heading ?? (mono ? 7 : active.contains { $0.role == 9 } ? 9 : 0)
+      fonts.append(.init(display: start..<end, font: font, role: role, flags: flags))
     }
-    guard let layout = ComposeTextLayout(projection: projection, font: body, width: width, fonts: fonts, attachments: attachments) else { return nil }
+    let paragraphs = spans.filter { (1...6).contains($0.role) || [8, 11, 12, 13].contains($0.role) }.map { block in
+      let containers = spans.filter { ($0.role == 9 || $0.role == 10) && $0.range.contains(block.range.lowerBound) }.count
+      let heading = (1...6).contains(block.role)
+      let before = heading ? CTFontGetSize(body) * 0.45 : block.role == 12 ? typography.paragraphSpacing : 0
+      let after = block.role == 13 ? 0 : typography.paragraphSpacing
+      return ComposeTextLayout.ParagraphRun(display: block.range, indent: CGFloat(containers) * typography.indent,
+        before: block.source.lowerBound >= projection.source.lowerBound ? before : 0,
+        after: block.source.upperBound <= projection.source.upperBound ? after : 0)
+    }
+    guard let layout = ComposeTextLayout(projection: projection, font: body, width: width,
+      lineSpacing: typography.lineSpacing, fonts: fonts, attachments: attachments, paragraphs: paragraphs) else { return nil }
     text = layout
+  }
+
+  public struct Palette {
+    public var link, quote, code, codeBackground: CGColor
+    public init(link: CGColor, quote: CGColor, code: CGColor, codeBackground: CGColor) {
+      self.link = link; self.quote = quote; self.code = code; self.codeBackground = codeBackground
+    }
   }
 
   /// Draw in a context whose y axis points down, using the same line objects
   /// as hit testing and navigation. The native view and rendering tests share
   /// this path; no cell approximation or second text layout is involved.
   public func draw(in context: CGContext, origin: CGPoint, clip: CGRect, dirty: CGRect,
-                   foreground: CGColor, background: CGColor, selection: CGColor) {
+                   foreground: CGColor, background: CGColor, selection: CGColor, palette: Palette? = nil) {
     guard clip.intersects(dirty) else { return }
     context.saveGState()
     defer { context.restoreGState() }
     context.clip(to: clip)
     context.setFillColor(background)
     context.fill(clip)
+    let palette = palette ?? Palette(link: foreground, quote: foreground, code: foreground,
+      codeBackground: foreground.copy(alpha: 0.07) ?? foreground)
+    func runRect(_ run: CTRun, _ fragment: ComposeTextLayout.Fragment) -> CGRect {
+      let range = CTRunGetStringRange(run)
+      let a = CTLineGetOffsetForStringIndex(fragment.line, range.location, nil)
+      let b = CTLineGetOffsetForStringIndex(fragment.line, range.location + range.length, nil)
+      return CGRect(x: origin.x + fragment.rect.minX + min(a, b), y: origin.y + fragment.rect.minY,
+        width: max(1, abs(b - a)), height: fragment.rect.height)
+    }
+    // Code backgrounds precede selection, so selected source stays visible.
+    for fragment in text.fragments where fragment.rect.offsetBy(dx: origin.x, dy: origin.y).intersects(clip.intersection(dirty)) {
+      let runs = CTLineGetGlyphRuns(fragment.line) as! [CTRun]
+      if runs.contains(where: { (CTRunGetAttributes($0) as NSDictionary)[ComposeTextLayout.roleKey] as? UInt32 == 9 }) {
+        context.setFillColor(palette.quote.copy(alpha: 0.4) ?? palette.quote)
+        context.fill(CGRect(x: origin.x + fragment.rect.minX - 10, y: origin.y + fragment.rect.minY, width: 2, height: fragment.rect.height))
+      }
+      context.setFillColor(palette.codeBackground)
+      for run in runs where (CTRunGetAttributes(run) as NSDictionary)[ComposeTextLayout.roleKey] as? UInt32 == 7 {
+        context.fill(runRect(run, fragment))
+      }
+    }
     context.setFillColor(selection)
     for cursor in pane.cursors where cursor.hasAnchor {
       guard let a = Int(exactly: cursor.position), let b = Int(exactly: cursor.anchor) else { continue }
@@ -99,14 +139,29 @@ public final class ComposePaneLayout {
       let rect = fragment.rect.offsetBy(dx: origin.x, dy: origin.y)
       guard rect.intersects(clip), rect.intersects(dirty) else { continue }
       // Core Text can change the context's fill color while drawing a run.
-      // Skip the replacement glyph and restore the foreground before every
+      // Skip the replacement glyph and restore the run color before every
       // text run, including text following an attachment on the same line.
       for run in CTLineGetGlyphRuns(fragment.line) as! [CTRun] {
         let attributes = CTRunGetAttributes(run) as NSDictionary
         guard attributes[ComposeTextLayout.attachmentKey] == nil else { continue }
-        context.setFillColor(foreground)
-        context.textPosition = CGPoint(x: origin.x, y: origin.y + fragment.baseline)
+        let role = attributes[ComposeTextLayout.roleKey] as? UInt32 ?? 0
+        let flags = attributes[ComposeTextLayout.flagsKey] as? UInt32 ?? 0
+        let color = flags & 16 != 0 ? palette.link : role == 7 ? palette.code : role == 9 ? palette.quote : foreground
+        context.setFillColor(color)
+        context.textPosition = CGPoint(x: origin.x + fragment.rect.minX, y: origin.y + fragment.baseline)
         CTRunDraw(run, context, CFRange(location: 0, length: 0))
+        if flags & 12 != 0 {
+          let font = attributes[kCTFontAttributeName] as! CTFont
+          let rect = runRect(run, fragment)
+          context.setFillColor(color)
+          let thickness = max(1, CTFontGetUnderlineThickness(font))
+          if flags & 4 != 0 {
+            context.fill(CGRect(x: rect.minX, y: origin.y + fragment.baseline - CTFontGetUnderlinePosition(font), width: rect.width, height: thickness))
+          }
+          if flags & 8 != 0 {
+            context.fill(CGRect(x: rect.minX, y: origin.y + fragment.baseline - CTFontGetXHeight(font) * 0.5, width: rect.width, height: thickness))
+          }
+        }
       }
     }
     for placed in text.attachments {

@@ -21,23 +21,26 @@ final class ComposePresentation {
   private(set) var navigation: WireComposeLayout?
   private let monospace: CTFont
   private let styleRevision: UInt64
+  private let typography: ComposeTypography
 
-  init?(pane: WirePane, window: UInt64, cell: CGSize, body: NSFont, monospace: NSFont, reuse: ComposePresentation? = nil,
+  init?(pane: WirePane, window: UInt64, cell: CGSize, body: NSFont, monospace: NSFont,
+        typography: ComposeTypography = .init(), pageWidth: CGFloat = 760, reuse: ComposePresentation? = nil,
         caretStates: [UInt64: WireComposeCaret] = [:], images: [UInt64: ComposeImageState] = [:], viewport: WireComposeViewport? = nil) {
     guard pane.hasCompose, pane.hasBuffer else { return nil }
     let rect = pane.content
     let bounds = CGRect(x: CGFloat(rect.x) * cell.width, y: CGFloat(rect.y) * cell.height,
                         width: CGFloat(rect.w) * cell.width, height: CGFloat(rect.h) * cell.height)
-    let width = min(760, bounds.width - 32)
+    let width = min(pageWidth, bounds.width - 32)
     guard width > 0, let layout = ComposePaneLayout(pane: pane.compose, body: body as CTFont,
-      monospace: monospace as CTFont, width: width, images: images, reuse: reuse?.layout) else { return nil }
+      monospace: monospace as CTFont, width: width, typography: typography, images: images, reuse: reuse?.layout) else { return nil }
     self.pane = pane
     self.layout = layout
     self.bounds = bounds
     self.body = body as CTFont
     self.monospace = monospace as CTFont
+    self.typography = typography
     if let reuse, reuse.layout.text.size.width == layout.text.size.width, reuse.bounds.height == bounds.height,
-       CFEqual(reuse.body, body as CTFont), CFEqual(reuse.monospace, monospace as CTFont) {
+       CFEqual(reuse.body, body as CTFont), CFEqual(reuse.monospace, monospace as CTFont), reuse.typography == typography {
       styleRevision = reuse.styleRevision
     } else { styleRevision = UInt64.random(in: 1...UInt64.max) }
     self.caretStates = caretStates
@@ -125,8 +128,9 @@ final class ComposePresentation {
     return NSRange(location: start, length: max(0, end - start))
   }
 
-  func draw(in context: CGContext, dirty: CGRect, foreground: NSColor, background: NSColor, selection: NSColor) {
+  func draw(in context: CGContext, dirty: CGRect, foreground: NSColor, background: NSColor, selection: NSColor,
+            palette: ComposePaneLayout.Palette? = nil) {
     layout.draw(in: context, origin: origin, clip: bounds, dirty: dirty, foreground: foreground.cgColor,
-                background: background.cgColor, selection: selection.withAlphaComponent(0.4).cgColor)
+                background: background.cgColor, selection: selection.withAlphaComponent(0.4).cgColor, palette: palette)
   }
 }

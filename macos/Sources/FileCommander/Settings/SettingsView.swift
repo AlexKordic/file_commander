@@ -128,7 +128,7 @@ struct EditorSettings: View {
       Section {
         Text("Files open in Fresh, which keeps running as its own program. The main window shows it in place of the panes and draws it natively: while it is shown, Fresh's menus fill the menu bar, and its tabs, sidebar, palette and status bar are Mac controls. Its tabs and unsaved text survive switching back, quitting File Commander and crashes.")
         LabeledContent("Switch key") { Text(app.keymap.chord(for: "switch_to_file_commander")?.symbols ?? "F10") }
-        LabeledContent("Text font") { Text("Appearance › Editor › Font") }
+        LabeledContent("Source font") { Text("Appearance › Editor › Font") }
       }
       Section("Keyboard") {
         Toggle("Use Option as Alt", isOn: $app.preferences.optionAsAlt)
@@ -141,6 +141,9 @@ struct EditorSettings: View {
           .explainerAnchor("settings.editor.terminal")
         Text("Runs Fresh's terminal interface in a terminal view instead. File Commander uses it anyway for a Fresh without the native editor's channel, such as an older version set in fresh_binary_path.")
           .font(.callout).foregroundStyle(.secondary)
+      }
+      if ProcessInfo.processInfo.environment["FC_NATIVE_RICH_COMPOSE"] == "1" {
+        ComposeSettings()
       }
       Section("Diagnostics") {
         Toggle("Record editor timing", isOn: $app.preferences.editorTelemetry)
@@ -156,6 +159,60 @@ struct EditorSettings: View {
       }
     }
     .formStyle(.grouped)
+  }
+}
+
+struct ComposeSettings: View {
+  @Environment(AppController.self) private var app
+
+  var body: some View {
+    @Bindable var app = app
+    Section("Markdown Compose") {
+      Picker("Body font", selection: $app.preferences.compose.bodyFamily) {
+        Text("System").tag("system")
+        Text("System Rounded").tag("system-rounded")
+        Text("System Monospaced").tag("system-mono")
+        if !["system", "system-rounded", "system-mono"].contains(app.preferences.compose.bodyFamily),
+           !NSFontManager.shared.availableFontFamilies.contains(app.preferences.compose.bodyFamily) {
+          Text("\(app.preferences.compose.bodyFamily) (using System)").tag(app.preferences.compose.bodyFamily)
+        }
+        ForEach(NSFontManager.shared.availableFontFamilies, id: \.self) { Text($0).tag($0) }
+      }
+      Picker("Code and table font", selection: $app.preferences.compose.monospaceFamily) {
+        Text("System Monospaced").tag("system-mono")
+        if app.preferences.compose.monospaceFamily != "system-mono",
+           !ComposePreferences.monospacedFamilies.contains(app.preferences.compose.monospaceFamily) {
+          Text("\(app.preferences.compose.monospaceFamily) (using System Monospaced)").tag(app.preferences.compose.monospaceFamily)
+        }
+        ForEach(ComposePreferences.monospacedFamilies, id: \.self) { Text($0).tag($0) }
+      }
+      Stepper(value: $app.preferences.compose.bodySize, in: 8...72, step: 1) {
+        Text("Body size: \(app.preferences.compose.bodySize, format: .number.precision(.fractionLength(0))) pt")
+      }
+      DisclosureGroup("Heading sizes") {
+        ForEach(0..<6) { level in
+          Stepper(value: Binding(get: { app.preferences.compose.headingScales[level] },
+            set: { app.preferences.compose.headingScales[level] = $0 }), in: 0.75...3, step: 0.05) {
+            Text("Heading \(level + 1): \(app.preferences.compose.headingScales[level], format: .number.precision(.fractionLength(2))) × body")
+          }
+        }
+      }
+      Stepper(value: $app.preferences.compose.lineSpacing, in: 0...24, step: 1) {
+        Text("Line spacing: \(app.preferences.compose.lineSpacing, format: .number.precision(.fractionLength(0))) pt")
+      }
+      Stepper(value: $app.preferences.compose.paragraphSpacing, in: 0...48, step: 1) {
+        Text("Paragraph spacing: \(app.preferences.compose.paragraphSpacing, format: .number.precision(.fractionLength(0))) pt")
+      }
+      Stepper(value: $app.preferences.compose.indent, in: 8...64, step: 2) {
+        Text("List and quote indent: \(app.preferences.compose.indent, format: .number.precision(.fractionLength(0))) pt")
+      }
+      Stepper(value: $app.preferences.compose.pageWidth, in: 320...1600, step: 40) {
+        Text("Maximum page width: \(app.preferences.compose.pageWidth, format: .number.precision(.fractionLength(0))) pt")
+      }
+      Text("Applies to native Markdown Compose. Text size also follows the app's zoom setting.")
+        .font(.callout).foregroundStyle(.secondary)
+      Button("Reset Compose Typography") { app.preferences.compose = .init() }
+    }
   }
 }
 

@@ -57,8 +57,11 @@ final class CellGridView: NSView, @preconcurrency NSTextInputClient {
   private var composeCaretIdentity: ComposePresentation.Identity?
   private var composeCaretRevision: UInt64 = 0
   private var composeCarets: [UInt64: WireComposeCaret] = [:]
-  private var bodyFont = NSFont.systemFont(ofSize: 15)
-  private var monoFont = NSFont.monospacedSystemFont(ofSize: 15, weight: .regular)
+  private var bodyFont = NSFont.systemFont(ofSize: 16)
+  private var monoFont = NSFont.monospacedSystemFont(ofSize: 16, weight: .regular)
+  private var composePreferences = ComposePreferences()
+  private var composeZoom = 1.0
+  var composePalette: ComposePaneLayout.Palette?
 
   init(store: SceneStore) {
     self.store = store
@@ -77,8 +80,6 @@ final class CellGridView: NSView, @preconcurrency NSTextInputClient {
   // MARK: Metrics
 
   func setFont(_ font: NSFont) {
-    bodyFont = .systemFont(ofSize: font.pointSize + 2)
-    monoFont = .monospacedSystemFont(ofSize: font.pointSize + 2, weight: .regular)
     let base = NSFontManager.shared.convert(font, toNotHaveTrait: [.boldFontMask, .italicFontMask])
     let bold = NSFontManager.shared.convert(base, toHaveTrait: .boldFontMask)
     let italic = NSFontManager.shared.convert(base, toHaveTrait: .italicFontMask)
@@ -95,6 +96,15 @@ final class CellGridView: NSView, @preconcurrency NSTextInputClient {
     ascent = ceil(CTFontGetAscent(ct))
     cellHeight = ascent + ceil(CTFontGetDescent(ct)) + ceil(max(0, CTFontGetLeading(ct)))
     reportSize()
+    rebuildCompose()
+    needsDisplay = true
+  }
+
+  func setComposePreferences(_ preferences: ComposePreferences, zoom: Double) {
+    let preferences = preferences.normalized, zoom = ComposePreferences.scale(zoom)
+    guard preferences != composePreferences || zoom != composeZoom else { return }
+    composePreferences = preferences; composeZoom = zoom
+    (bodyFont, monoFont) = preferences.fonts(zoom: zoom)
     rebuildCompose()
     needsDisplay = true
   }
@@ -184,6 +194,7 @@ final class CellGridView: NSView, @preconcurrency NSTextInputClient {
     let viewport = pane.compose.hasViewport ? composeViewportController?.value(scope: scope, remote: pane.compose.viewport) ?? pane.compose.viewport : nil
     return ComposePresentation(pane: pane, window: UInt64(store.windowID),
       cell: CGSize(width: cellWidth, height: cellHeight), body: bodyFont, monospace: monoFont,
+      typography: composePreferences.typography(zoom: composeZoom), pageWidth: composePreferences.pageWidth * composeZoom,
       reuse: reuse, caretStates: composeCaretIdentity == .init(window: UInt64(store.windowID), leaf: pane.leaf, buffer: pane.buffer)
         && composeCaretRevision == pane.compose.bufferRevision ? composeCarets : [:], images: images, viewport: viewport)
   }
@@ -208,7 +219,7 @@ final class CellGridView: NSView, @preconcurrency NSTextInputClient {
       return pane.layout.text.attachments.compactMap { placed -> (CGFloat, ComposeImageController.Demand)? in
         let rect = placed.rect.offsetBy(dx: pane.origin.x, dy: pane.origin.y)
         guard rect.intersects(near), let image = pane.pane.compose.images.first(where: { $0.start == UInt64(placed.attachment.source.lowerBound) }) else { return nil }
-        let maximum = image.block ? max(min(760, pane.bounds.width - 32), 480) : CTFontGetSize(pane.body) * 8
+        let maximum = image.block ? max(pane.layout.text.size.width, 480) : CTFontGetSize(pane.body) * 8
         return (abs(rect.midY - pane.bounds.midY), .init(scope: pane.scope, image: image,
           authority: pane.pane.compose.assetAuthority, document: pane.pane.compose.assetDocument,
           maximumDimension: Int(ceil(maximum * scale))))
@@ -296,7 +307,7 @@ final class CellGridView: NSView, @preconcurrency NSTextInputClient {
     } }
     for pane in composePanes.values {
       pane.draw(in: context, dirty: dirtyRect, foreground: defaultForeground, background: defaultBackground,
-                selection: store.theme.selection.map(NSColor.init(scene:)) ?? .selectedTextBackgroundColor)
+                selection: store.theme.selection.map(NSColor.init(scene:)) ?? .selectedTextBackgroundColor, palette: composePalette)
     }
     drawCaret(context)
   }

@@ -46,6 +46,7 @@ struct AppPreferences: Codable, Equatable {
   var optionAsAlt = false
   /// Show the editor in a terminal view instead of drawing it natively.
   var terminalEditor = false
+  var compose = ComposePreferences()
   /// The editor was shown when the app quit; it is shown again at launch.
   var editorWasOpen = false
   /// Record the native editor's timing to `<profile>/telemetry` (EditorTelemetry).
@@ -77,6 +78,7 @@ struct AppPreferences: Codable, Equatable {
     scrollMargin = min(10, max(0, try c.decodeIfPresent(Int.self, forKey: .scrollMargin) ?? d.scrollMargin))
     optionAsAlt = try c.decodeIfPresent(Bool.self, forKey: .optionAsAlt) ?? d.optionAsAlt
     terminalEditor = try c.decodeIfPresent(Bool.self, forKey: .terminalEditor) ?? d.terminalEditor
+    compose = try c.decodeIfPresent(ComposePreferences.self, forKey: .compose) ?? d.compose
     editorWasOpen = try c.decodeIfPresent(Bool.self, forKey: .editorWasOpen) ?? d.editorWasOpen
     editorTelemetry = try c.decodeIfPresent(Bool.self, forKey: .editorTelemetry) ?? d.editorTelemetry
     sidebarShown = try c.decodeIfPresent(Bool.self, forKey: .sidebarShown) ?? d.sidebarShown

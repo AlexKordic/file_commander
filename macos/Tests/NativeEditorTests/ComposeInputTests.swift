@@ -341,4 +341,40 @@ final class ComposeInputTests: XCTestCase {
     XCTAssertEqual(peer.inputs[0].scope.bufferRevision, 5)
     XCTAssertFalse(peer.inputs[0].cancel)
   }
+
+  @MainActor
+  func testTypographyChangesPreserveTheReadingAnchorAndInvalidateNavigationMeasurements() async throws {
+    let source = (0..<200).map { "Paragraph \($0) with words café 👩🏽‍💻 to wrap across the page.\n\n" }.joined()
+    var scene = pane(source)
+    let anchor = source[..<source.range(of: "Paragraph 40")!.lowerBound].utf8.count
+    scene.compose.viewport.position = UInt64(anchor)
+    scene.compose.viewport.offset = 5
+    let peer = try ScenePeer(pane: scene)
+    defer { peer.close() }
+    let editor = richEditor()
+    defer { editor.detachAll() }
+    editor.attach(socketPath: peer.path, app: nil)
+    try await eventually { editor.connected && editor.grid?.focusedCompose != nil }
+    let grid = try XCTUnwrap(editor.grid), original = try XCTUnwrap(grid.focusedCompose)
+    let navigation = try XCTUnwrap(original.measuredNavigation())
+    let before = try XCTUnwrap(original.layout.text.caret(for: anchor)).minY + original.origin.y
+    var settings = ComposePreferences()
+    settings.bodyFamily = "system-rounded"; settings.bodySize = 22
+    settings.pageWidth = 400; settings.lineSpacing = 8; settings.paragraphSpacing = 18
+    settings.headingScales = [2.2, 1.9, 1.6, 1.4, 1.2, 1]
+    grid.setComposePreferences(settings, zoom: 1)
+    let changed = try XCTUnwrap(grid.focusedCompose)
+    XCTAssertEqual(changed.scope, original.scope, "changing presentation does not relabel source revisions")
+    XCTAssertEqual(changed.layout.text.projection.text, source)
+    XCTAssertEqual(CTFontGetSize(changed.body), 22)
+    XCTAssertEqual(changed.layout.text.size.width, 400)
+    XCTAssertFalse(changed.layout.text === original.layout.text)
+    XCTAssertEqual(try XCTUnwrap(changed.layout.text.caret(for: anchor)).minY + changed.origin.y, before, accuracy: 0.001)
+    let updated = try XCTUnwrap(changed.measuredNavigation())
+    XCTAssertNotEqual(updated.styleRevision, navigation.styleRevision)
+    editor.send(.key(.with { $0.key = "T" }))
+    try await eventually { peer.inputs.count == 1 }
+    XCTAssertEqual(peer.inputs[0].layoutID, updated.id)
+    XCTAssertEqual(peer.inputs[0].scope.bufferRevision, 4)
+  }
 }

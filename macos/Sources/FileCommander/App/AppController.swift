@@ -68,7 +68,7 @@ final class AppController {
       guard preferences != oldValue else { return }
       savePreferences()
       if preferences.appearance != oldValue.appearance { applyAppearance() }
-      if preferences.zoom != oldValue.zoom { editor.applyTheme() }
+      if preferences.zoom != oldValue.zoom || preferences.compose != oldValue.compose { editor.applyTheme() }
       if preferences.editorTelemetry != oldValue.editorTelemetry { applyTelemetry() }
       if preferences.terminalEditor != oldValue.terminalEditor {
         // The next attach takes the other route; close the editor shown the old way.

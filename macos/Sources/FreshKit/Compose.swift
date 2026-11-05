@@ -212,13 +212,30 @@ public final class ComposeTextLayout {
     init(_ size: CGSize) { self.size = size }
   }
   static let attachmentKey = NSAttributedString.Key("fc.compose.attachment")
+  static let roleKey = NSAttributedString.Key("fc.compose.role")
+  static let flagsKey = NSAttributedString.Key("fc.compose.flags")
   public struct FontRun {
     public var display: Range<Int>
     public var font: CTFont
+    public var role: UInt32
+    public var flags: UInt32
 
-    public init(display: Range<Int>, font: CTFont) {
+    public init(display: Range<Int>, font: CTFont, role: UInt32 = 0, flags: UInt32 = 0) {
       self.display = display
       self.font = font
+      self.role = role
+      self.flags = flags
+    }
+  }
+
+  /// A source-mapped block, before any measured wrapping. Nested blocks use
+  /// their innermost paragraph geometry; spacing belongs to the block edges.
+  public struct ParagraphRun {
+    public var display: Range<Int>
+    public var indent, before, after: CGFloat
+
+    public init(display: Range<Int>, indent: CGFloat = 0, before: CGFloat = 0, after: CGFloat = 0) {
+      self.display = display; self.indent = indent; self.before = before; self.after = after
     }
   }
 
@@ -244,7 +261,8 @@ public final class ComposeTextLayout {
   /// Width and vertical geometry are in points. No rounding to terminal cells
   /// takes place. Invalid font ranges fail instead of quietly mis-styling text.
   public init?(projection: ComposeProjection, font: CTFont, width: CGFloat,
-               lineSpacing: CGFloat = 3, fonts: [FontRun] = [], attachments: [Attachment] = []) {
+               lineSpacing: CGFloat = 3, fonts: [FontRun] = [], attachments: [Attachment] = [],
+               paragraphs: [ParagraphRun] = []) {
     guard width.isFinite, width > 0, lineSpacing.isFinite, lineSpacing >= 0 else { return nil }
     let string = projection.text as NSString
     var utf16ToByte = [0: 0]
@@ -261,8 +279,14 @@ public final class ComposeTextLayout {
         NSAttributedString.Key(kCTForegroundColorFromContextAttributeName as String): true])
     for run in fonts {
       guard let start = byteToUTF16[run.display.lowerBound], let end = byteToUTF16[run.display.upperBound] else { return nil }
-      attributed.addAttribute(NSAttributedString.Key(kCTFontAttributeName as String), value: run.font,
-                              range: NSRange(location: start, length: end - start))
+      attributed.addAttributes([NSAttributedString.Key(kCTFontAttributeName as String): run.font,
+        Self.roleKey: run.role, Self.flagsKey: run.flags], range: NSRange(location: start, length: end - start))
+    }
+    var blocks: [(range: NSRange, style: ParagraphRun)] = []
+    for paragraph in paragraphs {
+      guard let start = byteToUTF16[paragraph.display.lowerBound], let end = byteToUTF16[paragraph.display.upperBound],
+            start < end, [paragraph.indent, paragraph.before, paragraph.after].allSatisfy({ $0.isFinite && $0 >= 0 }) else { return nil }
+      blocks.append((NSRange(location: start, length: end - start), paragraph))
     }
     for (index, attachment) in attachments.enumerated() {
       guard attachment.size.width.isFinite, attachment.size.height.isFinite,
@@ -291,7 +315,11 @@ public final class ComposeTextLayout {
     var top: CGFloat = 0
     var placed: [PlacedAttachment] = []
     let baseHeight = CTFontGetAscent(font) + CTFontGetDescent(font) + CTFontGetLeading(font)
-    func append(_ range: NSRange) {
+    func block(at position: Int) -> (range: NSRange, style: ParagraphRun)? {
+      blocks.filter { NSLocationInRange(position, $0.range) }.min { $0.range.length < $1.range.length }
+    }
+    func append(_ range: NSRange, block: (range: NSRange, style: ParagraphRun)?, indent: CGFloat) {
+      if let block, range.location == block.range.location { top += block.style.before }
       let line = CTTypesetterCreateLine(typesetter, CFRange(location: range.location, length: range.length))
       var ascent: CGFloat = 0, descent: CGFloat = 0, leading: CGFloat = 0
       CTLineGetTypographicBounds(line, &ascent, &descent, &leading)
@@ -308,7 +336,7 @@ public final class ComposeTextLayout {
         contentEnd -= 1
       }
       lines.append(Fragment(line: line, range: range,
-        rect: CGRect(x: 0, y: top, width: width, height: height),
+        rect: CGRect(x: indent, y: top, width: width - indent, height: height),
         baseline: top + ascent, contentEnd: contentEnd))
       for run in CTLineGetGlyphRuns(line) as! [CTRun] {
         let attributes = CTRunGetAttributes(run) as NSDictionary
@@ -317,12 +345,15 @@ public final class ComposeTextLayout {
         CTRunGetPositions(run, CFRange(location: 0, length: 1), &position)
         let attachment = attachments[index]
         placed.append(.init(attachment: attachment,
-          rect: CGRect(x: position.x, y: top + ascent - attachment.size.height, width: attachment.size.width, height: attachment.size.height)))
+          rect: CGRect(x: indent + position.x, y: top + ascent - attachment.size.height, width: attachment.size.width, height: attachment.size.height)))
       }
       top += height
+      if let block, NSMaxRange(range) >= NSMaxRange(block.range) { top += block.style.after }
     }
     while from < string.length {
-      let suggested = CTTypesetterSuggestLineBreak(typesetter, from, Double(width))
+      let paragraph = block(at: from)
+      let indent = min(paragraph?.style.indent ?? 0, width * 0.6)
+      let suggested = CTTypesetterSuggestLineBreak(typesetter, from, Double(width - indent))
       var count = suggested > 0 ? suggested : string.rangeOfComposedCharacterSequence(at: from).length
       guard count > 0, count <= string.length - from else { return nil }
       // A viewport narrower than a single composed character must overflow
@@ -331,11 +362,11 @@ public final class ComposeTextLayout {
         let cluster = string.rangeOfComposedCharacterSequence(at: from + count)
         if cluster.location < from + count { count = NSMaxRange(cluster) - from }
       }
-      append(NSRange(location: from, length: count))
+      append(NSRange(location: from, length: count), block: paragraph, indent: indent)
       from += count
     }
     if string.length == 0 || string.character(at: string.length - 1) == 10 || string.character(at: string.length - 1) == 13 {
-      append(NSRange(location: string.length, length: 0))
+      append(NSRange(location: string.length, length: 0), block: nil, indent: 0)
     }
     self.projection = projection
     self.fragments = lines
@@ -374,7 +405,8 @@ public final class ComposeTextLayout {
   private func hitIndex(at point: CGPoint) -> (Fragment, Int)? {
     guard point.x.isFinite, point.y.isFinite, let first = fragments.first else { return nil }
     let fragment = fragments.first(where: { point.y < $0.rect.maxY }) ?? fragments.last ?? first
-    let raw = CTLineGetStringIndexForPosition(fragment.line, CGPoint(x: point.x, y: 0))
+    let x = point.x - fragment.rect.minX
+    let raw = CTLineGetStringIndexForPosition(fragment.line, CGPoint(x: x, y: 0))
     let index = min(fragment.contentEnd, max(fragment.range.location, raw == kCFNotFound ? fragment.contentEnd : raw))
     var boundary = index
     if index < string.length {
@@ -382,7 +414,7 @@ public final class ComposeTextLayout {
       if index != grapheme.location {
         let left = CTLineGetOffsetForStringIndex(fragment.line, grapheme.location, nil)
         let right = CTLineGetOffsetForStringIndex(fragment.line, NSMaxRange(grapheme), nil)
-        boundary = abs(point.x - left) <= abs(point.x - right) ? grapheme.location : NSMaxRange(grapheme)
+        boundary = abs(x - left) <= abs(x - right) ? grapheme.location : NSMaxRange(grapheme)
       }
     }
     return (fragment, boundary)
@@ -398,7 +430,7 @@ public final class ComposeTextLayout {
       matches = [ending]
     }
     guard let fragment = affinity == .upstream ? matches.first : matches.last else { return nil }
-    let x = CTLineGetOffsetForStringIndex(fragment.line, index, nil)
+    let x = fragment.rect.minX + CTLineGetOffsetForStringIndex(fragment.line, index, nil)
     return CGRect(x: x, y: fragment.rect.minY, width: 1, height: fragment.rect.height)
   }
 
@@ -424,7 +456,7 @@ public final class ComposeTextLayout {
            fragments[number + 1].range.location == index { return nil }
         return WireComposeStop.with {
           $0.source = UInt64(source)
-          $0.x = Double(CTLineGetOffsetForStringIndex(fragment.line, index, nil))
+          $0.x = Double(fragment.rect.minX + CTLineGetOffsetForStringIndex(fragment.line, index, nil))
           $0.affinity = affinity == .upstream ? 1 : 0
         }
       }
@@ -488,8 +520,8 @@ public final class ComposeTextLayout {
       let to = min(b, fragment.contentEnd)
       let newline = b > fragment.contentEnd && b >= NSMaxRange(fragment.range)
       guard from < to || (newline && from <= fragment.contentEnd) else { return nil }
-      let x0 = CTLineGetOffsetForStringIndex(fragment.line, from, nil)
-      let x1 = newline ? fragment.rect.width : CTLineGetOffsetForStringIndex(fragment.line, to, nil)
+      let x0 = fragment.rect.minX + CTLineGetOffsetForStringIndex(fragment.line, from, nil)
+      let x1 = newline ? fragment.rect.maxX : fragment.rect.minX + CTLineGetOffsetForStringIndex(fragment.line, to, nil)
       return CGRect(x: min(x0, x1), y: fragment.rect.minY, width: max(1, abs(x1 - x0)), height: fragment.rect.height)
     }
   }
