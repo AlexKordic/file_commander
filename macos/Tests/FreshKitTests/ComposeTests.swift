@@ -203,6 +203,55 @@ final class ComposeTests: XCTestCase {
     }
   }
 
+  func testRealFreshOrnamentsUseMeasuredRulesAndContinuousQuoteRails() throws {
+    let url = try XCTUnwrap(Bundle.module.url(forResource: "Fixtures/compose-ornaments", withExtension: "pb"))
+    let pane = try WireComposePane(serializedBytes: Data(contentsOf: url))
+    XCTAssertFalse(pane.text.contains("─")); XCTAssertFalse(pane.text.contains("▌"))
+    XCTAssertFalse(pane.text.contains("--------------"))
+    XCTAssertTrue(pane.text.contains("Setext title\r\n\r\n"))
+    XCTAssertTrue(pane.text.contains("> literal code"))
+    for width: CGFloat in [240, 520] {
+      let mono = CTFontCreateWithName("Menlo" as CFString, 16, nil)
+      let layout = try XCTUnwrap(ComposePaneLayout(pane: pane, body: font(16), monospace: mono, width: width))
+      XCTAssertEqual(layout.thematicRules.count, 3)
+      XCTAssertEqual(layout.quoteRails.count, 2, "one continuous rail per parsed quote level")
+      XCTAssertEqual(Set(layout.thematicRules.map { $0.rect.minY }).count, 3)
+      for rule in layout.thematicRules {
+        XCTAssertEqual(rule.rect.height, 1)
+        XCTAssertLessThanOrEqual(rule.rect.maxX, width)
+        XCTAssertGreaterThanOrEqual(rule.rect.minX, 0)
+        let row = try XCTUnwrap(layout.text.fragments.first { $0.rect.contains(CGPoint(x: rule.rect.midX, y: rule.rect.midY)) })
+        XCTAssertEqual(row.contentEnd, row.range.location, "a thematic rule has its own line instead of sharing a code/text row")
+        let source = try XCTUnwrap(layout.text.sourcePosition(at: CGPoint(x: rule.rect.midX, y: rule.rect.midY)))
+        XCTAssertTrue(rule.source.contains(source) || source == rule.source.upperBound,
+          "the native rule occupies a source-mapped line, not a separate fake row")
+      }
+      let codeByte = pane.text[..<pane.text.range(of: "literal code")!.lowerBound].utf8.count
+      let source = try XCTUnwrap(layout.text.projection.sourcePosition(at: codeByte))
+      let caret = try XCTUnwrap(layout.text.caret(for: source))
+      XCTAssertTrue(layout.quoteRails[0].contains(CGPoint(x: layout.quoteRails[0].midX, y: caret.midY)),
+        "a line consisting only of monospace code still has its enclosing quote rail")
+      if width == 520, let path = ProcessInfo.processInfo.environment["FC_COMPOSE_ORNAMENT_PREVIEW_FILE"] {
+        let w = 568, h = Int(ceil(layout.text.size.height)) + 48
+        let context = try XCTUnwrap(CGContext(data: nil, width: w, height: h, bitsPerComponent: 8,
+          bytesPerRow: w * 4, space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
+        context.translateBy(x: 0, y: CGFloat(h)); context.scaleBy(x: 1, y: -1)
+        let bounds = CGRect(x: 0, y: 0, width: w, height: h)
+        layout.draw(in: context, origin: CGPoint(x: 24, y: 24), clip: bounds, dirty: bounds,
+          foreground: CGColor(gray: 0.1, alpha: 1), background: CGColor(gray: 1, alpha: 1), selection: CGColor(gray: 0.5, alpha: 1))
+        let destination = try XCTUnwrap(CGImageDestinationCreateWithURL(URL(fileURLWithPath: path) as CFURL, "public.png" as CFString, 1, nil))
+        CGImageDestinationAddImage(destination, try XCTUnwrap(context.makeImage()), nil)
+        XCTAssertTrue(CGImageDestinationFinalize(destination))
+      }
+    }
+    // Revealed or failed-formatting source is not painted over with a rule.
+    var revealed = wirePane("***\r\n")
+    revealed.spans = [.with { $0.end = 3; $0.role = 14 }]
+    let layout = try XCTUnwrap(ComposePaneLayout(pane: revealed, body: font(16), monospace: font(16), width: 240))
+    XCTAssertTrue(layout.thematicRules.isEmpty)
+    XCTAssertEqual(layout.text.projection.text, "***\r\n")
+  }
+
   func testAllHeadingScalesAndSpacingInvalidateLayoutWithoutChangingSource() throws {
     let source = (1...6).map { "Heading \($0)\r\n" }.joined()
     var pane = wirePane(source), offset: UInt64 = 0

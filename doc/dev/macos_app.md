@@ -248,6 +248,12 @@ Text prefix measured in its shaping context, including the first body character.
 The same measure constrains images and previews within a list. The recorded
 `compose-lists.pb` fixture comes from the real Compose plugin/socket contract;
 FreshKit checks it at several widths alongside raw-source and font-size cases.
+Native quote rails are continuous block rectangles, including through
+monospace-only text, nested quotes and image preview gaps. Thematic rules draw
+once within their measured source line; revealed or fallback source is not
+painted over. `compose-ornaments.pb` records the real-plugin projection for
+these checks. Protobuf fixtures are marked binary in `.gitattributes` so Git
+does not treat embedded Markdown line endings as source-file whitespace.
 Native clipboard access is injectable; scene/input tests use memory storage
 instead of reading or overwriting the user's system pasteboard.
 Tooltip rectangles share the attachment geometry and are replaced only when

@@ -1,0 +1,2 @@
+# Scene fixtures are protobuf bytes, even when their payload has no NULs.
+macos/Tests/FreshKitTests/Fixtures/*.pb binary

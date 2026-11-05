@@ -64,6 +64,8 @@ public final class ComposePaneLayout {
        width == reuse.width, typography == reuse.typography,
        CFEqual(body, reuse.body), CFEqual(monospace, reuse.monospace) {
       text = reuse.text
+      quoteRails = reuse.quoteRails
+      thematicRules = reuse.thematicRules
       return
     }
     struct Span { var source, range: Range<Int>; var role, flags: UInt32 }
@@ -96,11 +98,15 @@ public final class ComposePaneLayout {
       let role: UInt32 = heading ?? (mono ? 7 : active.contains { $0.role == 9 } ? 9 : 0)
       fonts.append(.init(display: start..<end, font: font, role: role, flags: flags))
     }
-    let paragraphs = spans.filter { (1...6).contains($0.role) || [8, 11, 12, 13].contains($0.role) }.map { block in
+    // Quote geometry is a fallback for empty/code-only lines; an equally
+    // sized actual paragraph keeps its own spacing and layout precedence.
+    let blocks = spans.filter { (1...6).contains($0.role) || [8, 11, 12, 13].contains($0.role) }
+      + spans.filter { $0.role == 9 }
+    let paragraphs = blocks.map { block in
       let containers = spans.filter { ($0.role == 9 || $0.role == 10) && $0.range.contains(block.range.lowerBound) }.count
       let heading = (1...6).contains(block.role)
       let before = heading ? CTFontGetSize(body) * 0.45 : block.role == 12 ? typography.paragraphSpacing : 0
-      let after = block.role == 13 ? 0 : typography.paragraphSpacing
+      let after = [9, 13].contains(block.role) ? 0 : typography.paragraphSpacing
       return ComposeTextLayout.ParagraphRun(display: block.range, indent: CGFloat(containers) * typography.indent,
         before: block.source.lowerBound >= projection.source.lowerBound ? before : 0,
         after: block.source.upperBound <= projection.source.upperBound ? after : 0)
@@ -149,6 +155,37 @@ public final class ComposePaneLayout {
     return String(message.prefix(512))
   }
 
+  /// Native block ornaments are measured rectangles, never repeated glyphs.
+  /// Their source ranges still belong to Fresh for selection and editing.
+  public private(set) lazy var quoteRails: [CGRect] = {
+    pane.spans.filter { $0.role == 9 }.compactMap { quote in
+      guard let start = Int(exactly: quote.start), let end = Int(exactly: quote.end), start < end else { return nil }
+      let source = start..<end
+      let rows = text.selectionRects(for: source)
+      let assets = text.attachments.filter { $0.attachment.source.overlaps(source) }.map(\.rect)
+      guard let top = (rows + assets).map(\.minY).min(), let bottom = (rows + assets).map(\.maxY).max() else { return nil }
+      let containers = pane.spans.filter { ($0.role == 9 || $0.role == 10) && $0.start <= quote.start && quote.start < $0.end }.count
+      return CGRect(x: min(CGFloat(containers) * typography.indent, width * 0.6) - 10,
+        y: top, width: 2, height: bottom - top)
+    }
+  }()
+
+  public struct Rule {
+    public let source: Range<Int>
+    public let rect: CGRect
+  }
+  public private(set) lazy var thematicRules: [Rule] = {
+    pane.spans.filter { $0.role == 14 }.compactMap { rule in
+      guard let start = Int(exactly: rule.start), let end = Int(exactly: rule.end), start < end,
+            start >= text.projection.source.lowerBound, end <= text.projection.source.upperBound else { return nil }
+      let segments = text.projection.segments.filter { $0.source.overlaps(start..<end) }
+      guard !segments.isEmpty, segments.allSatisfy({ $0.kind == .hidden }), let caret = text.caret(for: start) else { return nil }
+      let containers = pane.spans.filter { ($0.role == 9 || $0.role == 10) && $0.start <= rule.start && rule.start < $0.end }.count
+      let left = min(width, max(caret.minX, min(CGFloat(containers) * typography.indent, width * 0.6)))
+      return Rule(source: start..<end, rect: CGRect(x: left, y: caret.midY, width: width - left, height: 1))
+    }
+  }()
+
   /// Draw in a context whose y axis points down, using the same line objects
   /// as hit testing and navigation. The native view and rendering tests share
   /// this path; no cell approximation or second text layout is involved.
@@ -162,6 +199,17 @@ public final class ComposePaneLayout {
     context.fill(clip)
     let palette = palette ?? Palette(link: foreground, quote: foreground, code: foreground,
       codeBackground: foreground.copy(alpha: 0.07) ?? foreground)
+    context.setFillColor(palette.quote.copy(alpha: 0.4) ?? palette.quote)
+    for rect in quoteRails {
+      context.fill(rect.offsetBy(dx: origin.x, dy: origin.y))
+    }
+    for rule in thematicRules {
+      let selected = pane.cursors.contains { cursor in cursor.hasAnchor
+        && min(cursor.position, cursor.anchor) < UInt64(rule.source.upperBound)
+        && max(cursor.position, cursor.anchor) > UInt64(rule.source.lowerBound) }
+      context.setFillColor(selected ? selection : palette.quote.copy(alpha: 0.4) ?? palette.quote)
+      context.fill(rule.rect.offsetBy(dx: origin.x, dy: origin.y).insetBy(dx: 0, dy: selected ? -1 : 0))
+    }
     func runRect(_ run: CTRun, _ fragment: ComposeTextLayout.Fragment) -> CGRect {
       let range = CTRunGetStringRange(run)
       let a = CTLineGetOffsetForStringIndex(fragment.line, range.location, nil)
@@ -172,10 +220,6 @@ public final class ComposePaneLayout {
     // Code backgrounds precede selection, so selected source stays visible.
     for fragment in text.fragments where fragment.rect.offsetBy(dx: origin.x, dy: origin.y).intersects(clip.intersection(dirty)) {
       let runs = CTLineGetGlyphRuns(fragment.line) as! [CTRun]
-      if runs.contains(where: { (CTRunGetAttributes($0) as NSDictionary)[ComposeTextLayout.roleKey] as? UInt32 == 9 }) {
-        context.setFillColor(palette.quote.copy(alpha: 0.4) ?? palette.quote)
-        context.fill(CGRect(x: origin.x + fragment.rect.minX - 10, y: origin.y + fragment.rect.minY, width: 2, height: fragment.rect.height))
-      }
       context.setFillColor(palette.codeBackground)
       for run in runs where (CTRunGetAttributes(run) as NSDictionary)[ComposeTextLayout.roleKey] as? UInt32 == 7 {
         context.fill(runRect(run, fragment))

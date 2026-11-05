@@ -1548,7 +1548,7 @@ public nonisolated struct WireComposeSegment: Sendable {
 }
 
 /// role: body 0, headings 1-6, inline code 7, table 8, quote 9,
-/// list 10, paragraph 11, code block 12, list item 13.
+/// list 10, paragraph 11, code block 12, list item 13, thematic rule 14.
 /// flags: bold 1, italic 2, underline 4, strikethrough 8, link 16.
 public nonisolated struct WireComposeSpan: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the

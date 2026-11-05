@@ -439,6 +439,16 @@ physical continuation line is charged once. Source windows without the complete
 prefix and multiline cell replacements still need block-context qualification;
 the client never treats a partial prefix as the original marker.
 
+The rich projection omits setext underline lines while their heading is being
+read and reveals their exact source when a cursor enters the heading. Active
+terminal quote-bar replacements are removed only within parsed quotes; source
+editing and literal code remain source text. Existing quote-flow joins stay
+intact, except that a parsed thematic rule receives its own native line.
+Span role 14 identifies a thematic rule: its hidden source range reserves a
+source-mapped line for native drawing, with no repeated ruler characters.
+EOF rules reveal when the caret reaches their collapsed source end. These are
+per-client projection overrides; terminal conceals and markers are unchanged.
+
 Visible images are checked on a five-second prototype interval and when the
 editor is shown again. POSIX local/SSH stats include file identity plus
 nanosecond modification/change times. Metadata shortcuts are supplemented by

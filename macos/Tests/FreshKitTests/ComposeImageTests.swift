@@ -205,6 +205,9 @@ final class ComposeImageTests: XCTestCase {
       let rect = try XCTUnwrap(layout.text.attachments.first?.rect)
       XCTAssertEqual(rect.minX, 48, accuracy: 0.001)
       XCTAssertLessThanOrEqual(rect.maxX, 200)
+      let rail = try XCTUnwrap(layout.quoteRails.first)
+      XCTAssertLessThan(rail.minX, rect.minX)
+      XCTAssertGreaterThanOrEqual(rail.maxY, rect.maxY, "a source-preview gap cannot break the quote rail")
       let viewport = ComposeViewport(text: layout.text, documentLength: input.documentLen, height: 80)
       let anchor = WireComposeViewport.with { $0.position = UInt64(following); $0.offset = 12; $0.epoch = 1 }
       let top = try XCTUnwrap(viewport.requestedTop(anchor))
