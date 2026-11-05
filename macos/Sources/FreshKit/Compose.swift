@@ -2,6 +2,11 @@ import Foundation
 import CoreText
 import CoreGraphics
 
+extension WireComposePane {
+  /// Older fixtures and grid-era scenes omit the readiness extension.
+  public var formattingReady: Bool { !hasReady || ready }
+}
+
 /// Fresh's source-preserving Compose projection. Coordinates in this contract
 /// are UTF-8 bytes. Core Text's UTF-16 indices stay inside ComposeTextLayout.
 public struct ComposeProjection {

@@ -1497,6 +1497,20 @@ public nonisolated struct WireComposePane: @unchecked Sendable {
   /// Clears the value of `viewport`. Subsequent reads from it will return its default value.
   public mutating func clearViewport() {_uniqueStorage()._viewport = nil}
 
+  public var ready: Bool {
+    get {_storage._ready ?? false}
+    set {_uniqueStorage()._ready = newValue}
+  }
+  /// Returns true if `ready` has been explicitly set.
+  public var hasReady: Bool {_storage._ready != nil}
+  /// Clears the value of `ready`. Subsequent reads from it will return its default value.
+  public mutating func clearReady() {_uniqueStorage()._ready = nil}
+
+  public var error: String {
+    get {_storage._error}
+    set {_uniqueStorage()._error = newValue}
+  }
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
@@ -5791,7 +5805,7 @@ nonisolated extension WirePane: SwiftProtobuf.Message, SwiftProtobuf._MessageImp
 
 nonisolated extension WireComposePane: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".ComposePane"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}buffer_revision\0\u{3}projection_revision\0\u{3}source_start\0\u{3}source_end\0\u{1}text\0\u{1}segments\0\u{1}spans\0\u{1}images\0\u{1}cursors\0\u{1}focused\0\u{3}top_byte\0\u{3}document_len\0\u{3}selection_revision\0\u{1}keyboard\0\u{3}asset_authority\0\u{3}asset_document\0\u{1}viewport\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}buffer_revision\0\u{3}projection_revision\0\u{3}source_start\0\u{3}source_end\0\u{1}text\0\u{1}segments\0\u{1}spans\0\u{1}images\0\u{1}cursors\0\u{1}focused\0\u{3}top_byte\0\u{3}document_len\0\u{3}selection_revision\0\u{1}keyboard\0\u{3}asset_authority\0\u{3}asset_document\0\u{1}viewport\0\u{1}ready\0\u{1}error\0")
 
   fileprivate class _StorageClass {
     var _bufferRevision: UInt64 = 0
@@ -5811,6 +5825,8 @@ nonisolated extension WireComposePane: SwiftProtobuf.Message, SwiftProtobuf._Mes
     var _assetAuthority: UInt64 = 0
     var _assetDocument: UInt64 = 0
     var _viewport: WireComposeViewport? = nil
+    var _ready: Bool? = nil
+    var _error: String = String()
 
       // This property is used as the initial default value for new instances of the type.
       // The type itself is protecting the reference to its storage via CoW semantics.
@@ -5838,6 +5854,8 @@ nonisolated extension WireComposePane: SwiftProtobuf.Message, SwiftProtobuf._Mes
       _assetAuthority = source._assetAuthority
       _assetDocument = source._assetDocument
       _viewport = source._viewport
+      _ready = source._ready
+      _error = source._error
     }
   }
 
@@ -5873,6 +5891,8 @@ nonisolated extension WireComposePane: SwiftProtobuf.Message, SwiftProtobuf._Mes
         case 15: try { try decoder.decodeSingularUInt64Field(value: &_storage._assetAuthority) }()
         case 16: try { try decoder.decodeSingularUInt64Field(value: &_storage._assetDocument) }()
         case 17: try { try decoder.decodeSingularMessageField(value: &_storage._viewport) }()
+        case 18: try { try decoder.decodeSingularBoolField(value: &_storage._ready) }()
+        case 19: try { try decoder.decodeSingularStringField(value: &_storage._error) }()
         default: break
         }
       }
@@ -5936,6 +5956,12 @@ nonisolated extension WireComposePane: SwiftProtobuf.Message, SwiftProtobuf._Mes
       try { if let v = _storage._viewport {
         try visitor.visitSingularMessageField(value: v, fieldNumber: 17)
       } }()
+      try { if let v = _storage._ready {
+        try visitor.visitSingularBoolField(value: v, fieldNumber: 18)
+      } }()
+      if !_storage._error.isEmpty {
+        try visitor.visitSingularStringField(value: _storage._error, fieldNumber: 19)
+      }
     }
     try unknownFields.traverse(visitor: &visitor)
   }
@@ -5962,6 +5988,8 @@ nonisolated extension WireComposePane: SwiftProtobuf.Message, SwiftProtobuf._Mes
         if _storage._assetAuthority != rhs_storage._assetAuthority {return false}
         if _storage._assetDocument != rhs_storage._assetDocument {return false}
         if _storage._viewport != rhs_storage._viewport {return false}
+        if _storage._ready != rhs_storage._ready {return false}
+        if _storage._error != rhs_storage._error {return false}
         return true
       }
       if !storagesAreEqual {return false}

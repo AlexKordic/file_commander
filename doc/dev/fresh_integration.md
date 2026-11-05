@@ -362,6 +362,26 @@ the native consumer measures text and images with Core Text. Source coordinates
 are UTF-8 bytes, and native layout feedback is scoped to a window, split,
 buffer, source revision, projection revision, and selection revision.
 
+`ComposePane.ready` distinguishes a coherent projection from formatting still
+being applied. Readiness correlates the source revision, window, buffer
+lifetime, and a token assigned by the host to each batch of lines. Commands
+may span several editor ticks; offering lines or receiving a hook-name-only
+acknowledgment is not enough. Tracked source decorations apply to their original owner even after
+workspace focus changes. Edits invalidate the affected ranges and shift
+unaffected completed ranges without rebuilding them.
+
+Pending snapshots contain a raw copy map, never partially applied conceals.
+The native pane holds its previous presentation with its source map and
+revisions, and queues document input until the current projection is ready.
+An accepted edit's caret reveal
+can wait for readiness; a later physical scroll still takes precedence.
+Offscreen measurements remain demanded until their completion can wake the
+pending input. Failed formatting, missing coverage, or the prototype's
+formatting deadline of five seconds produces an explained, editable source fallback.
+Fallback editing does not restart that wait on every character. A successful
+new formatting batch can restore rich presentation. These timing and resource
+bounds still need validation against representative documents before release.
+
 - Type 27, `ComposeInput`, serializes document commands and returns an
   `InputReply`. Accepted and cancelled requests are terminal and consume their
   sequential id; a nonterminal rejection retains its id for refreshed geometry.

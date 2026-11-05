@@ -67,6 +67,12 @@ final class NativeEditor: NSObject, CellGridDelegate {
   private var pendingComposeBefore: (revision: UInt64, cursors: [WireComposeSelection])?
   private var viewportRefreshQueued = false
   private var lastComposeCancellation: String?
+  private var pendingCaretReveal: (target: InputTarget, scrollGeneration: UInt64)?
+  private struct FormattingFailure: Equatable {
+    var window, buffer, epoch: UInt64
+    var message: String
+  }
+  private var formattingFailures: [UInt64: FormattingFailure] = [:]
   private lazy var composeViewports = ComposeViewportController { [weak self] request in
     self?.socket?.send(.composeViewport(request))
   }
@@ -213,6 +219,8 @@ final class NativeEditor: NSObject, CellGridDelegate {
     pendingComposeProjection = nil
     pendingComposeBefore = nil
     lastComposeCancellation = nil
+    pendingCaretReveal = nil
+    formattingFailures.removeAll()
   }
 
   private func connectionEnded(_ reason: String?) {
@@ -263,6 +271,7 @@ final class NativeEditor: NSObject, CellGridDelegate {
     let started = ProcessInfo.processInfo.systemUptime
     if message.isHello { receivedHello = true }
     store.apply(message)
+    reportFormattingFailures()
     composeViewports.observe(window: UInt64(store.windowID), panes: store.panes,
       reply: message.frame.hasViewportReply ? message.frame.viewportReply : nil)
     if message.isHello, pendingShow { show() }
@@ -278,11 +287,12 @@ final class NativeEditor: NSObject, CellGridDelegate {
       if reply.accepted || reply.cancelled {
         let identity = pendingComposePane
         if reply.accepted { grid?.applyComposeCarets(reply.carets, identity: identity) }
-        if reply.accepted, let identity, let queued = composeQueue.first,
+        if reply.accepted, let identity, let queued = composeQueue.first, let target = queued.target,
            queued.scrollGeneration == composeViewports.userScrollGeneration,
-           let before = pendingComposeBefore, let pane = grid?.composePanes[identity.leaf], pane.identity == identity,
-           before.revision != pane.pane.compose.bufferRevision || before.cursors != pane.pane.compose.cursors {
-          revealComposeCaret(pane)
+           let before = pendingComposeBefore,
+           let pane = store.panes.first(where: { $0.leaf == identity.leaf && $0.hasBuffer && $0.buffer == identity.buffer && $0.hasCompose }),
+           before.revision != pane.compose.bufferRevision || before.cursors != pane.compose.cursors {
+          pendingCaretReveal = (target, queued.scrollGeneration)
         }
         if reply.cancelled, !reply.error.isEmpty, lastComposeCancellation != reply.error {
           lastComposeCancellation = reply.error
@@ -317,6 +327,7 @@ final class NativeEditor: NSObject, CellGridDelegate {
       }
       composeRegionSent = false
     }
+    attemptCaretReveal()
     pumpComposeInput()
     scheduleViewportContinuation()
     if let ack = message.timing?.ack { noteAck(ack) }
@@ -398,7 +409,26 @@ final class NativeEditor: NSObject, CellGridDelegate {
   }
 
   private func updateImageDemands() {
-    composeImages.update(shown && richCompose ? grid?.composeImageDemands() ?? [] : [])
+    let demands = shown && richCompose ? grid?.composeImageDemands() ?? [] : []
+    composeImages.update(demands.filter { demand in
+      store.panes.contains { pane in pane.leaf == demand.scope.leaf && pane.hasBuffer && pane.buffer == demand.scope.buffer
+        && pane.hasCompose && pane.compose.formattingReady && pane.compose.bufferRevision == demand.scope.bufferRevision }
+    })
+  }
+
+  private func reportFormattingFailures() {
+    let leaves = Set(store.panes.map(\.leaf))
+    formattingFailures = formattingFailures.filter { leaves.contains($0.key) }
+    for pane in store.panes where pane.hasCompose && pane.compose.formattingReady {
+      guard !pane.compose.error.isEmpty else { formattingFailures.removeValue(forKey: pane.leaf); continue }
+      let failure = FormattingFailure(window: UInt64(store.windowID), buffer: pane.buffer,
+        epoch: pane.compose.viewport.epoch, message: pane.compose.error)
+      if formattingFailures[pane.leaf] != failure {
+        formattingFailures[pane.leaf] = failure
+        app?.engine.reportError(failure.message)
+        Trace.write("editor formatting unavailable: \(failure.message)")
+      }
+    }
   }
 
   /// A source window can finish before the bottom of a tall pane. Fetch its
@@ -423,6 +453,19 @@ final class NativeEditor: NSObject, CellGridDelegate {
     if let next = pane.scrolling.revealing(cursor.position, affinity: pane.cursorAffinity, from: pane.viewport) {
       composeViewports.move(scope: pane.scope, from: pane.viewport, to: next, user: false)
     }
+  }
+
+  private func attemptCaretReveal() {
+    guard let pending = pendingCaretReveal else { return }
+    let identity = pending.target.identity
+    guard pending.scrollGeneration == composeViewports.userScrollGeneration,
+          identity.window == UInt64(store.windowID),
+          let current = store.panes.first(where: { $0.leaf == identity.leaf && $0.hasBuffer && $0.buffer == identity.buffer && $0.hasCompose }),
+          current.compose.viewport.epoch == pending.target.epoch else { pendingCaretReveal = nil; return }
+    guard current.compose.formattingReady, let pane = grid?.composePanes[identity.leaf], pane.identity == identity,
+          pane.pane.compose.bufferRevision == current.compose.bufferRevision else { return }
+    pendingCaretReveal = nil
+    revealComposeCaret(pane)
   }
 
   /// The active tab of the focused pane, for the window title.
@@ -538,6 +581,16 @@ final class NativeEditor: NSObject, CellGridDelegate {
       nextComposeID += 1
       pendingComposeID = nextComposeID
       pendingComposePane = queued.target?.identity
+    }
+    if let identity = pendingComposePane,
+       let current = store.panes.first(where: { $0.leaf == identity.leaf && $0.hasBuffer && $0.buffer == identity.buffer && $0.hasCompose }) {
+      guard current.compose.formattingReady else { return }
+      if let projection = pendingComposeProjection {
+        if projection.bufferRevision != current.compose.bufferRevision || projection.selectionRevision != current.compose.selectionRevision
+            || projection.assetDocument != current.compose.assetDocument {
+          pendingComposeProjection = nil; pendingComposeY = nil; pendingComposeRegion = nil
+        } else if !projection.formattingReady { return }
+      }
     }
     var input = WireComposeInput()
     input.id = pendingComposeID ?? 0

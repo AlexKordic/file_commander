@@ -158,7 +158,20 @@ final class CellGridView: NSView, @preconcurrency NSTextInputClient {
     })
   }
 
-  private func presentation(_ pane: WirePane, reuse: ComposePresentation? = nil) -> ComposePresentation? {
+  private func presentation(_ input: WirePane, reuse: ComposePresentation? = nil) -> ComposePresentation? {
+    var pane = input
+    if pane.hasCompose, !pane.compose.formattingReady, let reuse, reuse.pane.compose.formattingReady,
+       reuse.identity == .init(window: UInt64(store.windowID), leaf: pane.leaf, buffer: pane.buffer),
+       reuse.pane.compose.viewport.epoch == pane.compose.viewport.epoch,
+       reuse.pane.compose.assetAuthority == pane.compose.assetAuthority,
+       reuse.pane.compose.assetDocument == pane.compose.assetDocument {
+      // Retain the whole old source/map pair, including its revision and
+      // anchor. Relabeling old coordinates as current would corrupt input.
+      pane = reuse.pane
+      pane.content = input.content
+      pane.compose.focused = input.compose.focused
+      pane.compose.keyboard = input.compose.keyboard
+    }
     let scope = WireComposeScope.with {
       $0.windowID = UInt64(store.windowID); $0.leaf = pane.leaf; $0.buffer = pane.buffer
       $0.bufferRevision = pane.compose.bufferRevision
@@ -178,7 +191,7 @@ final class CellGridView: NSView, @preconcurrency NSTextInputClient {
   /// Geometry for a deferred key is measured with the same fonts, width and
   /// images, but never replaces a visible pane or starts offscreen image I/O.
   func composeMeasurement(identity: ComposePresentation.Identity, projection: WireComposePane) -> ComposePresentation? {
-    guard identity.window == UInt64(store.windowID), var pane = store.panes.first(where: { $0.leaf == identity.leaf && $0.hasBuffer && $0.buffer == identity.buffer }),
+    guard projection.formattingReady, identity.window == UInt64(store.windowID), var pane = store.panes.first(where: { $0.leaf == identity.leaf && $0.hasBuffer && $0.buffer == identity.buffer }),
           pane.hasCompose, pane.compose.bufferRevision == projection.bufferRevision,
           pane.compose.selectionRevision == projection.selectionRevision,
           pane.compose.assetDocument == projection.assetDocument else { return nil }
@@ -205,7 +218,7 @@ final class CellGridView: NSView, @preconcurrency NSTextInputClient {
 
   func applyComposeCarets(_ states: [WireComposeCaret], identity: ComposePresentation.Identity?) {
     composeCaretIdentity = identity
-    composeCaretRevision = identity.flatMap { composePanes[$0.leaf]?.pane.compose.bufferRevision } ?? 0
+    composeCaretRevision = identity.flatMap { target in store.panes.first(where: { $0.leaf == target.leaf && $0.hasBuffer && $0.buffer == target.buffer })?.compose.bufferRevision } ?? 0
     composeCarets = Dictionary(uniqueKeysWithValues: states.map { ($0.id, $0) })
     rebuildCompose()
     needsDisplay = true

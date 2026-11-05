@@ -14,11 +14,13 @@ private final class ScenePeer: @unchecked Sendable {
   private var client: Int32 = -1
   private var received: [WireComposeInput] = []
   private var receivedKeys: [WireKey] = []
+  private var receivedViewports: [WireComposeViewportRequest] = []
   private var sequence: UInt64 = 0
   private var applied: UInt64 = 0
 
   var inputs: [WireComposeInput] { lock.lock(); defer { lock.unlock() }; return received }
   var keys: [WireKey] { lock.lock(); defer { lock.unlock() }; return receivedKeys }
+  var viewports: [WireComposeViewportRequest] { lock.lock(); defer { lock.unlock() }; return receivedViewports }
   var lastApplied: UInt64 { lock.lock(); defer { lock.unlock() }; return applied }
 
   init(pane: WirePane) throws {
@@ -58,6 +60,8 @@ private final class ScenePeer: @unchecked Sendable {
           lock.lock(); applied = ack.seq; lock.unlock()
         } else if kind == SceneWire.Kind.key.rawValue, let key = try? WireKey(serializedBytes: payload) {
           lock.lock(); receivedKeys.append(key); lock.unlock()
+        } else if kind == SceneWire.Kind.composeViewport.rawValue, let request = try? WireComposeViewportRequest(serializedBytes: payload) {
+          lock.lock(); receivedViewports.append(request); lock.unlock()
         }
       }
     }
@@ -257,5 +261,84 @@ final class ComposeInputTests: XCTestCase {
     XCTAssertFalse(peer.inputs[2].cancel)
     XCTAssertEqual(peer.inputs[2].scope.buffer, 3)
     XCTAssertEqual(peer.inputs[2].bufferEpoch, 8)
+  }
+
+  @MainActor
+  func testPendingFormattingHoldsTheOldSourceMapAndQueuesInputUntilTheCurrentProjectionIsReady() async throws {
+    let source = String(repeating: "Paragraph words café to wrap across the page.\n\n", count: 50)
+    let peer = try ScenePeer(pane: pane(source))
+    defer { peer.close() }
+    let editor = richEditor()
+    defer { editor.detachAll() }
+    editor.attach(socketPath: peer.path, app: nil)
+    try await eventually { editor.connected && editor.grid?.focusedCompose != nil }
+    let grid = try XCTUnwrap(editor.grid), original = try XCTUnwrap(grid.focusedCompose)
+    let point = CGPoint(x: original.origin.x + 150, y: original.origin.y + original.layout.text.fragments[1].rect.midY)
+    let clicked = try XCTUnwrap(original.hit(at: point))
+    var pending = pane("X" + source, revision: 5); pending.compose.ready = false
+    peer.show(pending)
+    try await eventually { editor.store.panes[0].compose.hasReady && !editor.store.panes[0].compose.ready }
+    XCTAssertEqual(grid.focusedCompose?.pane.compose.bufferRevision, 4)
+    XCTAssertEqual(grid.focusedCompose?.layout.text.projection.text, source)
+    editor.send(.key(.with { $0.key = "T" }))
+    editor.grid(grid, point: point, in: try XCTUnwrap(grid.focusedCompose), extend: false, count: 1)
+    XCTAssertTrue(peer.inputs.isEmpty, "partial decoration frames cannot supply interactive input geometry")
+    pending.compose.ready = true
+    peer.show(pending)
+    try await eventually { peer.inputs.count == 1 }
+    XCTAssertEqual(peer.inputs[0].scope.bufferRevision, 5, "keyboard dispatch binds to the now-coherent current map")
+    XCTAssertEqual(grid.focusedCompose?.pane.compose.bufferRevision, 5)
+    peer.reply(.with { $0.id = 1; $0.accepted = true })
+    try await eventually { peer.inputs.count == 2 }
+    XCTAssertEqual(peer.inputs[1].sourceRevision, 4, "a click captured on the held presentation retains that source revision")
+    XCTAssertEqual(peer.inputs[1].position, UInt64(clicked.source))
+  }
+
+  @MainActor
+  func testAcceptedInputRevealsTheCaretAfterFormattingFinishes() async throws {
+    let source = (0..<200).map { "Paragraph \($0) with enough words to measure.\n\n" }.joined()
+    let peer = try ScenePeer(pane: pane(source))
+    defer { peer.close() }
+    let editor = richEditor()
+    defer { editor.detachAll() }
+    editor.attach(socketPath: peer.path, app: nil)
+    try await eventually { editor.connected && editor.grid?.focusedCompose != nil }
+    editor.send(.key(.with { $0.key = "T" }))
+    try await eventually { peer.inputs.count == 1 }
+    let updated = "X" + source
+    var pending = pane(updated, revision: 5)
+    pending.compose.cursors[0].position = UInt64(updated[..<updated.range(of: "Paragraph 100")!.lowerBound].utf8.count)
+    pending.compose.ready = false
+    let accepted = peer.reply(.with { $0.id = 1; $0.accepted = true }, pane: pending)
+    try await eventually { peer.lastApplied >= accepted }
+    XCTAssertTrue(peer.viewports.isEmpty, "old held geometry cannot reveal a new source caret")
+    pending.compose.ready = true
+    peer.show(pending)
+    try await eventually { !peer.viewports.isEmpty }
+    let presentation = try XCTUnwrap(editor.grid?.focusedCompose)
+    let caret = try XCTUnwrap(presentation.caret)
+    XCTAssertGreaterThanOrEqual(caret.minY, presentation.bounds.minY + 12 - 0.01)
+    XCTAssertLessThanOrEqual(caret.maxY, presentation.bounds.maxY - 12 + 0.01)
+  }
+
+  @MainActor
+  func testFormattingFailureUsesTheCurrentSourceAndKeepsInputEditable() async throws {
+    let peer = try ScenePeer(pane: pane("Original paragraph\n"))
+    defer { peer.close() }
+    let editor = richEditor()
+    defer { editor.detachAll() }
+    editor.attach(socketPath: peer.path, app: nil)
+    try await eventually { editor.connected && editor.grid?.focusedCompose != nil }
+    let source = "# Current source\n\n**Editable Markdown**\n"
+    var fallback = pane(source, revision: 5)
+    fallback.compose.ready = true
+    fallback.compose.error = "Formatting is unavailable. The Markdown source remains editable."
+    peer.show(fallback)
+    try await eventually { editor.grid?.focusedCompose?.pane.compose.bufferRevision == 5 }
+    XCTAssertEqual(editor.grid?.focusedCompose?.layout.text.projection.text, source)
+    editor.send(.key(.with { $0.key = "T" }))
+    try await eventually { peer.inputs.count == 1 }
+    XCTAssertEqual(peer.inputs[0].scope.bufferRevision, 5)
+    XCTAssertFalse(peer.inputs[0].cancel)
   }
 }

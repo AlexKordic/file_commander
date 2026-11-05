@@ -201,7 +201,9 @@ needs no Metal toolchain.
 `Tests/NativeEditorTests` imports the application target and controls scene
 timing over a disposable Unix socket. It verifies captured click positions
 through reflow, queued typing bound to its original buffer lifetime, terminal
-cancellation, and modal input while a document command waits for geometry.
+cancellation, modal input while a document command waits for geometry, and
+formatting readiness. Readiness checks cover holding the previous source map,
+waiting input, delayed caret reveal, and editable source fallback on failure.
 The tests create their own editor view and enable experimental rich Compose
 only for that instance. They do not attach to an existing Fresh session or
 open the installed app. To run the affected editor checks:
