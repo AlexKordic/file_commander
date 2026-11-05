@@ -130,6 +130,41 @@ public nonisolated enum WireMouseButton: SwiftProtobuf.Enum, Swift.CaseIterable 
 
 }
 
+/// A source marker and a caret-fragment offset in native points, per client.
+public nonisolated struct WireComposeViewport: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var position: UInt64 = 0
+
+  public var affinity: UInt32 = 0
+
+  public var offset: Double = 0
+
+  public var sequence: UInt64 = 0
+
+  public var epoch: UInt64 = 0
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
+public nonisolated struct WireComposeViewportReply: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var id: UInt64 = 0
+
+  public var accepted: Bool = false
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
 /// A bounded binary image payload, multiplexed with normal input/scene frames.
 public nonisolated struct WireComposeAssetChunk: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
@@ -1368,46 +1403,105 @@ public nonisolated struct WirePane: @unchecked Sendable {
 
 /// A source-preserving rich Compose window. All offsets are UTF-8 bytes;
 /// display offsets are relative to text, source offsets are buffer-wide.
-public nonisolated struct WireComposePane: Sendable {
+public nonisolated struct WireComposePane: @unchecked Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
 
-  public var bufferRevision: UInt64 = 0
+  public var bufferRevision: UInt64 {
+    get {_storage._bufferRevision}
+    set {_uniqueStorage()._bufferRevision = newValue}
+  }
 
-  public var projectionRevision: UInt64 = 0
+  public var projectionRevision: UInt64 {
+    get {_storage._projectionRevision}
+    set {_uniqueStorage()._projectionRevision = newValue}
+  }
 
-  public var sourceStart: UInt64 = 0
+  public var sourceStart: UInt64 {
+    get {_storage._sourceStart}
+    set {_uniqueStorage()._sourceStart = newValue}
+  }
 
-  public var sourceEnd: UInt64 = 0
+  public var sourceEnd: UInt64 {
+    get {_storage._sourceEnd}
+    set {_uniqueStorage()._sourceEnd = newValue}
+  }
 
-  public var text: String = String()
+  public var text: String {
+    get {_storage._text}
+    set {_uniqueStorage()._text = newValue}
+  }
 
-  public var segments: [WireComposeSegment] = []
+  public var segments: [WireComposeSegment] {
+    get {_storage._segments}
+    set {_uniqueStorage()._segments = newValue}
+  }
 
-  public var spans: [WireComposeSpan] = []
+  public var spans: [WireComposeSpan] {
+    get {_storage._spans}
+    set {_uniqueStorage()._spans = newValue}
+  }
 
-  public var images: [WireComposeImage] = []
+  public var images: [WireComposeImage] {
+    get {_storage._images}
+    set {_uniqueStorage()._images = newValue}
+  }
 
-  public var cursors: [WireComposeSelection] = []
+  public var cursors: [WireComposeSelection] {
+    get {_storage._cursors}
+    set {_uniqueStorage()._cursors = newValue}
+  }
 
-  public var focused: Bool = false
+  public var focused: Bool {
+    get {_storage._focused}
+    set {_uniqueStorage()._focused = newValue}
+  }
 
-  public var topByte: UInt64 = 0
+  public var topByte: UInt64 {
+    get {_storage._topByte}
+    set {_uniqueStorage()._topByte = newValue}
+  }
 
-  public var documentLen: UInt64 = 0
+  public var documentLen: UInt64 {
+    get {_storage._documentLen}
+    set {_uniqueStorage()._documentLen = newValue}
+  }
 
-  public var selectionRevision: UInt64 = 0
+  public var selectionRevision: UInt64 {
+    get {_storage._selectionRevision}
+    set {_uniqueStorage()._selectionRevision = newValue}
+  }
 
-  public var keyboard: Bool = false
+  public var keyboard: Bool {
+    get {_storage._keyboard}
+    set {_uniqueStorage()._keyboard = newValue}
+  }
 
-  public var assetAuthority: UInt64 = 0
+  public var assetAuthority: UInt64 {
+    get {_storage._assetAuthority}
+    set {_uniqueStorage()._assetAuthority = newValue}
+  }
 
-  public var assetDocument: UInt64 = 0
+  public var assetDocument: UInt64 {
+    get {_storage._assetDocument}
+    set {_uniqueStorage()._assetDocument = newValue}
+  }
+
+  public var viewport: WireComposeViewport {
+    get {_storage._viewport ?? WireComposeViewport()}
+    set {_uniqueStorage()._viewport = newValue}
+  }
+  /// Returns true if `viewport` has been explicitly set.
+  public var hasViewport: Bool {_storage._viewport != nil}
+  /// Clears the value of `viewport`. Subsequent reads from it will return its default value.
+  public mutating func clearViewport() {_uniqueStorage()._viewport = nil}
 
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
+
+  fileprivate var _storage = _StorageClass.defaultInstance
 }
 
 /// kind: 0 copied text, 1 hidden source, 2 atomic replacement, 3 insertion.
@@ -1534,12 +1628,22 @@ public nonisolated struct WireInputReply: Sendable {
   /// Clears the value of `needY`. Subsequent reads from it will return its default value.
   public mutating func clearNeedY() {self._needY = nil}
 
+  public var compose: WireComposePane {
+    get {_compose ?? WireComposePane()}
+    set {_compose = newValue}
+  }
+  /// Returns true if `compose` has been explicitly set.
+  public var hasCompose: Bool {self._compose != nil}
+  /// Clears the value of `compose`. Subsequent reads from it will return its default value.
+  public mutating func clearCompose() {self._compose = nil}
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
 
   fileprivate var _needRegion: UInt64? = nil
   fileprivate var _needY: Double? = nil
+  fileprivate var _compose: WireComposePane? = nil
 }
 
 public nonisolated struct WireComposeCaret: Sendable {
@@ -2864,6 +2968,15 @@ public nonisolated struct WireFrame: @unchecked Sendable {
     set {_uniqueStorage()._composeAssets = newValue}
   }
 
+  public var viewportReply: WireComposeViewportReply {
+    get {_storage._viewportReply ?? WireComposeViewportReply()}
+    set {_uniqueStorage()._viewportReply = newValue}
+  }
+  /// Returns true if `viewportReply` has been explicitly set.
+  public var hasViewportReply: Bool {_storage._viewportReply != nil}
+  /// Clears the value of `viewportReply`. Subsequent reads from it will return its default value.
+  public mutating func clearViewportReply() {_uniqueStorage()._viewportReply = nil}
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
@@ -3071,6 +3184,39 @@ public nonisolated struct WireComposeAssetRequest: Sendable {
   public var authority: UInt64 = 0
 
   public var document: UInt64 = 0
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+
+  fileprivate var _scope: WireComposeScope? = nil
+}
+
+/// Type 29: coalesced pixel scrolling. The source marker is remapped from the
+/// scope's buffer revision. offset is relative to the native content top.
+public nonisolated struct WireComposeViewportRequest: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var id: UInt64 = 0
+
+  public var scope: WireComposeScope {
+    get {_scope ?? WireComposeScope()}
+    set {_scope = newValue}
+  }
+  /// Returns true if `scope` has been explicitly set.
+  public var hasScope: Bool {self._scope != nil}
+  /// Clears the value of `scope`. Subsequent reads from it will return its default value.
+  public mutating func clearScope() {self._scope = nil}
+
+  public var position: UInt64 = 0
+
+  public var affinity: UInt32 = 0
+
+  public var offset: Double = 0
+
+  public var epoch: UInt64 = 0
 
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
@@ -3369,6 +3515,91 @@ nonisolated extension WireMouseKind: SwiftProtobuf._ProtoNameProviding {
 
 nonisolated extension WireMouseButton: SwiftProtobuf._ProtoNameProviding {
   public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0MOUSE_BUTTON_LEFT\0\u{1}MOUSE_BUTTON_RIGHT\0\u{1}MOUSE_BUTTON_MIDDLE\0")
+}
+
+nonisolated extension WireComposeViewport: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".ComposeViewport"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}position\0\u{1}affinity\0\u{1}offset\0\u{1}sequence\0\u{1}epoch\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularUInt64Field(value: &self.position) }()
+      case 2: try { try decoder.decodeSingularUInt32Field(value: &self.affinity) }()
+      case 3: try { try decoder.decodeSingularDoubleField(value: &self.offset) }()
+      case 4: try { try decoder.decodeSingularUInt64Field(value: &self.sequence) }()
+      case 5: try { try decoder.decodeSingularUInt64Field(value: &self.epoch) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if self.position != 0 {
+      try visitor.visitSingularUInt64Field(value: self.position, fieldNumber: 1)
+    }
+    if self.affinity != 0 {
+      try visitor.visitSingularUInt32Field(value: self.affinity, fieldNumber: 2)
+    }
+    if self.offset.bitPattern != 0 {
+      try visitor.visitSingularDoubleField(value: self.offset, fieldNumber: 3)
+    }
+    if self.sequence != 0 {
+      try visitor.visitSingularUInt64Field(value: self.sequence, fieldNumber: 4)
+    }
+    if self.epoch != 0 {
+      try visitor.visitSingularUInt64Field(value: self.epoch, fieldNumber: 5)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: WireComposeViewport, rhs: WireComposeViewport) -> Bool {
+    if lhs.position != rhs.position {return false}
+    if lhs.affinity != rhs.affinity {return false}
+    if lhs.offset != rhs.offset {return false}
+    if lhs.sequence != rhs.sequence {return false}
+    if lhs.epoch != rhs.epoch {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension WireComposeViewportReply: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".ComposeViewportReply"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}id\0\u{1}accepted\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularUInt64Field(value: &self.id) }()
+      case 2: try { try decoder.decodeSingularBoolField(value: &self.accepted) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if self.id != 0 {
+      try visitor.visitSingularUInt64Field(value: self.id, fieldNumber: 1)
+    }
+    if self.accepted != false {
+      try visitor.visitSingularBoolField(value: self.accepted, fieldNumber: 2)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: WireComposeViewportReply, rhs: WireComposeViewportReply) -> Bool {
+    if lhs.id != rhs.id {return false}
+    if lhs.accepted != rhs.accepted {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
 }
 
 nonisolated extension WireComposeAssetChunk: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
@@ -5533,104 +5764,181 @@ nonisolated extension WirePane: SwiftProtobuf.Message, SwiftProtobuf._MessageImp
 
 nonisolated extension WireComposePane: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".ComposePane"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}buffer_revision\0\u{3}projection_revision\0\u{3}source_start\0\u{3}source_end\0\u{1}text\0\u{1}segments\0\u{1}spans\0\u{1}images\0\u{1}cursors\0\u{1}focused\0\u{3}top_byte\0\u{3}document_len\0\u{3}selection_revision\0\u{1}keyboard\0\u{3}asset_authority\0\u{3}asset_document\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}buffer_revision\0\u{3}projection_revision\0\u{3}source_start\0\u{3}source_end\0\u{1}text\0\u{1}segments\0\u{1}spans\0\u{1}images\0\u{1}cursors\0\u{1}focused\0\u{3}top_byte\0\u{3}document_len\0\u{3}selection_revision\0\u{1}keyboard\0\u{3}asset_authority\0\u{3}asset_document\0\u{1}viewport\0")
+
+  fileprivate class _StorageClass {
+    var _bufferRevision: UInt64 = 0
+    var _projectionRevision: UInt64 = 0
+    var _sourceStart: UInt64 = 0
+    var _sourceEnd: UInt64 = 0
+    var _text: String = String()
+    var _segments: [WireComposeSegment] = []
+    var _spans: [WireComposeSpan] = []
+    var _images: [WireComposeImage] = []
+    var _cursors: [WireComposeSelection] = []
+    var _focused: Bool = false
+    var _topByte: UInt64 = 0
+    var _documentLen: UInt64 = 0
+    var _selectionRevision: UInt64 = 0
+    var _keyboard: Bool = false
+    var _assetAuthority: UInt64 = 0
+    var _assetDocument: UInt64 = 0
+    var _viewport: WireComposeViewport? = nil
+
+      // This property is used as the initial default value for new instances of the type.
+      // The type itself is protecting the reference to its storage via CoW semantics.
+      // This will force a copy to be made of this reference when the first mutation occurs;
+      // hence, it is safe to mark this as `nonisolated(unsafe)`.
+      static nonisolated(unsafe) let defaultInstance = _StorageClass()
+
+    private init() {}
+
+    init(copying source: _StorageClass) {
+      _bufferRevision = source._bufferRevision
+      _projectionRevision = source._projectionRevision
+      _sourceStart = source._sourceStart
+      _sourceEnd = source._sourceEnd
+      _text = source._text
+      _segments = source._segments
+      _spans = source._spans
+      _images = source._images
+      _cursors = source._cursors
+      _focused = source._focused
+      _topByte = source._topByte
+      _documentLen = source._documentLen
+      _selectionRevision = source._selectionRevision
+      _keyboard = source._keyboard
+      _assetAuthority = source._assetAuthority
+      _assetDocument = source._assetDocument
+      _viewport = source._viewport
+    }
+  }
+
+  fileprivate mutating func _uniqueStorage() -> _StorageClass {
+    if !isKnownUniquelyReferenced(&_storage) {
+      _storage = _StorageClass(copying: _storage)
+    }
+    return _storage
+  }
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
-    while let fieldNumber = try decoder.nextFieldNumber() {
-      // The use of inline closures is to circumvent an issue where the compiler
-      // allocates stack space for every case branch when no optimizations are
-      // enabled. https://github.com/apple/swift-protobuf/issues/1034
-      switch fieldNumber {
-      case 1: try { try decoder.decodeSingularUInt64Field(value: &self.bufferRevision) }()
-      case 2: try { try decoder.decodeSingularUInt64Field(value: &self.projectionRevision) }()
-      case 3: try { try decoder.decodeSingularUInt64Field(value: &self.sourceStart) }()
-      case 4: try { try decoder.decodeSingularUInt64Field(value: &self.sourceEnd) }()
-      case 5: try { try decoder.decodeSingularStringField(value: &self.text) }()
-      case 6: try { try decoder.decodeRepeatedMessageField(value: &self.segments) }()
-      case 7: try { try decoder.decodeRepeatedMessageField(value: &self.spans) }()
-      case 8: try { try decoder.decodeRepeatedMessageField(value: &self.images) }()
-      case 9: try { try decoder.decodeRepeatedMessageField(value: &self.cursors) }()
-      case 10: try { try decoder.decodeSingularBoolField(value: &self.focused) }()
-      case 11: try { try decoder.decodeSingularUInt64Field(value: &self.topByte) }()
-      case 12: try { try decoder.decodeSingularUInt64Field(value: &self.documentLen) }()
-      case 13: try { try decoder.decodeSingularUInt64Field(value: &self.selectionRevision) }()
-      case 14: try { try decoder.decodeSingularBoolField(value: &self.keyboard) }()
-      case 15: try { try decoder.decodeSingularUInt64Field(value: &self.assetAuthority) }()
-      case 16: try { try decoder.decodeSingularUInt64Field(value: &self.assetDocument) }()
-      default: break
+    _ = _uniqueStorage()
+    try withExtendedLifetime(_storage) { (_storage: _StorageClass) in
+      while let fieldNumber = try decoder.nextFieldNumber() {
+        // The use of inline closures is to circumvent an issue where the compiler
+        // allocates stack space for every case branch when no optimizations are
+        // enabled. https://github.com/apple/swift-protobuf/issues/1034
+        switch fieldNumber {
+        case 1: try { try decoder.decodeSingularUInt64Field(value: &_storage._bufferRevision) }()
+        case 2: try { try decoder.decodeSingularUInt64Field(value: &_storage._projectionRevision) }()
+        case 3: try { try decoder.decodeSingularUInt64Field(value: &_storage._sourceStart) }()
+        case 4: try { try decoder.decodeSingularUInt64Field(value: &_storage._sourceEnd) }()
+        case 5: try { try decoder.decodeSingularStringField(value: &_storage._text) }()
+        case 6: try { try decoder.decodeRepeatedMessageField(value: &_storage._segments) }()
+        case 7: try { try decoder.decodeRepeatedMessageField(value: &_storage._spans) }()
+        case 8: try { try decoder.decodeRepeatedMessageField(value: &_storage._images) }()
+        case 9: try { try decoder.decodeRepeatedMessageField(value: &_storage._cursors) }()
+        case 10: try { try decoder.decodeSingularBoolField(value: &_storage._focused) }()
+        case 11: try { try decoder.decodeSingularUInt64Field(value: &_storage._topByte) }()
+        case 12: try { try decoder.decodeSingularUInt64Field(value: &_storage._documentLen) }()
+        case 13: try { try decoder.decodeSingularUInt64Field(value: &_storage._selectionRevision) }()
+        case 14: try { try decoder.decodeSingularBoolField(value: &_storage._keyboard) }()
+        case 15: try { try decoder.decodeSingularUInt64Field(value: &_storage._assetAuthority) }()
+        case 16: try { try decoder.decodeSingularUInt64Field(value: &_storage._assetDocument) }()
+        case 17: try { try decoder.decodeSingularMessageField(value: &_storage._viewport) }()
+        default: break
+        }
       }
     }
   }
 
   public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
-    if self.bufferRevision != 0 {
-      try visitor.visitSingularUInt64Field(value: self.bufferRevision, fieldNumber: 1)
-    }
-    if self.projectionRevision != 0 {
-      try visitor.visitSingularUInt64Field(value: self.projectionRevision, fieldNumber: 2)
-    }
-    if self.sourceStart != 0 {
-      try visitor.visitSingularUInt64Field(value: self.sourceStart, fieldNumber: 3)
-    }
-    if self.sourceEnd != 0 {
-      try visitor.visitSingularUInt64Field(value: self.sourceEnd, fieldNumber: 4)
-    }
-    if !self.text.isEmpty {
-      try visitor.visitSingularStringField(value: self.text, fieldNumber: 5)
-    }
-    if !self.segments.isEmpty {
-      try visitor.visitRepeatedMessageField(value: self.segments, fieldNumber: 6)
-    }
-    if !self.spans.isEmpty {
-      try visitor.visitRepeatedMessageField(value: self.spans, fieldNumber: 7)
-    }
-    if !self.images.isEmpty {
-      try visitor.visitRepeatedMessageField(value: self.images, fieldNumber: 8)
-    }
-    if !self.cursors.isEmpty {
-      try visitor.visitRepeatedMessageField(value: self.cursors, fieldNumber: 9)
-    }
-    if self.focused != false {
-      try visitor.visitSingularBoolField(value: self.focused, fieldNumber: 10)
-    }
-    if self.topByte != 0 {
-      try visitor.visitSingularUInt64Field(value: self.topByte, fieldNumber: 11)
-    }
-    if self.documentLen != 0 {
-      try visitor.visitSingularUInt64Field(value: self.documentLen, fieldNumber: 12)
-    }
-    if self.selectionRevision != 0 {
-      try visitor.visitSingularUInt64Field(value: self.selectionRevision, fieldNumber: 13)
-    }
-    if self.keyboard != false {
-      try visitor.visitSingularBoolField(value: self.keyboard, fieldNumber: 14)
-    }
-    if self.assetAuthority != 0 {
-      try visitor.visitSingularUInt64Field(value: self.assetAuthority, fieldNumber: 15)
-    }
-    if self.assetDocument != 0 {
-      try visitor.visitSingularUInt64Field(value: self.assetDocument, fieldNumber: 16)
+    try withExtendedLifetime(_storage) { (_storage: _StorageClass) in
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every if/case branch local when no optimizations
+      // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+      // https://github.com/apple/swift-protobuf/issues/1182
+      if _storage._bufferRevision != 0 {
+        try visitor.visitSingularUInt64Field(value: _storage._bufferRevision, fieldNumber: 1)
+      }
+      if _storage._projectionRevision != 0 {
+        try visitor.visitSingularUInt64Field(value: _storage._projectionRevision, fieldNumber: 2)
+      }
+      if _storage._sourceStart != 0 {
+        try visitor.visitSingularUInt64Field(value: _storage._sourceStart, fieldNumber: 3)
+      }
+      if _storage._sourceEnd != 0 {
+        try visitor.visitSingularUInt64Field(value: _storage._sourceEnd, fieldNumber: 4)
+      }
+      if !_storage._text.isEmpty {
+        try visitor.visitSingularStringField(value: _storage._text, fieldNumber: 5)
+      }
+      if !_storage._segments.isEmpty {
+        try visitor.visitRepeatedMessageField(value: _storage._segments, fieldNumber: 6)
+      }
+      if !_storage._spans.isEmpty {
+        try visitor.visitRepeatedMessageField(value: _storage._spans, fieldNumber: 7)
+      }
+      if !_storage._images.isEmpty {
+        try visitor.visitRepeatedMessageField(value: _storage._images, fieldNumber: 8)
+      }
+      if !_storage._cursors.isEmpty {
+        try visitor.visitRepeatedMessageField(value: _storage._cursors, fieldNumber: 9)
+      }
+      if _storage._focused != false {
+        try visitor.visitSingularBoolField(value: _storage._focused, fieldNumber: 10)
+      }
+      if _storage._topByte != 0 {
+        try visitor.visitSingularUInt64Field(value: _storage._topByte, fieldNumber: 11)
+      }
+      if _storage._documentLen != 0 {
+        try visitor.visitSingularUInt64Field(value: _storage._documentLen, fieldNumber: 12)
+      }
+      if _storage._selectionRevision != 0 {
+        try visitor.visitSingularUInt64Field(value: _storage._selectionRevision, fieldNumber: 13)
+      }
+      if _storage._keyboard != false {
+        try visitor.visitSingularBoolField(value: _storage._keyboard, fieldNumber: 14)
+      }
+      if _storage._assetAuthority != 0 {
+        try visitor.visitSingularUInt64Field(value: _storage._assetAuthority, fieldNumber: 15)
+      }
+      if _storage._assetDocument != 0 {
+        try visitor.visitSingularUInt64Field(value: _storage._assetDocument, fieldNumber: 16)
+      }
+      try { if let v = _storage._viewport {
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 17)
+      } }()
     }
     try unknownFields.traverse(visitor: &visitor)
   }
 
   public static func ==(lhs: WireComposePane, rhs: WireComposePane) -> Bool {
-    if lhs.bufferRevision != rhs.bufferRevision {return false}
-    if lhs.projectionRevision != rhs.projectionRevision {return false}
-    if lhs.sourceStart != rhs.sourceStart {return false}
-    if lhs.sourceEnd != rhs.sourceEnd {return false}
-    if lhs.text != rhs.text {return false}
-    if lhs.segments != rhs.segments {return false}
-    if lhs.spans != rhs.spans {return false}
-    if lhs.images != rhs.images {return false}
-    if lhs.cursors != rhs.cursors {return false}
-    if lhs.focused != rhs.focused {return false}
-    if lhs.topByte != rhs.topByte {return false}
-    if lhs.documentLen != rhs.documentLen {return false}
-    if lhs.selectionRevision != rhs.selectionRevision {return false}
-    if lhs.keyboard != rhs.keyboard {return false}
-    if lhs.assetAuthority != rhs.assetAuthority {return false}
-    if lhs.assetDocument != rhs.assetDocument {return false}
+    if lhs._storage !== rhs._storage {
+      let storagesAreEqual: Bool = withExtendedLifetime((lhs._storage, rhs._storage)) { (_args: (_StorageClass, _StorageClass)) in
+        let _storage = _args.0
+        let rhs_storage = _args.1
+        if _storage._bufferRevision != rhs_storage._bufferRevision {return false}
+        if _storage._projectionRevision != rhs_storage._projectionRevision {return false}
+        if _storage._sourceStart != rhs_storage._sourceStart {return false}
+        if _storage._sourceEnd != rhs_storage._sourceEnd {return false}
+        if _storage._text != rhs_storage._text {return false}
+        if _storage._segments != rhs_storage._segments {return false}
+        if _storage._spans != rhs_storage._spans {return false}
+        if _storage._images != rhs_storage._images {return false}
+        if _storage._cursors != rhs_storage._cursors {return false}
+        if _storage._focused != rhs_storage._focused {return false}
+        if _storage._topByte != rhs_storage._topByte {return false}
+        if _storage._documentLen != rhs_storage._documentLen {return false}
+        if _storage._selectionRevision != rhs_storage._selectionRevision {return false}
+        if _storage._keyboard != rhs_storage._keyboard {return false}
+        if _storage._assetAuthority != rhs_storage._assetAuthority {return false}
+        if _storage._assetDocument != rhs_storage._assetDocument {return false}
+        if _storage._viewport != rhs_storage._viewport {return false}
+        return true
+      }
+      if !storagesAreEqual {return false}
+    }
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
@@ -5842,7 +6150,7 @@ nonisolated extension WireComposeSelection: SwiftProtobuf.Message, SwiftProtobuf
 
 nonisolated extension WireInputReply: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".InputReply"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}id\0\u{1}accepted\0\u{3}needs_layout\0\u{3}need_region\0\u{1}carets\0\u{3}need_y\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}id\0\u{1}accepted\0\u{3}needs_layout\0\u{3}need_region\0\u{1}carets\0\u{3}need_y\0\u{1}compose\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -5856,6 +6164,7 @@ nonisolated extension WireInputReply: SwiftProtobuf.Message, SwiftProtobuf._Mess
       case 4: try { try decoder.decodeSingularUInt64Field(value: &self._needRegion) }()
       case 5: try { try decoder.decodeRepeatedMessageField(value: &self.carets) }()
       case 6: try { try decoder.decodeSingularDoubleField(value: &self._needY) }()
+      case 7: try { try decoder.decodeSingularMessageField(value: &self._compose) }()
       default: break
       }
     }
@@ -5884,6 +6193,9 @@ nonisolated extension WireInputReply: SwiftProtobuf.Message, SwiftProtobuf._Mess
     try { if let v = self._needY {
       try visitor.visitSingularDoubleField(value: v, fieldNumber: 6)
     } }()
+    try { if let v = self._compose {
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 7)
+    } }()
     try unknownFields.traverse(visitor: &visitor)
   }
 
@@ -5894,6 +6206,7 @@ nonisolated extension WireInputReply: SwiftProtobuf.Message, SwiftProtobuf._Mess
     if lhs._needRegion != rhs._needRegion {return false}
     if lhs.carets != rhs.carets {return false}
     if lhs._needY != rhs._needY {return false}
+    if lhs._compose != rhs._compose {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
@@ -7853,7 +8166,7 @@ nonisolated extension WireSettingsUpdate: SwiftProtobuf.Message, SwiftProtobuf._
 
 nonisolated extension WireFrame: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".Frame"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}seq\0\u{1}width\0\u{1}height\0\u{3}window_id\0\u{1}theme\0\u{1}clipboard\0\u{1}cursor\0\u{3}grid_len\0\u{1}copies\0\u{1}rows\0\u{3}pane_len\0\u{1}panes\0\u{1}menus\0\u{3}status_bar\0\u{3}file_explorer\0\u{1}separators\0\u{1}popups\0\u{1}palette\0\u{3}trust_dialog\0\u{3}context_menu\0\u{3}keybinding_editor\0\u{1}settings\0\u{1}timing\0\u{3}input_reply\0\u{3}compose_assets\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}seq\0\u{1}width\0\u{1}height\0\u{3}window_id\0\u{1}theme\0\u{1}clipboard\0\u{1}cursor\0\u{3}grid_len\0\u{1}copies\0\u{1}rows\0\u{3}pane_len\0\u{1}panes\0\u{1}menus\0\u{3}status_bar\0\u{3}file_explorer\0\u{1}separators\0\u{1}popups\0\u{1}palette\0\u{3}trust_dialog\0\u{3}context_menu\0\u{3}keybinding_editor\0\u{1}settings\0\u{1}timing\0\u{3}input_reply\0\u{3}compose_assets\0\u{3}viewport_reply\0")
 
   fileprivate class _StorageClass {
     var _seq: UInt64 = 0
@@ -7881,6 +8194,7 @@ nonisolated extension WireFrame: SwiftProtobuf.Message, SwiftProtobuf._MessageIm
     var _timing: WireTiming? = nil
     var _inputReply: WireInputReply? = nil
     var _composeAssets: [WireComposeAssetChunk] = []
+    var _viewportReply: WireComposeViewportReply? = nil
 
       // This property is used as the initial default value for new instances of the type.
       // The type itself is protecting the reference to its storage via CoW semantics.
@@ -7916,6 +8230,7 @@ nonisolated extension WireFrame: SwiftProtobuf.Message, SwiftProtobuf._MessageIm
       _timing = source._timing
       _inputReply = source._inputReply
       _composeAssets = source._composeAssets
+      _viewportReply = source._viewportReply
     }
   }
 
@@ -7959,6 +8274,7 @@ nonisolated extension WireFrame: SwiftProtobuf.Message, SwiftProtobuf._MessageIm
         case 23: try { try decoder.decodeSingularMessageField(value: &_storage._timing) }()
         case 24: try { try decoder.decodeSingularMessageField(value: &_storage._inputReply) }()
         case 25: try { try decoder.decodeRepeatedMessageField(value: &_storage._composeAssets) }()
+        case 26: try { try decoder.decodeSingularMessageField(value: &_storage._viewportReply) }()
         default: break
         }
       }
@@ -8046,6 +8362,9 @@ nonisolated extension WireFrame: SwiftProtobuf.Message, SwiftProtobuf._MessageIm
       if !_storage._composeAssets.isEmpty {
         try visitor.visitRepeatedMessageField(value: _storage._composeAssets, fieldNumber: 25)
       }
+      try { if let v = _storage._viewportReply {
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 26)
+      } }()
     }
     try unknownFields.traverse(visitor: &visitor)
   }
@@ -8080,6 +8399,7 @@ nonisolated extension WireFrame: SwiftProtobuf.Message, SwiftProtobuf._MessageIm
         if _storage._timing != rhs_storage._timing {return false}
         if _storage._inputReply != rhs_storage._inputReply {return false}
         if _storage._composeAssets != rhs_storage._composeAssets {return false}
+        if _storage._viewportReply != rhs_storage._viewportReply {return false}
         return true
       }
       if !storagesAreEqual {return false}
@@ -8459,6 +8779,65 @@ nonisolated extension WireComposeAssetRequest: SwiftProtobuf.Message, SwiftProto
     if lhs.cancel != rhs.cancel {return false}
     if lhs.authority != rhs.authority {return false}
     if lhs.document != rhs.document {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension WireComposeViewportRequest: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".ComposeViewportRequest"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}id\0\u{1}scope\0\u{1}position\0\u{1}affinity\0\u{1}offset\0\u{1}epoch\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularUInt64Field(value: &self.id) }()
+      case 2: try { try decoder.decodeSingularMessageField(value: &self._scope) }()
+      case 3: try { try decoder.decodeSingularUInt64Field(value: &self.position) }()
+      case 4: try { try decoder.decodeSingularUInt32Field(value: &self.affinity) }()
+      case 5: try { try decoder.decodeSingularDoubleField(value: &self.offset) }()
+      case 6: try { try decoder.decodeSingularUInt64Field(value: &self.epoch) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
+    if self.id != 0 {
+      try visitor.visitSingularUInt64Field(value: self.id, fieldNumber: 1)
+    }
+    try { if let v = self._scope {
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 2)
+    } }()
+    if self.position != 0 {
+      try visitor.visitSingularUInt64Field(value: self.position, fieldNumber: 3)
+    }
+    if self.affinity != 0 {
+      try visitor.visitSingularUInt32Field(value: self.affinity, fieldNumber: 4)
+    }
+    if self.offset.bitPattern != 0 {
+      try visitor.visitSingularDoubleField(value: self.offset, fieldNumber: 5)
+    }
+    if self.epoch != 0 {
+      try visitor.visitSingularUInt64Field(value: self.epoch, fieldNumber: 6)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: WireComposeViewportRequest, rhs: WireComposeViewportRequest) -> Bool {
+    if lhs.id != rhs.id {return false}
+    if lhs._scope != rhs._scope {return false}
+    if lhs.position != rhs.position {return false}
+    if lhs.affinity != rhs.affinity {return false}
+    if lhs.offset != rhs.offset {return false}
+    if lhs.epoch != rhs.epoch {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }

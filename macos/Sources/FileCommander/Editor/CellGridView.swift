@@ -13,6 +13,7 @@ protocol CellGridDelegate: AnyObject {
   func grid(_ grid: CellGridView, handleAppChord event: NSEvent) -> Bool
   func gridPaste(_ grid: CellGridView)
   func grid(_ grid: CellGridView, point: CGPoint, in pane: ComposePresentation, extend: Bool, count: Int)
+  func grid(_ grid: CellGridView, scroll delta: CGFloat, in pane: ComposePresentation)
   var optionAsAlt: Bool { get }
 }
 
@@ -51,6 +52,7 @@ final class CellGridView: NSView, @preconcurrency NSTextInputClient {
   private var horizontalRemainder: CGFloat = 0
   private(set) var composePanes: [UInt64: ComposePresentation] = [:]
   weak var composeImageController: ComposeImageController?
+  weak var composeViewportController: ComposeViewportController?
   private var composeDrag: UInt64?
   private var composeCaretIdentity: ComposePresentation.Identity?
   private var composeCaretRevision: UInt64 = 0
@@ -152,16 +154,36 @@ final class CellGridView: NSView, @preconcurrency NSTextInputClient {
   private func rebuildCompose() {
     let previous = composePanes
     composePanes = Dictionary(uniqueKeysWithValues: store.panes.compactMap { pane in
-      let scope = WireComposeScope.with { $0.windowID = UInt64(store.windowID); $0.buffer = pane.buffer }
-      let images = Dictionary(uniqueKeysWithValues: pane.compose.images.map { image in
-        (image.start, composeImageController?.state(scope: scope, image: image,
-          authority: pane.compose.assetAuthority, document: pane.compose.assetDocument) ?? .loading)
-      })
-      return ComposePresentation(pane: pane, window: UInt64(store.windowID),
-        cell: CGSize(width: cellWidth, height: cellHeight), body: bodyFont, monospace: monoFont,
-        reuse: previous[pane.leaf], caretStates: composeCaretIdentity == .init(window: UInt64(store.windowID), leaf: pane.leaf, buffer: pane.buffer)
-          && composeCaretRevision == pane.compose.bufferRevision ? composeCarets : [:], images: images).map { (pane.leaf, $0) }
+      presentation(pane, reuse: previous[pane.leaf]).map { (pane.leaf, $0) }
     })
+  }
+
+  private func presentation(_ pane: WirePane, reuse: ComposePresentation? = nil) -> ComposePresentation? {
+    let scope = WireComposeScope.with {
+      $0.windowID = UInt64(store.windowID); $0.leaf = pane.leaf; $0.buffer = pane.buffer
+      $0.bufferRevision = pane.compose.bufferRevision
+      $0.projectionRevision = pane.compose.projectionRevision; $0.selectionRevision = pane.compose.selectionRevision
+    }
+    let images = Dictionary(uniqueKeysWithValues: pane.compose.images.map { image in
+      (image.start, composeImageController?.state(scope: scope, image: image,
+        authority: pane.compose.assetAuthority, document: pane.compose.assetDocument) ?? .loading)
+    })
+    let viewport = pane.compose.hasViewport ? composeViewportController?.value(scope: scope, remote: pane.compose.viewport) ?? pane.compose.viewport : nil
+    return ComposePresentation(pane: pane, window: UInt64(store.windowID),
+      cell: CGSize(width: cellWidth, height: cellHeight), body: bodyFont, monospace: monoFont,
+      reuse: reuse, caretStates: composeCaretIdentity == .init(window: UInt64(store.windowID), leaf: pane.leaf, buffer: pane.buffer)
+        && composeCaretRevision == pane.compose.bufferRevision ? composeCarets : [:], images: images, viewport: viewport)
+  }
+
+  /// Geometry for a deferred key is measured with the same fonts, width and
+  /// images, but never replaces a visible pane or starts offscreen image I/O.
+  func composeMeasurement(identity: ComposePresentation.Identity, projection: WireComposePane) -> ComposePresentation? {
+    guard identity.window == UInt64(store.windowID), var pane = store.panes.first(where: { $0.leaf == identity.leaf && $0.hasBuffer && $0.buffer == identity.buffer }),
+          pane.hasCompose, pane.compose.bufferRevision == projection.bufferRevision,
+          pane.compose.selectionRevision == projection.selectionRevision,
+          pane.compose.assetDocument == projection.assetDocument else { return nil }
+    pane.compose = projection
+    return presentation(pane)
   }
 
   func refreshComposeImages() { rebuildCompose(); needsDisplay = true }
@@ -195,9 +217,8 @@ final class CellGridView: NSView, @preconcurrency NSTextInputClient {
   }
 
   var focusedCompose: ComposePresentation? {
-    guard composeInputAllowed, let cursor = store.cursor else { return nil }
-    let cell = rect(column: cursor.column, row: cursor.row)
-    return composePanes.values.first { $0.pane.compose.focused && $0.bounds.contains(CGPoint(x: cell.midX, y: cell.midY)) }
+    guard composeInputAllowed else { return nil }
+    return composePanes.values.first { $0.pane.compose.focused && $0.pane.compose.keyboard }
   }
 
   private func compose(at point: CGPoint) -> ComposePresentation? {
@@ -208,7 +229,7 @@ final class CellGridView: NSView, @preconcurrency NSTextInputClient {
   }
 
   var caretRect: CGRect? {
-    if let rect = focusedCompose?.caret { return rect }
+    if let compose = focusedCompose { return compose.caret }
     return store.cursor.map { rect(column: $0.column, row: $0.row) }
   }
 
@@ -559,6 +580,11 @@ final class CellGridView: NSView, @preconcurrency NSTextInputClient {
   /// A trackpad moves three rows per scroll step, as one wheel notch does in
   /// Fresh; a wheel sends a step per notch.
   override func scrollWheel(with event: NSEvent) {
+    if let pane = compose(at: point(of: event)), pane.pane.compose.hasViewport {
+      let delta = -event.scrollingDeltaY * (event.hasPreciseScrollingDeltas ? 1 : CTFontGetSize(pane.body) * 3)
+      if delta != 0 { delegate?.grid(self, scroll: delta, in: pane) }
+      return
+    }
     let precise = event.hasPreciseScrollingDeltas
     let step = precise ? cellHeight * 3 : 1
     scrollRemainder += event.scrollingDeltaY

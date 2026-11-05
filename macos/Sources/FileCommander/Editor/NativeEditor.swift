@@ -41,7 +41,11 @@ final class NativeEditor: NSObject, CellGridDelegate {
     case message(SceneInput)
     case pointer(ComposePresentation.Identity, CGPoint, extend: Bool, count: Int)
   }
-  private var composeQueue: [PendingInput] = []
+  private struct QueuedInput {
+    var input: PendingInput
+    var scrollGeneration: UInt64
+  }
+  private var composeQueue: [QueuedInput] = []
   private var nextComposeID: UInt64 = 0
   private var pendingComposeID: UInt64?
   private var pendingComposePane: ComposePresentation.Identity?
@@ -50,6 +54,12 @@ final class NativeEditor: NSObject, CellGridDelegate {
   private var pendingComposeY: CGFloat?
   private var pendingComposeRegion: UInt64?
   private var composeRegionSent = false
+  private var pendingComposeProjection: WireComposePane?
+  private var pendingComposeBefore: (revision: UInt64, cursors: [WireComposeSelection])?
+  private var viewportRefreshQueued = false
+  private lazy var composeViewports = ComposeViewportController { [weak self] request in
+    self?.socket?.send(.composeViewport(request))
+  }
   private lazy var composeImages = ComposeImageController { [weak self] request in
     self?.socket?.send(.composeAsset(request))
   }
@@ -68,6 +78,12 @@ final class NativeEditor: NSObject, CellGridDelegate {
     composeImages.onChange = { [weak self] in
       self?.grid?.refreshComposeImages()
       self?.updateImageDemands()
+      self?.scheduleViewportContinuation()
+    }
+    composeViewports.onChange = { [weak self] in
+      self?.grid?.refreshComposeImages()
+      self?.updateImageDemands()
+      self?.scheduleViewportContinuation()
     }
     store.onChange = { [weak self] change in self?.sceneChanged(change) }
     let center = NotificationCenter.default
@@ -135,6 +151,7 @@ final class NativeEditor: NSObject, CellGridDelegate {
     grid?.showingEvent = NSApp.currentEvent.flatMap { $0.type == .keyDown ? $0.timestamp : nil }
     shown = true
     updateImageDemands()
+    scheduleViewportContinuation()
     onPresent?(true)
     updateMenus()
     Trace.write("editor: shown")
@@ -170,6 +187,7 @@ final class NativeEditor: NSObject, CellGridDelegate {
 
   private func disconnect() {
     composeImages.reset()
+    composeViewports.reset()
     socket?.close()
     socket = nil
     receivedHello = false
@@ -182,10 +200,13 @@ final class NativeEditor: NSObject, CellGridDelegate {
     pendingComposeY = nil
     pendingComposeRegion = nil
     composeRegionSent = false
+    pendingComposeProjection = nil
+    pendingComposeBefore = nil
   }
 
   private func connectionEnded(_ reason: String?) {
     composeImages.reset()
+    composeViewports.reset()
     socket = nil
     receivedHello = false
     hide()
@@ -200,6 +221,7 @@ final class NativeEditor: NSObject, CellGridDelegate {
     let view = EditorHostView(store: store) { [weak self] input in self?.sendFromPanel(input) }
     view.grid.delegate = self
     view.grid.composeImageController = composeImages
+    view.grid.composeViewportController = composeViewports
     self.view = view
     let menus = FreshMenus(store: store) { [weak self] action, argsJson in self?.send(.action(name: action, argsJson: argsJson)) }
     menus.openSettings = { [weak self] in self?.app?.openSettings(tab: .editor) }
@@ -220,6 +242,8 @@ final class NativeEditor: NSObject, CellGridDelegate {
     view?.applyLook(dark: theme.isDark)
     chrome?.themeChanged()
     grid.needsDisplay = true
+    updateImageDemands()
+    scheduleViewportContinuation()
   }
 
   // MARK: Scene
@@ -228,6 +252,8 @@ final class NativeEditor: NSObject, CellGridDelegate {
     let started = ProcessInfo.processInfo.systemUptime
     if message.isHello { receivedHello = true }
     store.apply(message)
+    composeViewports.observe(window: UInt64(store.windowID), panes: store.panes,
+      reply: message.frame.hasViewportReply ? message.frame.viewportReply : nil)
     if message.isHello, pendingShow { show() }
     composeImages.receive(message.frame.composeAssets)
     if benchFrameDelay > 0 { Thread.sleep(forTimeInterval: benchFrameDelay) }
@@ -240,20 +266,30 @@ final class NativeEditor: NSObject, CellGridDelegate {
       let reply = message.frame.inputReply
       if reply.accepted {
         let identity: ComposePresentation.Identity?
-        if case .pointer(let target, _, _, _) = composeQueue.first { identity = target }
+        if case .pointer(let target, _, _, _)? = composeQueue.first?.input { identity = target }
         else { identity = pendingComposePane }
         grid?.applyComposeCarets(reply.carets, identity: identity)
+        if let identity, let queued = composeQueue.first,
+           queued.scrollGeneration == composeViewports.userScrollGeneration,
+           let before = pendingComposeBefore, let pane = grid?.composePanes[identity.leaf], pane.identity == identity,
+           before.revision != pane.pane.compose.bufferRevision || before.cursors != pane.pane.compose.cursors {
+          revealComposeCaret(pane)
+        }
         if !composeQueue.isEmpty { composeQueue.removeFirst() }
         pendingComposeID = nil
         pendingComposePane = nil
         pendingComposeLayout = false
         pendingComposeY = nil
         pendingComposeRegion = nil
+        pendingComposeProjection = nil
+        pendingComposeBefore = nil
       } else if reply.needsLayout {
+        if reply.hasCompose { pendingComposeProjection = reply.compose }
         pendingComposeLayout = true
         if composeRegionSent { pendingComposeRegion = nil; pendingComposeY = nil }
         if reply.hasNeedY { pendingComposeY = CGFloat(reply.needY) }
-        if reply.hasNeedRegion, let identity = pendingComposePane, let pane = grid?.composePanes[identity.leaf] {
+        if reply.hasNeedRegion, let identity = pendingComposePane,
+           let pane = pendingComposeProjection.flatMap({ grid?.composeMeasurement(identity: identity, projection: $0) }) ?? grid?.composePanes[identity.leaf] {
           let requested = reply.needRegion
           let projection = pane.layout.text.projection.source
           if let source = Int(exactly: requested), source >= projection.lowerBound,
@@ -268,6 +304,7 @@ final class NativeEditor: NSObject, CellGridDelegate {
       composeRegionSent = false
     }
     pumpComposeInput()
+    scheduleViewportContinuation()
     if let ack = message.timing?.ack { noteAck(ack) }
     if let watch = benchWatch, store.lines.contains(where: { $0.contains(watch.text) }) {
       benchWatch = nil
@@ -350,6 +387,30 @@ final class NativeEditor: NSObject, CellGridDelegate {
     composeImages.update(shown && richCompose ? grid?.composeImageDemands() ?? [] : [])
   }
 
+  /// A source window can finish before the bottom of a tall pane. Fetch its
+  /// adjacent window without redrawing a guessed height or recursive reflow.
+  private func scheduleViewportContinuation() {
+    guard richCompose, receivedHello, !viewportRefreshQueued else { return }
+    viewportRefreshQueued = true
+    DispatchQueue.main.async { [weak self] in
+      guard let self else { return }
+      self.viewportRefreshQueued = false
+      guard self.receivedHello, self.shown else { return }
+      for pane in self.grid?.composePanes.values.map({ $0 }) ?? [] where pane.pane.compose.hasViewport {
+        if let next = pane.scrolling.continuation(pane.viewport) {
+          self.composeViewports.move(scope: pane.scope, from: pane.viewport, to: next, user: false)
+        }
+      }
+    }
+  }
+
+  private func revealComposeCaret(_ pane: ComposePresentation) {
+    guard pane.pane.compose.hasViewport, let cursor = pane.cursor else { return }
+    if let next = pane.scrolling.revealing(cursor.position, affinity: pane.cursorAffinity, from: pane.viewport) {
+      composeViewports.move(scope: pane.scope, from: pane.viewport, to: next, user: false)
+    }
+  }
+
   /// The active tab of the focused pane, for the window title.
   private func updateTitle() {
     let active = store.panes.lazy.compactMap { $0.tabBar.tabs.first(where: \.active)?.label }.first
@@ -363,8 +424,13 @@ final class NativeEditor: NSObject, CellGridDelegate {
 
   func grid(_ grid: CellGridView, point: CGPoint, in pane: ComposePresentation, extend: Bool, count: Int) {
     guard receivedHello else { return }
-    composeQueue.append(.pointer(pane.identity, point, extend: extend, count: count))
+    composeQueue.append(.init(input: .pointer(pane.identity, point, extend: extend, count: count), scrollGeneration: composeViewports.userScrollGeneration))
     pumpComposeInput()
+  }
+
+  func grid(_ grid: CellGridView, scroll delta: CGFloat, in pane: ComposePresentation) {
+    guard receivedHello, let next = pane.scrolling.moved(pane.viewport, by: delta, fallback: pane.bounds.minY + 12 - pane.origin.y) else { return }
+    composeViewports.move(scope: pane.scope, from: pane.viewport, to: next, user: true)
   }
 
   func gridDidResize(_ grid: CellGridView, columns: Int, rows: Int) {
@@ -433,7 +499,7 @@ final class NativeEditor: NSObject, CellGridDelegate {
     }
     switch input {
     case .key, .mouse, .paste, .action, .widget, .settingsClick, .kbEditClick:
-      composeQueue.append(.message(input))
+      composeQueue.append(.init(input: .message(input), scrollGeneration: composeViewports.userScrollGeneration))
       pumpComposeInput()
     default:
       socket?.send(input)
@@ -447,7 +513,7 @@ final class NativeEditor: NSObject, CellGridDelegate {
     if pendingComposeID == nil {
       nextComposeID += 1
       pendingComposeID = nextComposeID
-      if case .message(let input) = queued {
+      if case .message(let input) = queued.input {
         switch input {
         case .key, .paste, .action:
           pendingComposePane = grid?.focusedCompose.flatMap { $0.pane.compose.keyboard ? $0.identity : nil }
@@ -457,12 +523,14 @@ final class NativeEditor: NSObject, CellGridDelegate {
     }
     var input = WireComposeInput()
     input.id = pendingComposeID ?? 0
-    switch queued {
+    switch queued.input {
     case .message(let message):
       input.kind = UInt32(message.kind.rawValue)
       input.payload = Data(message.payload())
       if let identity = pendingComposePane {
-        guard let pane = grid?.composePanes[identity.leaf], pane.identity == identity else { return }
+        guard let visible = grid?.composePanes[identity.leaf], visible.identity == identity else { return }
+        let pane = pendingComposeProjection.flatMap { grid?.composeMeasurement(identity: identity, projection: $0) } ?? visible
+        pendingComposeBefore = (visible.pane.compose.bufferRevision, visible.pane.compose.cursors)
         if pane.pane.compose.keyboard {
           input.scope = pane.scope
           if let region = pendingComposeRegion {
@@ -484,6 +552,7 @@ final class NativeEditor: NSObject, CellGridDelegate {
     case .pointer(let identity, let location, let extend, let count):
       guard let pane = grid?.composePanes[identity.leaf], pane.identity == identity,
             let hit = pane.hit(at: location) else { return }
+      pendingComposeBefore = (pane.pane.compose.bufferRevision, pane.pane.compose.cursors)
       input.scope = pane.scope
       input.position = UInt64(hit.source)
       if let attachment = hit.attachment, !extend {

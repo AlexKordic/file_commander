@@ -15,13 +15,15 @@ final class ComposePresentation {
   let bounds: CGRect
   let origin: CGPoint
   let body: CTFont
+  let viewport: WireComposeViewport
+  let scrolling: ComposeViewport
   private let caretStates: [UInt64: WireComposeCaret]
   private(set) var navigation: WireComposeLayout?
   private let monospace: CTFont
   private let styleRevision: UInt64
 
   init?(pane: WirePane, window: UInt64, cell: CGSize, body: NSFont, monospace: NSFont, reuse: ComposePresentation? = nil,
-        caretStates: [UInt64: WireComposeCaret] = [:], images: [UInt64: ComposeImageState] = [:]) {
+        caretStates: [UInt64: WireComposeCaret] = [:], images: [UInt64: ComposeImageState] = [:], viewport: WireComposeViewport? = nil) {
     guard pane.hasCompose, pane.hasBuffer else { return nil }
     let rect = pane.content
     let bounds = CGRect(x: CGFloat(rect.x) * cell.width, y: CGFloat(rect.y) * cell.height,
@@ -41,6 +43,8 @@ final class ComposePresentation {
     self.caretStates = caretStates
     if let reuse, reuse.layout.text === layout.text, reuse.bounds.height == bounds.height { navigation = reuse.navigation }
     identity = .init(window: window, leaf: pane.leaf, buffer: pane.buffer)
+    self.viewport = viewport ?? .with { $0.position = pane.compose.topByte }
+    scrolling = ComposeViewport(text: layout.text, documentLength: pane.compose.documentLen, height: max(1, bounds.height - 24))
     let top = Int(exactly: pane.compose.topByte).flatMap { layout.text.caret(for: $0)?.minY } ?? 0
     var y = bounds.minY + 12 - top
     if let reuse, reuse.identity == identity,
@@ -51,6 +55,10 @@ final class ComposePresentation {
        let before = reuse.layout.text.caret(for: anchor.source, affinity: anchor.affinity),
        let after = layout.text.caret(for: anchor.source, affinity: anchor.affinity) {
       y = bounds.minY + before.minY + reuse.origin.y - reuse.bounds.minY - after.minY
+    }
+    if pane.compose.hasViewport {
+      let fallback = max(0, bounds.minY + 12 - (reuse?.origin.y ?? bounds.minY + 12))
+      y = bounds.minY + 12 - scrolling.displayedTop(self.viewport, fallback: fallback)
     }
     origin = CGPoint(x: bounds.midX - width / 2, y: y)
   }
@@ -75,6 +83,8 @@ final class ComposePresentation {
   var cursor: WireComposeSelection? {
     pane.compose.cursors.first(where: \.primary) ?? pane.compose.cursors.first
   }
+
+  var cursorAffinity: UInt32 { cursor.map { affinity(for: $0) == .upstream ? 1 : 0 } ?? 0 }
 
   var carets: [CGRect] {
     pane.compose.cursors.compactMap { cursor in
