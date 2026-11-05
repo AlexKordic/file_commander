@@ -51,6 +51,9 @@ final class CellGridView: NSView, @preconcurrency NSTextInputClient {
   private var horizontalRemainder: CGFloat = 0
   private(set) var composePanes: [UInt64: ComposePresentation] = [:]
   private var composeDrag: UInt64?
+  private var composeCaretIdentity: ComposePresentation.Identity?
+  private var composeCaretRevision: UInt64 = 0
+  private var composeCarets: [UInt64: WireComposeCaret] = [:]
   private var bodyFont = NSFont.systemFont(ofSize: 15)
   private var monoFont = NSFont.monospacedSystemFont(ofSize: 15, weight: .regular)
 
@@ -150,8 +153,17 @@ final class CellGridView: NSView, @preconcurrency NSTextInputClient {
     composePanes = Dictionary(uniqueKeysWithValues: store.panes.compactMap { pane in
       ComposePresentation(pane: pane, window: UInt64(store.windowID),
         cell: CGSize(width: cellWidth, height: cellHeight), body: bodyFont, monospace: monoFont,
-        reuse: previous[pane.leaf]).map { (pane.leaf, $0) }
+        reuse: previous[pane.leaf], caretStates: composeCaretIdentity == .init(window: UInt64(store.windowID), leaf: pane.leaf, buffer: pane.buffer)
+          && composeCaretRevision == pane.compose.bufferRevision ? composeCarets : [:]).map { (pane.leaf, $0) }
     })
+  }
+
+  func applyComposeCarets(_ states: [WireComposeCaret], identity: ComposePresentation.Identity?) {
+    composeCaretIdentity = identity
+    composeCaretRevision = identity.flatMap { composePanes[$0.leaf]?.pane.compose.bufferRevision } ?? 0
+    composeCarets = Dictionary(uniqueKeysWithValues: states.map { ($0.id, $0) })
+    rebuildCompose()
+    needsDisplay = true
   }
 
   var composeInputAllowed: Bool {

@@ -4,6 +4,75 @@ import ImageIO
 @testable import FreshKit
 
 final class ComposeTests: XCTestCase {
+  func testNavigationFeedbackUsesTheMeasuredCaretAndCompleteUnicodeClusters() throws {
+    let value = "Wide heading café 👩🏽‍💻\n\nWi iii WWW e\u{301} body text that wraps."
+    let layout = try XCTUnwrap(ComposeTextLayout(projection: try copied(value), font: font(24), width: 170))
+    let feedback = try XCTUnwrap(layout.navigation(id: 7, pageHeight: 200, documentLength: UInt64(value.utf8.count), positions: [0]))
+    var valid: Set<Int> = [0]
+    var byte = 0
+    for cluster in value { byte += cluster.utf8.count; valid.insert(byte) }
+    XCTAssertEqual(feedback.totalLines, UInt64(layout.fragments.count))
+    XCTAssertEqual(feedback.height, Double(layout.size.height))
+    for line in feedback.lines {
+      XCTAssertGreaterThan(line.height, 24)
+      XCTAssertTrue(line.hasStart)
+      XCTAssertTrue(line.hasEnd)
+      for point in line.stops {
+        XCTAssertTrue(valid.contains(Int(point.source)), "interior source grapheme in navigation feedback")
+        let affinity: ComposeProjection.Affinity = point.affinity == 1 ? .upstream : .downstream
+        let caret = try XCTUnwrap(layout.caret(for: Int(point.source), affinity: affinity))
+        XCTAssertEqual(Double(caret.minX), point.x, accuracy: 0.0001)
+        XCTAssertEqual(Double(caret.minY), line.y, accuracy: 0.0001)
+      }
+    }
+    let bytes: [UInt8] = try feedback.serializedBytes()
+    XCTAssertEqual(try WireComposeLayout(serializedBytes: bytes), feedback)
+  }
+
+  func testWrappedLineClickAndNavigationRetainTheirCaretAffinity() throws {
+    let layout = try XCTUnwrap(ComposeTextLayout(projection: try copied("a heading that wraps across lines"), font: font(24), width: 120))
+    let first = layout.fragments[0], next = layout.fragments[1]
+    let end = try XCTUnwrap(layout.hit(at: CGPoint(x: 500, y: first.rect.midY)))
+    let start = try XCTUnwrap(layout.hit(at: CGPoint(x: 0, y: next.rect.midY)))
+    XCTAssertEqual(end.source, start.source)
+    XCTAssertEqual(end.affinity, .upstream)
+    XCTAssertEqual(start.affinity, .downstream)
+    let feedback = try XCTUnwrap(layout.navigation(id: 9, pageHeight: 100, documentLength: UInt64(layout.projection.source.upperBound), positions: [0]))
+    XCTAssertEqual(feedback.lines[0].end.source, feedback.lines[1].start.source)
+    XCTAssertEqual(feedback.lines[0].end.affinity, 1)
+    XCTAssertEqual(feedback.lines[1].start.affinity, 0)
+  }
+
+  func testSparseFeedbackKeepsLineOrdinalsAndRequestsAdditionalPixelRegions() throws {
+    let value = (0..<1000).map { "line \($0) some words\n" }.joined()
+    let layout = try XCTUnwrap(ComposeTextLayout(projection: try copied(value), font: font(16), width: 300))
+    let positions: [UInt64] = [0, UInt64(value.utf8.count)]
+    let first = try XCTUnwrap(layout.navigation(id: 1, pageHeight: 100, documentLength: UInt64(value.utf8.count), positions: positions))
+    XCTAssertLessThan(first.lines.count, 50, "only nearby geometry crosses the socket")
+    XCTAssertEqual(first.totalLines, UInt64(layout.fragments.count))
+    XCTAssertTrue(zip(first.lines, first.lines.dropFirst()).contains { $1.number > $0.number + 1 })
+    let y = layout.fragments[500].rect.midY
+    let requested = try XCTUnwrap(layout.navigation(id: 2, pageHeight: 100, documentLength: UInt64(value.utf8.count), positions: positions, aroundY: y))
+    XCTAssertLessThan(requested.lines.count, 80)
+    XCTAssertTrue(requested.lines.contains { $0.number == 500 })
+    XCTAssertTrue(requested.lines.contains { $0.number == 0 })
+  }
+
+  func testPaddingFeedbackContainsOnlyCaretsTheSourceMapCanRepresent() throws {
+    let projection = try XCTUnwrap(ComposeProjection(source: 0..<3, text: "    abc   ", segments: [
+      .init(source: 0..<0, display: 0..<4, kind: .insertion),
+      .init(source: 0..<3, display: 4..<7, kind: .copy),
+      .init(source: 3..<3, display: 7..<10, kind: .insertion),
+    ]))
+    let layout = try XCTUnwrap(ComposeTextLayout(projection: projection, font: font(16), width: 300))
+    let feedback = try XCTUnwrap(layout.navigation(id: 1, pageHeight: 100, documentLength: 3, positions: [0]))
+    for line in feedback.lines {
+      for point in line.stops {
+        let caret = try XCTUnwrap(layout.caret(for: Int(point.source), affinity: point.affinity == 1 ? .upstream : .downstream))
+        XCTAssertEqual(Double(caret.minX), point.x, accuracy: 0.0001)
+      }
+    }
+  }
   private func wirePane(_ text: String) -> WireComposePane {
     WireComposePane.with {
       $0.text = text

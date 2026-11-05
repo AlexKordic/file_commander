@@ -15,8 +15,13 @@ final class ComposePresentation {
   let bounds: CGRect
   let origin: CGPoint
   let body: CTFont
+  private let caretStates: [UInt64: WireComposeCaret]
+  private(set) var navigation: WireComposeLayout?
+  private let monospace: CTFont
+  private let styleRevision: UInt64
 
-  init?(pane: WirePane, window: UInt64, cell: CGSize, body: NSFont, monospace: NSFont, reuse: ComposePresentation? = nil) {
+  init?(pane: WirePane, window: UInt64, cell: CGSize, body: NSFont, monospace: NSFont, reuse: ComposePresentation? = nil,
+        caretStates: [UInt64: WireComposeCaret] = [:]) {
     guard pane.hasCompose, pane.hasBuffer else { return nil }
     let rect = pane.content
     let bounds = CGRect(x: CGFloat(rect.x) * cell.width, y: CGFloat(rect.y) * cell.height,
@@ -28,6 +33,13 @@ final class ComposePresentation {
     self.layout = layout
     self.bounds = bounds
     self.body = body as CTFont
+    self.monospace = monospace as CTFont
+    if let reuse, reuse.layout.text.size.width == layout.text.size.width, reuse.bounds.height == bounds.height,
+       CFEqual(reuse.body, body as CTFont), CFEqual(reuse.monospace, monospace as CTFont) {
+      styleRevision = reuse.styleRevision
+    } else { styleRevision = UInt64.random(in: 1...UInt64.max) }
+    self.caretStates = caretStates
+    if let reuse, reuse.layout.text === layout.text, reuse.bounds.height == bounds.height { navigation = reuse.navigation }
     identity = .init(window: window, leaf: pane.leaf, buffer: pane.buffer)
     let top = Int(exactly: pane.compose.topByte).flatMap { layout.text.caret(for: $0)?.minY } ?? 0
     origin = CGPoint(x: bounds.midX - width / 2, y: bounds.minY + 12 - top)
@@ -46,7 +58,7 @@ final class ComposePresentation {
 
   var caret: CGRect? {
     guard let cursor, let position = Int(exactly: cursor.position),
-          let rect = layout.text.caret(for: position) else { return nil }
+          let rect = layout.text.caret(for: position, affinity: affinity(for: cursor)) else { return nil }
     return rect.offsetBy(dx: origin.x, dy: origin.y)
   }
 
@@ -56,12 +68,29 @@ final class ComposePresentation {
 
   var carets: [CGRect] {
     pane.compose.cursors.compactMap { cursor in
-      Int(exactly: cursor.position).flatMap { layout.text.caret(for: $0) }?.offsetBy(dx: origin.x, dy: origin.y)
+      Int(exactly: cursor.position).flatMap { layout.text.caret(for: $0, affinity: affinity(for: cursor)) }?.offsetBy(dx: origin.x, dy: origin.y)
     }
+  }
+
+  private func affinity(for cursor: WireComposeSelection) -> ComposeProjection.Affinity {
+    guard let state = caretStates[cursor.id], state.position == cursor.position else { return .downstream }
+    return state.affinity == 1 ? .upstream : .downstream
+  }
+
+  func measuredNavigation(aroundY: CGFloat? = nil) -> WireComposeLayout? {
+    if let navigation, aroundY == nil { return navigation }
+    let positions = pane.compose.cursors.flatMap { $0.hasAnchor ? [$0.position, $0.anchor] : [$0.position] }
+    navigation = layout.text.navigation(id: UInt64.random(in: 1...UInt64.max), pageHeight: max(1, bounds.height - 40),
+      documentLength: pane.compose.documentLen, positions: positions, aroundY: aroundY, styleRevision: styleRevision)
+    return navigation
   }
 
   func position(at point: CGPoint) -> Int? {
     layout.text.sourcePosition(at: CGPoint(x: point.x - origin.x, y: point.y - origin.y))
+  }
+
+  func hit(at point: CGPoint) -> ComposeTextLayout.Hit? {
+    layout.text.hit(at: CGPoint(x: point.x - origin.x, y: point.y - origin.y))
   }
 
   var selectedRange: NSRange {

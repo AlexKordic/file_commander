@@ -125,6 +125,10 @@ public struct ComposeProjection {
 /// Measured Compose text with one geometry shared by painting and hit testing.
 /// Fresh owns editing and undo; this is an immutable presentation of one block.
 public final class ComposeTextLayout {
+  public struct Hit {
+    public var source: Int
+    public var affinity: ComposeProjection.Affinity
+  }
   public struct FontRun {
     public var display: Range<Int>
     public var font: CTFont
@@ -229,6 +233,20 @@ public final class ComposeTextLayout {
   /// A hit returns a source-byte caret, snapping to a complete grapheme. It
   /// never returns the middle of a surrogate pair, CRLF, or composed character.
   public func sourcePosition(at point: CGPoint, affinity: ComposeProjection.Affinity = .downstream) -> Int? {
+    guard let (_, boundary) = hitIndex(at: point), let byte = utf16ToByte[boundary] else { return nil }
+    return projection.sourcePosition(at: byte, affinity: affinity)
+  }
+
+  /// Preserve which side of a wrapped line was clicked. Source bytes alone
+  /// cannot distinguish a line's end from the following line's beginning.
+  public func hit(at point: CGPoint) -> Hit? {
+    guard let (fragment, boundary) = hitIndex(at: point), let byte = utf16ToByte[boundary] else { return nil }
+    let affinity: ComposeProjection.Affinity = boundary == fragment.contentEnd && boundary > fragment.range.location ? .upstream : .downstream
+    guard let source = projection.sourcePosition(at: byte, affinity: affinity) else { return nil }
+    return Hit(source: source, affinity: affinity)
+  }
+
+  private func hitIndex(at point: CGPoint) -> (Fragment, Int)? {
     guard point.x.isFinite, point.y.isFinite, let first = fragments.first else { return nil }
     let fragment = fragments.first(where: { point.y < $0.rect.maxY }) ?? fragments.last ?? first
     let raw = CTLineGetStringIndexForPosition(fragment.line, CGPoint(x: point.x, y: 0))
@@ -242,18 +260,94 @@ public final class ComposeTextLayout {
         boundary = abs(point.x - left) <= abs(point.x - right) ? grapheme.location : NSMaxRange(grapheme)
       }
     }
-    guard let byte = utf16ToByte[boundary] else { return nil }
-    return projection.sourcePosition(at: byte, affinity: affinity)
+    return (fragment, boundary)
   }
 
   /// Caret geometry from the same shaped lines that supply hit testing. The
   /// affinity selects the visible side of a soft-wrap boundary.
   public func caret(for source: Int, affinity: ComposeProjection.Affinity = .downstream) -> CGRect? {
-    guard let byte = projection.displayPosition(for: source, affinity: affinity), let index = byteToUTF16[byte] else { return nil }
-    let matches = fragments.filter { index >= $0.range.location && index <= $0.contentEnd }
+    guard let byte = projection.displayPosition(for: source, affinity: affinity), var index = byteToUTF16[byte] else { return nil }
+    var matches = fragments.filter { index >= $0.range.location && index <= $0.contentEnd }
+    if matches.isEmpty, let ending = fragments.first(where: { index > $0.contentEnd && index < NSMaxRange($0.range) }) {
+      index = ending.contentEnd
+      matches = [ending]
+    }
     guard let fragment = affinity == .upstream ? matches.first : matches.last else { return nil }
     let x = CTLineGetOffsetForStringIndex(fragment.line, index, nil)
     return CGRect(x: x, y: fragment.rect.minY, width: 1, height: fragment.rect.height)
+  }
+
+  /// Feedback is sparse: include measured lines around the cursors and an
+  /// optional requested y coordinate. Line ordinals prevent the backend from
+  /// treating a gap between exported regions as adjacent visual lines.
+  public func navigation(id: UInt64, pageHeight: CGFloat, documentLength: UInt64,
+                         positions: [UInt64], aroundY: CGFloat? = nil, styleRevision: UInt64 = 0) -> WireComposeLayout? {
+    guard id != 0, pageHeight.isFinite, pageHeight > 0 else { return nil }
+    var centers = positions.compactMap { Int(exactly: $0).flatMap { caret(for: $0)?.midY } }
+    if let aroundY, aroundY.isFinite { centers.append(aroundY) }
+    if centers.isEmpty { centers = [0] }
+    let radius = max(120, pageHeight * 2)
+    var totalStops = 0
+    var lines: [WireComposeLine] = []
+    for (number, fragment) in fragments.enumerated() where centers.contains(where: { $0 + radius >= fragment.rect.minY && $0 - radius <= fragment.rect.maxY }) {
+      func stop(_ index: Int, _ affinity: ComposeProjection.Affinity) -> WireComposeStop? {
+        guard let display = utf16ToByte[index], let source = projection.sourcePosition(at: display, affinity: affinity),
+              projection.displayPosition(for: source, affinity: affinity) == display else { return nil }
+        if affinity == .upstream, number > 0, index == fragment.range.location,
+           fragments[number - 1].contentEnd == index { return nil }
+        if affinity == .downstream, number + 1 < fragments.count, index == fragment.contentEnd,
+           fragments[number + 1].range.location == index { return nil }
+        return WireComposeStop.with {
+          $0.source = UInt64(source)
+          $0.x = Double(CTLineGetOffsetForStringIndex(fragment.line, index, nil))
+          $0.affinity = affinity == .upstream ? 1 : 0
+        }
+      }
+      var stops: [WireComposeStop] = []
+      var index = fragment.range.location
+      while index <= fragment.contentEnd {
+        for affinity: ComposeProjection.Affinity in [.downstream, .upstream] {
+          if let point = stop(index, affinity), !stops.suffix(2).contains(where: { $0.source == point.source && $0.x == point.x }) {
+            stops.append(point)
+          }
+        }
+        guard index < fragment.contentEnd else { break }
+        let next = NSMaxRange(string.rangeOfComposedCharacterSequence(at: index))
+        guard next > index else { return nil }
+        index = min(next, fragment.contentEnd)
+      }
+      guard let first = stop(fragment.range.location, .downstream) ?? stop(fragment.range.location, .upstream) ?? stops.first,
+            let last = stop(fragment.contentEnd, .upstream) ?? stop(fragment.contentEnd, .downstream) ?? stops.last,
+            let a = utf16ToByte[fragment.range.location], let b = utf16ToByte[NSMaxRange(fragment.range)],
+            let sourceStart = projection.sourcePosition(at: a, affinity: .upstream),
+            let sourceEnd = projection.sourcePosition(at: b, affinity: .downstream) else { return nil }
+      // Explicit edge stops also preserve the desired affinity for Home/End.
+      if !stops.contains(first) { stops.append(first) }
+      if !stops.contains(last) { stops.append(last) }
+      totalStops += stops.count
+      guard totalStops <= 100_000, lines.count < 16_384 else { return nil }
+      lines.append(WireComposeLine.with {
+        $0.number = UInt64(number)
+        $0.y = Double(fragment.rect.minY)
+        $0.height = Double(fragment.rect.height)
+        $0.sourceStart = UInt64(sourceStart)
+        $0.sourceEnd = UInt64(sourceEnd)
+        $0.start = first
+        $0.end = last
+        $0.stops = stops
+      })
+    }
+    return WireComposeLayout.with {
+      $0.id = id
+      $0.pageHeight = Double(pageHeight)
+      $0.sourceStart = UInt64(projection.source.lowerBound)
+      $0.sourceEnd = UInt64(projection.source.upperBound)
+      $0.documentLen = documentLength
+      $0.lines = lines
+      $0.totalLines = UInt64(fragments.count)
+      $0.height = Double(size.height)
+      $0.styleRevision = styleRevision
+    }
   }
 
   /// Selection geometry in layout coordinates. Concealed syntax stays in the

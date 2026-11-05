@@ -45,6 +45,10 @@ final class NativeEditor: NSObject, CellGridDelegate {
   private var pendingComposeID: UInt64?
   private var pendingComposePane: ComposePresentation.Identity?
   private var composeInFlight = false
+  private var pendingComposeLayout = false
+  private var pendingComposeY: CGFloat?
+  private var pendingComposeRegion: UInt64?
+  private var composeRegionSent = false
 
   /// Connected to the session's scene.
   var connected: Bool { socket?.isOpen == true }
@@ -158,6 +162,10 @@ final class NativeEditor: NSObject, CellGridDelegate {
     pendingComposePane = nil
     composeInFlight = false
     nextComposeID = 0
+    pendingComposeLayout = false
+    pendingComposeY = nil
+    pendingComposeRegion = nil
+    composeRegionSent = false
   }
 
   private func connectionEnded(_ reason: String?) {
@@ -207,11 +215,35 @@ final class NativeEditor: NSObject, CellGridDelegate {
     socket?.send(.applied(seq: UInt64(message.sequence)))
     if message.frame.hasInputReply, message.frame.inputReply.id == pendingComposeID {
       composeInFlight = false
-      if message.frame.inputReply.accepted {
+      let reply = message.frame.inputReply
+      if reply.accepted {
+        let identity: ComposePresentation.Identity?
+        if case .pointer(let target, _, _, _) = composeQueue.first { identity = target }
+        else { identity = pendingComposePane }
+        grid?.applyComposeCarets(reply.carets, identity: identity)
         if !composeQueue.isEmpty { composeQueue.removeFirst() }
         pendingComposeID = nil
         pendingComposePane = nil
+        pendingComposeLayout = false
+        pendingComposeY = nil
+        pendingComposeRegion = nil
+      } else if reply.needsLayout {
+        pendingComposeLayout = true
+        if composeRegionSent { pendingComposeRegion = nil; pendingComposeY = nil }
+        if reply.hasNeedY { pendingComposeY = CGFloat(reply.needY) }
+        if reply.hasNeedRegion, let identity = pendingComposePane, let pane = grid?.composePanes[identity.leaf] {
+          let requested = reply.needRegion
+          let projection = pane.layout.text.projection.source
+          if let source = Int(exactly: requested), source >= projection.lowerBound,
+             source < projection.upperBound || (source == projection.upperBound && requested == pane.pane.compose.documentLen) {
+            pendingComposeY = pane.layout.text.caret(for: source)?.midY
+          } else {
+            pendingComposeRegion = requested
+            pendingComposeY = nil
+          }
+        }
       }
+      composeRegionSent = false
     }
     pumpComposeInput()
     if let ack = message.timing?.ack { noteAck(ack) }
@@ -357,6 +389,15 @@ final class NativeEditor: NSObject, CellGridDelegate {
 
   func send(_ input: SceneInput) {
     guard richCompose else { socket?.send(input); return }
+    // A modal that appeared while navigation awaited geometry must remain
+    // usable. Its ordinary input does not replace the deferred document action.
+    if pendingComposeLayout, let identity = pendingComposePane {
+      let pane = grid?.composePanes[identity.leaf]
+      if pane?.identity != identity || pane?.pane.compose.keyboard != true {
+        socket?.send(input)
+        return
+      }
+    }
     switch input {
     case .key, .mouse, .paste, .action, .widget, .settingsClick, .kbEditClick:
       composeQueue.append(.message(input))
@@ -391,15 +432,28 @@ final class NativeEditor: NSObject, CellGridDelegate {
         guard let pane = grid?.composePanes[identity.leaf], pane.identity == identity else { return }
         if pane.pane.compose.keyboard {
           input.scope = pane.scope
+          if let region = pendingComposeRegion {
+            input.region = region
+            composeRegionSent = true
+          } else {
+            let layout = pendingComposeLayout ? pane.measuredNavigation(aroundY: pendingComposeY) : pane.navigation
+            input.layoutID = layout?.id ?? 0
+            if pendingComposeLayout {
+              guard let layout else { return }
+              input.layout = layout
+            }
+          }
         } else {
+          if pendingComposeLayout { return }
           pendingComposePane = nil
         }
       }
     case .pointer(let identity, let location, let extend, let count):
       guard let pane = grid?.composePanes[identity.leaf], pane.identity == identity,
-            let position = pane.position(at: location) else { return }
+            let hit = pane.hit(at: location) else { return }
       input.scope = pane.scope
-      input.position = UInt64(position)
+      input.position = UInt64(hit.source)
+      input.affinity = hit.affinity == .upstream ? 1 : 0
       input.extend = extend
       input.clickCount = UInt32(clamping: count)
     }
