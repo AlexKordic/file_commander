@@ -3213,6 +3213,38 @@ public nonisolated struct WireComposeInput: @unchecked Sendable {
     set {_uniqueStorage()._cancel = newValue}
   }
 
+  public var replacementStart: UInt64 {
+    get {_storage._replacementStart ?? 0}
+    set {_uniqueStorage()._replacementStart = newValue}
+  }
+  /// Returns true if `replacementStart` has been explicitly set.
+  public var hasReplacementStart: Bool {_storage._replacementStart != nil}
+  /// Clears the value of `replacementStart`. Subsequent reads from it will return its default value.
+  public mutating func clearReplacementStart() {_uniqueStorage()._replacementStart = nil}
+
+  public var replacementEnd: UInt64 {
+    get {_storage._replacementEnd ?? 0}
+    set {_uniqueStorage()._replacementEnd = newValue}
+  }
+  /// Returns true if `replacementEnd` has been explicitly set.
+  public var hasReplacementEnd: Bool {_storage._replacementEnd != nil}
+  /// Clears the value of `replacementEnd`. Subsequent reads from it will return its default value.
+  public mutating func clearReplacementEnd() {_uniqueStorage()._replacementEnd = nil}
+
+  public var textInput: Bool {
+    get {_storage._textInput}
+    set {_uniqueStorage()._textInput = newValue}
+  }
+
+  public var replacementCursor: UInt64 {
+    get {_storage._replacementCursor ?? 0}
+    set {_uniqueStorage()._replacementCursor = newValue}
+  }
+  /// Returns true if `replacementCursor` has been explicitly set.
+  public var hasReplacementCursor: Bool {_storage._replacementCursor != nil}
+  /// Clears the value of `replacementCursor`. Subsequent reads from it will return its default value.
+  public mutating func clearReplacementCursor() {_uniqueStorage()._replacementCursor = nil}
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
@@ -8700,7 +8732,7 @@ nonisolated extension WireComposeScope: SwiftProtobuf.Message, SwiftProtobuf._Me
 
 nonisolated extension WireComposeInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".ComposeInput"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}id\0\u{1}scope\0\u{1}kind\0\u{1}payload\0\u{1}position\0\u{1}extend\0\u{3}click_count\0\u{1}layout\0\u{3}layout_id\0\u{1}affinity\0\u{1}region\0\u{3}attachment_start\0\u{3}source_revision\0\u{3}buffer_epoch\0\u{1}cancel\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}id\0\u{1}scope\0\u{1}kind\0\u{1}payload\0\u{1}position\0\u{1}extend\0\u{3}click_count\0\u{1}layout\0\u{3}layout_id\0\u{1}affinity\0\u{1}region\0\u{3}attachment_start\0\u{3}source_revision\0\u{3}buffer_epoch\0\u{1}cancel\0\u{3}replacement_start\0\u{3}replacement_end\0\u{3}text_input\0\u{3}replacement_cursor\0")
 
   fileprivate class _StorageClass {
     var _id: UInt64 = 0
@@ -8718,6 +8750,10 @@ nonisolated extension WireComposeInput: SwiftProtobuf.Message, SwiftProtobuf._Me
     var _sourceRevision: UInt64? = nil
     var _bufferEpoch: UInt64 = 0
     var _cancel: Bool = false
+    var _replacementStart: UInt64? = nil
+    var _replacementEnd: UInt64? = nil
+    var _textInput: Bool = false
+    var _replacementCursor: UInt64? = nil
 
       // This property is used as the initial default value for new instances of the type.
       // The type itself is protecting the reference to its storage via CoW semantics.
@@ -8743,6 +8779,10 @@ nonisolated extension WireComposeInput: SwiftProtobuf.Message, SwiftProtobuf._Me
       _sourceRevision = source._sourceRevision
       _bufferEpoch = source._bufferEpoch
       _cancel = source._cancel
+      _replacementStart = source._replacementStart
+      _replacementEnd = source._replacementEnd
+      _textInput = source._textInput
+      _replacementCursor = source._replacementCursor
     }
   }
 
@@ -8776,6 +8816,10 @@ nonisolated extension WireComposeInput: SwiftProtobuf.Message, SwiftProtobuf._Me
         case 13: try { try decoder.decodeSingularUInt64Field(value: &_storage._sourceRevision) }()
         case 14: try { try decoder.decodeSingularUInt64Field(value: &_storage._bufferEpoch) }()
         case 15: try { try decoder.decodeSingularBoolField(value: &_storage._cancel) }()
+        case 16: try { try decoder.decodeSingularUInt64Field(value: &_storage._replacementStart) }()
+        case 17: try { try decoder.decodeSingularUInt64Field(value: &_storage._replacementEnd) }()
+        case 18: try { try decoder.decodeSingularBoolField(value: &_storage._textInput) }()
+        case 19: try { try decoder.decodeSingularUInt64Field(value: &_storage._replacementCursor) }()
         default: break
         }
       }
@@ -8833,6 +8877,18 @@ nonisolated extension WireComposeInput: SwiftProtobuf.Message, SwiftProtobuf._Me
       if _storage._cancel != false {
         try visitor.visitSingularBoolField(value: _storage._cancel, fieldNumber: 15)
       }
+      try { if let v = _storage._replacementStart {
+        try visitor.visitSingularUInt64Field(value: v, fieldNumber: 16)
+      } }()
+      try { if let v = _storage._replacementEnd {
+        try visitor.visitSingularUInt64Field(value: v, fieldNumber: 17)
+      } }()
+      if _storage._textInput != false {
+        try visitor.visitSingularBoolField(value: _storage._textInput, fieldNumber: 18)
+      }
+      try { if let v = _storage._replacementCursor {
+        try visitor.visitSingularUInt64Field(value: v, fieldNumber: 19)
+      } }()
     }
     try unknownFields.traverse(visitor: &visitor)
   }
@@ -8857,6 +8913,10 @@ nonisolated extension WireComposeInput: SwiftProtobuf.Message, SwiftProtobuf._Me
         if _storage._sourceRevision != rhs_storage._sourceRevision {return false}
         if _storage._bufferEpoch != rhs_storage._bufferEpoch {return false}
         if _storage._cancel != rhs_storage._cancel {return false}
+        if _storage._replacementStart != rhs_storage._replacementStart {return false}
+        if _storage._replacementEnd != rhs_storage._replacementEnd {return false}
+        if _storage._textInput != rhs_storage._textInput {return false}
+        if _storage._replacementCursor != rhs_storage._replacementCursor {return false}
         return true
       }
       if !storagesAreEqual {return false}

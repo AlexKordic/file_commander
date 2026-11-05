@@ -256,6 +256,15 @@ these checks. Protobuf fixtures are marked binary in `.gitattributes` so Git
 does not treat embedded Markdown line endings as source-file whitespace.
 Native clipboard access is injectable; scene/input tests use memory storage
 instead of reading or overwriting the user's system pasteboard.
+
+For unmarked [AppKit text input](https://developer.apple.com/documentation/appkit/nstextinputclient),
+the native view exposes UTF-16 selection/context ranges and measured first-line
+rectangles. `ComposeReplacement` captures the corresponding source-byte range,
+revision, view lifetime and cursor ID before queueing it. Fresh owns validation,
+conflict cancellation and the atomic edit/undo operation. Committed phrases
+use `SceneInput.text`; clipboard paste retains its separate column-paste
+semantics. Full marked-text drawing/context, focus/reconnect handling and live
+IME qualification remain unfinished and keep rich Compose gated.
 Tooltip rectangles share the attachment geometry and are replaced only when
 their positions or descriptions change.
 

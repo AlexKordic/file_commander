@@ -155,6 +155,70 @@ private final class ScenePeer: @unchecked Sendable {
 }
 
 final class ComposeInputTests: XCTestCase {
+  @MainActor
+  func testCommittedPhraseWaitsForModalKeyboardOwnershipWithoutInventingLayoutFeedback() async throws {
+    let source = "Text before the input.\n"
+    let peer = try ScenePeer(pane: pane(source))
+    defer { peer.close() }
+    let editor = richEditor()
+    defer { editor.detachAll() }
+    editor.attach(socketPath: peer.path, app: nil)
+    try await eventually { editor.grid?.focusedCompose != nil }
+    editor.send(.text("東京"))
+    try await eventually { peer.inputs.count == 1 }
+    var modal = pane(source); modal.compose.keyboard = false
+    let waiting = peer.reply(.with { $0.id = 1; $0.needsLayout = true }, pane: modal)
+    try await eventually { peer.lastApplied >= waiting }
+    editor.send(.key(.with { $0.key = "Escape" }))
+    try await eventually { peer.keys.count == 1 }
+    XCTAssertEqual(peer.inputs.count, 1)
+    peer.show(pane(source))
+    try await eventually { peer.inputs.count == 2 }
+    XCTAssertEqual(peer.inputs[1].id, 1)
+    XCTAssertTrue(peer.inputs[1].textInput)
+    XCTAssertFalse(peer.inputs[1].hasLayout)
+    XCTAssertEqual(peer.inputs[1].layoutID, 0)
+    XCTAssertEqual(try WirePaste(serializedBytes: peer.inputs[1].payload).text, "東京")
+  }
+  @MainActor
+  func testNativeReplacementCapturesUtf8RangeThroughQueuedReflowAndNormalTextCommitsOnce() async throws {
+    let source = "👩🏽‍💻 **café** tail\r\n"
+    let peer = try ScenePeer(pane: pane(source))
+    defer { peer.close() }
+    let editor = richEditor()
+    defer { editor.detachAll() }
+    editor.attach(socketPath: peer.path, app: nil)
+    try await eventually { editor.grid?.focusedCompose != nil }
+    let grid = try XCTUnwrap(editor.grid)
+    let range = (source as NSString).range(of: "café")
+    let start = source[..<source.range(of: "café")!.lowerBound].utf8.count
+    var actual = NSRange(location: NSNotFound, length: 0)
+    XCTAssertEqual(grid.attributedSubstring(forProposedRange: range, actualRange: &actual)?.string, "café")
+    XCTAssertEqual(actual, range)
+    XCTAssertEqual(grid.selectedRange(), grid.focusedCompose?.selectedRange)
+    editor.send(.key(.with { $0.key = "X" }))
+    try await eventually { peer.inputs.count == 1 }
+    grid.insertText("東京", replacementRange: range)
+    let updated = pane("prefix " + source, revision: 5, width: 40)
+    peer.reply(.with { $0.id = 1; $0.accepted = true }, pane: updated)
+    try await eventually { peer.inputs.count == 2 }
+    let replacement = peer.inputs[1]
+    XCTAssertEqual(replacement.replacementStart, UInt64(start))
+    XCTAssertEqual(replacement.replacementEnd, UInt64(start + "café".utf8.count))
+    XCTAssertEqual(replacement.sourceRevision, 4)
+    XCTAssertEqual(replacement.bufferEpoch, 7)
+    XCTAssertEqual(replacement.replacementCursor, 1)
+    XCTAssertEqual(try WirePaste(serializedBytes: replacement.payload).text, "東京")
+    peer.reply(.with { $0.id = 2; $0.accepted = true })
+    try await eventually { peer.lastApplied >= 3 }
+    grid.insertText("日本語", replacementRange: NSRange(location: NSNotFound, length: 0))
+    try await eventually { peer.inputs.count == 3 }
+    XCTAssertEqual(UInt64(peer.inputs[2].kind), SceneWire.Kind.paste.rawValue)
+    XCTAssertFalse(peer.inputs[2].hasReplacementStart)
+    XCTAssertTrue(peer.inputs[2].textInput)
+    XCTAssertEqual(try WirePaste(serializedBytes: peer.inputs[2].payload).text, "日本語",
+      "a committed phrase is one Fresh text action, not a sequence of character keys")
+  }
   private func pane(_ text: String, revision: UInt64 = 4, width: UInt32 = 80) -> WirePane {
     .with {
       $0.leaf = 2; $0.buffer = 3; $0.content = .with { $0.w = width; $0.h = 35 }

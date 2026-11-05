@@ -507,7 +507,31 @@ public final class ComposeTextLayout {
   /// Caret geometry from the same shaped lines that supply hit testing. The
   /// affinity selects the visible side of a soft-wrap boundary.
   public func caret(for source: Int, affinity: ComposeProjection.Affinity = .downstream) -> CGRect? {
-    guard let byte = projection.displayPosition(for: source, affinity: affinity), var index = byteToUTF16[byte] else { return nil }
+    guard let index = utf16Position(for: source, affinity: affinity) else { return nil }
+    return caret(atUTF16: index, affinity: affinity)
+  }
+
+  public func utf16Position(for source: Int, affinity: ComposeProjection.Affinity = .downstream) -> Int? {
+    projection.displayPosition(for: source, affinity: affinity).flatMap { byteToUTF16[$0] }
+  }
+
+  /// AppKit ranges address this projection's UTF-16 context. A replacement
+  /// stays inside adjacent hidden markup; a collapsed current caret retains
+  /// its real source position instead of guessing a side of that markup.
+  public func sourceRange(forUTF16 range: NSRange, insertion: Int? = nil) -> Range<Int>? {
+    guard range.location >= 0, range.location <= string.length, range.length >= 0,
+          range.length <= string.length - range.location,
+          let a = utf16ToByte[range.location], let b = utf16ToByte[NSMaxRange(range)] else { return nil }
+    if range.length == 0, let insertion, utf16Position(for: insertion) == range.location { return insertion..<insertion }
+    guard let start = projection.sourcePosition(at: a, affinity: .downstream) else { return nil }
+    if range.length == 0 { return start..<start }
+    guard let end = projection.sourcePosition(at: b, affinity: .upstream), start <= end else { return nil }
+    return start..<end
+  }
+
+  public func caret(atUTF16 position: Int, affinity: ComposeProjection.Affinity = .downstream) -> CGRect? {
+    guard utf16ToByte[position] != nil else { return nil }
+    var index = position
     var matches = fragments.filter { index >= $0.range.location && index <= $0.contentEnd }
     if matches.isEmpty, let ending = fragments.first(where: { index > $0.contentEnd && index < NSMaxRange($0.range) }) {
       index = ending.contentEnd
@@ -516,6 +540,15 @@ public final class ComposeTextLayout {
     guard let fragment = affinity == .upstream ? matches.first : matches.last else { return nil }
     let x = fragment.rect.minX + CTLineGetOffsetForStringIndex(fragment.line, index, nil)
     return CGRect(x: x, y: fragment.rect.minY, width: 1, height: fragment.rect.height)
+  }
+
+  public func firstRect(forUTF16 range: NSRange) -> (rect: CGRect, range: NSRange)? {
+    guard sourceRange(forUTF16: range) != nil, let caret = caret(atUTF16: range.location),
+          let fragment = fragments.first(where: { $0.rect.minY == caret.minY }) else { return nil }
+    let start = min(range.location, fragment.contentEnd), end = max(start, min(NSMaxRange(range), fragment.contentEnd))
+    let a = CTLineGetOffsetForStringIndex(fragment.line, start, nil), b = CTLineGetOffsetForStringIndex(fragment.line, end, nil)
+    return (CGRect(x: fragment.rect.minX + min(a, b), y: fragment.rect.minY, width: max(1, abs(b-a)), height: fragment.rect.height),
+      NSRange(location: start, length: end-start))
   }
 
   /// Feedback is sparse: include measured lines around the cursors and an

@@ -449,6 +449,24 @@ source-mapped line for native drawing, with no repeated ruler characters.
 EOF rules reveal when the caret reaches their collapsed source end. These are
 per-client projection overrides; terminal conceals and markers are unchanged.
 
+Native text-service replacements use `ComposeInput.replacement_start` and
+`replacement_end` as UTF-8 source bounds, with `source_revision`, `buffer_epoch`
+and `replacement_cursor`. The range and cursor are captured before queued
+input or reflow. Fresh rebases unaffected ranges and cancels replacements
+whose contents changed, whose history expired, or whose cursor/view no longer
+exists. Boundary insertions remain outside a nonempty replacement. Empty text
+deletes its range. Read-only documents reject both replacements and literal
+text input; terminal cancellations consume their request IDs.
+
+`text_input` marks an ordinary committed phrase applied once to the current
+selections in its captured view. It uses Fresh's normal event/undo machinery
+and line-ending policy without clipboard column distribution. Plain clipboard
+paste keeps that distribution. Native unmarked context/range queries use
+UTF-16 projection offsets, mapped through the measured source projection.
+Complete marked-text context, stable context across source-window changes,
+composition lifecycle and live input-method qualification remain open; these
+transport additions do not establish full IME support.
+
 Visible images are checked on a five-second prototype interval and when the
 editor is shown again. POSIX local/SSH stats include file identity plus
 nanosecond modification/change times. Metadata shortcuts are supplemented by

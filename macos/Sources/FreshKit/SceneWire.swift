@@ -106,6 +106,9 @@ public enum SceneInput: Sendable {
   case mouse(WireMouse)
   case resize(cols: Int, rows: Int)
   case paste(String)
+  /// A committed input-method phrase. Rich input inserts it at every caret
+  /// without clipboard column-paste distribution.
+  case text(String)
   /// An action by name, with the arguments its menu item gave it (JSON, as
   /// Fresh sent them, or empty).
   case action(name: String, argsJson: String)
@@ -124,7 +127,7 @@ public enum SceneInput: Sendable {
     case .key: return .key
     case .mouse: return .mouse
     case .resize: return .resize
-    case .paste: return .paste
+    case .paste, .text: return .paste
     case .action: return .action
     case .widget: return .widget
     case .settingsClick: return .settingsClick
@@ -154,7 +157,7 @@ public enum SceneInput: Sendable {
         $0.cols = UInt32(clamping: cols)
         $0.rows = UInt32(clamping: rows)
       }
-    case .paste(let text): message = WirePaste.with { $0.text = text }
+    case .paste(let text), .text(let text): message = WirePaste.with { $0.text = text }
     case .action(let name, let argsJson):
       message = WireAction.with {
         $0.name = name
@@ -185,6 +188,7 @@ public enum SceneInput: Sendable {
     case .mouse(let mouse): return ("mouse", SceneInput.mouseKindName(mouse.kind))
     case .resize: return ("resize", nil)
     case .paste: return ("paste", nil)
+    case .text: return ("text", nil)
     case .action: return ("action", nil)
     case .widget: return ("widget", nil)
     case .settingsClick: return ("settings", nil)

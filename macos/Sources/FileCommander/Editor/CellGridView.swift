@@ -14,6 +14,7 @@ protocol CellGridDelegate: AnyObject {
   func gridPaste(_ grid: CellGridView)
   func grid(_ grid: CellGridView, point: CGPoint, in pane: ComposePresentation, extend: Bool, count: Int)
   func grid(_ grid: CellGridView, scroll delta: CGFloat, in pane: ComposePresentation)
+  func grid(_ grid: CellGridView, replace text: String, range: NSRange, in pane: ComposePresentation)
   var optionAsAlt: Bool { get }
 }
 
@@ -535,6 +536,15 @@ final class CellGridView: NSView, @preconcurrency NSTextInputClient {
   func insertText(_ string: Any, replacementRange: NSRange) {
     let text = (string as? NSAttributedString)?.string ?? (string as? String) ?? ""
     marked = ""
+    if let pane = focusedCompose {
+      if replacementRange.location != NSNotFound {
+        delegate?.grid(self, replace: text, range: replacementRange, in: pane)
+      } else if !text.isEmpty {
+        delegate?.grid(self, send: .text(text))
+      }
+      setNeedsDisplayCaret()
+      return
+    }
     for key in SceneKeys.typing(text) { delegate?.grid(self, send: .key(key)) }
     setNeedsDisplayCaret()
   }
@@ -551,13 +561,31 @@ final class CellGridView: NSView, @preconcurrency NSTextInputClient {
 
   func hasMarkedText() -> Bool { !marked.isEmpty }
   func markedRange() -> NSRange { marked.isEmpty ? NSRange(location: NSNotFound, length: 0) : NSRange(location: 0, length: marked.utf16.count) }
-  func selectedRange() -> NSRange { NSRange(location: marked.utf16.count, length: 0) }
+  func selectedRange() -> NSRange { !marked.isEmpty ? NSRange(location: marked.utf16.count, length: 0) : focusedCompose?.selectedRange ?? NSRange(location: 0, length: 0) }
   func validAttributesForMarkedText() -> [NSAttributedString.Key] { [.underlineStyle] }
-  func attributedSubstring(forProposedRange range: NSRange, actualRange: NSRangePointer?) -> NSAttributedString? { nil }
-  func characterIndex(for point: NSPoint) -> Int { 0 }
+  func attributedSubstring(forProposedRange range: NSRange, actualRange: NSRangePointer?) -> NSAttributedString? {
+    guard marked.isEmpty, let pane = focusedCompose, range.location != NSNotFound else { return nil }
+    let text = pane.layout.text.projection.text as NSString
+    guard range.location >= 0, range.location <= text.length, range.length >= 0 else { return nil }
+    let clipped = NSRange(location: range.location, length: min(range.length, text.length-range.location))
+    let adjusted = text.rangeOfComposedCharacterSequences(for: clipped)
+    actualRange?.pointee = adjusted
+    return NSAttributedString(string: text.substring(with: adjusted))
+  }
+  func characterIndex(for point: NSPoint) -> Int {
+    guard marked.isEmpty, let pane = focusedCompose, let window else { return NSNotFound }
+    let point = convert(window.convertPoint(fromScreen: point), from: nil)
+    guard pane.bounds.contains(point), let hit = pane.hit(at: point) else { return NSNotFound }
+    return pane.layout.text.utf16Position(for: hit.source, affinity: hit.affinity) ?? NSNotFound
+  }
   override func doCommand(by selector: Selector) {}
 
   func firstRect(forCharacterRange range: NSRange, actualRange: NSRangePointer?) -> NSRect {
+    if marked.isEmpty, let pane = focusedCompose, let window {
+      guard let area = pane.layout.text.firstRect(forUTF16: range) else { actualRange?.pointee = NSRange(location: NSNotFound, length: 0); return .zero }
+      actualRange?.pointee = area.range
+      return window.convertToScreen(convert(area.rect.offsetBy(dx: pane.origin.x, dy: pane.origin.y), to: nil))
+    }
     guard let local = caretRect, let window else { return .zero }
     return window.convertToScreen(convert(local, to: nil))
   }

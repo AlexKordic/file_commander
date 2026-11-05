@@ -57,6 +57,7 @@ final class NativeEditor: NSObject, CellGridDelegate {
   private enum PendingInput {
     case message(SceneInput)
     case pointer(ComposePointer)
+    case replacement(ComposeReplacement)
   }
   private struct InputTarget {
     var identity: ComposePresentation.Identity
@@ -531,6 +532,13 @@ final class NativeEditor: NSObject, CellGridDelegate {
     send(.paste(text))
   }
 
+  func grid(_ grid: CellGridView, replace text: String, range: NSRange, in pane: ComposePresentation) {
+    guard receivedHello, let cursor = pane.cursor,
+          let source = pane.layout.text.sourceRange(forUTF16: range, insertion: Int(exactly: cursor.position)),
+          let replacement = ComposeReplacement(scope: pane.scope, epoch: pane.pane.compose.viewport.epoch, source: source, cursor: cursor.id, text: text) else { return }
+    enqueueCompose(.replacement(replacement), target: pane)
+  }
+
   var optionAsAlt: Bool { app?.preferences.optionAsAlt ?? false }
 
   // MARK: Menus
@@ -563,7 +571,7 @@ final class NativeEditor: NSObject, CellGridDelegate {
 
   func send(_ input: SceneInput) {
     switch input {
-    case .key, .mouse, .paste, .action, .widget, .settingsClick, .kbEditClick:
+    case .key, .mouse, .paste, .text, .action, .widget, .settingsClick, .kbEditClick:
       guard receivedHello else { return }
     default: break
     }
@@ -578,10 +586,10 @@ final class NativeEditor: NSObject, CellGridDelegate {
       }
     }
     switch input {
-    case .key, .mouse, .paste, .action, .widget, .settingsClick, .kbEditClick:
+    case .key, .mouse, .paste, .text, .action, .widget, .settingsClick, .kbEditClick:
       let target: ComposePresentation?
       switch input {
-      case .key, .paste, .action: target = grid?.focusedCompose
+      case .key, .paste, .text, .action: target = grid?.focusedCompose
       default: target = nil
       }
       enqueueCompose(.message(input), target: target)
@@ -621,6 +629,7 @@ final class NativeEditor: NSObject, CellGridDelegate {
     case .message(let message):
       input.kind = UInt32(message.kind.rawValue)
       input.payload = Data(message.payload())
+      if case .text = message { input.textInput = true }
       if let identity = pendingComposePane {
         input.bufferEpoch = queued.target?.epoch ?? 0
         guard let visible = grid?.composePanes[identity.leaf], visible.identity == identity else {
@@ -644,7 +653,7 @@ final class NativeEditor: NSObject, CellGridDelegate {
           if let region = pendingComposeRegion {
             input.region = region
             composeRegionSent = true
-          } else {
+          } else if !input.textInput {
             let layout = pendingComposeLayout ? pane.measuredNavigation(aroundY: pendingComposeY) : pane.navigation
             input.layoutID = layout?.id ?? 0
             if pendingComposeLayout {
@@ -659,6 +668,11 @@ final class NativeEditor: NSObject, CellGridDelegate {
       }
     case .pointer(let pointer):
       input = pointer.input(id: input.id)
+      if let identity = pendingComposePane, let pane = grid?.composePanes[identity.leaf], pane.identity == identity {
+        pendingComposeBefore = (pane.pane.compose.bufferRevision, pane.pane.compose.cursors)
+      }
+    case .replacement(let replacement):
+      input = replacement.input(id: input.id)
       if let identity = pendingComposePane, let pane = grid?.composePanes[identity.leaf], pane.identity == identity {
         pendingComposeBefore = (pane.pane.compose.bufferRevision, pane.pane.compose.cursors)
       }

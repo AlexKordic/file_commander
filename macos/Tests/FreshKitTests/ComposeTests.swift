@@ -4,6 +4,25 @@ import ImageIO
 @testable import FreshKit
 
 final class ComposeTests: XCTestCase {
+  func testTextServiceRangesPreserveConcealedMarkupAndRejectPartialSurrogates() throws {
+    let body = "café 👩🏽‍💻", source = "**\(body)**"
+    let end = body.utf8.count + 2
+    let projection = try XCTUnwrap(ComposeProjection(source: 0..<source.utf8.count, text: body, segments: [
+      .init(source: 0..<2, display: 0..<0, kind: .hidden),
+      .init(source: 2..<end, display: 0..<body.utf8.count, kind: .copy),
+      .init(source: end..<source.utf8.count, display: body.utf8.count..<body.utf8.count, kind: .hidden),
+    ]))
+    let layout = try XCTUnwrap(ComposeTextLayout(projection: projection, font: font(22), width: 160))
+    XCTAssertEqual(layout.sourceRange(forUTF16: NSRange(location: 0, length: body.utf16.count)), 2..<end)
+    XCTAssertEqual(layout.sourceRange(forUTF16: NSRange(location: body.utf16.count, length: 0), insertion: end), end..<end)
+    XCTAssertNil(layout.sourceRange(forUTF16: NSRange(location: 6, length: 1)))
+    XCTAssertNil(layout.sourceRange(forUTF16: NSRange(location: NSNotFound, length: 0)))
+    XCTAssertNil(layout.sourceRange(forUTF16: NSRange(location: 1, length: Int.max)))
+    let area = try XCTUnwrap(layout.firstRect(forUTF16: NSRange(location: 0, length: body.utf16.count)))
+    XCTAssertEqual(area.rect.minY, layout.fragments[0].rect.minY)
+    XCTAssertEqual(area.range.location, 0)
+    XCTAssertLessThanOrEqual(NSMaxRange(area.range), layout.fragments[0].contentEnd)
+  }
   func testNavigationFeedbackUsesTheMeasuredCaretAndCompleteUnicodeClusters() throws {
     let value = "Wide heading café 👩🏽‍💻\n\nWi iii WWW e\u{301} body text that wraps."
     let layout = try XCTUnwrap(ComposeTextLayout(projection: try copied(value), font: font(24), width: 170))
