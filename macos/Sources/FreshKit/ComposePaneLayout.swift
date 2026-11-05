@@ -14,19 +14,23 @@ public final class ComposePaneLayout {
   private let imageSizes: [Int: CGSize]
   public let preedit: ComposeMarkedText?
   public let draftDisplayRange: NSRange?
+  public let composition: ComposeComposition?
+  public let draftDisplayRanges: [UInt64: NSRange]
 
   public init?(pane: WireComposePane, body: CTFont, monospace: CTFont, width: CGFloat,
                typography: ComposeTypography = .init(),
                images: [UInt64: ComposeImageState] = [:], reuse: ComposePaneLayout? = nil,
-               preedit: ComposeMarkedText? = nil) {
+               preedit: ComposeMarkedText? = nil, composition: ComposeComposition? = nil) {
     guard let baseProjection = ComposeProjection(pane), typography.isValid else { return nil }
     guard pane.images.allSatisfy({ !($0.rendered && $0.sourcePreview) }) else { return nil }
-    self.preedit = preedit
+    let composition = composition ?? preedit.flatMap { ComposeComposition(primary: 0, values: [0: $0]) }
+    let preedit = composition?.primary
+    self.composition = composition; self.preedit = preedit
     let visible = pane.images.filter { image in
       guard image.rendered || image.sourcePreview else { return false }
-      guard let preedit else { return true }
-      return !preedit.source.overlaps(Int(image.start)..<Int(image.end))
-        && !(preedit.source.isEmpty && Int(image.start) < preedit.source.lowerBound && preedit.source.lowerBound < Int(image.end))
+      guard let composition else { return true }
+      return !composition.values.values.contains { value in value.source.overlaps(Int(image.start)..<Int(image.end))
+        || (value.source.isEmpty && Int(image.start) < value.source.lowerBound && value.source.lowerBound < Int(image.end)) }
     }
     var sourceRanges: [Range<Int>] = [], sizes: [Int: CGSize] = [:]
     for image in visible {
@@ -44,13 +48,16 @@ public final class ComposePaneLayout {
     }
     let objects = baseProjection.replacingObjects(sourceRanges)
     let base = objects?.projection ?? baseProjection
-    let replacement = preedit?.projection(over: base)
+    let replacement = composition?.project(over: base)
     guard preedit == nil || replacement != nil else { return nil }
     let projection = replacement?.projection ?? base
-    if let replacement, let preedit {
-      let before = String(decoding: Array(projection.text.utf8)[..<replacement.display.lowerBound], as: UTF8.self).utf16.count
-      draftDisplayRange = NSRange(location: before, length: preedit.draft.length)
-    } else { draftDisplayRange = nil }
+    let displayBytes = Array(projection.text.utf8)
+    let displayRanges = (replacement?.displays ?? [:]).mapValues {
+      NSRange(location: String(decoding: displayBytes[..<$0.lowerBound], as: UTF8.self).utf16.count,
+        length: String(decoding: displayBytes[$0], as: UTF8.self).utf16.count)
+    }
+    draftDisplayRanges = displayRanges
+    draftDisplayRange = composition.flatMap { displayRanges[$0.primaryID] }
     var attachments = (objects?.objects ?? []).compactMap { object -> ComposeTextLayout.Attachment? in
       guard let size = sizes[object.source.lowerBound],
             let a = projection.displayPosition(for: object.source.lowerBound),
@@ -118,8 +125,11 @@ public final class ComposePaneLayout {
     for (start, end) in zip(boundaries, boundaries.dropFirst()) where start < end {
       fonts.append(fontRun(spans.filter { $0.range.contains(start) }, start..<end))
     }
-    if let preedit, let replacement, !replacement.display.isEmpty {
-      fonts.append(fontRun(spans.filter { $0.source.lowerBound <= preedit.source.lowerBound && preedit.source.lowerBound <= $0.source.upperBound }, replacement.display))
+    if let composition, let replacement {
+      for (id, display) in replacement.displays where !display.isEmpty {
+        let value = composition.values[id]!
+        fonts.append(fontRun(spans.filter { $0.source.lowerBound <= value.source.lowerBound && value.source.lowerBound <= $0.source.upperBound }, display))
+      }
     }
     // Quote geometry is a fallback for empty/code-only lines; an equally
     // sized actual paragraph keeps its own spacing and layout precedence.
@@ -249,14 +259,15 @@ public final class ComposePaneLayout {
       }
     }
     context.setFillColor(selection)
-    for cursor in pane.cursors where cursor.hasAnchor && (preedit == nil || !cursor.primary) {
+    for cursor in pane.cursors where cursor.hasAnchor && composition?.values[cursor.id] == nil {
       guard let a = Int(exactly: cursor.position), let b = Int(exactly: cursor.anchor) else { continue }
       for rect in text.selectionRects(for: min(a, b)..<max(a, b)) {
         context.fill(rect.offsetBy(dx: origin.x, dy: origin.y))
       }
     }
-    if let preedit, let display = draftDisplayRange {
-      for rect in text.selectionRects(forUTF16: NSRange(location: display.location + preedit.selected.location, length: preedit.selected.length)) {
+    for (id, display) in draftDisplayRanges {
+      guard let value = composition?.values[id] else { continue }
+      for rect in text.selectionRects(forUTF16: NSRange(location: display.location + value.selected.location, length: value.selected.length)) {
         context.fill(rect.offsetBy(dx: origin.x, dy: origin.y))
       }
     }
@@ -291,9 +302,10 @@ public final class ComposePaneLayout {
         }
       }
     }
-    if let preedit, let display = draftDisplayRange {
+    for (id, display) in draftDisplayRanges {
+      guard let value = composition?.values[id] else { continue }
       context.setFillColor(foreground)
-      let marked = NSRange(location: display.location + preedit.marked.location, length: preedit.marked.length)
+      let marked = NSRange(location: display.location + value.marked.location, length: value.marked.length)
       for rect in text.selectionRects(forUTF16: marked) {
         context.fill(CGRect(x: origin.x + rect.minX, y: origin.y + rect.maxY - 1, width: rect.width, height: 1))
       }

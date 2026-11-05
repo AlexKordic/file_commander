@@ -332,7 +332,7 @@ final class NativeEditor: NSObject, CellGridDelegate {
           Trace.write("editor input cancelled: \(reply.error)")
         } else if reply.accepted { lastComposeCancellation = nil }
         if reply.cancelled, case .replacement(let replacement)? = composeQueue.first?.input {
-          if let grid { self.grid(grid, recover: replacement.text) }
+          if let grid { for text in replacement.texts { self.grid(grid, recover: text) } }
         }
         if !composeQueue.isEmpty { composeQueue.removeFirst() }
         pendingComposeID = nil
@@ -550,7 +550,7 @@ final class NativeEditor: NSObject, CellGridDelegate {
   }
 
   func grid(_ grid: CellGridView, commit replacement: ComposeReplacement, in pane: ComposePresentation) {
-    guard receivedHello else { self.grid(grid, recover: replacement.text); return }
+    guard receivedHello else { for text in replacement.texts { self.grid(grid, recover: text) }; return }
     enqueueCompose(.replacement(replacement), target: pane)
   }
 
@@ -568,7 +568,7 @@ final class NativeEditor: NSObject, CellGridDelegate {
   private func recoverPendingText() {
     grid?.cancelComposition(recover: true)
     for queued in composeQueue {
-      if case .replacement(let replacement) = queued.input, let grid { self.grid(grid, recover: replacement.text) }
+      if case .replacement(let replacement) = queued.input, let grid { for text in replacement.texts { self.grid(grid, recover: text) } }
     }
     composeQueue.removeAll()
   }

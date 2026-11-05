@@ -51,8 +51,7 @@ final class CellGridView: NSView, @preconcurrency NSTextInputClient {
   private var marked = ""
   private struct Composition {
     let target: ComposePresentation
-    let cursor: UInt64
-    var text: ComposeMarkedText
+    var text: ComposeComposition
   }
   private var composition: Composition?
   private var compositionDragAnchor: Int?
@@ -177,9 +176,10 @@ final class CellGridView: NSView, @preconcurrency NSTextInputClient {
     if let composition {
       let target = composition.target
       let current = store.panes.first { $0.leaf == target.identity.leaf && $0.hasBuffer && $0.buffer == target.identity.buffer }
+      let live = Set(current?.compose.cursors.map(\.id) ?? [])
       if UInt64(store.windowID) != target.identity.window || current?.hasCompose != true
           || current?.compose.viewport.epoch != target.pane.compose.viewport.epoch
-          || current?.compose.focused != true || current?.compose.cursors.contains(where: { $0.id == composition.cursor }) != true {
+          || current?.compose.focused != true || !composition.text.values.keys.allSatisfy(live.contains) {
         cancelComposition(recover: true, rebuild: false)
       } else if current?.compose.keyboard == false || !composeInputAllowed {
         finishComposition(rebuild: false)
@@ -233,7 +233,7 @@ final class CellGridView: NSView, @preconcurrency NSTextInputClient {
 
   private func presentation(_ input: WirePane, reuse: ComposePresentation? = nil) -> ComposePresentation? {
     var pane = input
-    let preedit = composition.flatMap { value -> ComposeMarkedText? in
+    let preedit = composition.flatMap { value -> ComposeComposition? in
       guard value.target.identity == .init(window: UInt64(store.windowID), leaf: input.leaf, buffer: input.buffer),
             input.compose.viewport.epoch == value.target.pane.compose.viewport.epoch else { return nil }
       pane = value.target.pane; pane.content = input.content
@@ -268,7 +268,7 @@ final class CellGridView: NSView, @preconcurrency NSTextInputClient {
       cell: CGSize(width: cellWidth, height: cellHeight), body: bodyFont, monospace: monoFont,
       typography: composePreferences.typography(zoom: composeZoom), pageWidth: composePreferences.pageWidth * composeZoom,
       reuse: reuse, caretStates: composeCaretIdentity == .init(window: UInt64(store.windowID), leaf: pane.leaf, buffer: pane.buffer)
-        && composeCaretRevision == pane.compose.bufferRevision ? composeCarets : [:], images: images, viewport: viewport, preedit: preedit)
+        && composeCaretRevision == pane.compose.bufferRevision ? composeCarets : [:], images: images, viewport: viewport, composition: preedit)
   }
 
   /// Geometry for a deferred key is measured with the same fonts, width and
@@ -605,11 +605,11 @@ final class CellGridView: NSView, @preconcurrency NSTextInputClient {
       guard current.text.update(text, selected: selectedRange, replacement: replacementRange) else { return }
       composition = current; rebuildCompose(); needsDisplay = true; return
     }
-    if let target = focusedCompose, let context = target.textContext, let cursor = target.cursor {
-      let range = replacementRange.location == NSNotFound ? target.textServiceSelectedRange : replacementRange
-      guard let source = target.sourceRange(forTextServiceRange: range),
-            let text = ComposeMarkedText(context: context, range: range, source: source, text: text, selected: selectedRange) else { return }
-      composition = Composition(target: target, cursor: cursor.id, text: text)
+    if let target = focusedCompose, target.textContext != nil, target.cursor != nil {
+      guard let value = ComposeComposition(pane: target.pane.compose, text: text, selected: selectedRange, replacement: replacementRange) else {
+        delegate?.grid(self, recover: text.string); return
+      }
+      composition = Composition(target: target, text: value)
       marked = ""; rebuildCompose(); needsDisplay = true; return
     }
     marked = (string as? NSAttributedString)?.string ?? (string as? String) ?? ""
@@ -627,9 +627,15 @@ final class CellGridView: NSView, @preconcurrency NSTextInputClient {
     composition = nil
     compositionDragAnchor = nil
     if let replacement = ComposeReplacement(scope: current.target.scope, epoch: current.target.pane.compose.viewport.epoch,
-      source: current.text.source, cursor: current.cursor, text: current.text.draft.string) {
+      composition: current.text) {
       delegate?.grid(self, commit: replacement, in: current.target)
-    } else { delegate?.grid(self, recover: current.text.draft.string) }
+    } else {
+      var seen: Set<String> = []
+      for id in current.text.ordered {
+        let text = current.text.values[id]!.draft.string
+        if seen.insert(text).inserted { delegate?.grid(self, recover: text) }
+      }
+    }
     inputContext?.discardMarkedText()
     if rebuild { rebuildCompose(); needsDisplay = true }
   }
@@ -638,7 +644,10 @@ final class CellGridView: NSView, @preconcurrency NSTextInputClient {
     guard let current = composition else { return }
     composition = nil
     compositionDragAnchor = nil
-    if recover { delegate?.grid(self, recover: current.text.draft.string) }
+    if recover {
+      var seen: Set<String> = []
+      for value in current.text.values.values where seen.insert(value.draft.string).inserted { delegate?.grid(self, recover: value.draft.string) }
+    }
     inputContext?.discardMarkedText()
     if rebuild { rebuildCompose(); needsDisplay = true }
   }
@@ -708,7 +717,7 @@ final class CellGridView: NSView, @preconcurrency NSTextInputClient {
       guard display >= draft.location, display <= NSMaxRange(draft) else { return false }
       index = display
     }
-    let position = current.text.originalRange.location + index - draft.location
+    let position = current.text.virtualStart(for: current.text.primaryID) + index - draft.location
     let anchor = extend ? compositionDragAnchor ?? current.text.selectedRange.location : position
     guard current.text.select(NSRange(location: min(position, anchor), length: abs(position - anchor))) else { return false }
     compositionDragAnchor = anchor; composition = current

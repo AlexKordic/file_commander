@@ -27,7 +27,7 @@ final class ComposePresentation {
   init?(pane: WirePane, window: UInt64, cell: CGSize, body: NSFont, monospace: NSFont,
         typography: ComposeTypography = .init(), pageWidth: CGFloat = 760, reuse: ComposePresentation? = nil,
         caretStates: [UInt64: WireComposeCaret] = [:], images: [UInt64: ComposeImageState] = [:], viewport: WireComposeViewport? = nil,
-        preedit: ComposeMarkedText? = nil) {
+        preedit: ComposeMarkedText? = nil, composition: ComposeComposition? = nil) {
     guard pane.hasCompose, pane.hasBuffer else { return nil }
     if pane.compose.hasTextContext {
       if let reuse, reuse.pane.compose.documentLen == pane.compose.documentLen,
@@ -40,7 +40,7 @@ final class ComposePresentation {
                         width: CGFloat(rect.w) * cell.width, height: CGFloat(rect.h) * cell.height)
     let width = min(pageWidth, bounds.width - 32)
     guard width > 0, let layout = ComposePaneLayout(pane: pane.compose, body: body as CTFont,
-      monospace: monospace as CTFont, width: width, typography: typography, images: images, reuse: reuse?.layout, preedit: preedit) else { return nil }
+      monospace: monospace as CTFont, width: width, typography: typography, images: images, reuse: reuse?.layout, preedit: preedit, composition: composition) else { return nil }
     self.pane = pane
     self.layout = layout
     self.bounds = bounds
@@ -101,7 +101,12 @@ final class ComposePresentation {
   var cursorAffinity: UInt32 { cursor.map { affinity(for: $0) == .upstream ? 1 : 0 } ?? 0 }
 
   var carets: [CGRect] {
-    if layout.preedit != nil { return caret.map { [$0] } ?? [] }
+    if let composition = layout.composition {
+      return layout.draftDisplayRanges.compactMap { id, display in
+        guard let value = composition.values[id] else { return nil }
+        return layout.text.caret(atUTF16: display.location + NSMaxRange(value.selected))?.offsetBy(dx: origin.x, dy: origin.y)
+      }
+    }
     return pane.compose.cursors.compactMap { cursor in
       Int(exactly: cursor.position).flatMap { layout.text.caret(for: $0, affinity: affinity(for: cursor)) }?.offsetBy(dx: origin.x, dy: origin.y)
     }
@@ -188,24 +193,23 @@ final class ComposePresentation {
   }
 
   private func preeditDisplayPosition(_ position: Int) -> Int? {
-    guard let preedit = layout.preedit, let display = layout.draftDisplayRange else { return nil }
-    let start = preedit.originalRange.location, end = start + preedit.draft.length
-    if position >= start && position <= end { return display.location + position - start }
-    let (sourcePosition, overflow) = position > end
-      ? (position - preedit.draft.length).addingReportingOverflow(preedit.originalRange.length) : (position, false)
-    guard !overflow else { return nil }
-    guard let source = preedit.context.sourceRange(forUTF16: NSRange(location: sourcePosition, length: 0))?.lowerBound else { return nil }
+    guard let composition = layout.composition else { return nil }
+    if let draft = composition.draftPosition(at: position) {
+      return layout.draftDisplayRanges[draft.id].map { $0.location + draft.offset }
+    }
+    guard let source = composition.sourcePosition(at: position) else { return nil }
     return layout.text.utf16Position(for: source)
   }
 
   func preeditDocumentPosition(_ displayPosition: Int) -> Int? {
-    guard let preedit = layout.preedit, let display = layout.draftDisplayRange else { return nil }
-    if displayPosition >= display.location && displayPosition <= NSMaxRange(display) {
-      return preedit.originalRange.location + displayPosition - display.location
+    guard let composition = layout.composition else { return nil }
+    for id in [composition.primaryID] + composition.ordered.filter({ $0 != composition.primaryID }) {
+      if let display = layout.draftDisplayRanges[id], displayPosition >= display.location && displayPosition <= NSMaxRange(display) {
+        return composition.virtualStart(for: id) + displayPosition - display.location
+      }
     }
-    guard let sourceRange = layout.text.sourceRange(forUTF16: NSRange(location: displayPosition, length: 0)),
-          let position = preedit.context.utf16Position(for: sourceRange.lowerBound) else { return nil }
-    return position > NSMaxRange(preedit.originalRange) ? position - preedit.originalRange.length + preedit.draft.length : position
+    guard let sourceRange = layout.text.sourceRange(forUTF16: NSRange(location: displayPosition, length: 0)) else { return nil }
+    return composition.virtualPosition(for: sourceRange.lowerBound)
   }
 
   func draw(in context: CGContext, dirty: CGRect, foreground: NSColor, background: NSColor, selection: NSColor,

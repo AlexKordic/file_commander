@@ -156,6 +156,64 @@ private final class ScenePeer: @unchecked Sendable {
 
 final class ComposeInputTests: XCTestCase {
   @MainActor
+  func testMarkedTextCapturesAllOriginalCaretsThroughReflowAndCommitsOneBatch() async throws {
+    let source = "café and Tail\n"
+    var initial = pane(source)
+    initial.compose.cursors = [
+      .with { $0.id = 1; $0.anchor = 0; $0.position = 5; $0.utf16Anchor = 0; $0.utf16Position = 4 },
+      .with { $0.id = 2; $0.primary = true; $0.anchor = 10; $0.position = 14; $0.utf16Anchor = 9; $0.utf16Position = 13 },
+    ]
+    initial.compose.textContext.selectionStart = 9; initial.compose.textContext.selectionEnd = 13
+    let peer = try ScenePeer(pane: initial)
+    defer { peer.close() }
+    let editor = richEditor()
+    defer { editor.detachAll() }
+    editor.attach(socketPath: peer.path, app: nil)
+    try await eventually { editor.grid?.focusedCompose != nil }
+    let grid = try XCTUnwrap(editor.grid)
+    grid.setMarkedText("日本", selectedRange: NSRange(location: 2, length: 0), replacementRange: NSRange(location: NSNotFound, length: 0))
+    XCTAssertEqual(grid.markedRange(), NSRange(location: 7, length: 2))
+    XCTAssertEqual(grid.selectedRange(), NSRange(location: 9, length: 0))
+    XCTAssertEqual(grid.focusedCompose?.layout.draftDisplayRanges.count, 2)
+    XCTAssertEqual(grid.focusedCompose?.carets.count, 2)
+    var actual = NSRange(location: NSNotFound, length: 0)
+    XCTAssertEqual(grid.attributedSubstring(forProposedRange: NSRange(location: 0, length: 100), actualRange: &actual)?.string, "日本 and 日本\n")
+    var changed = initial; changed.content.w = 40; changed.compose.bufferRevision = 5
+    changed.compose.cursors.append(.with { $0.id = 3; $0.position = 8 })
+    peer.show(changed)
+    try await eventually { peer.lastApplied >= 2 }
+    XCTAssertTrue(peer.inputs.isEmpty)
+    grid.unmarkText(); grid.unmarkText()
+    try await eventually { peer.inputs.count == 1 }
+    let input = peer.inputs[0]
+    XCTAssertEqual(input.sourceRevision, 4)
+    XCTAssertEqual(input.replacementCursor, 2)
+    XCTAssertEqual(input.replacementStart, 10); XCTAssertEqual(input.replacementEnd, 14)
+    XCTAssertEqual(input.replacements.map(\.cursor), [1])
+    XCTAssertEqual(input.replacements[0].start, 0); XCTAssertEqual(input.replacements[0].end, 5)
+    XCTAssertEqual(try WirePaste(serializedBytes: input.payload).text, "日本")
+  }
+
+  @MainActor
+  func testRetiringAnyCapturedCaretRecoversTheWholeCompositionWithoutEditingTheSurvivor() async throws {
+    var initial = pane("first Tail\n")
+    initial.compose.cursors.append(.with { $0.id = 2; $0.position = 6 })
+    let peer = try ScenePeer(pane: initial)
+    defer { peer.close() }
+    let editor = richEditor()
+    defer { editor.detachAll() }
+    editor.attach(socketPath: peer.path, app: nil)
+    try await eventually { editor.grid?.focusedCompose != nil }
+    let grid = try XCTUnwrap(editor.grid)
+    grid.setMarkedText("保存", selectedRange: NSRange(location: 2, length: 0), replacementRange: NSRange(location: NSNotFound, length: 0))
+    initial.compose.cursors.removeLast()
+    peer.show(initial)
+    try await eventually { !grid.hasMarkedText() }
+    XCTAssertTrue(peer.inputs.isEmpty)
+    XCTAssertEqual(editor.uninsertedText, ["保存"])
+  }
+
+  @MainActor
   func testMarkedCommitWaitsForModalOwnershipAndResigningCommitsOnlyOnce() async throws {
     let initial = pane("original\n"), peer = try ScenePeer(pane: initial)
     defer { peer.close() }

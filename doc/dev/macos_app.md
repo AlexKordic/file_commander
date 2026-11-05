@@ -272,8 +272,10 @@ conflict cancellation and the atomic edit/undo operation. Committed phrases
 use `SceneInput.text`; clipboard paste retains its separate column-paste
 semantics.
 
-`ComposeMarkedText` holds provisional input-method text over the captured raw
-source context. It supports partial replacements and selected subranges without
+`ComposeComposition` coordinates `ComposeMarkedText` snapshots at the captured
+carets. Default composition broadcasts to all original carets; an explicit
+initial replacement range addresses only the primary. It supports partial
+replacements and selected subranges without
 changing Fresh's buffer. `ComposePaneLayout` lays out that provisional text
 with the paragraph's typography, wrapping, images and shared caret/selection
 geometry. Marked text is underlined; accessibility selections address the
@@ -282,12 +284,15 @@ revision while unrelated source replies arrive and never supplies navigation
 feedback to Fresh. Unmarking commits once; explicit cancellation restores the
 original presentation. A retired source target or failed commit retains text
 for explicit copying rather than inserting into a replacement view.
+Each caret keeps its own source range; all targets commit as one Fresh undo
+transaction. Overlapping expansions are refused together. Text-service indices
+include provisional length changes at earlier carets, including offscreen ones.
 
 **Edit > Copy Uninserted Text** is available in the editor's menu and FC's
 menu after disconnection. Text stays in memory for the application session;
 copying neither clears it nor happens automatically. Application restart
-does not preserve this native recovery list. Multi-caret composition, repeated
-compositions during pending edits and live IME/recovery qualification remain
+does not preserve this native recovery list. Repeated compositions during
+pending edits and live IME/recovery qualification remain
 unfinished and keep rich Compose gated.
 Tooltip rectangles share the attachment geometry and are replaced only when
 their positions or descriptions change.

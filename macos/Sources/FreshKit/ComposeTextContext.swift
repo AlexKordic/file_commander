@@ -6,7 +6,8 @@ public struct ComposeTextContext {
   public let text: String
   public let source: Range<Int>
   public let range: NSRange
-  public let selection: NSRange
+  public private(set) var selection: NSRange
+  private let documentLength: Int
   private let utf16ToSource: [Int: Int]
   private let sourceToUTF16: [Int: Int]
 
@@ -21,13 +22,20 @@ public struct ComposeTextContext {
       units += scalar.utf16.count; byte += scalar.utf8.count
       toSource[units] = byte; toUTF16[byte] = units
     }
-    text = wire.text; source = start..<byte
+    text = wire.text; source = start..<byte; self.documentLength = document
     range = NSRange(location: base, length: units - base)
     selection = NSRange(location: a, length: b - a)
     utf16ToSource = toSource; sourceToUTF16 = toUTF16
   }
 
   public func utf16Position(for source: Int) -> Int? { sourceToUTF16[source] }
+
+  /// Carets sharing a source chunk share its immutable text/index storage.
+  public func selecting(_ selection: NSRange) -> ComposeTextContext? {
+    guard selection.location >= 0, selection.location != NSNotFound, selection.length >= 0,
+          selection.location <= documentLength, selection.length <= documentLength - selection.location else { return nil }
+    var copy = self; copy.selection = selection; return copy
+  }
 
   public func exactText(for proposed: NSRange) -> String? {
     guard sourceRange(forUTF16: proposed) != nil else { return nil }

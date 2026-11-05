@@ -458,6 +458,12 @@ exists. Boundary insertions remain outside a nonempty replacement. Empty text
 deletes its range. Read-only documents reject both replacements and literal
 text input; terminal cancellations consume their request IDs.
 
+Additional `ComposeInput.replacements` capture secondary cursor IDs and source
+ranges, optionally overriding the common text. Fresh validates and rebases
+every target before applying one undo transaction. A missing cursor, changed
+range, duplicate cursor or overlapping target cancels the whole operation.
+New carets created after capture do not join an existing composition.
+
 `text_input` marks an ordinary committed phrase applied once to the current
 selections in its captured view. It uses Fresh's normal event/undo machinery
 and line-ending policy without clipboard column distribution. Plain clipboard
@@ -473,6 +479,9 @@ is bounded to at most 8 KiB around the caret, even for a very large selection.
 The native client can replace the complete captured primary selection using
 its cursor's byte bounds; arbitrary ranges outside the known context are
 refused. Context queries can return a bounded, grapheme-adjusted result or nil.
+Secondary carets receive document-wide UTF-16 positions and coalesced raw
+`text_chunks` around their source positions. Nearby carets share each chunk;
+these additional windows together cannot exceed the parsed document size.
 The accessibility value and its selection retain display-relative coordinates.
 Native rich Compose keeps marked text as a provisional replacement over that
 immutable source snapshot. Partial updates, marked/selected subranges and
@@ -485,14 +494,28 @@ explicit cancellation leaves the source unchanged. Losing the target view,
 buffer lifetime or cursor cancels the composition into native recovery text.
 Modal UI can defer its committed replacement using the existing input ID.
 
+`ComposeComposition` captures all current carets for the default marked-text
+operation. An explicit initial replacement range addresses only the primary.
+Each target retains its own source range and surrounding context. Provisional
+document positions include length changes from earlier carets, even offscreen.
+Partial updates validate every target on copies; intersecting expansions are
+refused without changing any draft. Commit sends one replacement batch;
+retiring any captured cursor recovers the composition without editing a subset.
+Recovery retains distinct draft variants when surrounding source differs.
+
 Uninserted text is retained in FC memory for the application session and can
 be copied explicitly from **Edit > Copy Uninserted Text**, including after
 disconnection. Failure never overwrites the system clipboard, and copying
 does not erase the retained text. This is not a persistent crash checkpoint.
-Multi-caret composition, consecutive compositions while edits await replies,
+Consecutive compositions while edits await replies,
 interactive input-method behavior and recovery qualification remain open;
 this development implementation does not establish full IME support. Context
 sizing and scene traffic still need performance qualification before release.
+
+Native Compose must wrap using measured fonts and available pixel width.
+Terminal Markdown column counts, padded or truncated table replacements and
+character-sized frames are not a native layout contract. Removing the remaining
+terminal table/code formatting and measuring native table cells is still open.
 
 Visible images are checked on a five-second prototype interval and when the
 editor is shown again. POSIX local/SSH stats include file identity plus
