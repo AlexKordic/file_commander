@@ -239,6 +239,12 @@ replacement is ready. Unchanged binary replies update freshness without
 decoding or reflow. A transient failure shows the last preview with a warning;
 small inline images use a badge rather than a footer that would cover them.
 Hovering an image shows its alt text/title and any loading or failure details.
+When image markup is revealed for editing, `ComposeTextLayout` keeps the
+source as text and reserves a separate preview below its last measured line.
+That preview shares image loading, tooltips and source-range hit testing with
+rendered attachments. It adds no document characters or navigation stops.
+Native clipboard access is injectable; scene/input tests use memory storage
+instead of reading or overwriting the user's system pasteboard.
 Tooltip rectangles share the attachment geometry and are replaced only when
 their positions or descriptions change.
 

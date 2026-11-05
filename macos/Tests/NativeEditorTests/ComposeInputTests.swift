@@ -5,6 +5,12 @@ import FreshKit
 import SwiftProtobuf
 @testable import FileCommander
 
+@MainActor
+private final class MemoryPasteboard: EditorPasteboard {
+  private(set) var editorText: String?
+  func replaceEditorText(_ text: String) { editorText = text }
+}
+
 /// A private scene peer controls acknowledgment timing. The production editor,
 /// socket, scene store, AppKit pane and input queue run unchanged.
 private final class ScenePeer: @unchecked Sendable {
@@ -125,6 +131,13 @@ private final class ScenePeer: @unchecked Sendable {
   func show(_ pane: WirePane) { send(.frame, frame(pane: pane)) }
 
   @discardableResult
+  func copy(_ text: String, sequence: UInt64) -> UInt64 {
+    var frame = frame(pane: nil)
+    frame.clipboard = .with { $0.text = text; $0.seq = sequence }
+    send(.frame, frame); return frame.seq
+  }
+
+  @discardableResult
   func image(_ chunk: WireComposeAssetChunk) -> UInt64 {
     var frame = frame(pane: nil); frame.composeAssets = [chunk]; send(.frame, frame)
     return frame.seq
@@ -157,13 +170,13 @@ final class ComposeInputTests: XCTestCase {
   }
 
   @MainActor
-  private func richEditor() -> NativeEditor {
+  private func richEditor(pasteboard: (any EditorPasteboard)? = nil) -> NativeEditor {
     _ = NSApplication.shared
     NSApp.setActivationPolicy(.prohibited)
     let gate = ProcessInfo.processInfo.environment["FC_NATIVE_RICH_COMPOSE"]
     setenv("FC_NATIVE_RICH_COMPOSE", "1", 1)
     defer { if let gate { setenv("FC_NATIVE_RICH_COMPOSE", gate, 1) } else { unsetenv("FC_NATIVE_RICH_COMPOSE") } }
-    return NativeEditor()
+    return NativeEditor(pasteboard: pasteboard ?? MemoryPasteboard())
   }
 
   @MainActor
@@ -445,5 +458,54 @@ final class ComposeInputTests: XCTestCase {
     XCTAssertTrue(description?.contains("Picture") == true)
     XCTAssertTrue(description?.contains("last preview") == true)
     XCTAssertTrue(description?.contains("Temporarily offline") == true)
+    scene.compose.images[0].rendered = false; scene.compose.images[0].sourcePreview = true
+    scene.compose.projectionRevision = 5; scene.compose.selectionRevision = 5
+    scene.compose.cursors[0].position = 10
+    peer.show(scene)
+    try await eventually { editor.grid?.focusedCompose?.layout.text.attachments.first?.attachment.preview == true }
+    XCTAssertEqual(previewWidth(), 80, "entering source editing retains the decoded preview")
+    XCTAssertEqual(peer.assets.filter { !$0.cancel }.count, 4, "revealing markup alone does not redownload unchanged bytes")
+    XCTAssertEqual(editor.grid?.focusedCompose?.layout.text.projection.text, source)
+  }
+
+  @MainActor
+  func testSourcePreviewUsesTheImageRangeAndPasteSendsOnlyCopiedMarkdown() async throws {
+    let markup = "![**café**](<images/a b.png>)"
+    let source = "Before \(markup) after.\r\n"
+    var scene = pane(source)
+    scene.compose.assetAuthority = 5; scene.compose.assetDocument = 7
+    scene.compose.images = [.with { $0.start = 7; $0.end = UInt64(7 + markup.utf8.count)
+      $0.target = "images/a b.png"; $0.alt = "café"; $0.sourcePreview = true }]
+    scene.compose.cursors[0].position = 11
+    let peer = try ScenePeer(pane: scene)
+    defer { peer.close() }
+    let pasteboard = MemoryPasteboard()
+    let editor = richEditor(pasteboard: pasteboard)
+    defer { editor.detachAll() }
+    editor.attach(socketPath: peer.path, app: nil)
+    try await eventually { editor.grid?.focusedCompose?.layout.text.attachments.first?.attachment.preview == true }
+    let grid = try XCTUnwrap(editor.grid), presentation = try XCTUnwrap(grid.focusedCompose)
+    XCTAssertEqual(presentation.layout.text.projection.text, source)
+    let rect = try XCTUnwrap(presentation.layout.text.attachments.first?.rect)
+      .offsetBy(dx: presentation.origin.x, dy: presentation.origin.y)
+    editor.grid(grid, point: CGPoint(x: rect.midX, y: rect.midY), in: presentation, extend: false, count: 1)
+    try await eventually { peer.inputs.count == 1 }
+    XCTAssertEqual(peer.inputs[0].attachmentStart, 7)
+    XCTAssertEqual(peer.inputs[0].position, scene.compose.images[0].end)
+    XCTAssertEqual(peer.inputs[0].sourceRevision, 4)
+    scene.compose.images[0].sourcePreview = false; scene.compose.images[0].rendered = true
+    scene.compose.projectionRevision = 5; scene.compose.selectionRevision = 5
+    scene.compose.cursors[0].position = scene.compose.images[0].end
+    scene.compose.cursors[0].anchor = 7
+    peer.reply(.with { $0.id = 1; $0.accepted = true }, pane: scene)
+    try await eventually { grid.focusedCompose?.pane.compose.projectionRevision == 5 }
+    let copied = peer.copy(markup, sequence: 1)
+    try await eventually { peer.lastApplied >= copied }
+    XCTAssertEqual(pasteboard.editorText, markup)
+    editor.gridPaste(grid)
+    try await eventually { peer.inputs.count == 2 }
+    XCTAssertEqual(UInt64(peer.inputs[1].kind), SceneWire.Kind.paste.rawValue)
+    XCTAssertEqual(try WirePaste(serializedBytes: peer.inputs[1].payload).text, markup)
+    XCTAssertEqual(peer.inputs[1].scope.projectionRevision, 5)
   }
 }

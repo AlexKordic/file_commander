@@ -247,7 +247,8 @@ final class CellGridView: NSView, @preconcurrency NSTextInputClient {
       return pane.layout.text.attachments.compactMap { placed -> (CGFloat, ComposeImageController.Demand)? in
         let rect = placed.rect.offsetBy(dx: pane.origin.x, dy: pane.origin.y)
         guard rect.intersects(near), let image = pane.pane.compose.images.first(where: { $0.start == UInt64(placed.attachment.source.lowerBound) }) else { return nil }
-        let maximum = image.block ? max(pane.layout.text.size.width, 480) : CTFontGetSize(pane.body) * 8
+        let maximum = image.sourcePreview ? max(rect.width, rect.height)
+          : image.block ? max(pane.layout.text.size.width, 480) : CTFontGetSize(pane.body) * 8
         return (abs(rect.midY - pane.bounds.midY), .init(scope: pane.scope, image: image,
           authority: pane.pane.compose.assetAuthority, document: pane.pane.compose.assetDocument,
           maximumDimension: Int(ceil(maximum * scale))))

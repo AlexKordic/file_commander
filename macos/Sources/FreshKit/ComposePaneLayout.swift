@@ -17,20 +17,39 @@ public final class ComposePaneLayout {
                typography: ComposeTypography = .init(),
                images: [UInt64: ComposeImageState] = [:], reuse: ComposePaneLayout? = nil) {
     guard let baseProjection = ComposeProjection(pane), typography.isValid else { return nil }
-    let rendered = pane.images.filter(\.rendered)
+    guard pane.images.allSatisfy({ !($0.rendered && $0.sourcePreview) }) else { return nil }
+    let visible = pane.images.filter { $0.rendered || $0.sourcePreview }
     var sourceRanges: [Range<Int>] = [], sizes: [Int: CGSize] = [:]
-    for image in rendered {
-      guard let start = Int(exactly: image.start), let end = Int(exactly: image.end), start < end else { return nil }
-      sourceRanges.append(start..<end)
+    for image in visible {
+      guard let start = Int(exactly: image.start), let end = Int(exactly: image.end), start < end,
+            start >= baseProjection.source.lowerBound, end <= baseProjection.source.upperBound else { return nil }
+      if image.rendered { sourceRanges.append(start..<end) }
       let containers = pane.spans.filter { ($0.role == 9 || $0.role == 10) && $0.start <= image.start && image.start < $0.end }.count
       let available = width - min(CGFloat(containers) * typography.indent, width * 0.6)
-      sizes[start] = (images[image.start] ?? .loading).size(body: CTFontGetSize(body), width: available, block: image.block)
+      var size = (images[image.start] ?? .loading).size(body: CTFontGetSize(body),
+        width: image.sourcePreview ? min(360, available) : available, block: image.block || image.sourcePreview)
+      if image.sourcePreview, size.height > 240 {
+        size.width *= 240 / size.height; size.height = 240
+      }
+      sizes[start] = size
     }
     let objects = baseProjection.replacingObjects(sourceRanges)
     let projection = objects?.projection ?? baseProjection
-    let attachments = (objects?.objects ?? []).compactMap { object -> ComposeTextLayout.Attachment? in
+    var attachments = (objects?.objects ?? []).compactMap { object -> ComposeTextLayout.Attachment? in
       guard let size = sizes[object.source.lowerBound] else { return nil }
       return .init(source: object.source, display: object.display, size: size)
+    }
+    for image in visible where image.sourcePreview {
+      let source = Int(image.start)..<Int(image.end)
+      guard projection.segments.allSatisfy({ segment in
+        let inside = segment.source.overlaps(source) || (segment.source.isEmpty
+          && source.lowerBound < segment.source.lowerBound && segment.source.lowerBound < source.upperBound)
+        return !inside || segment.kind == .copy
+      }) else { return nil }
+      guard let start = projection.displayPosition(for: source.lowerBound, affinity: .downstream),
+            let end = projection.displayPosition(for: source.upperBound, affinity: .upstream), start < end,
+            let size = sizes[source.lowerBound] else { return nil }
+      attachments.append(.init(source: source, display: start..<end, size: size, preview: true))
     }
     self.pane = pane
     self.body = body
@@ -56,6 +75,10 @@ public final class ComposePaneLayout {
             let start = projection.displayPosition(for: from, affinity: .downstream),
             let end = projection.displayPosition(for: to, affinity: .upstream), start < end else { continue }
       spans.append(Span(source: a..<b, range: start..<end, role: span.role, flags: span.flags))
+    }
+    // Image markup remains ordinary source, styled as code while it is edited.
+    for attachment in attachments where attachment.preview {
+      spans.append(.init(source: attachment.source, range: attachment.display, role: 7, flags: 0))
     }
     let boundaries = Set([0, projection.text.utf8.count] + spans.flatMap { [$0.range.lowerBound, $0.range.upperBound] }).sorted()
     var fonts: [ComposeTextLayout.FontRun] = []
@@ -179,10 +202,24 @@ public final class ComposePaneLayout {
     }
     for placed in text.attachments {
       let rect = placed.rect.offsetBy(dx: origin.x, dy: origin.y)
-      guard rect.intersects(clip), rect.intersects(dirty),
+      let caption = CGRect(x: rect.minX, y: rect.minY - 18, width: rect.width, height: 18)
+      let bounds = placed.attachment.preview ? rect.union(caption) : rect
+      guard bounds.intersects(clip), bounds.intersects(dirty),
             let image = pane.images.first(where: { $0.start == UInt64(placed.attachment.source.lowerBound) }) else { continue }
       let state = images[image.start] ?? .loading
       context.saveGState()
+      if placed.attachment.preview {
+        context.setFillColor(foreground.copy(alpha: 0.65) ?? foreground)
+        let font = CTFontCreateCopyWithAttributes(body, min(12, CTFontGetSize(body)), nil, nil)
+        let label = CTLineCreateWithAttributedString(NSAttributedString(string: "Preview", attributes: [
+          NSAttributedString.Key(kCTFontAttributeName as String): font,
+          NSAttributedString.Key(kCTForegroundColorFromContextAttributeName as String): true,
+        ]))
+        context.saveGState(); context.clip(to: caption)
+        context.textPosition = CGPoint(x: caption.minX, y: caption.minY + CTFontGetAscent(font) + 1)
+        CTLineDraw(label, context); context.restoreGState()
+      }
+      context.clip(to: rect)
       if let asset = state.asset {
         context.translateBy(x: rect.minX, y: rect.maxY)
         context.scaleBy(x: 1, y: -1)
@@ -205,6 +242,7 @@ public final class ComposePaneLayout {
       context.restoreGState()
       if case .stale(_, let warning) = state {
         context.saveGState()
+        context.clip(to: rect)
         if rect.width < 140 || rect.height < 48 {
           // A footer would obscure a small inline image. Keep its pixels and
           // show a compact warning; the tooltip carries the explanation.
@@ -232,7 +270,9 @@ public final class ComposePaneLayout {
         context.restoreGState()
       }
       if pane.cursors.contains(where: { cursor in
-        cursor.hasAnchor && min(cursor.position, cursor.anchor) < image.end && max(cursor.position, cursor.anchor) > image.start
+        cursor.hasAnchor && (placed.attachment.preview
+          ? min(cursor.position, cursor.anchor) <= image.start && max(cursor.position, cursor.anchor) >= image.end
+          : min(cursor.position, cursor.anchor) < image.end && max(cursor.position, cursor.anchor) > image.start)
       }) {
         context.setStrokeColor(selection)
         context.setLineWidth(2)

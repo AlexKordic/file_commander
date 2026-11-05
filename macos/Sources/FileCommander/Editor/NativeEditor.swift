@@ -4,6 +4,22 @@ import FCKit
 import FreshKit
 import SwiftProtobuf
 
+/// Clipboard access is injectable so socket/input tests do not depend on, or
+/// overwrite, the logged-in user's pasteboard.
+@MainActor
+protocol EditorPasteboard {
+  var editorText: String? { get }
+  func replaceEditorText(_ text: String)
+}
+
+extension NSPasteboard: EditorPasteboard {
+  var editorText: String? { string(forType: .string) }
+  func replaceEditorText(_ text: String) {
+    clearContents()
+    setString(text, forType: .string)
+  }
+}
+
 /// The native editor: Fresh's session drawn by the app, over the session's
 /// scene channel. Fresh lays out and renders; this view draws the cells and
 /// Fresh's chrome with native controls, puts Fresh's menus in the menu bar
@@ -30,6 +46,7 @@ final class NativeEditor: NSObject, CellGridDelegate {
   private weak var app: AppController?
   private var menus: FreshMenus?
   private var clipboardSequence: Int?
+  private let pasteboard: any EditorPasteboard
   private var pendingShow = false
   private var receivedHello = false
   private var menusWanted = false
@@ -89,7 +106,10 @@ final class NativeEditor: NSObject, CellGridDelegate {
   /// Called with the active tab's name when it changes.
   var onTitle: ((String) -> Void)?
 
-  override init() {
+  override convenience init() { self.init(pasteboard: NSPasteboard.general) }
+
+  init(pasteboard: any EditorPasteboard) {
+    self.pasteboard = pasteboard
     super.init()
     composeImages.onChange = { [weak self] in
       self?.grid?.refreshComposeImages()
@@ -402,8 +422,7 @@ final class NativeEditor: NSObject, CellGridDelegate {
     if let copy = store.clipboard, copy.sequence != clipboardSequence {
       // The hello reports the editor's last copy; only later copies reach the pasteboard.
       if clipboardSequence != nil || !change.isHello {
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(copy.text, forType: .string)
+        pasteboard.replaceEditorText(copy.text)
       }
       clipboardSequence = copy.sequence
     } else if change.isHello && clipboardSequence == nil {
@@ -508,7 +527,7 @@ final class NativeEditor: NSObject, CellGridDelegate {
   }
 
   func gridPaste(_ grid: CellGridView) {
-    guard let text = NSPasteboard.general.string(forType: .string), !text.isEmpty else { return }
+    guard let text = pasteboard.editorText, !text.isEmpty else { return }
     send(.paste(text))
   }
 

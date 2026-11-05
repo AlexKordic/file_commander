@@ -1587,6 +1587,8 @@ public nonisolated struct WireComposeImage: Sendable {
 
   public var rendered: Bool = false
 
+  public var sourcePreview: Bool = false
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
@@ -6129,7 +6131,7 @@ nonisolated extension WireComposeSpan: SwiftProtobuf.Message, SwiftProtobuf._Mes
 
 nonisolated extension WireComposeImage: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".ComposeImage"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}start\0\u{1}end\0\u{1}target\0\u{1}alt\0\u{1}title\0\u{1}block\0\u{1}rendered\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}start\0\u{1}end\0\u{1}target\0\u{1}alt\0\u{1}title\0\u{1}block\0\u{1}rendered\0\u{3}source_preview\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -6144,6 +6146,7 @@ nonisolated extension WireComposeImage: SwiftProtobuf.Message, SwiftProtobuf._Me
       case 5: try { try decoder.decodeSingularStringField(value: &self.title) }()
       case 6: try { try decoder.decodeSingularBoolField(value: &self.block) }()
       case 7: try { try decoder.decodeSingularBoolField(value: &self.rendered) }()
+      case 8: try { try decoder.decodeSingularBoolField(value: &self.sourcePreview) }()
       default: break
       }
     }
@@ -6171,6 +6174,9 @@ nonisolated extension WireComposeImage: SwiftProtobuf.Message, SwiftProtobuf._Me
     if self.rendered != false {
       try visitor.visitSingularBoolField(value: self.rendered, fieldNumber: 7)
     }
+    if self.sourcePreview != false {
+      try visitor.visitSingularBoolField(value: self.sourcePreview, fieldNumber: 8)
+    }
     try unknownFields.traverse(visitor: &visitor)
   }
 
@@ -6182,6 +6188,7 @@ nonisolated extension WireComposeImage: SwiftProtobuf.Message, SwiftProtobuf._Me
     if lhs.title != rhs.title {return false}
     if lhs.block != rhs.block {return false}
     if lhs.rendered != rhs.rendered {return false}
+    if lhs.sourcePreview != rhs.sourcePreview {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }

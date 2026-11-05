@@ -418,6 +418,16 @@ bounds still need validation against representative documents before release.
   carry those final validators. An unchanged reply must name the requested
   digest and cannot follow partial data.
 
+Image annotations distinguish `rendered` attachments from `source_preview`.
+Entering image-source editing reveals the entire original markup, including
+nested emphasis or table-cell conceals. Its preview occupies measured space
+below that text without inserting characters or caret positions. Preview
+clicks address the same image source range. Selection, copy, cut, paste and
+undo use Fresh's Markdown source, including reference syntax; they do not
+copy the graphical object or relocate its asset. Pending/fallback projections
+set neither image presentation flag. Invalid markup remains editable source
+and may no longer have a parsed preview until it becomes a valid image again.
+
 Visible images are checked on a five-second prototype interval and when the
 editor is shown again. POSIX local/SSH stats include file identity plus
 nanosecond modification/change times. Metadata shortcuts are supplemented by

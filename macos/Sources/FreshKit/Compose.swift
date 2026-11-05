@@ -199,8 +199,12 @@ public final class ComposeTextLayout {
     public let source: Range<Int>
     public let display: Range<Int>
     public let size: CGSize
-    public init(source: Range<Int>, display: Range<Int>, size: CGSize) {
+    /// A source-edit preview occupies flow space after its text line, without
+    /// replacing text, adding caret stops, or introducing clipboard characters.
+    public let preview: Bool
+    public init(source: Range<Int>, display: Range<Int>, size: CGSize, preview: Bool = false) {
       self.source = source; self.display = display; self.size = size
+      self.preview = preview
     }
   }
   public struct PlacedAttachment {
@@ -288,11 +292,19 @@ public final class ComposeTextLayout {
             start < end, [paragraph.indent, paragraph.before, paragraph.after].allSatisfy({ $0.isFinite && $0 >= 0 }) else { return nil }
       blocks.append((NSRange(location: start, length: end - start), paragraph))
     }
+    var previews: [(index: Int, end: Int)] = []
     for (index, attachment) in attachments.enumerated() {
       guard attachment.size.width.isFinite, attachment.size.height.isFinite,
             attachment.size.width > 0, attachment.size.height > 0,
             let start = byteToUTF16[attachment.display.lowerBound], let end = byteToUTF16[attachment.display.upperBound],
-            end - start == 1, string.character(at: start) == 0xfffc else { return nil }
+            start < end, !attachment.source.isEmpty,
+            attachment.source.lowerBound >= projection.source.lowerBound,
+            attachment.source.upperBound <= projection.source.upperBound else { return nil }
+      if attachment.preview {
+        previews.append((index, end))
+        continue
+      }
+      guard end - start == 1, string.character(at: start) == 0xfffc else { return nil }
       let metrics = Unmanaged.passRetained(Metrics(attachment.size)).toOpaque()
       var callbacks = CTRunDelegateCallbacks(version: kCTRunDelegateCurrentVersion,
         dealloc: { Unmanaged<Metrics>.fromOpaque($0).release() },
@@ -314,6 +326,8 @@ public final class ComposeTextLayout {
     var from = 0
     var top: CGFloat = 0
     var placed: [PlacedAttachment] = []
+    previews.sort { $0.end == $1.end ? $0.index < $1.index : $0.end < $1.end }
+    var nextPreview = 0
     let baseHeight = CTFontGetAscent(font) + CTFontGetDescent(font) + CTFontGetLeading(font)
     func block(at position: Int) -> (range: NSRange, style: ParagraphRun)? {
       blocks.filter { NSLocationInRange(position, $0.range) }.min { $0.range.length < $1.range.length }
@@ -348,6 +362,14 @@ public final class ComposeTextLayout {
           rect: CGRect(x: indent + position.x, y: top + ascent - attachment.size.height, width: attachment.size.width, height: attachment.size.height)))
       }
       top += height
+      while nextPreview < previews.count, previews[nextPreview].end <= NSMaxRange(range) {
+        let attachment = attachments[previews[nextPreview].index]
+        top += 18 // Caption; presentation only, with no source/caret position.
+        placed.append(.init(attachment: attachment, rect: CGRect(x: indent, y: top,
+          width: attachment.size.width, height: attachment.size.height)))
+        top += attachment.size.height + 8
+        nextPreview += 1
+      }
       if let block, NSMaxRange(range) >= NSMaxRange(block.range) { top += block.style.after }
     }
     while from < string.length {

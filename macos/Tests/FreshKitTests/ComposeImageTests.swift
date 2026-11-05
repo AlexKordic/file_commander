@@ -124,6 +124,94 @@ final class ComposeImageTests: XCTestCase {
     }
   }
 
+  func testSourceEditingKeepsExactWrappedMarkupAndAddsOnlyPreviewGeometry() throws {
+    let markup = "![**café 👩🏽‍💻**](<images/a very long path.png> \"caption\")"
+    let source = "Before \(markup) after.\r\n\r\nFollowing paragraph.\r\n"
+    var input = pane(source)
+    var annotation = image(source, markup)
+    annotation.rendered = false; annotation.sourcePreview = true
+    input.images = [annotation]
+    let font = CTFontCreateWithName("Helvetica" as CFString, 16, nil)
+    let mono = CTFontCreateWithName("Menlo" as CFString, 16, nil)
+    let asset = try ComposeImageAsset.decode(encode(bitmap(600, 300)))
+    for width: CGFloat in [180, 480] {
+      let layout = try XCTUnwrap(ComposePaneLayout(pane: input, body: font, monospace: mono, width: width,
+        images: [annotation.start: .ready(asset)]))
+      XCTAssertEqual(layout.text.projection.text, source)
+      XCTAssertTrue(layout.text.projection.segments.allSatisfy { $0.kind == .copy })
+      let placed = try XCTUnwrap(layout.text.attachments.first)
+      XCTAssertTrue(placed.attachment.preview)
+      XCTAssertEqual(placed.attachment.display, Int(annotation.start)..<Int(annotation.end))
+      XCTAssertLessThanOrEqual(placed.rect.width, min(width, 360))
+      XCTAssertLessThanOrEqual(placed.rect.height, 240)
+      let end = try XCTUnwrap(layout.text.caret(for: Int(annotation.end), affinity: .upstream))
+      XCTAssertLessThanOrEqual(end.maxY + 18, placed.rect.minY + 0.001)
+      let following = source[..<source.range(of: "Following")!.lowerBound].utf8.count
+      let after = try XCTUnwrap(layout.text.caret(for: following))
+      XCTAssertGreaterThanOrEqual(after.minY, placed.rect.maxY + 8)
+      let hit = try XCTUnwrap(layout.text.hit(at: CGPoint(x: placed.rect.maxX - 1, y: placed.rect.midY)))
+      XCTAssertEqual(hit.attachment, Int(annotation.start)..<Int(annotation.end))
+      let feedback = try XCTUnwrap(layout.text.navigation(id: 1, pageHeight: 900,
+        documentLength: input.documentLen, positions: [annotation.start]))
+      XCTAssertTrue(feedback.lines.flatMap(\.stops).contains { annotation.start < $0.source && $0.source < annotation.end },
+        "markup has real caret stops; the preview adds none")
+      XCTAssertEqual(feedback.lines.count, layout.text.fragments.count)
+      if width == 480 {
+        let w = 528, h = Int(ceil(layout.text.size.height)) + 48
+        let context = try XCTUnwrap(CGContext(data: nil, width: w, height: h, bitsPerComponent: 8,
+          bytesPerRow: w * 4, space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
+        context.translateBy(x: 0, y: CGFloat(h)); context.scaleBy(x: 1, y: -1)
+        let bounds = CGRect(x: 0, y: 0, width: w, height: h)
+        layout.draw(in: context, origin: CGPoint(x: 24, y: 24), clip: bounds, dirty: bounds,
+          foreground: CGColor(gray: 0.1, alpha: 1), background: CGColor(gray: 1, alpha: 1), selection: CGColor(gray: 0.5, alpha: 1))
+        let pixels = context.data!.assumingMemoryBound(to: UInt8.self)
+        let red = (0..<(w * h)).filter { pixels[$0 * 4] > 200 && pixels[$0 * 4 + 2] < 70 }.count
+        XCTAssertGreaterThan(red, 1000, "the source-edit preview uses the native image draw path")
+        if let path = ProcessInfo.processInfo.environment["FC_COMPOSE_SOURCE_PREVIEW_FILE"] {
+          try encode(XCTUnwrap(context.makeImage())).write(to: URL(fileURLWithPath: path))
+        }
+      }
+    }
+    // Pending/fallback source has neither native attachment nor asset demand.
+    input.images[0].sourcePreview = false
+    let sourceOnly = try XCTUnwrap(ComposePaneLayout(pane: input, body: font, monospace: mono, width: 480))
+    XCTAssertTrue(sourceOnly.text.attachments.isEmpty)
+    input.images[0].sourcePreview = true; input.images[0].rendered = true
+    XCTAssertNil(ComposePaneLayout(pane: input, body: font, monospace: mono, width: 480))
+    input.images[0].rendered = false
+    let replaced = try XCTUnwrap(ComposeProjection(input)?.replacingObjects([Int(annotation.start)..<Int(annotation.end)]))
+    input.text = replaced.projection.text
+    input.segments = replaced.projection.segments.map { segment in .with {
+      $0.sourceStart = UInt64(segment.source.lowerBound); $0.sourceEnd = UInt64(segment.source.upperBound)
+      $0.displayStart = UInt64(segment.display.lowerBound); $0.displayEnd = UInt64(segment.display.upperBound)
+      $0.kind = segment.kind == .copy ? 0 : 2
+    } }
+    XCTAssertNil(ComposePaneLayout(pane: input, body: font, monospace: mono, width: 480),
+      "a source-edit preview must not accept a concealed or atomic source map")
+  }
+
+  func testSourcePreviewFitsNestedIndentAndAnchorsFollowingTextThroughLateSizing() throws {
+    let source = "![pic](x.png)\n\nFollowing\n"
+    var input = pane(source)
+    var annotation = image(source, "![pic](x.png)", block: true)
+    annotation.rendered = false; annotation.sourcePreview = true; input.images = [annotation]
+    input.spans = [9, 10, 11].map { role in .with { $0.end = annotation.end; $0.role = UInt32(role) } }
+    let font = CTFontCreateWithName("Helvetica" as CFString, 16, nil)
+    let asset = try ComposeImageAsset.decode(encode(bitmap(600, 300)))
+    let following = source[..<source.range(of: "Following")!.lowerBound].utf8.count
+    for state: ComposeImageState in [.loading, .ready(asset), .failed("Unavailable")] {
+      let layout = try XCTUnwrap(ComposePaneLayout(pane: input, body: font, monospace: font, width: 200,
+        images: [annotation.start: state]))
+      let rect = try XCTUnwrap(layout.text.attachments.first?.rect)
+      XCTAssertEqual(rect.minX, 48, accuracy: 0.001)
+      XCTAssertLessThanOrEqual(rect.maxX, 200)
+      let viewport = ComposeViewport(text: layout.text, documentLength: input.documentLen, height: 80)
+      let anchor = WireComposeViewport.with { $0.position = UInt64(following); $0.offset = 12; $0.epoch = 1 }
+      let top = try XCTUnwrap(viewport.requestedTop(anchor))
+      XCTAssertEqual(try XCTUnwrap(layout.text.caret(for: following)).minY - top, 12, accuracy: 0.001)
+    }
+  }
+
   func testImagesDrawInsideTextAndAsBlocksThroughTheNativePath() throws {
     let source = "Compose images\n\nBefore ![inline](x.png) after text.\n\n![block](x.png)\n\nEnd."
     var input = pane(source)
