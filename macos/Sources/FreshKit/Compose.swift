@@ -504,6 +504,8 @@ public final class ComposeTextLayout {
     return (fragment, boundary)
   }
 
+  public func hitUTF16(at point: CGPoint) -> Int? { hitIndex(at: point)?.1 }
+
   /// Caret geometry from the same shaped lines that supply hit testing. The
   /// affinity selects the visible side of a soft-wrap boundary.
   public func caret(for source: Int, affinity: ComposeProjection.Affinity = .downstream) -> CGRect? {
@@ -543,7 +545,9 @@ public final class ComposeTextLayout {
   }
 
   public func firstRect(forUTF16 range: NSRange) -> (rect: CGRect, range: NSRange)? {
-    guard sourceRange(forUTF16: range) != nil, let caret = caret(atUTF16: range.location),
+    guard range.location >= 0, range.length >= 0, range.location <= string.length,
+          range.length <= string.length - range.location, utf16ToByte[NSMaxRange(range)] != nil,
+          let caret = caret(atUTF16: range.location),
           let fragment = fragments.first(where: { $0.rect.minY == caret.minY }) else { return nil }
     let start = min(range.location, fragment.contentEnd), end = max(start, min(NSMaxRange(range), fragment.contentEnd))
     let a = CTLineGetOffsetForStringIndex(fragment.line, start, nil), b = CTLineGetOffsetForStringIndex(fragment.line, end, nil)
@@ -632,6 +636,14 @@ public final class ComposeTextLayout {
           let start = projection.displayPosition(for: max(source.lowerBound, projection.source.lowerBound), affinity: .downstream),
           let end = projection.displayPosition(for: min(source.upperBound, projection.source.upperBound), affinity: .upstream),
           let a = byteToUTF16[start], let b = byteToUTF16[end], a <= b else { return [] }
+    return selectionRects(forUTF16: NSRange(location: a, length: b - a))
+  }
+
+  public func selectionRects(forUTF16 range: NSRange) -> [CGRect] {
+    guard range.location >= 0, range.length >= 0, range.location <= string.length,
+          range.length <= string.length - range.location,
+          utf16ToByte[range.location] != nil, utf16ToByte[NSMaxRange(range)] != nil else { return [] }
+    let a = range.location, b = NSMaxRange(range)
     return fragments.compactMap { fragment in
       let from = max(a, fragment.range.location)
       let to = min(b, fragment.contentEnd)

@@ -29,6 +29,16 @@ public struct ComposeTextContext {
 
   public func utf16Position(for source: Int) -> Int? { sourceToUTF16[source] }
 
+  public func exactText(for proposed: NSRange) -> String? {
+    guard sourceRange(forUTF16: proposed) != nil else { return nil }
+    return (text as NSString).substring(with: NSRange(location: proposed.location - range.location, length: proposed.length))
+  }
+
+  public func exactText(forSource proposed: Range<Int>) -> String? {
+    guard let a = sourceToUTF16[proposed.lowerBound], let b = sourceToUTF16[proposed.upperBound] else { return nil }
+    return exactText(for: NSRange(location: a, length: b - a))
+  }
+
   public func sourceRange(forUTF16 proposed: NSRange) -> Range<Int>? {
     guard proposed.location >= 0, proposed.location != NSNotFound, proposed.length >= 0, proposed.location <= NSMaxRange(range),
           proposed.length <= NSMaxRange(range) - proposed.location,
