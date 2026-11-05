@@ -17,6 +17,7 @@ final class ComposePresentation {
   let body: CTFont
   let viewport: WireComposeViewport
   let scrolling: ComposeViewport
+  let textContext: ComposeTextContext?
   private let caretStates: [UInt64: WireComposeCaret]
   private(set) var navigation: WireComposeLayout?
   private let monospace: CTFont
@@ -27,6 +28,12 @@ final class ComposePresentation {
         typography: ComposeTypography = .init(), pageWidth: CGFloat = 760, reuse: ComposePresentation? = nil,
         caretStates: [UInt64: WireComposeCaret] = [:], images: [UInt64: ComposeImageState] = [:], viewport: WireComposeViewport? = nil) {
     guard pane.hasCompose, pane.hasBuffer else { return nil }
+    if pane.compose.hasTextContext {
+      if let reuse, reuse.pane.compose.documentLen == pane.compose.documentLen,
+         reuse.pane.compose.textContext == pane.compose.textContext { textContext = reuse.textContext }
+      else { textContext = ComposeTextContext(pane.compose.textContext, documentLength: pane.compose.documentLen) }
+      guard textContext != nil else { return nil }
+    } else { textContext = nil }
     let rect = pane.content
     let bounds = CGRect(x: CGFloat(rect.x) * cell.width, y: CGFloat(rect.y) * cell.height,
                         width: CGFloat(rect.w) * cell.width, height: CGFloat(rect.h) * cell.height)
@@ -126,6 +133,39 @@ final class ComposePresentation {
     let start = String(decoding: bytes[..<a], as: UTF8.self).utf16.count
     let end = String(decoding: bytes[..<b], as: UTF8.self).utf16.count
     return NSRange(location: start, length: max(0, end - start))
+  }
+
+  var textServiceSelectedRange: NSRange { textContext?.selection ?? selectedRange }
+
+  func sourceRange(forTextServiceRange range: NSRange) -> Range<Int>? {
+    guard let context = textContext else {
+      return layout.text.sourceRange(forUTF16: range, insertion: cursor.flatMap { Int(exactly: $0.position) })
+    }
+    if let source = context.sourceRange(forUTF16: range) { return source }
+    // A large selection can extend past the bounded context. Its byte ends
+    // already belong to the captured Fresh cursor and do not need guessing.
+    if range == context.selection, let cursor,
+       let a = Int(exactly: cursor.position), let b = Int(exactly: cursor.hasAnchor ? cursor.anchor : cursor.position) {
+      return min(a, b)..<max(a, b)
+    }
+    return nil
+  }
+
+  func textServiceIndex(for source: Int, affinity: ComposeProjection.Affinity = .downstream) -> Int? {
+    if let context = textContext { return context.utf16Position(for: source) }
+    return layout.text.utf16Position(for: source, affinity: affinity)
+  }
+
+  func textServiceRect(for range: NSRange) -> (rect: CGRect, range: NSRange)? {
+    guard let context = textContext else { return layout.text.firstRect(forUTF16: range) }
+    guard let source = sourceRange(forTextServiceRange: range),
+          let a = layout.text.utf16Position(for: source.lowerBound),
+          let b = layout.text.utf16Position(for: source.upperBound, affinity: .upstream), b >= a,
+          let area = layout.text.firstRect(forUTF16: NSRange(location: a, length: b - a)) else { return nil }
+    if range.length == 0 { return (area.rect, range) }
+    guard let actual = layout.text.sourceRange(forUTF16: area.range),
+          let start = context.utf16Position(for: actual.lowerBound), let end = context.utf16Position(for: actual.upperBound) else { return nil }
+    return (area.rect, NSRange(location: start, length: end - start))
   }
 
   func draw(in context: CGContext, dirty: CGRect, foreground: NSColor, background: NSColor, selection: NSColor,

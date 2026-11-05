@@ -156,6 +156,76 @@ private final class ScenePeer: @unchecked Sendable {
 
 final class ComposeInputTests: XCTestCase {
   @MainActor
+  func testLargePrimarySelectionCanBeReplacedBeyondTheBoundedTextContext() async throws {
+    let prefix = String(repeating: "文", count: 4000), source = prefix + "Tail"
+    var last = pane(source)
+    last.compose.sourceStart = UInt64(prefix.utf8.count); last.compose.text = "Tail"
+    last.compose.segments = [.with {
+      $0.sourceStart = UInt64(prefix.utf8.count); $0.sourceEnd = UInt64(source.utf8.count); $0.displayEnd = 4
+    }]
+    last.compose.cursors[0].position = UInt64(source.utf8.count); last.compose.cursors[0].anchor = 0
+    last.compose.textContext = .with {
+      $0.text = "Tail"; $0.sourceStart = UInt64(prefix.utf8.count); $0.utf16Start = 4000; $0.selectionEnd = 4004
+    }
+    let peer = try ScenePeer(pane: last)
+    defer { peer.close() }
+    let editor = richEditor()
+    defer { editor.detachAll() }
+    editor.attach(socketPath: peer.path, app: nil)
+    try await eventually { editor.grid?.focusedCompose != nil }
+    let grid = try XCTUnwrap(editor.grid)
+    XCTAssertEqual(grid.selectedRange(), NSRange(location: 0, length: 4004))
+    grid.insertText("", replacementRange: grid.selectedRange())
+    try await eventually { peer.inputs.count == 1 }
+    XCTAssertEqual(peer.inputs[0].replacementStart, 0)
+    XCTAssertEqual(peer.inputs[0].replacementEnd, UInt64(source.utf8.count))
+    XCTAssertEqual(try WirePaste(serializedBytes: peer.inputs[0].payload).text, "")
+  }
+
+  @MainActor
+  func testTextServicesKeepSourceCoordinatesAcrossConcealmentAndSourceWindowChanges() async throws {
+    let prefix = String(repeating: "👩🏽‍💻 before\r\n", count: 100), raw = "**café** tail\r\n"
+    let start = prefix.utf8.count, base = prefix.utf16.count
+    var compact = pane(prefix + raw)
+    compact.compose.sourceStart = UInt64(start); compact.compose.text = "café tail\r\n"
+    compact.compose.segments = [
+      .with { $0.sourceStart = UInt64(start); $0.sourceEnd = UInt64(start + 2); $0.kind = 1 },
+      .with { $0.sourceStart = UInt64(start + 2); $0.sourceEnd = UInt64(start + 7); $0.displayEnd = 5 },
+      .with { $0.sourceStart = UInt64(start + 7); $0.sourceEnd = UInt64(start + 9); $0.displayStart = 5; $0.displayEnd = 5; $0.kind = 1 },
+      .with { $0.sourceStart = UInt64(start + 9); $0.sourceEnd = compact.compose.sourceEnd; $0.displayStart = 5; $0.displayEnd = UInt64(compact.compose.text.utf8.count) },
+    ]
+    compact.compose.cursors[0].position = UInt64(start + 7); compact.compose.cursors[0].anchor = UInt64(start + 2)
+    compact.compose.textContext = .with {
+      $0.text = raw; $0.sourceStart = UInt64(start); $0.utf16Start = UInt64(base)
+      $0.selectionStart = UInt64(base + 2); $0.selectionEnd = UInt64(base + 6)
+    }
+    let peer = try ScenePeer(pane: compact)
+    defer { peer.close() }
+    let editor = richEditor()
+    defer { editor.detachAll() }
+    editor.attach(socketPath: peer.path, app: nil)
+    try await eventually { editor.grid?.focusedCompose != nil }
+    let grid = try XCTUnwrap(editor.grid), selection = NSRange(location: base + 2, length: 4)
+    XCTAssertEqual(grid.selectedRange(), selection)
+    XCTAssertEqual(grid.accessibilitySelectedTextRange(), NSRange(location: 0, length: 4), "accessibility addresses the displayed value, not raw-source context")
+    var actual = NSRange(location: NSNotFound, length: 0)
+    XCTAssertEqual(grid.attributedSubstring(forProposedRange: selection, actualRange: &actual)?.string, "café")
+    XCTAssertEqual(actual, selection)
+    let presentation = try XCTUnwrap(grid.focusedCompose)
+    XCTAssertEqual(presentation.textServiceRect(for: selection)?.range, selection)
+    XCTAssertEqual(presentation.textServiceIndex(for: start + 2), base + 2)
+    var revealed = pane(prefix + raw, width: 40)
+    revealed.compose.cursors = compact.compose.cursors; revealed.compose.textContext = compact.compose.textContext
+    peer.show(revealed)
+    try await eventually { grid.focusedCompose?.pane.compose.sourceStart == 0 }
+    XCTAssertEqual(grid.selectedRange(), selection)
+    XCTAssertEqual(grid.attributedSubstring(forProposedRange: selection, actualRange: &actual)?.string, "café")
+    grid.insertText("東京", replacementRange: selection)
+    try await eventually { peer.inputs.count == 1 }
+    XCTAssertEqual(peer.inputs[0].replacementStart, UInt64(start + 2))
+    XCTAssertEqual(peer.inputs[0].replacementEnd, UInt64(start + 7))
+  }
+  @MainActor
   func testCommittedPhraseWaitsForModalKeyboardOwnershipWithoutInventingLayoutFeedback() async throws {
     let source = "Text before the input.\n"
     let peer = try ScenePeer(pane: pane(source))
@@ -229,6 +299,9 @@ final class ComposeInputTests: XCTestCase {
         $0.viewport = .with { $0.epoch = 7 }
         $0.focused = true; $0.keyboard = true
         $0.cursors = [.with { $0.primary = true; $0.id = 1; $0.position = revision == 4 ? 0 : 1 }]
+        $0.textContext = .with {
+          $0.text = text; $0.selectionStart = revision == 4 ? 0 : 1; $0.selectionEnd = $0.selectionStart
+        }
       }
     }
   }

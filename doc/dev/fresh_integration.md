@@ -461,11 +461,23 @@ text input; terminal cancellations consume their request IDs.
 `text_input` marks an ordinary committed phrase applied once to the current
 selections in its captured view. It uses Fresh's normal event/undo machinery
 and line-ending policy without clipboard column distribution. Plain clipboard
-paste keeps that distribution. Native unmarked context/range queries use
-UTF-16 projection offsets, mapped through the measured source projection.
-Complete marked-text context, stable context across source-window changes,
-composition lifecycle and live input-method qualification remain open; these
-transport additions do not establish full IME support.
+paste keeps that distribution.
+
+`ComposePane.text_context` supplies raw Markdown near the primary caret for
+unmarked native text services. `source_start` is a buffer-wide UTF-8 byte
+offset; `utf16_start` and the selection bounds are buffer-wide source UTF-16
+offsets. They remain independent of concealment, font layout and the visible
+source window. A sparse UTF-16 index is built with each parsed source revision;
+caret movement does not recount the complete document. The current context
+is bounded to at most 8 KiB around the caret, even for a very large selection.
+The native client can replace the complete captured primary selection using
+its cursor's byte bounds; arbitrary ranges outside the known context are
+refused. Context queries can return a bounded, grapheme-adjusted result or nil.
+The accessibility value and its selection retain display-relative coordinates.
+Complete marked-text context/drawing, composition lifecycle and live
+input-method qualification remain open; these transport additions do not
+establish full IME support. Context sizing and scene traffic need performance
+qualification before release.
 
 Visible images are checked on a five-second prototype interval and when the
 editor is shown again. POSIX local/SSH stats include file identity plus

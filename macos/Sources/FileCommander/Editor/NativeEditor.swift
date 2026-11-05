@@ -534,7 +534,7 @@ final class NativeEditor: NSObject, CellGridDelegate {
 
   func grid(_ grid: CellGridView, replace text: String, range: NSRange, in pane: ComposePresentation) {
     guard receivedHello, let cursor = pane.cursor,
-          let source = pane.layout.text.sourceRange(forUTF16: range, insertion: Int(exactly: cursor.position)),
+          let source = pane.sourceRange(forTextServiceRange: range),
           let replacement = ComposeReplacement(scope: pane.scope, epoch: pane.pane.compose.viewport.epoch, source: source, cursor: cursor.id, text: text) else { return }
     enqueueCompose(.replacement(replacement), target: pane)
   }

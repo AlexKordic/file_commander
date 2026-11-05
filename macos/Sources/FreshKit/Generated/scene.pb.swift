@@ -1409,8 +1409,8 @@ public nonisolated struct WirePane: @unchecked Sendable {
   fileprivate var _storage = _StorageClass.defaultInstance
 }
 
-/// A source-preserving rich Compose window. All offsets are UTF-8 bytes;
-/// display offsets are relative to text, source offsets are buffer-wide.
+/// A source-preserving rich Compose window. Projection offsets are UTF-8
+/// bytes; text_context uses document-wide source UTF-16 for native input.
 public nonisolated struct WireComposePane: @unchecked Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
@@ -1519,11 +1519,42 @@ public nonisolated struct WireComposePane: @unchecked Sendable {
     set {_uniqueStorage()._error = newValue}
   }
 
+  public var textContext: WireComposeTextContext {
+    get {_storage._textContext ?? WireComposeTextContext()}
+    set {_uniqueStorage()._textContext = newValue}
+  }
+  /// Returns true if `textContext` has been explicitly set.
+  public var hasTextContext: Bool {_storage._textContext != nil}
+  /// Clears the value of `textContext`. Subsequent reads from it will return its default value.
+  public mutating func clearTextContext() {_uniqueStorage()._textContext = nil}
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
 
   fileprivate var _storage = _StorageClass.defaultInstance
+}
+
+/// Raw source near the primary caret, independent of display conceals and
+/// viewport. source_start is UTF-8 bytes; all other offsets are UTF-16.
+public nonisolated struct WireComposeTextContext: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var text: String = String()
+
+  public var sourceStart: UInt64 = 0
+
+  public var utf16Start: UInt64 = 0
+
+  public var selectionStart: UInt64 = 0
+
+  public var selectionEnd: UInt64 = 0
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
 }
 
 /// kind: 0 copied text, 1 hidden source, 2 atomic replacement, 3 insertion.
@@ -5883,7 +5914,7 @@ nonisolated extension WirePane: SwiftProtobuf.Message, SwiftProtobuf._MessageImp
 
 nonisolated extension WireComposePane: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".ComposePane"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}buffer_revision\0\u{3}projection_revision\0\u{3}source_start\0\u{3}source_end\0\u{1}text\0\u{1}segments\0\u{1}spans\0\u{1}images\0\u{1}cursors\0\u{1}focused\0\u{3}top_byte\0\u{3}document_len\0\u{3}selection_revision\0\u{1}keyboard\0\u{3}asset_authority\0\u{3}asset_document\0\u{1}viewport\0\u{1}ready\0\u{1}error\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}buffer_revision\0\u{3}projection_revision\0\u{3}source_start\0\u{3}source_end\0\u{1}text\0\u{1}segments\0\u{1}spans\0\u{1}images\0\u{1}cursors\0\u{1}focused\0\u{3}top_byte\0\u{3}document_len\0\u{3}selection_revision\0\u{1}keyboard\0\u{3}asset_authority\0\u{3}asset_document\0\u{1}viewport\0\u{1}ready\0\u{1}error\0\u{3}text_context\0")
 
   fileprivate class _StorageClass {
     var _bufferRevision: UInt64 = 0
@@ -5905,6 +5936,7 @@ nonisolated extension WireComposePane: SwiftProtobuf.Message, SwiftProtobuf._Mes
     var _viewport: WireComposeViewport? = nil
     var _ready: Bool? = nil
     var _error: String = String()
+    var _textContext: WireComposeTextContext? = nil
 
       // This property is used as the initial default value for new instances of the type.
       // The type itself is protecting the reference to its storage via CoW semantics.
@@ -5934,6 +5966,7 @@ nonisolated extension WireComposePane: SwiftProtobuf.Message, SwiftProtobuf._Mes
       _viewport = source._viewport
       _ready = source._ready
       _error = source._error
+      _textContext = source._textContext
     }
   }
 
@@ -5971,6 +6004,7 @@ nonisolated extension WireComposePane: SwiftProtobuf.Message, SwiftProtobuf._Mes
         case 17: try { try decoder.decodeSingularMessageField(value: &_storage._viewport) }()
         case 18: try { try decoder.decodeSingularBoolField(value: &_storage._ready) }()
         case 19: try { try decoder.decodeSingularStringField(value: &_storage._error) }()
+        case 20: try { try decoder.decodeSingularMessageField(value: &_storage._textContext) }()
         default: break
         }
       }
@@ -6040,6 +6074,9 @@ nonisolated extension WireComposePane: SwiftProtobuf.Message, SwiftProtobuf._Mes
       if !_storage._error.isEmpty {
         try visitor.visitSingularStringField(value: _storage._error, fieldNumber: 19)
       }
+      try { if let v = _storage._textContext {
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 20)
+      } }()
     }
     try unknownFields.traverse(visitor: &visitor)
   }
@@ -6068,10 +6105,61 @@ nonisolated extension WireComposePane: SwiftProtobuf.Message, SwiftProtobuf._Mes
         if _storage._viewport != rhs_storage._viewport {return false}
         if _storage._ready != rhs_storage._ready {return false}
         if _storage._error != rhs_storage._error {return false}
+        if _storage._textContext != rhs_storage._textContext {return false}
         return true
       }
       if !storagesAreEqual {return false}
     }
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension WireComposeTextContext: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".ComposeTextContext"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}text\0\u{3}source_start\0\u{3}utf16_start\0\u{3}selection_start\0\u{3}selection_end\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularStringField(value: &self.text) }()
+      case 2: try { try decoder.decodeSingularUInt64Field(value: &self.sourceStart) }()
+      case 3: try { try decoder.decodeSingularUInt64Field(value: &self.utf16Start) }()
+      case 4: try { try decoder.decodeSingularUInt64Field(value: &self.selectionStart) }()
+      case 5: try { try decoder.decodeSingularUInt64Field(value: &self.selectionEnd) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if !self.text.isEmpty {
+      try visitor.visitSingularStringField(value: self.text, fieldNumber: 1)
+    }
+    if self.sourceStart != 0 {
+      try visitor.visitSingularUInt64Field(value: self.sourceStart, fieldNumber: 2)
+    }
+    if self.utf16Start != 0 {
+      try visitor.visitSingularUInt64Field(value: self.utf16Start, fieldNumber: 3)
+    }
+    if self.selectionStart != 0 {
+      try visitor.visitSingularUInt64Field(value: self.selectionStart, fieldNumber: 4)
+    }
+    if self.selectionEnd != 0 {
+      try visitor.visitSingularUInt64Field(value: self.selectionEnd, fieldNumber: 5)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: WireComposeTextContext, rhs: WireComposeTextContext) -> Bool {
+    if lhs.text != rhs.text {return false}
+    if lhs.sourceStart != rhs.sourceStart {return false}
+    if lhs.utf16Start != rhs.utf16Start {return false}
+    if lhs.selectionStart != rhs.selectionStart {return false}
+    if lhs.selectionEnd != rhs.selectionEnd {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }

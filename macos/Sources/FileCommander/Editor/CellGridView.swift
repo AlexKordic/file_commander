@@ -165,11 +165,21 @@ final class CellGridView: NSView, @preconcurrency NSTextInputClient {
   }
 
   private func rebuildCompose() {
+    let old = focusedCompose
     let previous = composePanes
     composePanes = Dictionary(uniqueKeysWithValues: store.panes.compactMap { pane in
       presentation(pane, reuse: previous[pane.leaf]).map { (pane.leaf, $0) }
     })
     updateImageTooltips()
+    if window?.firstResponder === self {
+      inputContext?.invalidateCharacterCoordinates()
+      let next = focusedCompose
+      if #available(macOS 15.4, *), marked.isEmpty,
+         old?.identity != next?.identity || old?.pane.compose.bufferRevision != next?.pane.compose.bufferRevision
+          || old?.textServiceSelectedRange != next?.textServiceSelectedRange {
+        inputContext?.textInputClientDidUpdateSelection()
+      }
+    }
   }
 
   private func updateImageTooltips() {
@@ -561,10 +571,17 @@ final class CellGridView: NSView, @preconcurrency NSTextInputClient {
 
   func hasMarkedText() -> Bool { !marked.isEmpty }
   func markedRange() -> NSRange { marked.isEmpty ? NSRange(location: NSNotFound, length: 0) : NSRange(location: 0, length: marked.utf16.count) }
-  func selectedRange() -> NSRange { !marked.isEmpty ? NSRange(location: marked.utf16.count, length: 0) : focusedCompose?.selectedRange ?? NSRange(location: 0, length: 0) }
+  func selectedRange() -> NSRange { !marked.isEmpty ? NSRange(location: marked.utf16.count, length: 0) : focusedCompose?.textServiceSelectedRange ?? NSRange(location: 0, length: 0) }
   func validAttributesForMarkedText() -> [NSAttributedString.Key] { [.underlineStyle] }
   func attributedSubstring(forProposedRange range: NSRange, actualRange: NSRangePointer?) -> NSAttributedString? {
     guard marked.isEmpty, let pane = focusedCompose, range.location != NSNotFound else { return nil }
+    if let context = pane.textContext {
+      guard let result = context.substring(forProposedRange: range) else {
+        actualRange?.pointee = NSRange(location: NSNotFound, length: 0); return nil
+      }
+      actualRange?.pointee = result.range
+      return NSAttributedString(string: result.text)
+    }
     let text = pane.layout.text.projection.text as NSString
     guard range.location >= 0, range.location <= text.length, range.length >= 0 else { return nil }
     let clipped = NSRange(location: range.location, length: min(range.length, text.length-range.location))
@@ -576,13 +593,13 @@ final class CellGridView: NSView, @preconcurrency NSTextInputClient {
     guard marked.isEmpty, let pane = focusedCompose, let window else { return NSNotFound }
     let point = convert(window.convertPoint(fromScreen: point), from: nil)
     guard pane.bounds.contains(point), let hit = pane.hit(at: point) else { return NSNotFound }
-    return pane.layout.text.utf16Position(for: hit.source, affinity: hit.affinity) ?? NSNotFound
+    return pane.textServiceIndex(for: hit.source, affinity: hit.affinity) ?? NSNotFound
   }
   override func doCommand(by selector: Selector) {}
 
   func firstRect(forCharacterRange range: NSRange, actualRange: NSRangePointer?) -> NSRect {
     if marked.isEmpty, let pane = focusedCompose, let window {
-      guard let area = pane.layout.text.firstRect(forUTF16: range) else { actualRange?.pointee = NSRange(location: NSNotFound, length: 0); return .zero }
+      guard let area = pane.textServiceRect(for: range) else { actualRange?.pointee = NSRange(location: NSNotFound, length: 0); return .zero }
       actualRange?.pointee = area.range
       return window.convertToScreen(convert(area.rect.offsetBy(dx: pane.origin.x, dy: pane.origin.y), to: nil))
     }
