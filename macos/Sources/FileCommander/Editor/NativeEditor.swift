@@ -83,7 +83,10 @@ final class NativeEditor: NSObject, CellGridDelegate {
     Trace.write("editor: connecting to \(path)")
     disconnect()
     let socket = SceneSocket(path: path)
-    socket.onMessage = { [weak self] message in self?.received(message) }
+    socket.onMessage = { [weak self, weak socket] message in
+      guard let self, let socket, self.socket === socket else { return }
+      self.received(message)
+    }
     socket.onSent = { number, type, kind, bytes, at in
       var fields: [String: Any] = ["ev": "send", "t": EditorTelemetry.ms(at), "n": number, "type": type, "bytes": bytes]
       if let kind { fields["kind"] = kind }
