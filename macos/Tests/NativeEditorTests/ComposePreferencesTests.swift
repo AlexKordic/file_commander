@@ -1,12 +1,14 @@
 import AppKit
 import CoreText
 import XCTest
+import FreshKit
 @testable import FileCommander
 
 final class ComposePreferencesTests: XCTestCase {
   func testOldProfilesKeepDefaultsAndComposeSettingsPersistInTheAppProfile() throws {
     let old = try JSONDecoder().decode(AppPreferences.self, from: Data(#"{"terminalEditor":true,"scrollMargin":7}"#.utf8))
     XCTAssertEqual(old.compose, ComposePreferences())
+    XCTAssertEqual(old.compose.pageWidth, 0, "native Compose uses the available width by default")
     XCTAssertTrue(old.terminalEditor)
     var preferences = old
     preferences.compose.bodyFamily = "system-rounded"
@@ -34,7 +36,7 @@ final class ComposePreferencesTests: XCTestCase {
     XCTAssertEqual(preferences.compose.lineSpacing, 24)
     XCTAssertEqual(preferences.compose.paragraphSpacing, 0)
     XCTAssertEqual(preferences.compose.indent, 64)
-    XCTAssertEqual(preferences.compose.pageWidth, 320)
+    XCTAssertEqual(preferences.compose.pageWidth, 0)
     XCTAssertEqual(preferences.compose.bodyFamily, "system")
     XCTAssertTrue(CTFontGetSymbolicTraits(preferences.compose.fonts(zoom: 1).monospace as CTFont).contains(.traitMonoSpace))
     var missing = ComposePreferences()
@@ -44,5 +46,27 @@ final class ComposePreferencesTests: XCTestCase {
     let fonts = missing.fonts(zoom: .infinity)
     XCTAssertEqual(fonts.body.pointSize, 16)
     XCTAssertTrue(CTFontGetSymbolicTraits(fonts.monospace as CTFont).contains(.traitMonoSpace))
+  }
+
+  @MainActor
+  func testNativeWrappingUsesTheAvailablePixelWidthUnlessTheUserChoosesAReadingLimit() throws {
+    let text = String(repeating: "Proportional words with iii and WWW measure in pixels. ", count: 25)
+    var pane = WirePane.with {
+      $0.buffer = 1; $0.leaf = 2; $0.content.w = 240; $0.content.h = 40
+      $0.compose = .with {
+        $0.text = text; $0.sourceEnd = UInt64(text.utf8.count); $0.documentLen = $0.sourceEnd
+        $0.segments = [.with { $0.sourceEnd = UInt64(text.utf8.count); $0.displayEnd = $0.sourceEnd }]
+      }
+    }
+    let body = NSFont.systemFont(ofSize: 18), mono = NSFont.monospacedSystemFont(ofSize: 18, weight: .regular)
+    let full = try XCTUnwrap(ComposePresentation(pane: pane, window: 1, cell: CGSize(width: 8, height: 16), body: body, monospace: mono))
+    XCTAssertEqual(full.layout.text.size.width, 1888)
+    pane.content.w = 120
+    let narrower = try XCTUnwrap(ComposePresentation(pane: pane, window: 1, cell: CGSize(width: 8, height: 16), body: body, monospace: mono))
+    XCTAssertEqual(narrower.layout.text.size.width, 928)
+    XCTAssertGreaterThan(narrower.layout.text.fragments.count, full.layout.text.fragments.count)
+    let limited = try XCTUnwrap(ComposePresentation(pane: pane, window: 1, cell: CGSize(width: 8, height: 16), body: body, monospace: mono, pageWidth: 500))
+    XCTAssertEqual(limited.layout.text.size.width, 500)
+    XCTAssertGreaterThan(limited.layout.text.fragments.count, narrower.layout.text.fragments.count)
   }
 }

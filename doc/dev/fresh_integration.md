@@ -514,8 +514,12 @@ sizing and scene traffic still need performance qualification before release.
 
 Native Compose must wrap using measured fonts and available pixel width.
 Terminal Markdown column counts, padded or truncated table replacements and
-character-sized frames are not a native layout contract. Removing the remaining
-terminal table/code formatting and measuring native table cells is still open.
+character-sized frames are not a native layout contract. Parsed table/code
+blocks currently bypass those terminal conceals, retaining exact editable
+source, semantic fonts and image overrides. Native list prefixes also bypass
+terminal indent expansion. Measured table cells and native code-frame
+ornaments still need implementation and qualification. The native default
+uses all available pane width; a reading limit is optional and measured in points.
 
 Visible images are checked on a five-second prototype interval and when the
 editor is shown again. POSIX local/SSH stats include file identity plus

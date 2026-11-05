@@ -206,8 +206,12 @@ struct ComposeSettings: View {
       Stepper(value: $app.preferences.compose.indent, in: 8...64, step: 2) {
         Text("List and quote indent: \(app.preferences.compose.indent, format: .number.precision(.fractionLength(0))) pt")
       }
-      Stepper(value: $app.preferences.compose.pageWidth, in: 320...1600, step: 40) {
-        Text("Maximum page width: \(app.preferences.compose.pageWidth, format: .number.precision(.fractionLength(0))) pt")
+      Toggle("Limit reading width", isOn: Binding(get: { app.preferences.compose.pageWidth > 0 },
+        set: { app.preferences.compose.pageWidth = $0 ? 760 : 0 }))
+      if app.preferences.compose.pageWidth > 0 {
+        Stepper(value: $app.preferences.compose.pageWidth, in: 320...1600, step: 40) {
+          Text("Maximum page width: \(app.preferences.compose.pageWidth, format: .number.precision(.fractionLength(0))) pt")
+        }
       }
       Text("Applies to native Markdown Compose. Text size also follows the app's zoom setting.")
         .font(.callout).foregroundStyle(.secondary)

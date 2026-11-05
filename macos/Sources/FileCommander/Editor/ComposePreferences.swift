@@ -11,7 +11,9 @@ struct ComposePreferences: Codable, Equatable {
   var lineSpacing = 3.0
   var paragraphSpacing = 6.0
   var indent = 24.0
-  var pageWidth = 760.0
+  /// Zero uses the available pane width. A positive value is an optional
+  /// user-selected reading measure in points, never terminal columns.
+  var pageWidth = 0.0
 
   init() {}
 
@@ -46,7 +48,7 @@ struct ComposePreferences: Codable, Equatable {
     value.lineSpacing = clamp(lineSpacing, 0...24, d.lineSpacing)
     value.paragraphSpacing = clamp(paragraphSpacing, 0...48, d.paragraphSpacing)
     value.indent = clamp(indent, 8...64, d.indent)
-    value.pageWidth = clamp(pageWidth, 320...1600, d.pageWidth)
+    value.pageWidth = pageWidth == 0 ? 0 : clamp(pageWidth, 320...1600, d.pageWidth)
     return value
   }
 

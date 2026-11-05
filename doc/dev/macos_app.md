@@ -219,11 +219,19 @@ The development mode `FC_NATIVE_RICH_COMPOSE=1` exposes **Settings â€º Editor â€
 Markdown Compose**. `ComposePreferences` stores body/code font families, body
 size, six heading scales, line and paragraph spacing, list/quote indentation,
 and page width under `compose` in `app_settings.json`. Missing fields retain
-defaults; numerical values are bounded, missing fonts fall back to system
-fonts, and code/table fonts must remain monospaced. Defaults are 16 pt body
+defaults; numerical values are bounded and missing fonts fall back to system
+fonts. Code and the current table source fallback use a monospace font;
+that does not impose a column count. Defaults are 16 pt body
 text, heading scales of 1.8/1.5/1.25/1.15/1.05/1, 3 pt additional line spacing,
-6 pt paragraph spacing, 24 pt indentation, and a 760 pt page measure. The
+6 pt paragraph spacing and 24 pt indentation. Compose uses the available pane
+width by default (`pageWidth: 0`). **Limit reading width** enables an optional
+maximum in points; existing explicitly saved positive limits are preserved. The
 app's zoom scales native Compose fonts and spacing as well.
+
+Terminal Markdown's fixed column measure does not govern native wrapping.
+Parsed table/code blocks currently retain exact editable source instead of
+terminal-padded or truncated cell replacements and character-sized code
+frames. Native measured table cells and code-frame ornaments remain unfinished.
 
 `ComposeTextLayout` measures indentation, block spacing, image attachments,
 and styled fonts together. Drawing, hit testing, selection and navigation use

@@ -25,7 +25,7 @@ final class ComposePresentation {
   private let typography: ComposeTypography
 
   init?(pane: WirePane, window: UInt64, cell: CGSize, body: NSFont, monospace: NSFont,
-        typography: ComposeTypography = .init(), pageWidth: CGFloat = 760, reuse: ComposePresentation? = nil,
+        typography: ComposeTypography = .init(), pageWidth: CGFloat = 0, reuse: ComposePresentation? = nil,
         caretStates: [UInt64: WireComposeCaret] = [:], images: [UInt64: ComposeImageState] = [:], viewport: WireComposeViewport? = nil,
         preedit: ComposeMarkedText? = nil, composition: ComposeComposition? = nil) {
     guard pane.hasCompose, pane.hasBuffer else { return nil }
@@ -38,7 +38,8 @@ final class ComposePresentation {
     let rect = pane.content
     let bounds = CGRect(x: CGFloat(rect.x) * cell.width, y: CGFloat(rect.y) * cell.height,
                         width: CGFloat(rect.w) * cell.width, height: CGFloat(rect.h) * cell.height)
-    let width = min(pageWidth, bounds.width - 32)
+    let available = bounds.width - 32
+    let width = pageWidth > 0 ? min(pageWidth, available) : available
     guard width > 0, let layout = ComposePaneLayout(pane: pane.compose, body: body as CTFont,
       monospace: monospace as CTFont, width: width, typography: typography, images: images, reuse: reuse?.layout, preedit: preedit, composition: composition) else { return nil }
     self.pane = pane
