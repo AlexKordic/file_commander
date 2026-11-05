@@ -1,4 +1,5 @@
 import AppKit
+import ImageIO
 import XCTest
 import FreshKit
 import SwiftProtobuf
@@ -15,12 +16,14 @@ private final class ScenePeer: @unchecked Sendable {
   private var received: [WireComposeInput] = []
   private var receivedKeys: [WireKey] = []
   private var receivedViewports: [WireComposeViewportRequest] = []
+  private var receivedAssets: [WireComposeAssetRequest] = []
   private var sequence: UInt64 = 0
   private var applied: UInt64 = 0
 
   var inputs: [WireComposeInput] { lock.lock(); defer { lock.unlock() }; return received }
   var keys: [WireKey] { lock.lock(); defer { lock.unlock() }; return receivedKeys }
   var viewports: [WireComposeViewportRequest] { lock.lock(); defer { lock.unlock() }; return receivedViewports }
+  var assets: [WireComposeAssetRequest] { lock.lock(); defer { lock.unlock() }; return receivedAssets }
   var lastApplied: UInt64 { lock.lock(); defer { lock.unlock() }; return applied }
 
   init(pane: WirePane) throws {
@@ -62,6 +65,8 @@ private final class ScenePeer: @unchecked Sendable {
           lock.lock(); receivedKeys.append(key); lock.unlock()
         } else if kind == SceneWire.Kind.composeViewport.rawValue, let request = try? WireComposeViewportRequest(serializedBytes: payload) {
           lock.lock(); receivedViewports.append(request); lock.unlock()
+        } else if kind == SceneWire.Kind.composeAsset.rawValue, let request = try? WireComposeAssetRequest(serializedBytes: payload) {
+          lock.lock(); receivedAssets.append(request); lock.unlock()
         }
       }
     }
@@ -118,6 +123,12 @@ private final class ScenePeer: @unchecked Sendable {
   }
 
   func show(_ pane: WirePane) { send(.frame, frame(pane: pane)) }
+
+  @discardableResult
+  func image(_ chunk: WireComposeAssetChunk) -> UInt64 {
+    var frame = frame(pane: nil); frame.composeAssets = [chunk]; send(.frame, frame)
+    return frame.seq
+  }
 
   func close() {
     lock.lock()
@@ -376,5 +387,63 @@ final class ComposeInputTests: XCTestCase {
     try await eventually { peer.inputs.count == 1 }
     XCTAssertEqual(peer.inputs[0].layoutID, updated.id)
     XCTAssertEqual(peer.inputs[0].scope.bufferRevision, 4)
+  }
+
+  @MainActor
+  func testReturningToTheEditorRevalidatesImagesWithoutBlankingTheNativePreview() async throws {
+    let source = "Before ![pic](x.png) after text.\n"
+    var scene = pane(source)
+    scene.compose.assetAuthority = 5; scene.compose.assetDocument = 7
+    scene.compose.images = [.with { $0.start = 7; $0.end = 20; $0.target = "x.png"; $0.alt = "Picture"; $0.rendered = true }]
+    let peer = try ScenePeer(pane: scene)
+    defer { peer.close() }
+    let editor = richEditor()
+    defer { editor.detachAll() }
+    editor.attach(socketPath: peer.path, app: nil)
+    try await eventually { peer.assets.contains { !$0.cancel } }
+    func png(_ width: Int) throws -> Data {
+      let context = try XCTUnwrap(CGContext(data: nil, width: width, height: 20, bitsPerComponent: 8,
+        bytesPerRow: width * 4, space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
+      let data = NSMutableData()
+      let destination = try XCTUnwrap(CGImageDestinationCreateWithData(data, "public.png" as CFString, 1, nil))
+      CGImageDestinationAddImage(destination, try XCTUnwrap(context.makeImage()), nil)
+      XCTAssertTrue(CGImageDestinationFinalize(destination))
+      return data as Data
+    }
+    func previewWidth() -> CGFloat? { editor.grid?.focusedCompose?.layout.text.attachments.first?.rect.width }
+    let initial = try png(40)
+    peer.image(.with { $0.id = peer.assets.last!.id; $0.data = initial; $0.total = UInt64(initial.count); $0.done = true
+      $0.version = Data(repeating: 1, count: 32); $0.digest = Data(repeating: 1, count: 32) })
+    try await eventually { previewWidth() == 40 }
+    editor.switchBack(); editor.show()
+    try await eventually { peer.assets.filter { !$0.cancel }.count == 2 }
+    let check = try XCTUnwrap(peer.assets.last)
+    XCTAssertEqual(check.knownVersion, Data(repeating: 1, count: 32))
+    XCTAssertEqual(check.knownDigest, Data(repeating: 1, count: 32))
+    XCTAssertEqual(previewWidth(), 40, "an in-flight revalidation retains the already drawn image")
+    let checked = peer.image(.with { $0.id = check.id; $0.done = true; $0.unchanged = true
+      $0.version = Data(repeating: 2, count: 32); $0.digest = check.knownDigest })
+    try await eventually { peer.lastApplied >= checked }
+    XCTAssertEqual(previewWidth(), 40)
+    editor.switchBack(); editor.show()
+    try await eventually { peer.assets.filter { !$0.cancel }.count == 3 }
+    let replacement = try png(80)
+    XCTAssertEqual(previewWidth(), 40)
+    peer.image(.with { $0.id = peer.assets.last!.id; $0.data = replacement; $0.total = UInt64(replacement.count); $0.done = true
+      $0.version = Data(repeating: 3, count: 32); $0.digest = Data(repeating: 3, count: 32) })
+    try await eventually { previewWidth() == 80 }
+    XCTAssertEqual(editor.grid?.focusedCompose?.scope.bufferRevision, 4)
+    XCTAssertEqual(editor.grid?.focusedCompose?.pane.compose.text, source)
+    editor.switchBack(); editor.show()
+    try await eventually { peer.assets.filter { !$0.cancel }.count == 4 }
+    let interrupted = peer.image(.with { $0.id = peer.assets.last!.id; $0.error = "Temporarily offline"; $0.retryable = true; $0.done = true })
+    try await eventually { peer.lastApplied >= interrupted }
+    XCTAssertEqual(previewWidth(), 80)
+    let current = try XCTUnwrap(editor.grid?.focusedCompose)
+    let rect = try XCTUnwrap(current.layout.text.attachments.first?.rect).offsetBy(dx: current.origin.x, dy: current.origin.y)
+    let description = editor.grid?.composeImageDescription(at: CGPoint(x: rect.midX, y: rect.midY))
+    XCTAssertTrue(description?.contains("Picture") == true)
+    XCTAssertTrue(description?.contains("last preview") == true)
+    XCTAssertTrue(description?.contains("Temporarily offline") == true)
   }
 }

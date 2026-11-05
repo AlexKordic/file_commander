@@ -57,16 +57,25 @@ public final class ComposeImageAsset: @unchecked Sendable {
 public enum ComposeImageState {
   case loading
   case ready(ComposeImageAsset)
+  /// A transient refresh failure retains the last valid preview and explains
+  /// that it is stale. A confirmed missing/invalid resource uses .failed.
+  case stale(ComposeImageAsset, String)
   case failed(String)
+
+  public var asset: ComposeImageAsset? {
+    switch self {
+    case .ready(let asset), .stale(let asset, _): return asset
+    default: return nil
+    }
+  }
 
   public func size(body: CGFloat, width: CGFloat, block: Bool) -> CGSize {
     let maxWidth = block ? width : min(width, body * 8)
     let maxHeight = block ? CGFloat(480) : body * 6
-    switch self {
-    case .ready(let asset):
+    if let asset {
       let scale = min(1, maxWidth / asset.originalSize.width, maxHeight / asset.originalSize.height)
       return CGSize(width: max(1, asset.originalSize.width * scale), height: max(1, asset.originalSize.height * scale))
-    default:
+    } else {
       return CGSize(width: min(maxWidth, block ? 360 : body * 4), height: min(maxHeight, block ? 150 : body * 2))
     }
   }

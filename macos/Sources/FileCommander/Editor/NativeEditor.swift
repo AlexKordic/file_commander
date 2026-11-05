@@ -166,7 +166,7 @@ final class NativeEditor: NSObject, CellGridDelegate {
     pendingShow = false
     grid?.showingEvent = NSApp.currentEvent.flatMap { $0.type == .keyDown ? $0.timestamp : nil }
     shown = true
-    updateImageDemands()
+    updateImageDemands(revalidate: true)
     scheduleViewportContinuation()
     onPresent?(true)
     updateMenus()
@@ -412,12 +412,12 @@ final class NativeEditor: NSObject, CellGridDelegate {
     updateImageDemands()
   }
 
-  private func updateImageDemands() {
+  private func updateImageDemands(revalidate: Bool = false) {
     let demands = shown && richCompose ? grid?.composeImageDemands() ?? [] : []
     composeImages.update(demands.filter { demand in
       store.panes.contains { pane in pane.leaf == demand.scope.leaf && pane.hasBuffer && pane.buffer == demand.scope.buffer
         && pane.hasCompose && pane.compose.formattingReady && pane.compose.bufferRevision == demand.scope.bufferRevision }
-    })
+    }, revalidate: revalidate)
   }
 
   private func reportFormattingFailures() {

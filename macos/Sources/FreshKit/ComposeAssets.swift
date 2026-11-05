@@ -9,8 +9,9 @@ public struct ComposeAssetReceiver {
   public static let maximumRequests = 4
 
   public enum Event {
-    case loaded(request: WireComposeAssetRequest, bytes: Data)
-    case failed(request: WireComposeAssetRequest, message: String)
+    case loaded(request: WireComposeAssetRequest, bytes: Data, version: Data, digest: Data)
+    case unchanged(request: WireComposeAssetRequest, version: Data, digest: Data)
+    case failed(request: WireComposeAssetRequest, message: String, retryable: Bool)
   }
 
   private struct Pending {
@@ -30,6 +31,7 @@ public struct ComposeAssetReceiver {
   @discardableResult
   public mutating func register(_ request: WireComposeAssetRequest) -> Bool {
     guard request.id > lastID, request.hasScope, request.end > request.start, !request.cancel,
+          [0, 32].contains(request.knownVersion.count), [0, 32].contains(request.knownDigest.count),
           pending[request.id] == nil, pending.count < Self.maximumRequests else { return false }
     lastID = request.id
     pending[request.id] = Pending(request: request)
@@ -51,10 +53,23 @@ public struct ComposeAssetReceiver {
 
   public mutating func receive(_ chunk: WireComposeAssetChunk) -> Event? {
     guard var state = pending.removeValue(forKey: chunk.id) else { return nil }
-    func failed(_ message: String) -> Event { .failed(request: state.request, message: message) }
+    func failed(_ message: String, retryable: Bool = false) -> Event {
+      .failed(request: state.request, message: String(message.prefix(512)), retryable: retryable)
+    }
     // A source/authority cancellation can arrive after earlier data chunks.
     // Its error terminates the request regardless of the old stream offset.
-    if !chunk.error.isEmpty { return failed(chunk.error) }
+    if !chunk.error.isEmpty { return failed(chunk.error, retryable: chunk.retryable) }
+    guard !chunk.retryable, [0, 32].contains(chunk.version.count) else { return failed("Invalid image validator") }
+    if chunk.unchanged {
+      guard state.bytes.isEmpty, state.total == nil, chunk.done, chunk.total == 0, chunk.offset == 0, chunk.data.isEmpty,
+            state.request.knownDigest.count == 32, chunk.digest == state.request.knownDigest else {
+        return failed("Invalid unchanged image response")
+      }
+      return .unchanged(request: state.request, version: chunk.version, digest: chunk.digest)
+    }
+    guard chunk.done ? chunk.digest.count == 32 : chunk.version.isEmpty && chunk.digest.isEmpty else {
+      return failed("Invalid image validator")
+    }
     guard let total = Int(exactly: chunk.total), total <= Self.maximumBytes,
           chunk.data.count <= Self.maximumChunkBytes,
           chunk.offset == UInt64(state.bytes.count), total >= state.bytes.count,
@@ -69,7 +84,7 @@ public struct ComposeAssetReceiver {
     state.bytes.append(chunk.data)
     if chunk.done {
       guard state.bytes.count == total else { return failed("Incomplete image response") }
-      return .loaded(request: state.request, bytes: state.bytes)
+      return .loaded(request: state.request, bytes: state.bytes, version: chunk.version, digest: chunk.digest)
     }
     guard state.bytes.count < total else { return failed("Image response lacks its final marker") }
     pending[chunk.id] = state

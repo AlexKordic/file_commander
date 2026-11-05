@@ -233,6 +233,23 @@ flags. The same rendering path produces the checked bitmap previews. These
 controls remain gated with rich Compose until interactive and release
 qualification is complete.
 
+`ComposeImageController` revalidates visible images in the background and checks
+them when the editor is shown again. It retains the decoded image until a
+replacement is ready. Unchanged binary replies update freshness without
+decoding or reflow. A transient failure shows the last preview with a warning;
+small inline images use a badge rather than a footer that would cover them.
+Hovering an image shows its alt text/title and any loading or failure details.
+Tooltip rectangles share the attachment geometry and are replaced only when
+their positions or descriptions change.
+
+FreshKit tests cover the refresh timer, conditional replies, source-edit
+throttling, duplicate references across splits, bounded caches/decodes,
+temporary failure recovery, missing images, and negative caching of invalid
+content. The production-native socket tests additionally verify revalidation
+after switching back from the panels, keeping the previous image until decode
+finishes, and the tooltip for a stale preview. The test peer does not establish
+live SSH or interactive GUI qualification.
+
 `Tests/FreshKitTests/Fixtures/scene.tlv` comes from
 `macos/tools/record_scene.py`, which starts a throwaway Fresh session, connects
 to its scene socket as the app does, types a few keys, opens the palette and

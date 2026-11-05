@@ -183,6 +183,14 @@ public nonisolated struct WireComposeAssetChunk: Sendable {
 
   public var done: Bool = false
 
+  public var version: Data = Data()
+
+  public var digest: Data = Data()
+
+  public var unchanged: Bool = false
+
+  public var retryable: Bool = false
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
@@ -3227,6 +3235,10 @@ public nonisolated struct WireComposeAssetRequest: Sendable {
 
   public var document: UInt64 = 0
 
+  public var knownVersion: Data = Data()
+
+  public var knownDigest: Data = Data()
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
@@ -3646,7 +3658,7 @@ nonisolated extension WireComposeViewportReply: SwiftProtobuf.Message, SwiftProt
 
 nonisolated extension WireComposeAssetChunk: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".ComposeAssetChunk"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}id\0\u{1}offset\0\u{1}total\0\u{1}data\0\u{1}error\0\u{1}done\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}id\0\u{1}offset\0\u{1}total\0\u{1}data\0\u{1}error\0\u{1}done\0\u{1}version\0\u{1}digest\0\u{1}unchanged\0\u{1}retryable\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -3660,6 +3672,10 @@ nonisolated extension WireComposeAssetChunk: SwiftProtobuf.Message, SwiftProtobu
       case 4: try { try decoder.decodeSingularBytesField(value: &self.data) }()
       case 5: try { try decoder.decodeSingularStringField(value: &self.error) }()
       case 6: try { try decoder.decodeSingularBoolField(value: &self.done) }()
+      case 7: try { try decoder.decodeSingularBytesField(value: &self.version) }()
+      case 8: try { try decoder.decodeSingularBytesField(value: &self.digest) }()
+      case 9: try { try decoder.decodeSingularBoolField(value: &self.unchanged) }()
+      case 10: try { try decoder.decodeSingularBoolField(value: &self.retryable) }()
       default: break
       }
     }
@@ -3684,6 +3700,18 @@ nonisolated extension WireComposeAssetChunk: SwiftProtobuf.Message, SwiftProtobu
     if self.done != false {
       try visitor.visitSingularBoolField(value: self.done, fieldNumber: 6)
     }
+    if !self.version.isEmpty {
+      try visitor.visitSingularBytesField(value: self.version, fieldNumber: 7)
+    }
+    if !self.digest.isEmpty {
+      try visitor.visitSingularBytesField(value: self.digest, fieldNumber: 8)
+    }
+    if self.unchanged != false {
+      try visitor.visitSingularBoolField(value: self.unchanged, fieldNumber: 9)
+    }
+    if self.retryable != false {
+      try visitor.visitSingularBoolField(value: self.retryable, fieldNumber: 10)
+    }
     try unknownFields.traverse(visitor: &visitor)
   }
 
@@ -3694,6 +3722,10 @@ nonisolated extension WireComposeAssetChunk: SwiftProtobuf.Message, SwiftProtobu
     if lhs.data != rhs.data {return false}
     if lhs.error != rhs.error {return false}
     if lhs.done != rhs.done {return false}
+    if lhs.version != rhs.version {return false}
+    if lhs.digest != rhs.digest {return false}
+    if lhs.unchanged != rhs.unchanged {return false}
+    if lhs.retryable != rhs.retryable {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
@@ -8809,7 +8841,7 @@ nonisolated extension WireComposeInput: SwiftProtobuf.Message, SwiftProtobuf._Me
 
 nonisolated extension WireComposeAssetRequest: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".ComposeAssetRequest"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}id\0\u{1}scope\0\u{1}start\0\u{1}end\0\u{1}cancel\0\u{1}authority\0\u{1}document\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}id\0\u{1}scope\0\u{1}start\0\u{1}end\0\u{1}cancel\0\u{1}authority\0\u{1}document\0\u{3}known_version\0\u{3}known_digest\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -8824,6 +8856,8 @@ nonisolated extension WireComposeAssetRequest: SwiftProtobuf.Message, SwiftProto
       case 5: try { try decoder.decodeSingularBoolField(value: &self.cancel) }()
       case 6: try { try decoder.decodeSingularUInt64Field(value: &self.authority) }()
       case 7: try { try decoder.decodeSingularUInt64Field(value: &self.document) }()
+      case 8: try { try decoder.decodeSingularBytesField(value: &self.knownVersion) }()
+      case 9: try { try decoder.decodeSingularBytesField(value: &self.knownDigest) }()
       default: break
       }
     }
@@ -8855,6 +8889,12 @@ nonisolated extension WireComposeAssetRequest: SwiftProtobuf.Message, SwiftProto
     if self.document != 0 {
       try visitor.visitSingularUInt64Field(value: self.document, fieldNumber: 7)
     }
+    if !self.knownVersion.isEmpty {
+      try visitor.visitSingularBytesField(value: self.knownVersion, fieldNumber: 8)
+    }
+    if !self.knownDigest.isEmpty {
+      try visitor.visitSingularBytesField(value: self.knownDigest, fieldNumber: 9)
+    }
     try unknownFields.traverse(visitor: &visitor)
   }
 
@@ -8866,6 +8906,8 @@ nonisolated extension WireComposeAssetRequest: SwiftProtobuf.Message, SwiftProto
     if lhs.cancel != rhs.cancel {return false}
     if lhs.authority != rhs.authority {return false}
     if lhs.document != rhs.document {return false}
+    if lhs.knownVersion != rhs.knownVersion {return false}
+    if lhs.knownDigest != rhs.knownDigest {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }

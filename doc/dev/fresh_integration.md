@@ -412,8 +412,28 @@ bounds still need validation against representative documents before release.
 - Type 28, `ComposeAssetRequest`, identifies a parsed image annotation rather
   than accepting a client-supplied path. Fresh reads it through the document's
   local or SSH filesystem and sends bounded binary chunks. The native consumer
-  bounds assembly, decoding and cache use. Resource refresh and complete
-  interactive/SSH qualification remain development work.
+  bounds assembly, decoding and cache use. `known_version` and `known_digest`
+  carry binary validators. The final successful chunk supplies its version and SHA-256
+  digest; an `unchanged` reply contains no image payload. Partial chunks cannot
+  carry those final validators. An unchanged reply must name the requested
+  digest and cannot follow partial data.
+
+Visible images are checked on a five-second prototype interval and when the
+editor is shown again. POSIX local/SSH stats include file identity plus
+nanosecond modification/change times. Metadata shortcuts are supplemented by
+content verification on a sixty-second prototype threshold; filesystems without a useful
+stamp use content verification directly. Hashing is bounded and runs through
+the authority's filesystem; the SSH helper computes the hash on the host, so
+verification does not download unchanged image bytes. The native client skips
+decoding unchanged responses and retains previews while refresh is in flight.
+
+Transient errors carry `retryable` and retain the last valid preview with an
+explanation. Missing, denied or invalid resources use an editable fallback.
+Retry scheduling survives source-edit cancellation and temporary formatting
+frames, preventing a new image read for every character typed. Duplicate
+visible references share work even if their order changes between splits.
+These intervals and resource budgets still need interactive/performance
+qualification; full GUI/SSH qualification remains open.
 
 These additive prototype messages retain the current scene version during
 development. Audit the final protocol version and update the dependency pin,

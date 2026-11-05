@@ -94,6 +94,19 @@ public final class ComposePaneLayout {
     }
   }
 
+  public func imageDescription(_ image: WireComposeImage) -> String {
+    let label = image.alt.isEmpty ? "Image" : image.alt
+    let state = images[image.start] ?? .loading
+    let message: String
+    switch state {
+    case .loading: message = "\(label): loading"
+    case .failed(let error): message = "\(label): \(error)"
+    case .stale(_, let error): message = "\(label): showing the last preview; \(error)"
+    case .ready: message = image.title.isEmpty ? label : "\(label): \(image.title)"
+    }
+    return String(message.prefix(512))
+  }
+
   /// Draw in a context whose y axis points down, using the same line objects
   /// as hit testing and navigation. The native view and rendering tests share
   /// this path; no cell approximation or second text layout is involved.
@@ -170,7 +183,7 @@ public final class ComposePaneLayout {
             let image = pane.images.first(where: { $0.start == UInt64(placed.attachment.source.lowerBound) }) else { continue }
       let state = images[image.start] ?? .loading
       context.saveGState()
-      if case .ready(let asset) = state {
+      if let asset = state.asset {
         context.translateBy(x: rect.minX, y: rect.maxY)
         context.scaleBy(x: 1, y: -1)
         context.draw(asset.image, in: CGRect(origin: .zero, size: rect.size))
@@ -190,6 +203,34 @@ public final class ComposePaneLayout {
         CTLineDraw(line, context)
       }
       context.restoreGState()
+      if case .stale(_, let warning) = state {
+        context.saveGState()
+        if rect.width < 140 || rect.height < 48 {
+          // A footer would obscure a small inline image. Keep its pixels and
+          // show a compact warning; the tooltip carries the explanation.
+          let badge = CGRect(x: rect.maxX - min(10, rect.width), y: rect.maxY - min(10, rect.height),
+            width: min(10, rect.width), height: min(10, rect.height))
+          context.setFillColor(background.copy(alpha: 0.95) ?? background); context.fillEllipse(in: badge)
+          context.setStrokeColor(foreground); context.setLineWidth(1); context.strokeEllipse(in: badge.insetBy(dx: 0.5, dy: 0.5))
+          context.setFillColor(foreground)
+          context.fill(CGRect(x: badge.midX - 0.5, y: badge.minY + 2, width: 1, height: max(1, badge.height - 5)))
+          context.fill(CGRect(x: badge.midX - 0.5, y: badge.maxY - 2, width: 1, height: 1))
+        } else {
+          let strip = CGRect(x: rect.minX, y: rect.maxY - 24, width: rect.width, height: 24)
+          context.clip(to: strip)
+          context.setFillColor(background.copy(alpha: 0.92) ?? background); context.fill(strip)
+          context.setFillColor(foreground)
+          let font = CTFontCreateCopyWithAttributes(body, min(12, CTFontGetSize(body)), nil, nil)
+          let label = "Last preview: \(String(warning.prefix(160)))"
+          let line = CTLineCreateWithAttributedString(NSAttributedString(string: label, attributes: [
+            NSAttributedString.Key(kCTFontAttributeName as String): font,
+            NSAttributedString.Key(kCTForegroundColorFromContextAttributeName as String): true,
+          ]))
+          context.textPosition = CGPoint(x: strip.minX + 4, y: strip.minY + CTFontGetAscent(font) + 2)
+          CTLineDraw(line, context)
+        }
+        context.restoreGState()
+      }
       if pane.cursors.contains(where: { cursor in
         cursor.hasAnchor && min(cursor.position, cursor.anchor) < image.end && max(cursor.position, cursor.anchor) > image.start
       }) {

@@ -62,6 +62,8 @@ final class CellGridView: NSView, @preconcurrency NSTextInputClient {
   private var composePreferences = ComposePreferences()
   private var composeZoom = 1.0
   var composePalette: ComposePaneLayout.Palette?
+  private struct ImageTip: Equatable { var rect: CGRect; var text: String }
+  private var imageTips: [ImageTip] = []
 
   init(store: SceneStore) {
     self.store = store
@@ -166,6 +168,32 @@ final class CellGridView: NSView, @preconcurrency NSTextInputClient {
     composePanes = Dictionary(uniqueKeysWithValues: store.panes.compactMap { pane in
       presentation(pane, reuse: previous[pane.leaf]).map { (pane.leaf, $0) }
     })
+    updateImageTooltips()
+  }
+
+  private func updateImageTooltips() {
+    var tips: [ImageTip] = []
+    for pane in composePanes.values {
+      for placed in pane.layout.text.attachments {
+        let rect = placed.rect.offsetBy(dx: pane.origin.x, dy: pane.origin.y).intersection(pane.bounds)
+        guard !rect.isEmpty, !rect.isNull,
+              let image = pane.pane.compose.images.first(where: { $0.start == UInt64(placed.attachment.source.lowerBound) }) else { continue }
+        tips.append(ImageTip(rect: rect, text: pane.layout.imageDescription(image)))
+      }
+    }
+    tips.sort { a, b in a.rect.minY == b.rect.minY ? a.rect.minX < b.rect.minX : a.rect.minY < b.rect.minY }
+    guard tips != imageTips else { return }
+    removeAllToolTips(); imageTips = tips
+    for tip in tips { _ = addToolTip(tip.rect, owner: self, userData: nil) }
+  }
+
+  func composeImageDescription(at point: NSPoint) -> String? {
+    imageTips.first { $0.rect.contains(point) }?.text
+  }
+
+  @objc func view(_ view: NSView, stringForToolTip tag: NSView.ToolTipTag, point: NSPoint,
+                  userData: UnsafeMutableRawPointer?) -> String {
+    composeImageDescription(at: point) ?? ""
   }
 
   private func presentation(_ input: WirePane, reuse: ComposePresentation? = nil) -> ComposePresentation? {
