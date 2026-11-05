@@ -101,7 +101,7 @@ public enum SceneWire {
 
 /// A message the app sends.
 public enum SceneInput: Sendable {
-  case hello(telemetry: Bool, richCompose: Bool = false)
+  case hello(telemetry: Bool, richCompose: Bool = false, measuredTables: Bool = false)
   case key(WireKey)
   case mouse(WireMouse)
   case resize(cols: Int, rows: Int)
@@ -144,11 +144,12 @@ public enum SceneInput: Sendable {
   public func payload() -> [UInt8] {
     let message: any SwiftProtobuf.Message
     switch self {
-    case .hello(let telemetry, let richCompose):
+    case .hello(let telemetry, let richCompose, let measuredTables):
       message = WireClientHello.with {
         $0.version = SceneWire.version
         $0.telemetry = telemetry
         $0.richCompose = richCompose
+        $0.measuredTables = measuredTables
       }
     case .key(let key): message = key
     case .mouse(let mouse): message = mouse

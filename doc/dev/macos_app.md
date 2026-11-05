@@ -272,6 +272,14 @@ wrap to the pixel measure, and their insets govern caret, selection, navigation
 and marked-text layout. List markers stay outside the code frame. Partial
 content windows draw open frame edges. Code uses the configured monospace font
 without a fixed column count; its background and border follow the theme.
+
+FreshKit also decodes and validates the experimental parser-owned table model
+in `compose-tables.pb`: alignments, Unicode, images, real empty cells, missing
+cells, bounded rows and source reveal. The native editor still requests table
+source while measured cells and two-dimensional caret navigation are connected.
+`SceneSocket.open(measuredTables:)` defaults to false; enabling it requires a
+consumer that implements the new cell geometry. These data-model tests are
+foundations for that renderer, not interactive table qualification.
 Native clipboard access is injectable; scene/input tests use memory storage
 instead of reading or overwriting the user's system pasteboard.
 

@@ -1533,11 +1533,77 @@ public nonisolated struct WireComposePane: @unchecked Sendable {
     set {_uniqueStorage()._textChunks = newValue}
   }
 
+  public var tables: [WireComposeTable] {
+    get {_storage._tables}
+    set {_uniqueStorage()._tables = newValue}
+  }
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
 
   fileprivate var _storage = _StorageClass.defaultInstance
+}
+
+/// Parser-owned table ranges. Alignment: 0 default, 1 left, 2 center, 3 right.
+public nonisolated struct WireComposeTable: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var start: UInt64 = 0
+
+  public var end: UInt64 = 0
+
+  public var alignments: [UInt32] = []
+
+  public var rows: [WireComposeTableRow] = []
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
+/// source selects exact structural Markdown; rows may be a bounded subset.
+public nonisolated struct WireComposeTableRow: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var start: UInt64 = 0
+
+  public var end: UInt64 = 0
+
+  public var contentEnd: UInt64 = 0
+
+  public var header: Bool = false
+
+  public var source: Bool = false
+
+  public var cells: [WireComposeTableCell] = []
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
+/// Missing cells have no editable source; real empty cells retain their anchor.
+public nonisolated struct WireComposeTableCell: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var start: UInt64 = 0
+
+  public var end: UInt64 = 0
+
+  public var revealed: Bool = false
+
+  public var missing: Bool = false
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
 }
 
 /// Raw source near the primary caret, independent of display conceals and
@@ -3148,6 +3214,9 @@ public nonisolated struct WireClientHello: Sendable {
 
   /// Opt in to source-mapped Compose panes. Grid cells remain available.
   public var richCompose: Bool = false
+
+  /// Opt in to measured table cells; requires rich_compose.
+  public var measuredTables: Bool = false
 
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
@@ -6015,7 +6084,7 @@ nonisolated extension WirePane: SwiftProtobuf.Message, SwiftProtobuf._MessageImp
 
 nonisolated extension WireComposePane: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".ComposePane"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}buffer_revision\0\u{3}projection_revision\0\u{3}source_start\0\u{3}source_end\0\u{1}text\0\u{1}segments\0\u{1}spans\0\u{1}images\0\u{1}cursors\0\u{1}focused\0\u{3}top_byte\0\u{3}document_len\0\u{3}selection_revision\0\u{1}keyboard\0\u{3}asset_authority\0\u{3}asset_document\0\u{1}viewport\0\u{1}ready\0\u{1}error\0\u{3}text_context\0\u{3}text_chunks\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}buffer_revision\0\u{3}projection_revision\0\u{3}source_start\0\u{3}source_end\0\u{1}text\0\u{1}segments\0\u{1}spans\0\u{1}images\0\u{1}cursors\0\u{1}focused\0\u{3}top_byte\0\u{3}document_len\0\u{3}selection_revision\0\u{1}keyboard\0\u{3}asset_authority\0\u{3}asset_document\0\u{1}viewport\0\u{1}ready\0\u{1}error\0\u{3}text_context\0\u{3}text_chunks\0\u{1}tables\0")
 
   fileprivate class _StorageClass {
     var _bufferRevision: UInt64 = 0
@@ -6039,6 +6108,7 @@ nonisolated extension WireComposePane: SwiftProtobuf.Message, SwiftProtobuf._Mes
     var _error: String = String()
     var _textContext: WireComposeTextContext? = nil
     var _textChunks: [WireComposeTextChunk] = []
+    var _tables: [WireComposeTable] = []
 
       // This property is used as the initial default value for new instances of the type.
       // The type itself is protecting the reference to its storage via CoW semantics.
@@ -6070,6 +6140,7 @@ nonisolated extension WireComposePane: SwiftProtobuf.Message, SwiftProtobuf._Mes
       _error = source._error
       _textContext = source._textContext
       _textChunks = source._textChunks
+      _tables = source._tables
     }
   }
 
@@ -6109,6 +6180,7 @@ nonisolated extension WireComposePane: SwiftProtobuf.Message, SwiftProtobuf._Mes
         case 19: try { try decoder.decodeSingularStringField(value: &_storage._error) }()
         case 20: try { try decoder.decodeSingularMessageField(value: &_storage._textContext) }()
         case 21: try { try decoder.decodeRepeatedMessageField(value: &_storage._textChunks) }()
+        case 22: try { try decoder.decodeRepeatedMessageField(value: &_storage._tables) }()
         default: break
         }
       }
@@ -6184,6 +6256,9 @@ nonisolated extension WireComposePane: SwiftProtobuf.Message, SwiftProtobuf._Mes
       if !_storage._textChunks.isEmpty {
         try visitor.visitRepeatedMessageField(value: _storage._textChunks, fieldNumber: 21)
       }
+      if !_storage._tables.isEmpty {
+        try visitor.visitRepeatedMessageField(value: _storage._tables, fieldNumber: 22)
+      }
     }
     try unknownFields.traverse(visitor: &visitor)
   }
@@ -6214,10 +6289,156 @@ nonisolated extension WireComposePane: SwiftProtobuf.Message, SwiftProtobuf._Mes
         if _storage._error != rhs_storage._error {return false}
         if _storage._textContext != rhs_storage._textContext {return false}
         if _storage._textChunks != rhs_storage._textChunks {return false}
+        if _storage._tables != rhs_storage._tables {return false}
         return true
       }
       if !storagesAreEqual {return false}
     }
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension WireComposeTable: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".ComposeTable"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}start\0\u{1}end\0\u{1}alignments\0\u{1}rows\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularUInt64Field(value: &self.start) }()
+      case 2: try { try decoder.decodeSingularUInt64Field(value: &self.end) }()
+      case 3: try { try decoder.decodeRepeatedUInt32Field(value: &self.alignments) }()
+      case 4: try { try decoder.decodeRepeatedMessageField(value: &self.rows) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if self.start != 0 {
+      try visitor.visitSingularUInt64Field(value: self.start, fieldNumber: 1)
+    }
+    if self.end != 0 {
+      try visitor.visitSingularUInt64Field(value: self.end, fieldNumber: 2)
+    }
+    if !self.alignments.isEmpty {
+      try visitor.visitPackedUInt32Field(value: self.alignments, fieldNumber: 3)
+    }
+    if !self.rows.isEmpty {
+      try visitor.visitRepeatedMessageField(value: self.rows, fieldNumber: 4)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: WireComposeTable, rhs: WireComposeTable) -> Bool {
+    if lhs.start != rhs.start {return false}
+    if lhs.end != rhs.end {return false}
+    if lhs.alignments != rhs.alignments {return false}
+    if lhs.rows != rhs.rows {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension WireComposeTableRow: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".ComposeTableRow"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}start\0\u{1}end\0\u{3}content_end\0\u{1}header\0\u{1}source\0\u{1}cells\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularUInt64Field(value: &self.start) }()
+      case 2: try { try decoder.decodeSingularUInt64Field(value: &self.end) }()
+      case 3: try { try decoder.decodeSingularUInt64Field(value: &self.contentEnd) }()
+      case 4: try { try decoder.decodeSingularBoolField(value: &self.header) }()
+      case 5: try { try decoder.decodeSingularBoolField(value: &self.source) }()
+      case 6: try { try decoder.decodeRepeatedMessageField(value: &self.cells) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if self.start != 0 {
+      try visitor.visitSingularUInt64Field(value: self.start, fieldNumber: 1)
+    }
+    if self.end != 0 {
+      try visitor.visitSingularUInt64Field(value: self.end, fieldNumber: 2)
+    }
+    if self.contentEnd != 0 {
+      try visitor.visitSingularUInt64Field(value: self.contentEnd, fieldNumber: 3)
+    }
+    if self.header != false {
+      try visitor.visitSingularBoolField(value: self.header, fieldNumber: 4)
+    }
+    if self.source != false {
+      try visitor.visitSingularBoolField(value: self.source, fieldNumber: 5)
+    }
+    if !self.cells.isEmpty {
+      try visitor.visitRepeatedMessageField(value: self.cells, fieldNumber: 6)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: WireComposeTableRow, rhs: WireComposeTableRow) -> Bool {
+    if lhs.start != rhs.start {return false}
+    if lhs.end != rhs.end {return false}
+    if lhs.contentEnd != rhs.contentEnd {return false}
+    if lhs.header != rhs.header {return false}
+    if lhs.source != rhs.source {return false}
+    if lhs.cells != rhs.cells {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension WireComposeTableCell: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".ComposeTableCell"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}start\0\u{1}end\0\u{1}revealed\0\u{1}missing\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularUInt64Field(value: &self.start) }()
+      case 2: try { try decoder.decodeSingularUInt64Field(value: &self.end) }()
+      case 3: try { try decoder.decodeSingularBoolField(value: &self.revealed) }()
+      case 4: try { try decoder.decodeSingularBoolField(value: &self.missing) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if self.start != 0 {
+      try visitor.visitSingularUInt64Field(value: self.start, fieldNumber: 1)
+    }
+    if self.end != 0 {
+      try visitor.visitSingularUInt64Field(value: self.end, fieldNumber: 2)
+    }
+    if self.revealed != false {
+      try visitor.visitSingularBoolField(value: self.revealed, fieldNumber: 3)
+    }
+    if self.missing != false {
+      try visitor.visitSingularBoolField(value: self.missing, fieldNumber: 4)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: WireComposeTableCell, rhs: WireComposeTableCell) -> Bool {
+    if lhs.start != rhs.start {return false}
+    if lhs.end != rhs.end {return false}
+    if lhs.revealed != rhs.revealed {return false}
+    if lhs.missing != rhs.missing {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
@@ -8883,7 +9104,7 @@ nonisolated extension WireError: SwiftProtobuf.Message, SwiftProtobuf._MessageIm
 
 nonisolated extension WireClientHello: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".ClientHello"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}version\0\u{1}telemetry\0\u{3}rich_compose\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}version\0\u{1}telemetry\0\u{3}rich_compose\0\u{3}measured_tables\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -8894,6 +9115,7 @@ nonisolated extension WireClientHello: SwiftProtobuf.Message, SwiftProtobuf._Mes
       case 1: try { try decoder.decodeSingularUInt32Field(value: &self.version) }()
       case 2: try { try decoder.decodeSingularBoolField(value: &self.telemetry) }()
       case 3: try { try decoder.decodeSingularBoolField(value: &self.richCompose) }()
+      case 4: try { try decoder.decodeSingularBoolField(value: &self.measuredTables) }()
       default: break
       }
     }
@@ -8909,6 +9131,9 @@ nonisolated extension WireClientHello: SwiftProtobuf.Message, SwiftProtobuf._Mes
     if self.richCompose != false {
       try visitor.visitSingularBoolField(value: self.richCompose, fieldNumber: 3)
     }
+    if self.measuredTables != false {
+      try visitor.visitSingularBoolField(value: self.measuredTables, fieldNumber: 4)
+    }
     try unknownFields.traverse(visitor: &visitor)
   }
 
@@ -8916,6 +9141,7 @@ nonisolated extension WireClientHello: SwiftProtobuf.Message, SwiftProtobuf._Mes
     if lhs.version != rhs.version {return false}
     if lhs.telemetry != rhs.telemetry {return false}
     if lhs.richCompose != rhs.richCompose {return false}
+    if lhs.measuredTables != rhs.measuredTables {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }

@@ -534,6 +534,27 @@ outside the frame, and clipped blocks retain open boundary edges. Selection,
 navigation and provisional text share the inset font geometry. The real-plugin
 `compose-code.pb` fixture covers nested quotes/lists, empty and unclosed fences.
 
+The table transport is a separate, experimental capability:
+`ClientHello.measured_tables` requires `rich_compose` and defaults to false.
+Opted-in clients receive `ComposePane.tables` with parser-owned table/row/cell
+source ranges, column alignments and cell/structural-source reveal state.
+Rows can be a bounded subset of a table. Real empty cells retain their source
+anchor; missing cells from a short row are explicitly marked and cannot be
+treated as editable source. Cell text uses the parser's text/code events,
+preserving escaped pipes, entities and opaque image ranges. Tabs separate
+present cells in the projected text; no column padding or forced wrapping is
+serialized. Image objects and exact image-source previews remain disjoint.
+Edits and undo still use Fresh's original Markdown source coordinates.
+
+The native editor has not opted into table cells yet. `ComposeTableModel`
+validates the new data and resolves its source/display ranges, including
+Unicode and malformed-input checks. Pixel cell layout, table-aware input
+geometry and two-dimensional navigation remain to be connected and qualified
+before enabling the capability. Legacy rich clients keep table source and
+can share the same backend with a table-capable client without exchanging
+their per-client projections. `compose-tables.pb` records that real-plugin
+source contract; its model checks do not prove complete table ergonomics.
+
 Visible images are checked on a five-second prototype interval and when the
 editor is shown again. POSIX local/SSH stats include file identity plus
 nanosecond modification/change times. Metadata shortcuts are supplemented by
