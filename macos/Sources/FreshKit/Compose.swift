@@ -236,10 +236,13 @@ public final class ComposeTextLayout {
   /// their innermost paragraph geometry; spacing belongs to the block edges.
   public struct ParagraphRun {
     public var display: Range<Int>
-    public var indent, before, after: CGFloat
+    public var indent, trailing, before, after: CGFloat
+    public var verbatim: Bool
 
-    public init(display: Range<Int>, indent: CGFloat = 0, before: CGFloat = 0, after: CGFloat = 0) {
-      self.display = display; self.indent = indent; self.before = before; self.after = after
+    public init(display: Range<Int>, indent: CGFloat = 0, trailing: CGFloat = 0,
+                before: CGFloat = 0, after: CGFloat = 0, verbatim: Bool = false) {
+      self.display = display; self.indent = indent; self.trailing = trailing
+      self.before = before; self.after = after; self.verbatim = verbatim
     }
   }
 
@@ -302,7 +305,7 @@ public final class ComposeTextLayout {
     var blocks: [(range: NSRange, style: ParagraphRun)] = []
     for paragraph in paragraphs {
       guard let start = byteToUTF16[paragraph.display.lowerBound], let end = byteToUTF16[paragraph.display.upperBound],
-            start < end, [paragraph.indent, paragraph.before, paragraph.after].allSatisfy({ $0.isFinite && $0 >= 0 }) else { return nil }
+            start < end, [paragraph.indent, paragraph.trailing, paragraph.before, paragraph.after].allSatisfy({ $0.isFinite && $0 >= 0 }) else { return nil }
       blocks.append((NSRange(location: start, length: end - start), paragraph))
     }
     var hangs: [(range: NSRange, content: Int, prefix: CGFloat, indent: CGFloat)] = []
@@ -392,7 +395,7 @@ public final class ComposeTextLayout {
         contentEnd -= 1
       }
       lines.append(Fragment(line: line, range: range,
-        rect: CGRect(x: indent, y: top, width: width - indent, height: height),
+        rect: CGRect(x: indent, y: top, width: max(1, width - indent - (block?.style.trailing ?? 0)), height: height),
         baseline: top + ascent, contentEnd: contentEnd))
       for run in CTLineGetGlyphRuns(line) as! [CTRun] {
         let attributes = CTRunGetAttributes(run) as NSDictionary
@@ -419,7 +422,7 @@ public final class ComposeTextLayout {
     while from < string.length {
       let paragraph = block(at: from)
       var desired = paragraph?.style.indent ?? 0
-      if let item = hangingItem(at: from) {
+      if paragraph?.style.verbatim != true, let item = hangingItem(at: from) {
         desired = item.indent
         if from >= item.content {
           // Source indentation on a physical continuation line is already
@@ -437,7 +440,7 @@ public final class ComposeTextLayout {
         }
       }
       let indent = min(desired, width * 0.6)
-      let suggested = CTTypesetterSuggestLineBreak(typesetter, from, Double(width - indent))
+      let suggested = CTTypesetterSuggestLineBreak(typesetter, from, Double(max(1, width - indent - (paragraph?.style.trailing ?? 0))))
       var count = suggested > 0 ? suggested : string.rangeOfComposedCharacterSequence(at: from).length
       guard count > 0, count <= string.length - from else { return nil }
       // A viewport narrower than a single composed character must overflow

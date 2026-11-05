@@ -12,6 +12,9 @@ public final class ComposePaneLayout {
   private let typography: ComposeTypography
   private let images: [UInt64: ComposeImageState]
   private let imageSizes: [Int: CGSize]
+  private struct CodeBlock { var source, display: Range<Int>; var indent: CGFloat }
+  private var codeBlocks: [CodeBlock] = []
+  private static let codePadding: CGFloat = 8
   public let preedit: ComposeMarkedText?
   public let draftDisplayRange: NSRange?
   public let composition: ComposeComposition?
@@ -91,6 +94,8 @@ public final class ComposePaneLayout {
       text = reuse.text
       quoteRails = reuse.quoteRails
       thematicRules = reuse.thematicRules
+      codeBlocks = reuse.codeBlocks
+      codeFrames = reuse.codeFrames
       return
     }
     struct Span { var source, range: Range<Int>; var role, flags: UInt32 }
@@ -119,7 +124,7 @@ public final class ComposePaneLayout {
       if heading != nil || flags & 1 != 0 { traits.insert(.traitBold) }
       if flags & 2 != 0 { traits.insert(.traitItalic) }
       let font = CTFontCreateCopyWithSymbolicTraits(base, pointSize, nil, traits, [.traitBold, .traitItalic]) ?? base
-      let role: UInt32 = heading ?? (mono ? 7 : active.contains { $0.role == 9 } ? 9 : 0)
+      let role: UInt32 = heading ?? (active.contains { $0.role == 12 } ? 12 : mono ? 7 : active.contains { $0.role == 9 } ? 9 : 0)
       return .init(display: range, font: font, role: role, flags: flags)
     }
     for (start, end) in zip(boundaries, boundaries.dropFirst()) where start < end {
@@ -135,15 +140,31 @@ public final class ComposePaneLayout {
     // sized actual paragraph keeps its own spacing and layout precedence.
     let blocks = spans.filter { (1...6).contains($0.role) || [8, 11, 12, 13].contains($0.role) }
       + spans.filter { $0.role == 9 }
-    let paragraphs = blocks.map { block in
+    var codeGeometry: [CodeBlock] = []
+    let paragraphs = blocks.compactMap { block -> ComposeTextLayout.ParagraphRun? in
       let containers = spans.filter { ($0.role == 9 || $0.role == 10) && $0.range.contains(block.range.lowerBound) }.count
       let heading = (1...6).contains(block.role)
-      let before = heading ? CTFontGetSize(body) * 0.45 : block.role == 12 ? typography.paragraphSpacing : 0
-      let after = [9, 13].contains(block.role) ? 0 : typography.paragraphSpacing
-      return ComposeTextLayout.ParagraphRun(display: block.range, indent: CGFloat(containers) * typography.indent,
+      let code = block.role == 12, padding = code ? Self.codePadding : 0
+      let indent = code ? min(CGFloat(containers) * typography.indent, max(0, width * 0.6 - padding)) : CGFloat(containers) * typography.indent
+      var range = block.range
+      if code {
+        // A semantic block can begin after a list marker on its first line.
+        // Keep that preceding text outside the block's frame and paragraph.
+        let start = displayBytes[..<range.lowerBound].lastIndex(where: { $0 == 10 || $0 == 13 }).map { $0 + 1 } ?? 0
+        if !String(decoding: displayBytes[start..<range.lowerBound], as: UTF8.self).trimmingCharacters(in: .whitespaces).isEmpty,
+           let newline = displayBytes[range].firstIndex(where: { $0 == 10 || $0 == 13 }) {
+          let next = newline + (displayBytes[newline] == 13 && displayBytes.indices.contains(newline + 1) && displayBytes[newline + 1] == 10 ? 2 : 1)
+          if next < range.upperBound { range = next..<range.upperBound }
+        }
+        codeGeometry.append(.init(source: block.source, display: range, indent: indent))
+      }
+      let before = heading ? CTFontGetSize(body) * 0.45 : code ? typography.paragraphSpacing + padding : 0
+      let after = [9, 13].contains(block.role) ? 0 : typography.paragraphSpacing + padding
+      return ComposeTextLayout.ParagraphRun(display: range, indent: indent + padding, trailing: padding,
         before: block.source.lowerBound >= projection.source.lowerBound ? before : 0,
-        after: block.source.upperBound <= projection.source.upperBound ? after : 0)
+        after: block.source.upperBound <= projection.source.upperBound ? after : 0, verbatim: code)
     }
+    codeBlocks = codeGeometry
     let bytes = Array(projection.text.utf8)
     var hanging: [ComposeTextLayout.HangingRun] = []
     for item in pane.spans where item.role == 13 && item.hasContentStart {
@@ -196,7 +217,8 @@ public final class ComposePaneLayout {
       let source = start..<end
       let rows = text.selectionRects(for: source)
       let assets = text.attachments.filter { $0.attachment.source.overlaps(source) }.map(\.rect)
-      guard let top = (rows + assets).map(\.minY).min(), let bottom = (rows + assets).map(\.maxY).max() else { return nil }
+      let code = codeFrames.filter { $0.source.overlaps(source) }.map(\.rect)
+      guard let top = (rows + assets + code).map(\.minY).min(), let bottom = (rows + assets + code).map(\.maxY).max() else { return nil }
       let containers = pane.spans.filter { ($0.role == 9 || $0.role == 10) && $0.start <= quote.start && quote.start < $0.end }.count
       return CGRect(x: min(CGFloat(containers) * typography.indent, width * 0.6) - 10,
         y: top, width: 2, height: bottom - top)
@@ -219,6 +241,28 @@ public final class ComposePaneLayout {
     }
   }()
 
+  public struct CodeFrame {
+    public let source: Range<Int>
+    public let rect: CGRect
+    public let hasStart, hasEnd: Bool
+  }
+
+  public private(set) lazy var codeFrames: [CodeFrame] = {
+    let bytes = Array(text.projection.text.utf8)
+    return codeBlocks.compactMap { block in
+      let start = String(decoding: bytes[..<block.display.lowerBound], as: UTF8.self).utf16.count
+      let end = start + String(decoding: bytes[block.display], as: UTF8.self).utf16.count
+      let rows = text.fragments.filter { $0.range.location < end && NSMaxRange($0.range) > start }
+      guard let first = rows.first, let last = rows.last else { return nil }
+      let hasStart = block.source.lowerBound >= text.projection.source.lowerBound
+      let hasEnd = block.source.upperBound <= text.projection.source.upperBound
+      let left = min(block.indent, width * 0.6)
+      let top = first.rect.minY - (hasStart ? Self.codePadding : 0)
+      let bottom = last.rect.maxY + (hasEnd ? Self.codePadding : 0)
+      return CodeFrame(source: block.source, rect: CGRect(x: left, y: top, width: width - left, height: bottom - top), hasStart: hasStart, hasEnd: hasEnd)
+    }
+  }()
+
   /// Draw in a context whose y axis points down, using the same line objects
   /// as hit testing and navigation. The native view and rendering tests share
   /// this path; no cell approximation or second text layout is involved.
@@ -232,6 +276,24 @@ public final class ComposePaneLayout {
     context.fill(clip)
     let palette = palette ?? Palette(link: foreground, quote: foreground, code: foreground,
       codeBackground: foreground.copy(alpha: 0.07) ?? foreground)
+    for frame in codeFrames {
+      let rect = frame.rect.offsetBy(dx: origin.x, dy: origin.y)
+      guard rect.intersects(clip.intersection(dirty)) else { continue }
+      context.setFillColor(palette.codeBackground)
+      context.setStrokeColor(palette.code.copy(alpha: 0.25) ?? palette.code)
+      context.setLineWidth(1)
+      if frame.hasStart && frame.hasEnd {
+        let path = CGPath(roundedRect: rect.insetBy(dx: 0.5, dy: 0.5), cornerWidth: 5, cornerHeight: 5, transform: nil)
+        context.addPath(path); context.drawPath(using: .fillStroke)
+      } else {
+        context.fill(rect)
+        context.move(to: CGPoint(x: rect.minX + 0.5, y: rect.minY)); context.addLine(to: CGPoint(x: rect.minX + 0.5, y: rect.maxY))
+        context.move(to: CGPoint(x: rect.maxX - 0.5, y: rect.minY)); context.addLine(to: CGPoint(x: rect.maxX - 0.5, y: rect.maxY))
+        if frame.hasStart { context.move(to: CGPoint(x: rect.minX, y: rect.minY + 0.5)); context.addLine(to: CGPoint(x: rect.maxX, y: rect.minY + 0.5)) }
+        if frame.hasEnd { context.move(to: CGPoint(x: rect.minX, y: rect.maxY - 0.5)); context.addLine(to: CGPoint(x: rect.maxX, y: rect.maxY - 0.5)) }
+        context.strokePath()
+      }
+    }
     context.setFillColor(palette.quote.copy(alpha: 0.4) ?? palette.quote)
     for rect in quoteRails {
       context.fill(rect.offsetBy(dx: origin.x, dy: origin.y))
@@ -284,7 +346,7 @@ public final class ComposePaneLayout {
         guard attributes[ComposeTextLayout.attachmentKey] == nil else { continue }
         let role = attributes[ComposeTextLayout.roleKey] as? UInt32 ?? 0
         let flags = attributes[ComposeTextLayout.flagsKey] as? UInt32 ?? 0
-        let color = flags & 16 != 0 ? palette.link : role == 7 ? palette.code : role == 9 ? palette.quote : foreground
+        let color = flags & 16 != 0 ? palette.link : [7, 12].contains(role) ? palette.code : role == 9 ? palette.quote : foreground
         context.setFillColor(color)
         context.textPosition = CGPoint(x: origin.x + fragment.rect.minX, y: origin.y + fragment.baseline)
         CTRunDraw(run, context, CFRange(location: 0, length: 0))

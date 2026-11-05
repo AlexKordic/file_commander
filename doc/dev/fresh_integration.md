@@ -514,12 +514,25 @@ sizing and scene traffic still need performance qualification before release.
 
 Native Compose must wrap using measured fonts and available pixel width.
 Terminal Markdown column counts, padded or truncated table replacements and
-character-sized frames are not a native layout contract. Parsed table/code
-blocks currently bypass those terminal conceals, retaining exact editable
-source, semantic fonts and image overrides. Native list prefixes also bypass
-terminal indent expansion. Measured table cells and native code-frame
-ornaments still need implementation and qualification. The native default
+character-sized frames are not a native layout contract. Parsed tables
+currently bypass those terminal conceals, retaining editable source, semantic
+fonts and image overrides. Native list prefixes also bypass terminal indent
+expansion. Measured native table cells remain unfinished. The native default
 uses all available pane width; a reading limit is optional and measured in points.
+
+For native code blocks, Fresh records the source ranges owned by the Markdown
+parser's code-text events. Gaps identify fences and container prefixes; these
+hide while reading and reveal on the edited source line. Hidden delimiter
+lines do not add empty header/footer rows. All parser-owned code content,
+including its original CR/LF bytes, remains copied and individually
+addressable. An empty fence without a terminator uses a native
+line placeholder without editing the buffer. Terminal decorations are unchanged.
+FC draws code frames from measured fragments, with native insets and wrapping,
+separate from inline code backgrounds. Code within a list uses its block
+inset instead of the list's hanging marker. A first-line list marker stays
+outside the frame, and clipped blocks retain open boundary edges. Selection,
+navigation and provisional text share the inset font geometry. The real-plugin
+`compose-code.pb` fixture covers nested quotes/lists, empty and unclosed fences.
 
 Visible images are checked on a five-second prototype interval and when the
 editor is shown again. POSIX local/SSH stats include file identity plus

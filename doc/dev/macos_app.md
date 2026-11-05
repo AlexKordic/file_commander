@@ -229,9 +229,10 @@ maximum in points; existing explicitly saved positive limits are preserved. The
 app's zoom scales native Compose fonts and spacing as well.
 
 Terminal Markdown's fixed column measure does not govern native wrapping.
-Parsed table/code blocks currently retain exact editable source instead of
-terminal-padded or truncated cell replacements and character-sized code
-frames. Native measured table cells and code-frame ornaments remain unfinished.
+Parsed tables currently retain editable source instead of terminal-padded or
+truncated cell replacements. Native measured table cells remain unfinished.
+Code blocks use parser-owned content ranges and measured native frames;
+character-sized terminal frames do not enter the native projection.
 
 `ComposeTextLayout` measures indentation, block spacing, image attachments,
 and styled fonts together. Drawing, hit testing, selection and navigation use
@@ -262,6 +263,15 @@ once within their measured source line; revealed or fallback source is not
 painted over. `compose-ornaments.pb` records the real-plugin projection for
 these checks. Protobuf fixtures are marked binary in `.gitattributes` so Git
 does not treat embedded Markdown line endings as source-file whitespace.
+
+`compose-code.pb` records real-plugin code blocks in quotes and lists, including
+an item whose first line is a code fence, empty blocks and an unclosed fence.
+Fresh conceals fence/container syntax while preserving code bytes and source
+line endings; the edited line reveals its exact source. Native code frames
+wrap to the pixel measure, and their insets govern caret, selection, navigation
+and marked-text layout. List markers stay outside the code frame. Partial
+content windows draw open frame edges. Code uses the configured monospace font
+without a fixed column count; its background and border follow the theme.
 Native clipboard access is injectable; scene/input tests use memory storage
 instead of reading or overwriting the user's system pasteboard.
 
