@@ -120,6 +120,89 @@ final class ComposeTests: XCTestCase {
     XCTAssertEqual(spaced.text.projection.text, source)
   }
 
+  func testListContinuationsUseTheShapedPrefixAndPreserveSourceCaretGeometry() throws {
+    for prefix in ["• ", "100. ", "> 12. [ ] ", "    + "] {
+      let source = prefix + "Wide café 👩🏽‍💻 words with enough text to wrap across several measured rows and remain editable.\r\n"
+      for size: CGFloat in [12, 22] {
+        var pane = wirePane(source)
+        let marker = prefix.hasPrefix(">") ? 2 : prefix.hasPrefix("    ") ? 4 : 0
+        pane.spans = [10, 13].map { role in .with {
+          $0.start = UInt64(marker); $0.end = pane.sourceEnd; $0.role = UInt32(role)
+          if role == 13 { $0.contentStart = UInt64(prefix.utf8.count) }
+        } }
+        if prefix.hasPrefix(">") { pane.spans.append(.with { $0.end = pane.sourceEnd; $0.role = 9 }) }
+        let layout = try XCTUnwrap(ComposePaneLayout(pane: pane, body: font(size), monospace: font(size), width: 220))
+        let body = try XCTUnwrap(layout.text.caret(for: prefix.utf8.count))
+        XCTAssertGreaterThan(layout.text.fragments.count, 3)
+        for fragment in layout.text.fragments.dropFirst() where fragment.range.length > 0 {
+          XCTAssertEqual(fragment.rect.minX, body.minX, accuracy: 0.001, "\(prefix), \(size)")
+          let hit = try XCTUnwrap(layout.text.hit(at: CGPoint(x: fragment.rect.minX + 0.01, y: fragment.rect.midY)))
+          let caret = try XCTUnwrap(layout.text.caret(for: hit.source, affinity: hit.affinity))
+          XCTAssertEqual(caret.minX, fragment.rect.minX, accuracy: 0.001)
+        }
+        let navigation = try XCTUnwrap(layout.text.navigation(id: 1, pageHeight: 1000, documentLength: pane.documentLen, positions: [0]))
+        for line in navigation.lines {
+          for stop in line.stops {
+            let caret = try XCTUnwrap(layout.text.caret(for: Int(stop.source), affinity: stop.affinity == 1 ? .upstream : .downstream))
+            XCTAssertEqual(Double(caret.minX), stop.x, accuracy: 0.001)
+          }
+        }
+        XCTAssertEqual(layout.text.projection.text, source)
+      }
+    }
+  }
+
+  func testPhysicalContinuationWhitespaceIsNotChargedTwice() throws {
+    let source = "100. First line\n     Physical continuation with words that wrap across the remaining measured width.\n"
+    var pane = wirePane(source)
+    pane.spans = [10, 13].map { role in .with { $0.end = pane.sourceEnd; $0.role = UInt32(role)
+      if role == 13 { $0.contentStart = 5 } } }
+    let layout = try XCTUnwrap(ComposePaneLayout(pane: pane, body: font(16), monospace: font(16), width: 260))
+    let first = try XCTUnwrap(layout.text.caret(for: 5))
+    let physical = source[..<source.range(of: "Physical")!.lowerBound].utf8.count
+    XCTAssertEqual(try XCTUnwrap(layout.text.caret(for: physical)).minX, first.minX, accuracy: 0.001)
+    for fragment in layout.text.fragments.dropFirst(2) where fragment.range.length > 0 {
+      XCTAssertEqual(fragment.rect.minX, first.minX, accuracy: 0.001)
+    }
+  }
+
+  func testRealFreshListSceneKeepsWrappedBodiesAndInlineImagesWithinTheMeasure() throws {
+    let url = try XCTUnwrap(Bundle.module.url(forResource: "Fixtures/compose-lists", withExtension: "pb"))
+    let pane = try WireComposePane(serializedBytes: Data(contentsOf: url))
+    let items = pane.spans.filter { $0.role == 13 && $0.hasContentStart }
+    XCTAssertEqual(items.count, 5)
+    for width: CGFloat in [260, 520] {
+      let layout = try XCTUnwrap(ComposePaneLayout(pane: pane, body: font(16), monospace: font(16), width: width))
+      for item in items {
+        let body = try XCTUnwrap(layout.text.caret(for: Int(item.contentStart)))
+        let display = try XCTUnwrap(layout.text.projection.displayPosition(for: Int(item.contentStart)))
+        let bytes = Array(layout.text.projection.text.utf8)
+        let end = bytes[display...].firstIndex(where: { $0 == 10 || $0 == 13 }) ?? bytes.count
+        let end16 = String(decoding: bytes[..<end], as: UTF8.self).utf16.count
+        let index = try XCTUnwrap(layout.text.fragments.firstIndex { $0.rect.minY == body.minY })
+        let following = layout.text.fragments.dropFirst(index + 1).prefix { $0.range.location < end16 }
+        XCTAssertFalse(following.isEmpty, "fixture item must exercise soft wrapping")
+        for fragment in following { XCTAssertEqual(fragment.rect.minX, body.minX, accuracy: 0.001) }
+      }
+      for placed in layout.text.attachments {
+        XCTAssertGreaterThanOrEqual(placed.rect.minX, 0)
+        XCTAssertLessThanOrEqual(placed.rect.maxX, width + 0.001)
+      }
+      if width == 520, let path = ProcessInfo.processInfo.environment["FC_COMPOSE_LIST_PREVIEW_FILE"] {
+        let w = 568, h = Int(ceil(layout.text.size.height)) + 48
+        let context = try XCTUnwrap(CGContext(data: nil, width: w, height: h, bitsPerComponent: 8,
+          bytesPerRow: w * 4, space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
+        context.translateBy(x: 0, y: CGFloat(h)); context.scaleBy(x: 1, y: -1)
+        let bounds = CGRect(x: 0, y: 0, width: w, height: h)
+        layout.draw(in: context, origin: CGPoint(x: 24, y: 24), clip: bounds, dirty: bounds,
+          foreground: CGColor(gray: 0.1, alpha: 1), background: CGColor(gray: 1, alpha: 1), selection: CGColor(gray: 0.5, alpha: 1))
+        let destination = try XCTUnwrap(CGImageDestinationCreateWithURL(URL(fileURLWithPath: path) as CFURL, "public.png" as CFString, 1, nil))
+        CGImageDestinationAddImage(destination, try XCTUnwrap(context.makeImage()), nil)
+        XCTAssertTrue(CGImageDestinationFinalize(destination))
+      }
+    }
+  }
+
   func testAllHeadingScalesAndSpacingInvalidateLayoutWithoutChangingSource() throws {
     let source = (1...6).map { "Heading \($0)\r\n" }.joined()
     var pane = wirePane(source), offset: UInt64 = 0

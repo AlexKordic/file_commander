@@ -105,8 +105,27 @@ public final class ComposePaneLayout {
         before: block.source.lowerBound >= projection.source.lowerBound ? before : 0,
         after: block.source.upperBound <= projection.source.upperBound ? after : 0)
     }
+    let bytes = Array(projection.text.utf8)
+    var hanging: [ComposeTextLayout.HangingRun] = []
+    for item in pane.spans where item.role == 13 && item.hasContentStart {
+      guard item.start <= item.contentStart, item.contentStart < item.end else { return nil }
+      // A clipped source window may not contain this item's marker. The full
+      // block-context/performance qualification handles those windows; never
+      // measure a partial prefix as if it were the complete marker.
+      guard item.start >= pane.sourceStart, item.contentStart >= pane.sourceStart,
+            item.contentStart < pane.sourceEnd,
+            let source = Int(exactly: item.start), let content = Int(exactly: item.contentStart),
+            let start = projection.displayPosition(for: source, affinity: .downstream),
+            let bodyStart = projection.displayPosition(for: content, affinity: .downstream),
+            let end = projection.displayPosition(for: min(Int(item.end), projection.source.upperBound), affinity: .upstream),
+            bodyStart < end else { continue }
+      let lineStart = bytes[..<start].lastIndex(where: { $0 == 10 || $0 == 13 }).map { $0 + 1 } ?? 0
+      guard !bytes[lineStart..<bodyStart].contains(where: { $0 == 10 || $0 == 13 }) else { continue }
+      let containers = pane.spans.filter { ($0.role == 9 || $0.role == 10) && $0.start <= item.contentStart && item.contentStart < $0.end }.count
+      hanging.append(.init(display: lineStart..<end, contentStart: bodyStart, indent: CGFloat(containers) * typography.indent))
+    }
     guard let layout = ComposeTextLayout(projection: projection, font: body, width: width,
-      lineSpacing: typography.lineSpacing, fonts: fonts, attachments: attachments, paragraphs: paragraphs) else { return nil }
+      lineSpacing: typography.lineSpacing, fonts: fonts, attachments: attachments, paragraphs: paragraphs, hanging: hanging) else { return nil }
     text = layout
   }
 

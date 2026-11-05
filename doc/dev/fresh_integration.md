@@ -428,6 +428,17 @@ copy the graphical object or relocate its asset. Pending/fallback projections
 set neither image presentation flag. Invalid markup remains editable source
 and may no longer have a parsed preview until it becomes a valid image again.
 
+List-item spans carry optional `content_start`: the source-byte position of
+the first body content on the opening line, after a list/task marker. It is
+derived from Markdown parser events, including tight lists, quoted items,
+parenthesized ordered markers and empty items. The native client maps that
+anchor into the projection and measures the prefix with its actual styled
+font and shaping context. Continuation text, caret/hit geometry, navigation
+and image sizing use that same content measure. Existing indentation on a
+physical continuation line is charged once. Source windows without the complete
+prefix and multiline cell replacements still need block-context qualification;
+the client never treats a partial prefix as the original marker.
+
 Visible images are checked on a five-second prototype interval and when the
 editor is shown again. POSIX local/SSH stats include file identity plus
 nanosecond modification/change times. Metadata shortcuts are supplemented by

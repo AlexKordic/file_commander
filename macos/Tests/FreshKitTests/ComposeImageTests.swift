@@ -212,6 +212,28 @@ final class ComposeImageTests: XCTestCase {
     }
   }
 
+  func testListImagesAndSourcePreviewsFitTheMeasuredHangingContentWidth() throws {
+    let source = "100. ![pic](x.png)\n"
+    let font = CTFontCreateWithName("Helvetica" as CFString, 16, nil)
+    let asset = try ComposeImageAsset.decode(encode(bitmap(600, 300)))
+    for preview in [false, true] {
+      var input = pane(source)
+      var annotation = image(source, "![pic](x.png)", block: true)
+      annotation.rendered = !preview; annotation.sourcePreview = preview; input.images = [annotation]
+      input.spans = [10, 13].map { role in .with { $0.end = input.sourceEnd; $0.role = UInt32(role)
+        if role == 13 { $0.contentStart = 5 } } }
+      let layout = try XCTUnwrap(ComposePaneLayout(pane: input, body: font, monospace: font, width: 180,
+        images: [annotation.start: .ready(asset)]))
+      let rect = try XCTUnwrap(layout.text.attachments.first?.rect)
+      XCTAssertLessThanOrEqual(rect.maxX, 180.001)
+      let caret = try XCTUnwrap(layout.text.caret(for: Int(annotation.start)))
+      XCTAssertEqual(rect.minX, caret.minX, accuracy: 0.001)
+      XCTAssertEqual(rect.width / rect.height, 2, accuracy: 0.001)
+      let hit = try XCTUnwrap(layout.text.hit(at: CGPoint(x: rect.midX, y: rect.midY)))
+      XCTAssertEqual(hit.attachment, Int(annotation.start)..<Int(annotation.end))
+    }
+  }
+
   func testImagesDrawInsideTextAndAsBlocksThroughTheNativePath() throws {
     let source = "Compose images\n\nBefore ![inline](x.png) after text.\n\n![block](x.png)\n\nEnd."
     var input = pane(source)

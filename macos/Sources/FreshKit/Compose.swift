@@ -243,6 +243,19 @@ public final class ComposeTextLayout {
     }
   }
 
+  /// Fresh identifies the body after a list/task marker. Core Text measures
+  /// the displayed prefix; no Markdown recognition or column estimate occurs
+  /// in the native client. Nested items override their containing item.
+  public struct HangingRun {
+    public var display: Range<Int>
+    public var contentStart: Int
+    public var indent: CGFloat
+
+    public init(display: Range<Int>, contentStart: Int, indent: CGFloat) {
+      self.display = display; self.contentStart = contentStart; self.indent = indent
+    }
+  }
+
   public struct Fragment {
     public let line: CTLine
     /// The exact Core Text range, in UTF-16, including a consumed line ending.
@@ -266,7 +279,7 @@ public final class ComposeTextLayout {
   /// takes place. Invalid font ranges fail instead of quietly mis-styling text.
   public init?(projection: ComposeProjection, font: CTFont, width: CGFloat,
                lineSpacing: CGFloat = 3, fonts: [FontRun] = [], attachments: [Attachment] = [],
-               paragraphs: [ParagraphRun] = []) {
+               paragraphs: [ParagraphRun] = [], hanging: [HangingRun] = []) {
     guard width.isFinite, width > 0, lineSpacing.isFinite, lineSpacing >= 0 else { return nil }
     let string = projection.text as NSString
     var utf16ToByte = [0: 0]
@@ -291,6 +304,35 @@ public final class ComposeTextLayout {
       guard let start = byteToUTF16[paragraph.display.lowerBound], let end = byteToUTF16[paragraph.display.upperBound],
             start < end, [paragraph.indent, paragraph.before, paragraph.after].allSatisfy({ $0.isFinite && $0 >= 0 }) else { return nil }
       blocks.append((NSRange(location: start, length: end - start), paragraph))
+    }
+    var hangs: [(range: NSRange, content: Int, prefix: CGFloat, indent: CGFloat)] = []
+    for item in hanging {
+      guard let start = byteToUTF16[item.display.lowerBound], let end = byteToUTF16[item.display.upperBound],
+            let content = byteToUTF16[item.contentStart], start <= content, content < end,
+            item.indent.isFinite, item.indent >= 0 else { return nil }
+      let newline = string.rangeOfCharacter(from: .newlines, range: NSRange(location: start, length: end - start)).location
+      let contextEnd = newline == NSNotFound ? end : newline
+      guard content <= contextEnd else { return nil }
+      // Shape in context: cutting after the marker changes kerning at the
+      // first body character (for example "1) An"), moving its actual caret.
+      let prefix = CTLineCreateWithAttributedString(attributed.attributedSubstring(from: NSRange(location: start, length: contextEnd - start)))
+      let measured = CTLineGetOffsetForStringIndex(prefix, content - start, nil)
+      guard measured.isFinite, measured >= 0 else { return nil }
+      hangs.append((NSRange(location: start, length: end - start), content, measured, item.indent))
+    }
+    func hangingItem(at position: Int) -> (range: NSRange, content: Int, prefix: CGFloat, indent: CGFloat)? {
+      hangs.filter { NSLocationInRange(position, $0.range) }.min {
+        $0.range.length == $1.range.length ? $0.content > $1.content : $0.range.length < $1.range.length
+      }
+    }
+    // Reserve the same content measure for attachments as for continuation
+    // text, including on a first line that also contains the marker.
+    let attachments = attachments.map { attachment in
+      guard let start = byteToUTF16[attachment.display.lowerBound], let item = hangingItem(at: start) else { return attachment }
+      let available = width - min(item.indent + item.prefix, width * 0.6)
+      guard attachment.size.width > available else { return attachment }
+      return Attachment(source: attachment.source, display: attachment.display,
+        size: CGSize(width: available, height: attachment.size.height * available / attachment.size.width), preview: attachment.preview)
     }
     var previews: [(index: Int, end: Int)] = []
     for (index, attachment) in attachments.enumerated() {
@@ -365,7 +407,9 @@ public final class ComposeTextLayout {
       while nextPreview < previews.count, previews[nextPreview].end <= NSMaxRange(range) {
         let attachment = attachments[previews[nextPreview].index]
         top += 18 // Caption; presentation only, with no source/caret position.
-        placed.append(.init(attachment: attachment, rect: CGRect(x: indent, y: top,
+        let item = byteToUTF16[attachment.display.lowerBound].flatMap { hangingItem(at: $0) }
+        let previewIndent = item.map { min($0.indent + $0.prefix, width * 0.6) } ?? indent
+        placed.append(.init(attachment: attachment, rect: CGRect(x: previewIndent, y: top,
           width: attachment.size.width, height: attachment.size.height)))
         top += attachment.size.height + 8
         nextPreview += 1
@@ -374,7 +418,25 @@ public final class ComposeTextLayout {
     }
     while from < string.length {
       let paragraph = block(at: from)
-      let indent = min(paragraph?.style.indent ?? 0, width * 0.6)
+      var desired = paragraph?.style.indent ?? 0
+      if let item = hangingItem(at: from) {
+        desired = item.indent
+        if from >= item.content {
+          // Source indentation on a physical continuation line is already
+          // drawn. Charge only the missing part of the measured prefix.
+          var whitespace = from
+          if from > 0 && [10, 13].contains(string.character(at: from - 1)) {
+            while whitespace < string.length && [9, 32].contains(string.character(at: whitespace)) { whitespace += 1 }
+          }
+          var existing: CGFloat = 0
+          if whitespace > from {
+            let prefix = CTTypesetterCreateLine(typesetter, CFRange(location: from, length: whitespace - from))
+            existing = CGFloat(CTLineGetTypographicBounds(prefix, nil, nil, nil))
+          }
+          desired += max(0, item.prefix - existing)
+        }
+      }
+      let indent = min(desired, width * 0.6)
       let suggested = CTTypesetterSuggestLineBreak(typesetter, from, Double(width - indent))
       var count = suggested > 0 ? suggested : string.rangeOfComposedCharacterSequence(at: from).length
       guard count > 0, count <= string.length - from else { return nil }

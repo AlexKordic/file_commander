@@ -1563,9 +1563,20 @@ public nonisolated struct WireComposeSpan: Sendable {
 
   public var flags: UInt32 = 0
 
+  public var contentStart: UInt64 {
+    get {_contentStart ?? 0}
+    set {_contentStart = newValue}
+  }
+  /// Returns true if `contentStart` has been explicitly set.
+  public var hasContentStart: Bool {self._contentStart != nil}
+  /// Clears the value of `contentStart`. Subsequent reads from it will return its default value.
+  public mutating func clearContentStart() {self._contentStart = nil}
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
+
+  fileprivate var _contentStart: UInt64? = nil
 }
 
 public nonisolated struct WireComposeImage: Sendable {
@@ -6086,7 +6097,7 @@ nonisolated extension WireComposeSegment: SwiftProtobuf.Message, SwiftProtobuf._
 
 nonisolated extension WireComposeSpan: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".ComposeSpan"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}start\0\u{1}end\0\u{1}role\0\u{1}flags\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}start\0\u{1}end\0\u{1}role\0\u{1}flags\0\u{3}content_start\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -6098,12 +6109,17 @@ nonisolated extension WireComposeSpan: SwiftProtobuf.Message, SwiftProtobuf._Mes
       case 2: try { try decoder.decodeSingularUInt64Field(value: &self.end) }()
       case 3: try { try decoder.decodeSingularUInt32Field(value: &self.role) }()
       case 4: try { try decoder.decodeSingularUInt32Field(value: &self.flags) }()
+      case 5: try { try decoder.decodeSingularUInt64Field(value: &self._contentStart) }()
       default: break
       }
     }
   }
 
   public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
     if self.start != 0 {
       try visitor.visitSingularUInt64Field(value: self.start, fieldNumber: 1)
     }
@@ -6116,6 +6132,9 @@ nonisolated extension WireComposeSpan: SwiftProtobuf.Message, SwiftProtobuf._Mes
     if self.flags != 0 {
       try visitor.visitSingularUInt32Field(value: self.flags, fieldNumber: 4)
     }
+    try { if let v = self._contentStart {
+      try visitor.visitSingularUInt64Field(value: v, fieldNumber: 5)
+    } }()
     try unknownFields.traverse(visitor: &visitor)
   }
 
@@ -6124,6 +6143,7 @@ nonisolated extension WireComposeSpan: SwiftProtobuf.Message, SwiftProtobuf._Mes
     if lhs.end != rhs.end {return false}
     if lhs.role != rhs.role {return false}
     if lhs.flags != rhs.flags {return false}
+    if lhs._contentStart != rhs._contentStart {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }

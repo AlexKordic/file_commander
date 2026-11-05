@@ -243,6 +243,11 @@ When image markup is revealed for editing, `ComposeTextLayout` keeps the
 source as text and reserves a separate preview below its last measured line.
 That preview shares image loading, tooltips and source-range hit testing with
 rendered attachments. It adds no document characters or navigation stops.
+List/task continuation alignment uses Fresh's parsed body anchor and a Core
+Text prefix measured in its shaping context, including the first body character.
+The same measure constrains images and previews within a list. The recorded
+`compose-lists.pb` fixture comes from the real Compose plugin/socket contract;
+FreshKit checks it at several widths alongside raw-source and font-size cases.
 Native clipboard access is injectable; scene/input tests use memory storage
 instead of reading or overwriting the user's system pasteboard.
 Tooltip rectangles share the attachment geometry and are replaced only when
