@@ -30,6 +30,9 @@ public final class SceneSocket: @unchecked Sendable {
   public let path: String
   /// Called on the main queue with each decoded message.
   public var onMessage: (@MainActor (SceneMessage) -> Void)?
+  /// Independently paced auxiliary data. These messages never advance the
+  /// scene sequence and must not receive a render-frame Applied acknowledgment.
+  public var onIndexChunk: (@MainActor (WireComposeIndexChunk) -> Void)?
   /// Called on the main queue once, when the connection ends; the argument says why.
   public var onClose: (@MainActor (String?) -> Void)?
   /// Called on the write queue after each message is written, for telemetry:
@@ -148,6 +151,21 @@ public final class SceneSocket: @unchecked Sendable {
             break loop
           }
           let started = ProcessInfo.processInfo.systemUptime
+          if kind == SceneWire.Kind.composeIndexChunk.rawValue {
+            guard greeted else {
+              reason = "the editor sent document navigation before its hello"
+              break loop
+            }
+            guard payload.count <= 128 << 10 else {
+              reason = "the editor sent an oversized document navigation chunk"
+              break loop
+            }
+            let index = try WireComposeIndexChunk(serializedBytes: buffer[payload])
+            DispatchQueue.main.async { [weak self] in
+              MainActor.assumeIsolated { self?.onIndexChunk?(index) }
+            }
+            continue
+          }
           guard var message = SceneMessage(kind: kind, payload: buffer[payload]) else {
             reason = "the editor sent a message the app can't read (type \(kind))"
             break loop

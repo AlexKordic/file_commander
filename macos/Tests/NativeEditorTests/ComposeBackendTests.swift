@@ -120,6 +120,47 @@ private final class ComposeBackend {
 
 final class ComposeBackendTests: XCTestCase {
   @MainActor
+  func testDocumentRotorsRevealOffscreenSourceAndKeepFreshEditingAndUndoOwnership() async throws {
+    let backend = try backend(); defer { backend.captureDiagnostics("semantic-navigation"); backend.stop() }
+    let editor = editor(BackendPasteboard()); defer { editor.detachAll() }
+    let original = "# Start\r\n\r\n| Key | Value |\r\n| --- | --- |\r\n| one | two |\r\n\r\n"
+      + String(repeating: "Ordinary paragraph **with emphasis** and words.\r\n\r\n", count: 2400)
+      + "## Offscreen Café 東京\r\n\r\n[Final link](target.md) ![Final image](missing.png)\r\n"
+    let file = backend.root.appendingPathComponent("navigation.md")
+    try Data(original.utf8).write(to: file)
+    try await attach(backend, file: file, editor: editor)
+    let grid = try XCTUnwrap(editor.grid)
+    XCTAssertTrue(editor.store.composeSemanticIndex)
+    XCTAssertTrue(grid.accessibilityCustomRotors().isEmpty)
+    try await eventually(editor, "complete parser navigation") { grid.composeNavigation.controller.status == .ready }
+    let index = try XCTUnwrap(grid.composeNavigation.controller.index)
+    let ordinal = try XCTUnwrap(index.find(kind: 0, after: nil, forward: true, filter: "OFFSCREEN CAFE"))
+    let entry = index.entries[ordinal]
+    XCTAssertGreaterThan(entry.source.lowerBound, Int(try XCTUnwrap(grid.focusedCompose).pane.compose.sourceEnd))
+    let rotor = try XCTUnwrap(grid.accessibilityCustomRotors().first { $0.type == .heading })
+    let parameters = NSAccessibilityCustomRotor.SearchParameters()
+    parameters.searchDirection = .next; parameters.filterString = "OFFSCREEN CAFE"
+    let result = try XCTUnwrap(grid.composeNavigation.rotor(rotor, resultFor: parameters))
+    let element = try XCTUnwrap(grid.composeNavigation.accessibilityElement(withToken: try XCTUnwrap(result.itemLoadingToken)))
+    XCTAssertEqual((element as? NSAccessibilityElement)?.accessibilityLabel(), "Offscreen Café 東京")
+    try await eventually(editor, "Fresh selects and reveals the offscreen source entry") {
+      guard let pane = grid.focusedCompose, let cursor = pane.pane.compose.cursors.first(where: \.primary) else { return false }
+      return cursor.hasAnchor && cursor.anchor == UInt64(entry.source.lowerBound) && cursor.position == UInt64(entry.source.upperBound)
+        && pane.pane.compose.sourceStart <= cursor.position && cursor.position <= pane.pane.compose.sourceEnd
+        && pane.caret?.intersects(pane.bounds) == true
+    }
+    XCTAssertEqual(try Data(contentsOf: file), Data(original.utf8), "navigation does not rewrite source")
+    let replacement = "## Replacement\r\n"
+    var expected = Data(original.utf8); expected.replaceSubrange(entry.source, with: replacement.utf8)
+    grid.insertText(replacement, replacementRange: NSRange(location: NSNotFound, length: 0))
+    editor.send(.action(name: "save", argsJson: ""))
+    try await eventually(editor, "normal source edit after rotor selection") { (try? Data(contentsOf: file)) == expected }
+    XCTAssertFalse((element as? NSAccessibilityElement)?.isAccessibilityElement() ?? true)
+    editor.send(.action(name: "undo", argsJson: "")); editor.send(.action(name: "save", argsJson: ""))
+    try await eventually(editor, "one Fresh undo restores exact CRLF Markdown") { (try? Data(contentsOf: file)) == Data(original.utf8) }
+  }
+
+  @MainActor
   func testAccessibilitySourceSelectionsAndImmediateTypingPreserveMarkdownAndOneUndoHistory() async throws {
     let backend = try backend(); defer { backend.captureDiagnostics("accessibility-source-actions"); backend.stop() }
     let pasteboard = BackendPasteboard(), editor = editor(pasteboard); defer { editor.detachAll() }

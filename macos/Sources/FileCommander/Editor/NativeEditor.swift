@@ -172,6 +172,10 @@ final class NativeEditor: NSObject, CellGridDelegate {
       guard let self, let socket, self.socket === socket else { return }
       self.received(message)
     }
+    socket.onIndexChunk = { [weak self, weak socket] chunk in
+      guard let self, let socket, self.socket === socket else { return }
+      self.grid?.composeNavigation.controller.receive(chunk)
+    }
     socket.onSent = { number, type, kind, bytes, at in
       var fields: [String: Any] = ["ev": "send", "t": EditorTelemetry.ms(at), "n": number, "type": type, "bytes": bytes]
       if let kind { fields["kind"] = kind }
@@ -210,6 +214,7 @@ final class NativeEditor: NSObject, CellGridDelegate {
     pendingShow = false
     grid?.showingEvent = NSApp.currentEvent.flatMap { $0.type == .keyDown ? $0.timestamp : nil }
     shown = true
+    grid?.composeNavigation.update()
     updateImageDemands(revalidate: true)
     scheduleViewportContinuation()
     onPresent?(true)
@@ -234,6 +239,7 @@ final class NativeEditor: NSObject, CellGridDelegate {
     guard shown else { return }
     grid?.finishComposition()
     shown = false
+    grid?.composeNavigation.update()
     composeImages.update([])
     onPresent?(false)
     updateMenus()
@@ -296,6 +302,7 @@ final class NativeEditor: NSObject, CellGridDelegate {
     view.grid.richPopupProjection = richCompose
     view.grid.composeImageController = composeImages
     view.grid.composeViewportController = composeViewports
+    view.grid.sendComposeIndex = { [weak self] request in self?.socket?.send(.composeIndex(request)) }
     self.view = view
     let menus = FreshMenus(store: store) { [weak self] action, argsJson in self?.send(.action(name: action, argsJson: argsJson)) }
     menus.openSettings = { [weak self] in self?.app?.openSettings(tab: .editor) }

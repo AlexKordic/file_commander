@@ -17,6 +17,7 @@
   "FreshKitTests.ComposePopupPlacementTests",
   "FreshKitTests.ComposeShapingTests",
   "FreshKitTests.ComposeSelectionChangeTests",
+  "FreshKitTests.ComposeSemanticIndexTests",
   "FreshKitTests.ComposeTableLayoutTests",
   "FreshKitTests.ComposeTableMeasurementTests",
   "FreshKitTests.ComposeTableModelTests",

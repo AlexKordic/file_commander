@@ -25,6 +25,7 @@ private final class ScenePeer: @unchecked Sendable {
   private var receivedKeys: [WireKey] = []
   private var receivedViewports: [WireComposeViewportRequest] = []
   private var receivedAssets: [WireComposeAssetRequest] = []
+  private var receivedIndexes: [WireComposeIndexRequest] = []
   private var sequence: UInt64 = 0
   private var applied: UInt64 = 0
 
@@ -33,10 +34,11 @@ private final class ScenePeer: @unchecked Sendable {
   var keys: [WireKey] { lock.lock(); defer { lock.unlock() }; return receivedKeys }
   var viewports: [WireComposeViewportRequest] { lock.lock(); defer { lock.unlock() }; return receivedViewports }
   var assets: [WireComposeAssetRequest] { lock.lock(); defer { lock.unlock() }; return receivedAssets }
+  var indexes: [WireComposeIndexRequest] { lock.lock(); defer { lock.unlock() }; return receivedIndexes }
   var lastApplied: UInt64 { lock.lock(); defer { lock.unlock() }; return applied }
 
   init(pane: WirePane, version: UInt32 = SceneWire.version, regionProbes: Bool = true, nativePopups: Bool = true,
-       sourceSelections: Bool = true, greeting: Greeting = .normal) throws {
+       sourceSelections: Bool = true, semanticIndex: Bool = false, greeting: Greeting = .normal) throws {
     try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
     listener = Darwin.socket(AF_UNIX, SOCK_STREAM, 0)
     var started = false
@@ -73,9 +75,12 @@ private final class ScenePeer: @unchecked Sendable {
           let hello = WireServerHello.with {
             $0.version = version; $0.composeRegionProbes = regionProbes; $0.nativePopupProjection = nativePopups; $0.scene = self.frame(pane: pane)
             $0.composeSourceSelections = sourceSelections
+            $0.composeSemanticIndex = semanticIndex
           }
           send(.serverHello, hello)
           if greeting == .duplicate { send(.serverHello, hello) }
+        } else if kind == SceneWire.Kind.composeIndexRequest.rawValue, let request = try? WireComposeIndexRequest(serializedBytes: payload) {
+          lock.lock(); receivedIndexes.append(request); lock.unlock()
         } else if kind == SceneWire.Kind.composeInput.rawValue, let input = try? WireComposeInput(serializedBytes: payload) {
           lock.lock(); received.append(input); lock.unlock()
         } else if kind == SceneWire.Kind.applied.rawValue, let ack = try? WireApplied(serializedBytes: payload) {
@@ -144,6 +149,7 @@ private final class ScenePeer: @unchecked Sendable {
   }
 
   func show(_ pane: WirePane) { send(.frame, frame(pane: pane)) }
+  func index(_ chunk: WireComposeIndexChunk) { send(.composeIndexChunk, chunk) }
 
   func showPopup(_ pane: WirePane, popup: WireScenePopup) {
     var frame = frame(pane: pane); frame.popups = .with { $0.popups = [popup] }
@@ -181,6 +187,117 @@ private final class ScenePeer: @unchecked Sendable {
 }
 
 final class ComposeInputTests: XCTestCase {
+  @MainActor
+  func testSemanticRotorTokensCannotActWhileFilesAreShownOrReviveOnReturn() async throws {
+    let peer = try ScenePeer(pane: pane("# Heading\n"), semanticIndex: true); defer { peer.close() }
+    let editor = richEditor(); defer { editor.detachAll() }; editor.attach(socketPath: peer.path, app: nil)
+    try await eventually { editor.grid?.focusedCompose != nil && editor.shown }
+    let grid = try XCTUnwrap(editor.grid)
+    _ = grid.accessibilityCustomRotors()
+    try await eventually { peer.indexes.contains { $0.hasOwner } }
+    let request = try XCTUnwrap(peer.indexes.first { $0.hasOwner })
+    peer.index(.with {
+      $0.id = request.id; $0.owner = request.owner; $0.totalEntries = 1; $0.labelBytes = 7; $0.done = true
+      $0.parts = [.with { $0.start = 0; $0.end = 10; $0.kind = 1; $0.label = "Heading"; $0.labelLength = 7; $0.labelDone = true }]
+    })
+    try await eventually { grid.composeNavigation.controller.status == .ready }
+    let rotor = try XCTUnwrap(grid.accessibilityCustomRotors().first)
+    let parameters = NSAccessibilityCustomRotor.SearchParameters(); parameters.searchDirection = .next
+    let result = try XCTUnwrap(grid.composeNavigation.rotor(rotor, resultFor: parameters))
+    let token = try XCTUnwrap(result.itemLoadingToken)
+    editor.switchBack()
+    XCTAssertNil(grid.composeNavigation.accessibilityElement(withToken: token))
+    XCTAssertTrue(grid.accessibilityCustomRotors().isEmpty); XCTAssertTrue(peer.inputs.isEmpty)
+    editor.show()
+    XCTAssertNil(grid.composeNavigation.accessibilityElement(withToken: token))
+    XCTAssertNil(grid.composeNavigation.rotor(rotor, resultFor: parameters))
+    try await eventually { peer.indexes.filter { $0.hasOwner }.count == 2 }
+    XCTAssertTrue(peer.inputs.isEmpty, "a token from before hiding cannot move the source cursor on return")
+  }
+
+  @MainActor
+  func testSemanticRotorsSearchOffscreenSourceAndRetireArchivedTokensOnSourceAndConnectionChanges() async throws {
+    var scene = pane("# Visible\n")
+    scene.compose.documentLen = 1_000_000; scene.compose.assetAuthority = 8; scene.compose.assetDocument = 9
+    let peer = try ScenePeer(pane: scene, semanticIndex: true); defer { peer.close() }
+    let editor = richEditor(); defer { editor.detachAll() }
+    editor.attach(socketPath: peer.path, app: nil)
+    try await eventually { editor.grid?.focusedCompose != nil && peer.lastApplied >= 1 }
+    let grid = try XCTUnwrap(editor.grid)
+    XCTAssertTrue(peer.indexes.isEmpty, "ordinary rendering does not fetch the navigation index")
+    XCTAssertTrue(grid.accessibilityCustomRotors().isEmpty)
+    try await eventually { peer.indexes.contains { $0.hasOwner } }
+    let request = try XCTUnwrap(peer.indexes.first { $0.hasOwner })
+    let labels: [(UInt32, UInt64, String)] = [(1, 0, "Visible"), (2, 900_000, "Café 東京 offscreen"),
+      (16, 900_100, "Final link"), (17, 900_200, "Final image")]
+    peer.index(.with {
+      $0.id = request.id; $0.owner = request.owner; $0.totalEntries = 4
+      $0.labelBytes = UInt64(labels.reduce(0) { $0 + $1.2.utf8.count }); $0.done = true
+      $0.parts = labels.enumerated().map { index, label in .with {
+        $0.index = UInt64(index); $0.kind = label.0; $0.start = label.1; $0.end = label.1 + 10
+        $0.label = label.2; $0.labelLength = UInt64(label.2.utf8.count); $0.labelDone = true
+      } }
+    })
+    try await eventually { grid.composeNavigation.controller.status == .ready }
+    XCTAssertEqual(peer.lastApplied, 1, "auxiliary chunks never become Frame Applied(0)")
+    try await eventually { peer.indexes.contains { $0.hasAppliedSequence && $0.appliedSequence == 0 } }
+    let rotors = grid.accessibilityCustomRotors()
+    XCTAssertEqual(rotors.map(\.type), [.heading, .headingLevel1, .headingLevel2, .headingLevel3,
+      .headingLevel4, .headingLevel5, .headingLevel6, .link, .image])
+    let heading = try XCTUnwrap(rotors.first { $0.type == .heading })
+    let parameters = NSAccessibilityCustomRotor.SearchParameters()
+    parameters.searchDirection = .next; parameters.filterString = "CAFE"
+    let result = try XCTUnwrap(grid.composeNavigation.rotor(heading, resultFor: parameters))
+    XCTAssertEqual(result.customLabel, "Café 東京 offscreen")
+    XCTAssertNil(result.targetElement, "offscreen results use AppKit's loading contract")
+    let token = try XCTUnwrap(result.itemLoadingToken)
+    let archived = try NSKeyedArchiver.archivedData(withRootObject: token, requiringSecureCoding: true)
+    let restored = try XCTUnwrap(NSKeyedUnarchiver.unarchivedObject(ofClass: NSString.self, from: archived))
+    let element = try XCTUnwrap(grid.composeNavigation.accessibilityElement(withToken: restored))
+    let accessible = try XCTUnwrap(element as? NSAccessibilityElement)
+    XCTAssertEqual(accessible.accessibilityLabel(), "Café 東京 offscreen")
+    XCTAssertTrue(grid.accessibilityChildren()?.contains { ($0 as? NSAccessibilityElement) === accessible } == true)
+    XCTAssertEqual(accessible.accessibilityFrame(), .zero, "unrendered source has no guessed geometry")
+    try await eventually { peer.inputs.count == 1 }
+    XCTAssertEqual(peer.inputs[0].selectionTargets.map(\.position), [900_010])
+    XCTAssertEqual(peer.inputs[0].selectionTargets.first?.anchor, 900_000)
+    XCTAssertEqual(peer.inputs[0].bufferEpoch, 7)
+    scene.compose.bufferRevision += 1; scene.compose.projectionRevision += 1; peer.show(scene)
+    try await eventually { editor.store.panes[0].compose.bufferRevision == 5 }
+    XCTAssertNil(grid.composeNavigation.rotor(heading, resultFor: parameters))
+    XCTAssertNil(grid.composeNavigation.accessibilityElement(withToken: restored))
+    XCTAssertFalse(accessible.isAccessibilityElement()); XCTAssertFalse(accessible.accessibilityPerformPress())
+    editor.detachAll()
+    XCTAssertNil(grid.composeNavigation.accessibilityElement(withToken: restored))
+  }
+
+  @MainActor
+  func testSemanticRotorsWaitForCompleteInventoryAndDoNotAppearForOldPeers() async throws {
+    let peer = try ScenePeer(pane: pane("# Visible\n"), semanticIndex: false); defer { peer.close() }
+    let editor = richEditor(); defer { editor.detachAll() }; editor.attach(socketPath: peer.path, app: nil)
+    try await eventually { editor.grid?.focusedCompose != nil }
+    XCTAssertTrue(try XCTUnwrap(editor.grid).accessibilityCustomRotors().isEmpty)
+    XCTAssertTrue(peer.indexes.isEmpty)
+    let next = try ScenePeer(pane: pane("# Visible\n"), semanticIndex: true); defer { next.close() }
+    editor.attach(socketPath: next.path, app: nil)
+    try await eventually { editor.grid?.focusedCompose != nil }
+    let grid = try XCTUnwrap(editor.grid)
+    XCTAssertTrue(grid.accessibilityCustomRotors().isEmpty)
+    try await eventually { next.indexes.contains { $0.hasOwner } }
+    let request = try XCTUnwrap(next.indexes.first { $0.hasOwner })
+    next.index(.with {
+      $0.id = request.id; $0.owner = request.owner; $0.totalEntries = 2; $0.labelBytes = 10
+      $0.parts = [.with { $0.start = 0; $0.end = 5; $0.kind = 1; $0.label = "First"; $0.labelLength = 5; $0.labelDone = true }]
+    })
+    try await eventually { next.indexes.contains { $0.hasAppliedSequence } }
+    XCTAssertTrue(grid.accessibilityCustomRotors().isEmpty)
+    XCTAssertTrue(grid.accessibilityHelp()?.contains("complete") == true)
+    next.index(.with { $0.id = request.id; $0.owner = request.owner; $0.sequence = 1; $0.done = true; $0.error = "source changed" })
+    try await eventually { grid.composeNavigation.controller.status == .failed("source changed") }
+    XCTAssertTrue(grid.accessibilityCustomRotors().isEmpty)
+    XCTAssertEqual(grid.accessibilityHelp(), "source changed")
+  }
+
   @MainActor
   func testOrdinaryKeysAndSaveKeepTheirNormalQueuePathAfterAccessibilitySelection() async throws {
     var scene = pane("alpha beta"); scene.compose.editable = true

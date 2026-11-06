@@ -7,6 +7,7 @@ import FreshKit
 @MainActor
 protocol CellGridDelegate: AnyObject {
   var connected: Bool { get }
+  var shown: Bool { get }
   func grid(_ grid: CellGridView, send input: SceneInput)
   func gridDidResize(_ grid: CellGridView, columns: Int, rows: Int)
   /// The chord is an app shortcut (Quit, Hide, the switch key, ...) that the
@@ -86,6 +87,8 @@ final class CellGridView: NSView, @preconcurrency NSTextInputClient {
   private(set) var composePanes: [UInt64: ComposePresentation] = [:]
   weak var composeImageController: ComposeImageController?
   weak var composeViewportController: ComposeViewportController?
+  var sendComposeIndex: ((WireComposeIndexRequest) -> Void)?
+  lazy var composeNavigation = ComposeAccessibilityNavigation(grid: self)
   private var composeGeometryRevision: UInt64 = 0
   var richPopupProjection = false
   var popupCapture: UInt64?
@@ -232,6 +235,7 @@ final class CellGridView: NSView, @preconcurrency NSTextInputClient {
     }
     updateComposeTooltips()
     updateAccessibleImages()
+    composeNavigation.update()
     if old?.layout.text.projection.text != focusedCompose?.layout.text.projection.text {
       NSAccessibility.post(element: self, notification: .valueChanged)
     }
@@ -592,6 +596,8 @@ final class CellGridView: NSView, @preconcurrency NSTextInputClient {
   override func accessibilityRoleDescription() -> String? { "editor" }
   override func accessibilityLabel() -> String? { title }
   override func accessibilityValue() -> Any? { focusedCompose?.layout.text.projection.text ?? store.lines.joined(separator: "\n") }
+  override func accessibilityCustomRotors() -> [NSAccessibilityCustomRotor] { composeNavigation.rotors() }
+  override func accessibilityHelp() -> String? { composeNavigation.help ?? super.accessibilityHelp() }
 
   override func accessibilitySelectedTextRange() -> NSRange {
     if let compose = focusedCompose { return compose.selectedRange }
@@ -751,13 +757,15 @@ final class CellGridView: NSView, @preconcurrency NSTextInputClient {
 
   override func accessibilityChildren() -> [Any]? {
     guard let pane = focusedCompose else { return super.accessibilityChildren() }
-    return pane.layout.text.attachments.compactMap { accessibleImages[.init(pane, source: $0.attachment.source)] }
+    var children: [Any] = pane.layout.text.attachments.compactMap { accessibleImages[.init(pane, source: $0.attachment.source)] }
+    if let element = composeNavigation.loadedElement { children.append(element) }
+    return children
   }
 
   override func accessibilityVisibleChildren() -> [Any]? {
     guard let pane = focusedCompose else { return super.accessibilityVisibleChildren() }
     let visible = accessibilityScreenRect(pane.bounds)
-    return (accessibilityChildren() ?? []).filter { ($0 as? ComposeAccessibilityImage)?.accessibilityFrame().intersects(visible) == true }
+    return (accessibilityChildren() ?? []).filter { ($0 as? NSAccessibilityElement)?.accessibilityFrame().intersects(visible) == true }
   }
 
   func isCurrentAccessibilityImage(_ image: ComposeAccessibilityImage) -> Bool {
@@ -772,6 +780,7 @@ final class CellGridView: NSView, @preconcurrency NSTextInputClient {
   /// Scene numbers can repeat after a backend restart. Old AX objects must
   /// not regain ownership when a new connection supplies the same numbers.
   func invalidateAccessibleImages() {
+    composeNavigation.controller.reset()
     let hadImages = !accessibleImages.isEmpty
     accessibleImages.removeAll(); accessibleImageLabels.removeAll()
     if hadImages { NSAccessibility.post(element: self, notification: .layoutChanged) }
@@ -779,7 +788,7 @@ final class CellGridView: NSView, @preconcurrency NSTextInputClient {
 
   override func accessibilityHitTest(_ point: NSPoint) -> Any? {
     for image in accessibilityChildren() ?? [] {
-      if let image = image as? ComposeAccessibilityImage, image.accessibilityFrame().contains(point) { return image }
+      if let image = image as? NSAccessibilityElement, image.accessibilityFrame().contains(point) { return image }
     }
     return super.accessibilityHitTest(point)
   }

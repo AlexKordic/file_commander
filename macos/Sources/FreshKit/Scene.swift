@@ -172,6 +172,7 @@ public struct SceneMessage: @unchecked Sendable {
   public let composeRegionProbes: Bool
   public let nativePopupProjection: Bool
   public let composeSourceSelections: Bool
+  public let composeSemanticIndex: Bool
   public let sequence: Int
   /// What changed (everything, for a hello).
   public let frame: WireFrame
@@ -202,6 +203,7 @@ public struct SceneMessage: @unchecked Sendable {
       composeRegionProbes = hello.composeRegionProbes
       nativePopupProjection = hello.nativePopupProjection
       composeSourceSelections = hello.composeSourceSelections
+      composeSemanticIndex = hello.composeSemanticIndex
       frame = hello.scene
     case .frame:
       guard let decoded = try? WireFrame(serializedBytes: Array(payload)) else { return nil }
@@ -210,6 +212,7 @@ public struct SceneMessage: @unchecked Sendable {
       composeRegionProbes = false
       nativePopupProjection = false
       composeSourceSelections = false
+      composeSemanticIndex = false
       frame = decoded
     default:
       return nil
@@ -265,6 +268,7 @@ public final class SceneStore {
   @ObservationIgnored public private(set) var popups: [WireScenePopup] = []
   @ObservationIgnored public private(set) var nativePopupProjection = false
   @ObservationIgnored public private(set) var composeSourceSelections = false
+  @ObservationIgnored public private(set) var composeSemanticIndex = false
   @ObservationIgnored public private(set) var palette: WirePaletteView?
   @ObservationIgnored public private(set) var trustDialog: WireTrustDialogView?
   @ObservationIgnored public private(set) var contextMenu: WireContextMenuView?
@@ -283,6 +287,7 @@ public final class SceneStore {
     if message.isHello {
       composeAcceptances.removeAll(); nativePopupProjection = message.nativePopupProjection
       composeSourceSelections = message.composeSourceSelections
+      composeSemanticIndex = message.composeSemanticIndex
     }
     let previousWindow = windowID
     var change = SceneChange()

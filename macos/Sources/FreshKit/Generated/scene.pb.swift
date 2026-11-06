@@ -2140,6 +2140,98 @@ public nonisolated struct WireComposeCaret: Sendable {
   public init() {}
 }
 
+/// Source ownership for a complete document navigation generation.
+public nonisolated struct WireComposeIndexOwner: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var window: UInt64 = 0
+
+  public var leaf: UInt64 = 0
+
+  public var buffer: UInt64 = 0
+
+  public var epoch: UInt64 = 0
+
+  public var revision: UInt64 = 0
+
+  public var authority: UInt64 = 0
+
+  public var document: UInt64 = 0
+
+  public var length: UInt64 = 0
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
+/// A complete label can span parts; offsets and lengths count UTF-8 bytes.
+/// kind: heading levels 1-6, link 16, image 17. No target URI or image data.
+public nonisolated struct WireComposeIndexPart: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var index: UInt64 = 0
+
+  public var start: UInt64 = 0
+
+  public var end: UInt64 = 0
+
+  public var kind: UInt32 = 0
+
+  public var labelOffset: UInt64 = 0
+
+  public var label: String = String()
+
+  public var labelDone: Bool = false
+
+  public var labelLength: UInt64 = 0
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
+/// Type 4: independently acknowledged metadata, never a render Frame.
+/// At most 128 KiB; errors discard the generation rather than its tail.
+public nonisolated struct WireComposeIndexChunk: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var id: UInt64 = 0
+
+  public var owner: WireComposeIndexOwner {
+    get {_owner ?? WireComposeIndexOwner()}
+    set {_owner = newValue}
+  }
+  /// Returns true if `owner` has been explicitly set.
+  public var hasOwner: Bool {self._owner != nil}
+  /// Clears the value of `owner`. Subsequent reads from it will return its default value.
+  public mutating func clearOwner() {self._owner = nil}
+
+  public var totalEntries: UInt64 = 0
+
+  public var labelBytes: UInt64 = 0
+
+  public var sequence: UInt64 = 0
+
+  public var parts: [WireComposeIndexPart] = []
+
+  public var done: Bool = false
+
+  public var error: String = String()
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+
+  fileprivate var _owner: WireComposeIndexOwner? = nil
+}
+
 /// A line between panes.
 public nonisolated struct WireSeparator: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
@@ -3501,6 +3593,9 @@ public nonisolated struct WireServerHello: Sendable {
   /// Atomic, revisioned source selection groups in ComposeInput field 22.
   public var composeSourceSelections: Bool = false
 
+  /// Complete document navigation inventories, independently streamed as type 4.
+  public var composeSemanticIndex: Bool = false
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
@@ -3798,6 +3893,43 @@ public nonisolated struct WireComposeSelectionTarget: Sendable {
 
   fileprivate var _position: UInt64? = nil
   fileprivate var _anchor: UInt64? = nil
+}
+
+/// Type 31: exactly one of owner (subscribe), cancel or applied_sequence.
+/// IDs increase per client; at most one inventory and one unacknowledged chunk.
+public nonisolated struct WireComposeIndexRequest: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var id: UInt64 = 0
+
+  public var owner: WireComposeIndexOwner {
+    get {_owner ?? WireComposeIndexOwner()}
+    set {_owner = newValue}
+  }
+  /// Returns true if `owner` has been explicitly set.
+  public var hasOwner: Bool {self._owner != nil}
+  /// Clears the value of `owner`. Subsequent reads from it will return its default value.
+  public mutating func clearOwner() {self._owner = nil}
+
+  public var cancel: Bool = false
+
+  public var appliedSequence: UInt64 {
+    get {_appliedSequence ?? 0}
+    set {_appliedSequence = newValue}
+  }
+  /// Returns true if `appliedSequence` has been explicitly set.
+  public var hasAppliedSequence: Bool {self._appliedSequence != nil}
+  /// Clears the value of `appliedSequence`. Subsequent reads from it will return its default value.
+  public mutating func clearAppliedSequence() {self._appliedSequence = nil}
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+
+  fileprivate var _owner: WireComposeIndexOwner? = nil
+  fileprivate var _appliedSequence: UInt64? = nil
 }
 
 /// Source carets captured with the input's source_revision (or scope revision).
@@ -7977,6 +8109,205 @@ nonisolated extension WireComposeCaret: SwiftProtobuf.Message, SwiftProtobuf._Me
   }
 }
 
+nonisolated extension WireComposeIndexOwner: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".ComposeIndexOwner"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}window\0\u{1}leaf\0\u{1}buffer\0\u{1}epoch\0\u{1}revision\0\u{1}authority\0\u{1}document\0\u{1}length\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularUInt64Field(value: &self.window) }()
+      case 2: try { try decoder.decodeSingularUInt64Field(value: &self.leaf) }()
+      case 3: try { try decoder.decodeSingularUInt64Field(value: &self.buffer) }()
+      case 4: try { try decoder.decodeSingularUInt64Field(value: &self.epoch) }()
+      case 5: try { try decoder.decodeSingularUInt64Field(value: &self.revision) }()
+      case 6: try { try decoder.decodeSingularUInt64Field(value: &self.authority) }()
+      case 7: try { try decoder.decodeSingularUInt64Field(value: &self.document) }()
+      case 8: try { try decoder.decodeSingularUInt64Field(value: &self.length) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if self.window != 0 {
+      try visitor.visitSingularUInt64Field(value: self.window, fieldNumber: 1)
+    }
+    if self.leaf != 0 {
+      try visitor.visitSingularUInt64Field(value: self.leaf, fieldNumber: 2)
+    }
+    if self.buffer != 0 {
+      try visitor.visitSingularUInt64Field(value: self.buffer, fieldNumber: 3)
+    }
+    if self.epoch != 0 {
+      try visitor.visitSingularUInt64Field(value: self.epoch, fieldNumber: 4)
+    }
+    if self.revision != 0 {
+      try visitor.visitSingularUInt64Field(value: self.revision, fieldNumber: 5)
+    }
+    if self.authority != 0 {
+      try visitor.visitSingularUInt64Field(value: self.authority, fieldNumber: 6)
+    }
+    if self.document != 0 {
+      try visitor.visitSingularUInt64Field(value: self.document, fieldNumber: 7)
+    }
+    if self.length != 0 {
+      try visitor.visitSingularUInt64Field(value: self.length, fieldNumber: 8)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: WireComposeIndexOwner, rhs: WireComposeIndexOwner) -> Bool {
+    if lhs.window != rhs.window {return false}
+    if lhs.leaf != rhs.leaf {return false}
+    if lhs.buffer != rhs.buffer {return false}
+    if lhs.epoch != rhs.epoch {return false}
+    if lhs.revision != rhs.revision {return false}
+    if lhs.authority != rhs.authority {return false}
+    if lhs.document != rhs.document {return false}
+    if lhs.length != rhs.length {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension WireComposeIndexPart: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".ComposeIndexPart"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}index\0\u{1}start\0\u{1}end\0\u{1}kind\0\u{3}label_offset\0\u{1}label\0\u{3}label_done\0\u{3}label_length\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularUInt64Field(value: &self.index) }()
+      case 2: try { try decoder.decodeSingularUInt64Field(value: &self.start) }()
+      case 3: try { try decoder.decodeSingularUInt64Field(value: &self.end) }()
+      case 4: try { try decoder.decodeSingularUInt32Field(value: &self.kind) }()
+      case 5: try { try decoder.decodeSingularUInt64Field(value: &self.labelOffset) }()
+      case 6: try { try decoder.decodeSingularStringField(value: &self.label) }()
+      case 7: try { try decoder.decodeSingularBoolField(value: &self.labelDone) }()
+      case 8: try { try decoder.decodeSingularUInt64Field(value: &self.labelLength) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if self.index != 0 {
+      try visitor.visitSingularUInt64Field(value: self.index, fieldNumber: 1)
+    }
+    if self.start != 0 {
+      try visitor.visitSingularUInt64Field(value: self.start, fieldNumber: 2)
+    }
+    if self.end != 0 {
+      try visitor.visitSingularUInt64Field(value: self.end, fieldNumber: 3)
+    }
+    if self.kind != 0 {
+      try visitor.visitSingularUInt32Field(value: self.kind, fieldNumber: 4)
+    }
+    if self.labelOffset != 0 {
+      try visitor.visitSingularUInt64Field(value: self.labelOffset, fieldNumber: 5)
+    }
+    if !self.label.isEmpty {
+      try visitor.visitSingularStringField(value: self.label, fieldNumber: 6)
+    }
+    if self.labelDone != false {
+      try visitor.visitSingularBoolField(value: self.labelDone, fieldNumber: 7)
+    }
+    if self.labelLength != 0 {
+      try visitor.visitSingularUInt64Field(value: self.labelLength, fieldNumber: 8)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: WireComposeIndexPart, rhs: WireComposeIndexPart) -> Bool {
+    if lhs.index != rhs.index {return false}
+    if lhs.start != rhs.start {return false}
+    if lhs.end != rhs.end {return false}
+    if lhs.kind != rhs.kind {return false}
+    if lhs.labelOffset != rhs.labelOffset {return false}
+    if lhs.label != rhs.label {return false}
+    if lhs.labelDone != rhs.labelDone {return false}
+    if lhs.labelLength != rhs.labelLength {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension WireComposeIndexChunk: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".ComposeIndexChunk"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}id\0\u{1}owner\0\u{3}total_entries\0\u{3}label_bytes\0\u{1}sequence\0\u{1}parts\0\u{1}done\0\u{1}error\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularUInt64Field(value: &self.id) }()
+      case 2: try { try decoder.decodeSingularMessageField(value: &self._owner) }()
+      case 3: try { try decoder.decodeSingularUInt64Field(value: &self.totalEntries) }()
+      case 4: try { try decoder.decodeSingularUInt64Field(value: &self.labelBytes) }()
+      case 5: try { try decoder.decodeSingularUInt64Field(value: &self.sequence) }()
+      case 6: try { try decoder.decodeRepeatedMessageField(value: &self.parts) }()
+      case 7: try { try decoder.decodeSingularBoolField(value: &self.done) }()
+      case 8: try { try decoder.decodeSingularStringField(value: &self.error) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
+    if self.id != 0 {
+      try visitor.visitSingularUInt64Field(value: self.id, fieldNumber: 1)
+    }
+    try { if let v = self._owner {
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 2)
+    } }()
+    if self.totalEntries != 0 {
+      try visitor.visitSingularUInt64Field(value: self.totalEntries, fieldNumber: 3)
+    }
+    if self.labelBytes != 0 {
+      try visitor.visitSingularUInt64Field(value: self.labelBytes, fieldNumber: 4)
+    }
+    if self.sequence != 0 {
+      try visitor.visitSingularUInt64Field(value: self.sequence, fieldNumber: 5)
+    }
+    if !self.parts.isEmpty {
+      try visitor.visitRepeatedMessageField(value: self.parts, fieldNumber: 6)
+    }
+    if self.done != false {
+      try visitor.visitSingularBoolField(value: self.done, fieldNumber: 7)
+    }
+    if !self.error.isEmpty {
+      try visitor.visitSingularStringField(value: self.error, fieldNumber: 8)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: WireComposeIndexChunk, rhs: WireComposeIndexChunk) -> Bool {
+    if lhs.id != rhs.id {return false}
+    if lhs._owner != rhs._owner {return false}
+    if lhs.totalEntries != rhs.totalEntries {return false}
+    if lhs.labelBytes != rhs.labelBytes {return false}
+    if lhs.sequence != rhs.sequence {return false}
+    if lhs.parts != rhs.parts {return false}
+    if lhs.done != rhs.done {return false}
+    if lhs.error != rhs.error {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
 nonisolated extension WireSeparator: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".Separator"
   public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}vertical\0\u{1}x\0\u{1}y\0\u{1}len\0")
@@ -10166,7 +10497,7 @@ nonisolated extension WireFrame: SwiftProtobuf.Message, SwiftProtobuf._MessageIm
 
 nonisolated extension WireServerHello: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".ServerHello"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}version\0\u{1}scene\0\u{3}compose_region_probes\0\u{3}native_popup_projection\0\u{3}compose_source_selections\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}version\0\u{1}scene\0\u{3}compose_region_probes\0\u{3}native_popup_projection\0\u{3}compose_source_selections\0\u{3}compose_semantic_index\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -10179,6 +10510,7 @@ nonisolated extension WireServerHello: SwiftProtobuf.Message, SwiftProtobuf._Mes
       case 3: try { try decoder.decodeSingularBoolField(value: &self.composeRegionProbes) }()
       case 4: try { try decoder.decodeSingularBoolField(value: &self.nativePopupProjection) }()
       case 5: try { try decoder.decodeSingularBoolField(value: &self.composeSourceSelections) }()
+      case 6: try { try decoder.decodeSingularBoolField(value: &self.composeSemanticIndex) }()
       default: break
       }
     }
@@ -10204,6 +10536,9 @@ nonisolated extension WireServerHello: SwiftProtobuf.Message, SwiftProtobuf._Mes
     if self.composeSourceSelections != false {
       try visitor.visitSingularBoolField(value: self.composeSourceSelections, fieldNumber: 5)
     }
+    if self.composeSemanticIndex != false {
+      try visitor.visitSingularBoolField(value: self.composeSemanticIndex, fieldNumber: 6)
+    }
     try unknownFields.traverse(visitor: &visitor)
   }
 
@@ -10213,6 +10548,7 @@ nonisolated extension WireServerHello: SwiftProtobuf.Message, SwiftProtobuf._Mes
     if lhs.composeRegionProbes != rhs.composeRegionProbes {return false}
     if lhs.nativePopupProjection != rhs.nativePopupProjection {return false}
     if lhs.composeSourceSelections != rhs.composeSourceSelections {return false}
+    if lhs.composeSemanticIndex != rhs.composeSemanticIndex {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
@@ -10663,6 +10999,55 @@ nonisolated extension WireComposeSelectionTarget: SwiftProtobuf.Message, SwiftPr
   public static func ==(lhs: WireComposeSelectionTarget, rhs: WireComposeSelectionTarget) -> Bool {
     if lhs._position != rhs._position {return false}
     if lhs._anchor != rhs._anchor {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension WireComposeIndexRequest: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".ComposeIndexRequest"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}id\0\u{1}owner\0\u{1}cancel\0\u{3}applied_sequence\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularUInt64Field(value: &self.id) }()
+      case 2: try { try decoder.decodeSingularMessageField(value: &self._owner) }()
+      case 3: try { try decoder.decodeSingularBoolField(value: &self.cancel) }()
+      case 4: try { try decoder.decodeSingularUInt64Field(value: &self._appliedSequence) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
+    if self.id != 0 {
+      try visitor.visitSingularUInt64Field(value: self.id, fieldNumber: 1)
+    }
+    try { if let v = self._owner {
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 2)
+    } }()
+    if self.cancel != false {
+      try visitor.visitSingularBoolField(value: self.cancel, fieldNumber: 3)
+    }
+    try { if let v = self._appliedSequence {
+      try visitor.visitSingularUInt64Field(value: v, fieldNumber: 4)
+    } }()
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: WireComposeIndexRequest, rhs: WireComposeIndexRequest) -> Bool {
+    if lhs.id != rhs.id {return false}
+    if lhs._owner != rhs._owner {return false}
+    if lhs.cancel != rhs.cancel {return false}
+    if lhs._appliedSequence != rhs._appliedSequence {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }

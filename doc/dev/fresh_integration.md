@@ -983,9 +983,41 @@ and unavailable ownership disable these actions. An unconfirmed selection
 after a source change cannot redirect a selected-text replacement. Replacing
 only the displayed part of a larger selected range is refused. AXValue is
 not writable because it may be a cropped projection with concealed Markdown.
-Document-wide semantic heading/link navigation, accessibility actions across
-provisional composition, a complete document text model and interactive
-VoiceOver qualification remain unfinished.
+Development peers also advertise `ServerHello.compose_semantic_index` (field
+6). One parser-owned inventory covers every heading, link and image in the
+document, including source outside the displayed window. Parsed labels retain
+their full text for case/diacritic-insensitive filtering; destinations and
+image bytes are not copied into this inventory. Image alt names use the same
+parsed text for native attachments and navigation. Nested image alt links
+are not separately actionable.
+
+The complete inventory admits at most 262,144 entries and 32 MiB of UTF-8
+labels. Exceeding either limit reports unavailable navigation while preserving
+the complete editable source. It never advertises a prefix as complete.
+`ComposeIndexRequest` (TLV 31) subscribes by window, leaf, buffer, lifetime,
+revision, filesystem authority, document identity and source length. A separate
+`ComposeIndexChunk` (TLV 4) sends at most 64 KiB of label text and 256 parts
+per chunk, with each part at most 16 KiB on a UTF-8 scalar boundary; the
+encoded chunk is bounded by 128 KiB. Only one chunk awaits its own sequence
+acknowledgment. Render-frame Applied does not advance it, and index chunks
+never enter SceneStore or change the render sequence. One retirement notice
+can overtake a pending chunk when its source becomes obsolete.
+
+The native client subscribes when assistive navigation is queried, validates
+the entire generation and prepares full-label search away from the UI thread.
+Prepared search metadata has a separate 64 MiB budget. Typed heading, heading
+level, link and image rotors use AppKit APIs available on macOS 14. Menu labels
+may show an explicit ellipsis; filtering still searches the full label.
+Offscreen results use securely archivable loading tokens and source-owned
+virtual elements. Selecting a result follows the ordinary Fresh source
+selection queue and measured caret reveal. It does not open a link or rewrite
+Markdown. Source, focus and connection changes retire tokens and elements,
+even if a restarted backend reuses the same numeric IDs. Heading elements use
+a group role with a heading-level description, avoiding newer OS-only roles.
+
+These are direct AppKit and private-backend contracts. Actual VoiceOver,
+macOS 14 runtime behavior, accessibility actions across provisional
+composition and a complete document text model remain unqualified.
 
 Native rich Compose keeps marked text as a provisional replacement over that
 immutable source snapshot. Partial updates, marked/selected subranges and
