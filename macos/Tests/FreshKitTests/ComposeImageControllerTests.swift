@@ -26,6 +26,63 @@ final class ComposeImageControllerTests: XCTestCase {
   }
 
   @MainActor
+  func testCanonicallyEquivalentImageNamesKeepTheirOwnPixelsAndValidators() async throws {
+    let composed = "caf\u{e9}.png", decomposed = "cafe\u{301}.png"
+    XCTAssertEqual(composed, decomposed, "Swift String equality folds canonical spelling")
+    XCTAssertNotEqual(Array(composed.utf8), Array(decomposed.utf8))
+    let firstImage = try asset(40), secondImage = try asset(80)
+    var sent: [WireComposeAssetRequest] = [], time = 0.0
+    let controller = ComposeImageController(now: { time }, decode: { bytes, _ in
+      bytes.first == 1 ? firstImage : secondImage
+    }, send: { sent.append($0) })
+    defer { controller.reset() }
+    let first = demand(target: composed)
+    var second = demand(target: decomposed); second.image.start = 40; second.image.end = 61
+    controller.update([first, second])
+    let requests = sent.filter { !$0.cancel }
+    XCTAssertEqual(requests.count, 2, "byte-distinct names can address different files on an SSH filesystem")
+    guard requests.count == 2 else { return }
+    controller.receive([complete(requests[1], value: 2), complete(requests[0], value: 1)])
+    try await eventually { controller.outstandingCount == 0 }
+    XCTAssertTrue(controller.state(scope: first.scope, image: first.image, authority: 5, document: 7).asset === firstImage)
+    XCTAssertTrue(controller.state(scope: second.scope, image: second.image, authority: 5, document: 7).asset === secondImage)
+    time = 6; controller.update([second, first])
+    let refresh = sent.filter { !$0.cancel }.suffix(2)
+    XCTAssertEqual(refresh.first(where: { $0.start == first.image.start })?.knownDigest, Data(repeating: 1, count: 32))
+    XCTAssertEqual(refresh.first(where: { $0.start == second.image.start })?.knownDigest, Data(repeating: 2, count: 32))
+    controller.update([first])
+    XCTAssertTrue(sent.contains { $0.cancel && $0.id == refresh.first(where: { $0.start == second.image.start })?.id })
+    XCTAssertFalse(sent.contains { $0.cancel && $0.id == refresh.first(where: { $0.start == first.image.start })?.id })
+  }
+
+  @MainActor
+  func testLiteralTargetIdentitySurvivesStringBridgingAndRetargeting() async throws {
+    let literal = "images/\(String(repeating: "café👩🏽‍💻/", count: 4))café.png"
+    let foreign = NSMutableString(string: literal) as String
+    XCTAssertEqual(Array(literal.utf8), Array(foreign.utf8))
+    let old = try asset(40), replacement = try asset(80)
+    var sent: [WireComposeAssetRequest] = []
+    let controller = ComposeImageController(decode: { bytes, _ in bytes.first == 1 ? old : replacement }, send: { sent.append($0) })
+    defer { controller.reset() }
+    let first = demand(target: literal)
+    var second = demand(target: foreign); second.image.start = 40; second.image.end = 60
+    controller.update([first, second])
+    XCTAssertEqual(sent.count, 1, "identical bytes share a read regardless of String storage")
+    controller.receive([complete(sent[0])]); try await eventually { controller.outstandingCount == 0 }
+    XCTAssertTrue(controller.state(scope: second.scope, image: second.image, authority: 5, document: 7).asset === old)
+    var changed = first
+    changed.image.target = literal.replacingOccurrences(of: "café.png", with: "cafe\u{301}.png")
+    changed.scope.bufferRevision += 1
+    XCTAssertEqual(changed.image.target, first.image.target)
+    controller.update([changed])
+    XCTAssertEqual(sent.filter { !$0.cancel }.count, 2, "mutating a target must derive a new literal resource identity")
+    XCTAssertTrue(sent.last!.knownVersion.isEmpty); XCTAssertTrue(sent.last!.knownDigest.isEmpty)
+    controller.receive([complete(sent.last!, value: 2)]); try await eventually { controller.outstandingCount == 0 }
+    XCTAssertTrue(controller.state(scope: first.scope, image: first.image, authority: 5, document: 7).asset === old)
+    XCTAssertTrue(controller.state(scope: changed.scope, image: changed.image, authority: 5, document: 7).asset === replacement)
+  }
+
+  @MainActor
   func testDecodesOffMainThreadDeduplicatesReferencesAndKeepsSourceAuthoritySeparate() async throws {
     let decoded = try asset(), changed = expectation(description: "decoded image")
     var sent: [WireComposeAssetRequest] = []

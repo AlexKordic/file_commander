@@ -2089,6 +2089,55 @@ final class ComposeInputTests: XCTestCase {
   }
 
   @MainActor
+  func testLiteralUnicodeImageTargetsKeepDistinctNativePreviewsThroughRetargeting() async throws {
+    let firstName = "caf\u{e9}.png", secondName = "cafe\u{301}.png"
+    func scene(_ first: String, revision: UInt64 = 4) throws -> WirePane {
+      let markup = ["![one](\(first))", "![two](\(secondName))"]
+      let source = "First \(markup[0]) second \(markup[1]) tail.\n"
+      var value = pane(source, revision: revision)
+      value.compose.assetAuthority = 5; value.compose.assetDocument = 7
+      value.compose.images = try zip(markup, [first, secondName]).enumerated().map { index, pair in
+        let range = try XCTUnwrap(source.range(of: pair.0, options: .literal))
+        return .with {
+          $0.start = UInt64(source[..<range.lowerBound].utf8.count); $0.end = UInt64(source[..<range.upperBound].utf8.count)
+          $0.target = pair.1; $0.alt = index == 0 ? "one" : "two"; $0.rendered = true
+        }
+      }
+      return value
+    }
+    func png(_ width: Int) throws -> Data {
+      let pixels = try XCTUnwrap(CGContext(data: nil, width: width, height: 20, bitsPerComponent: 8,
+        bytesPerRow: width * 4, space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
+      pixels.setFillColor(CGColor(red: width == 40 ? 1 : 0, green: 0.2, blue: width == 80 ? 1 : 0, alpha: 1))
+      pixels.fill(CGRect(x: 0, y: 0, width: width, height: 20))
+      let data = NSMutableData(), output = try XCTUnwrap(CGImageDestinationCreateWithData(data, "public.png" as CFString, 1, nil))
+      CGImageDestinationAddImage(output, try XCTUnwrap(pixels.makeImage()), nil); XCTAssertTrue(CGImageDestinationFinalize(output))
+      return data as Data
+    }
+    let initial = try scene(firstName), peer = try ScenePeer(pane: initial)
+    defer { peer.close() }
+    let editor = richEditor(); defer { editor.detachAll() }
+    editor.attach(socketPath: peer.path, app: nil)
+    try await eventually { peer.assets.filter { !$0.cancel }.count == 2 }
+    let requests = peer.assets.filter { !$0.cancel }
+    for index in [1, 0] {
+      let request = try XCTUnwrap(requests.first { $0.start == initial.compose.images[index].start })
+      let bytes = try png(index == 0 ? 40 : 80)
+      peer.image(.with { $0.id = request.id; $0.data = bytes; $0.total = UInt64(bytes.count); $0.done = true
+        $0.version = Data(repeating: UInt8(index + 1), count: 32); $0.digest = $0.version })
+    }
+    try await eventually { editor.grid?.focusedCompose?.layout.text.attachments.map(\.rect.width) == [40, 80] }
+    let replacement = try scene(secondName, revision: 5)
+    peer.show(replacement)
+    try await eventually { editor.grid?.focusedCompose?.pane.compose.bufferRevision == 5
+      && editor.grid?.focusedCompose?.layout.text.attachments.map(\.rect.width) == [80, 80] }
+    let displayed = try XCTUnwrap(editor.grid?.focusedCompose)
+    XCTAssertEqual(Array(displayed.pane.compose.text.utf8), Array(replacement.compose.text.utf8))
+    XCTAssertEqual(displayed.layout.text.attachments.map(\.attachment.source.lowerBound), replacement.compose.images.map { Int($0.start) })
+    XCTAssertEqual(peer.assets.filter { !$0.cancel }.count, 2, "both references can now share the already received second resource")
+  }
+
+  @MainActor
   func testReturningToTheEditorRevalidatesImagesWithoutBlankingTheNativePreview() async throws {
     let source = "Before ![pic](x.png) after text.\n"
     var scene = pane(source)

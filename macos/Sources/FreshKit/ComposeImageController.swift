@@ -25,6 +25,23 @@ public final class ComposeImageController {
   fileprivate struct Key: Hashable {
     var window, buffer, authority, document: UInt64
     var target: String
+
+    // Filesystem destinations retain their literal UTF-8 spelling. Swift's
+    // default String equality would merge canonically equivalent names that
+    // can identify different files on an SSH host.
+    static func == (a: Self, b: Self) -> Bool {
+      a.window == b.window && a.buffer == b.buffer && a.authority == b.authority && a.document == b.document
+        && a.target.utf8.elementsEqual(b.target.utf8)
+    }
+
+    func hash(into hasher: inout Hasher) {
+      hasher.combine(window); hasher.combine(buffer); hasher.combine(authority); hasher.combine(document)
+      let bytes = target.utf8
+      if bytes.withContiguousStorageIfAvailable({ hasher.combine(bytes: UnsafeRawBufferPointer($0)) }) == nil {
+        // Use the same byte hashing for foreign/noncontiguous string storage.
+        Array(bytes).withUnsafeBufferPointer { hasher.combine(bytes: UnsafeRawBufferPointer($0)) }
+      }
+    }
   }
   private struct Work {
     var demand: Demand

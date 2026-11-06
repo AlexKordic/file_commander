@@ -549,6 +549,14 @@ background-parser threshold while its first inline PNG decode is held, then
 checks native image geometry, exact save and one undo. These checks do not
 qualify a remote connection or an actual input method.
 
+Image-identity checks keep canonically equivalent but byte-distinct targets
+separate through out-of-order decodes, validation and cancellation. Identical
+bytes from bridged strings still share work, while mutating a destination
+selects its current literal identity. A controlled native scene receives two
+real PNGs for those names, checks distinct preview geometry, then retargets one
+reference to the already cached second resource. This exercises the native
+protocol/controller/view path; it does not prove live SSH filesystem behavior.
+
 Image-cache pressure checks preserve known geometry after evicting pixels,
 including inline/block selection, hit testing, caret placement and accessible
 explanations at narrow and wide measures. They vary nearby demands, ordering

@@ -1088,6 +1088,11 @@ Closing/hiding the last presentation or replacing its document/authority retires
 the decode. Source reads retain their stricter revision/range cancellation and
 retry behavior. The four outstanding slots, two decode workers, 64 MiB decoded
 cache and 128 cache entries remain unchanged.
+Image target identity uses its literal UTF-8 spelling. Canonically equivalent
+Unicode names can identify distinct files on an SSH filesystem, so they keep
+separate reads, pixels and validation tokens. Identical destination bytes share
+work across source references and string representations; Fresh still resolves
+the destination on the document's filesystem authority.
 When the byte limit evicts an image, the bitmap-free entry retains its known
 dimensions, so wrapping, selections and caret geometry do not change merely
 because pixels left the cache. The placeholder explains the memory limit.
