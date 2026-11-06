@@ -6,6 +6,69 @@ import FreshKit
 
 final class ComposePreferencesTests: XCTestCase {
   @MainActor
+  func testVirtualPendingProjectionCannotBePublishedAsBackendNavigation() throws {
+    _ = NSApplication.shared; NSApp.setActivationPolicy(.prohibited)
+    let source = "aa BB cc"
+    let context = try XCTUnwrap(ComposeTextContext(.with { $0.text = source }, documentLength: UInt64(source.utf8.count)))
+    let marked = try XCTUnwrap(ComposeMarkedText(context: context, range: NSRange(location: 0, length: 0), source: 0..<0,
+      text: NSAttributedString(string: "日本"), selected: NSRange(location: 2, length: 0)))
+    let prefix = try XCTUnwrap(ComposeComposition(primary: 1, values: [1: marked]))
+    let selected = try XCTUnwrap(ComposeVirtualSelections(prefix: prefix))
+    let pending = try XCTUnwrap(ComposeVirtualInsertion(selections: selected, text: NSAttributedString(string: "X"), selected: NSRange(location: 1, length: 0)))
+    let pane = WirePane.with {
+      $0.buffer = 1; $0.leaf = 2; $0.content.w = 80; $0.content.h = 20
+      $0.compose = .with {
+        $0.text = source; $0.sourceEnd = UInt64(source.utf8.count); $0.documentLen = $0.sourceEnd
+        $0.segments = [.with { $0.sourceEnd = UInt64(source.utf8.count); $0.displayEnd = $0.sourceEnd }]
+      }
+    }
+    let body = NSFont.systemFont(ofSize: 18), mono = NSFont.monospacedSystemFont(ofSize: 18, weight: .regular)
+    let visible = try XCTUnwrap(ComposePresentation(pane: pane, window: 99, cell: CGSize(width: 8, height: 16), body: body,
+      monospace: mono, virtualInsertion: pending))
+    XCTAssertEqual(visible.layout.text.projection.text, "日本Xaa BB cc")
+    XCTAssertNil(visible.measuredNavigation(), "pending text is presentation-only until a matching backend receipt")
+  }
+
+  @MainActor
+  func testSparseNavigationIsResampledForNewCaretsAndCurrentSceneOwnership() throws {
+    _ = NSApplication.shared; NSApp.setActivationPolicy(.prohibited)
+    let source = String(repeating: "Proportional café 👩🏽‍💻 words in a complete paragraph.\n\n", count: 400) + "Tail.\n"
+    var pane = WirePane.with {
+      $0.buffer = 1; $0.leaf = 2; $0.content.w = 80; $0.content.h = 12
+      $0.compose = .with {
+        $0.text = source; $0.sourceEnd = UInt64(source.utf8.count); $0.documentLen = $0.sourceEnd
+        $0.segments = [.with { $0.sourceEnd = UInt64(source.utf8.count); $0.displayEnd = $0.sourceEnd }]
+        $0.cursors = [.with { $0.id = 1; $0.primary = true }]
+      }
+    }
+    let body = NSFont.systemFont(ofSize: 18), mono = NSFont.monospacedSystemFont(ofSize: 18, weight: .regular)
+    func presentation(_ reuse: ComposePresentation? = nil, geometry: UInt64 = 0) throws -> ComposePresentation {
+      try XCTUnwrap(ComposePresentation(pane: pane, window: 99, cell: CGSize(width: 8, height: 16), body: body, monospace: mono,
+        reuse: reuse, geometryRevision: geometry))
+    }
+    let first = try presentation(), original = try XCTUnwrap(first.measuredNavigation())
+    pane.compose.cursors[0].position = 1; pane.compose.selectionRevision += 1
+    let nearby = try presentation(first)
+    XCTAssertTrue(first.layout.text === nearby.layout.text)
+    XCTAssertEqual(try XCTUnwrap(nearby.measuredNavigation()).id, original.id,
+      "an already measured nearby caret must not force another geometry exchange")
+    let tail = UInt64(source.utf8.count - "Tail.\n".utf8.count)
+    XCTAssertFalse(original.lines.flatMap(\.stops).contains { $0.source == tail })
+    pane.compose.cursors[0].position = tail; pane.compose.selectionRevision += 1
+    let moved = try presentation(nearby), current = try XCTUnwrap(moved.measuredNavigation())
+    XCTAssertTrue(first.layout.text === moved.layout.text)
+    XCTAssertNotEqual(current.id, original.id)
+    XCTAssertTrue(current.lines.flatMap(\.stops).contains { $0.source == tail }, "the new cursor needs actual measured stops")
+    pane.compose.bufferRevision += 1
+    let revised = try presentation(moved), updated = try XCTUnwrap(revised.measuredNavigation())
+    XCTAssertTrue(moved.layout.text === revised.layout.text)
+    XCTAssertNotEqual(current.id, updated.id, "navigation ownership follows the current source scope")
+    let changed = try presentation(revised, geometry: 1), measured = try XCTUnwrap(changed.measuredNavigation())
+    XCTAssertTrue(revised.layout.text === changed.layout.text)
+    XCTAssertNotEqual(measured.environmentRevision, updated.environmentRevision)
+  }
+
+  @MainActor
   func testSplitPanesKeepTheirOwnScopeCursorViewportAndGeometry() throws {
     _ = NSApplication.shared
     NSApp.setActivationPolicy(.prohibited)

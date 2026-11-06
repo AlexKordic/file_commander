@@ -569,6 +569,15 @@ resizes, checks document-wide text-service coordinates, inserts Unicode, saves
 exact CRLF source and undoes once. This does not establish a latency budget for
 the complete workflow or qualify arbitrary soft-wrap clipping.
 
+Geometry-reuse regressions vary marked-clause selection independently of its
+draft, then replace the draft or raw reveal context. Empty-window relocation
+and canonically equivalent but byte-distinct projections must retain current
+source coordinates and exact bytes. Virtual insertions must display their
+current text and cannot supply backend navigation. Native sample checks keep
+nearby measured carets, resample a distant caret, and retire geometry exchanges
+when source or rendering ownership changes. These complement the real-backend
+typing/save/undo workflows; they do not qualify actual input methods.
+
 ## CI
 
 `.github/workflows/tests.yml` is the repository's only workflow. It runs on

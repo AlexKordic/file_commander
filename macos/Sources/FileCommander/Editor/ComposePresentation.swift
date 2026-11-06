@@ -72,7 +72,18 @@ final class ComposePresentation {
       styleRevision = reuse.styleRevision
     } else { styleRevision = UInt64.random(in: 1...UInt64.max) }
     self.caretStates = caretStates
-    if let reuse, reuse.layout.text === layout.text, reuse.bounds.height == bounds.height { navigation = reuse.navigation }
+    // Keep a valid nearby sample across ordinary caret moves. A distant caret
+    // needs new stops; sharing immutable text cannot certify missing geometry.
+    if let reuse, let sample = reuse.navigation, reuse.layout.text === layout.text, reuse.bounds.height == bounds.height,
+       reuse.identity == .init(window: window, leaf: pane.leaf, buffer: pane.buffer),
+       reuse.pane.compose.bufferRevision == pane.compose.bufferRevision,
+       reuse.pane.compose.projectionRevision == pane.compose.projectionRevision,
+       reuse.styleRevision == styleRevision, reuse.environmentRevision == environmentRevision,
+       pane.compose.cursors.flatMap({ $0.hasAnchor ? [$0.position, $0.anchor] : [$0.position] }).allSatisfy({ position in
+         sample.lines.contains { $0.stops.contains { $0.source == position } }
+       }) {
+      navigation = sample
+    }
     identity = .init(window: window, leaf: pane.leaf, buffer: pane.buffer)
     self.viewport = viewport ?? .with { $0.position = pane.compose.topByte }
     scrolling = ComposeViewport(text: layout.text, documentLength: pane.compose.documentLen, height: max(1, bounds.height - 24),
@@ -159,7 +170,7 @@ final class ComposePresentation {
   }
 
   func measuredNavigation(aroundY: CGFloat? = nil) -> WireComposeLayout? {
-    guard layout.preedit == nil else { return nil }
+    guard layout.composition == nil, layout.virtualInsertion == nil else { return nil }
     if let navigation, aroundY == nil { return navigation }
     let positions = pane.compose.cursors.flatMap { $0.hasAnchor ? [$0.position, $0.anchor] : [$0.position] }
     navigation = layout.text.navigation(id: UInt64.random(in: 1...UInt64.max), pageHeight: max(1, bounds.height - 40),

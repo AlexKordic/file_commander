@@ -1111,6 +1111,17 @@ the temporary advances. Only the last measured paragraph is retained during
 construction. No source context is clipped, and neither a character count nor
 terminal columns determine the wrapping measure.
 
+Native geometry reuse compares literal UTF-8 projection bytes, source maps and
+window bounds, document/authority identity, structure, measured image sizes,
+fonts and width. Scene revisions and caret/marked-clause selections alone
+can share the validated geometry while retaining current presentation metadata.
+Draft text, source ranges and raw reveal context also belong to the reuse key.
+Virtual insertions use their complete placement path and cannot publish their
+provisional geometry as backend navigation. Sparse navigation samples retain
+their source/rendering ownership and must contain every current caret and
+selection endpoint. Nearby measured carets can keep the existing sample;
+distant carets or changed source/rendering ownership require a fresh sample.
+
 These additive prototype messages retain the current scene version during
 development. Audit the final protocol version and update the dependency pin,
 bundle, consumer, and recovery qualification together before enabling the
