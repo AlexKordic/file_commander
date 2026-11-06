@@ -12,6 +12,8 @@ import tarfile
 import tempfile
 import unittest
 import uuid
+from unittest.mock import patch
+from types import SimpleNamespace
 
 import qualify_compose as q
 
@@ -43,6 +45,41 @@ class QualificationTests(unittest.TestCase):
                 item = tarfile.TarInfo(name); item.size = 3
                 tar.addfile(item, io.BytesIO(b"a\0b"))
         return stream.getvalue()
+
+    def built_inputs(self):
+        products, engine = self.local / "products", self.local / "engine"
+        products.mkdir(); engine.mkdir()
+        for name in ("FileCommander", "fc-relaunch", "fc-askpass", "fresh"):
+            (products / name).write_bytes(b"built product")
+        (engine / "fc").write_bytes(b"built terminal")
+        archive = engine / "third_party/7zip/_o/7z.so"
+        archive.parent.mkdir(parents=True); archive.write_bytes(b"built archive library")
+        for name in ("FileCommander_FileCommander.bundle", "SwiftProtobuf_SwiftProtobuf.bundle"):
+            (products / name).mkdir()
+        return products, products / "fresh", engine
+
+    def test_preparation_accepts_current_products_without_a_swiftterm_resource_target(self):
+        products, fresh, engine = self.built_inputs()
+        files, resources = q.prepared_inputs(products, fresh, engine)
+        self.assertEqual(set(files), {"FileCommander", "fc-relaunch", "fc-askpass", "fresh", "fc", "7z.so"})
+        self.assertEqual({p.name for p in resources}, {"FileCommander_FileCommander.bundle", "SwiftProtobuf_SwiftProtobuf.bundle"})
+        older = products / "SwiftTerm_SwiftTerm.bundle"; older.mkdir()
+        self.assertIn(older, q.prepared_inputs(products, fresh, engine)[1])
+
+    def test_missing_required_resource_is_reported_before_creating_any_private_profile(self):
+        products, fresh, engine = self.built_inputs()
+        (products / "FileCommander_FileCommander.bundle").rmdir()
+        args = SimpleNamespace(products=products, fresh=fresh, engine_build=engine)
+        with patch.object(q.sys, "platform", "darwin"), patch.object(q.tempfile, "mkdtemp") as create:
+            with self.assertRaisesRegex(ValueError, "Missing built resource bundle"):
+                q.prepare(args)
+            create.assert_not_called()
+
+    def test_optional_bundle_path_must_be_a_directory_when_present(self):
+        products, fresh, engine = self.built_inputs()
+        (products / "SwiftTerm_SwiftTerm.bundle").write_bytes(b"not a resource directory")
+        with self.assertRaisesRegex(ValueError, "Missing built resource bundle"):
+            q.prepared_inputs(products, fresh, engine)
 
     def test_fixture_has_exact_crlf_unicode_and_binary_png(self):
         q.fixture_files(self.local / "files")

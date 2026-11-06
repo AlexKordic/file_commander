@@ -187,15 +187,30 @@ def locked(root):
         yield
 
 
-def prepare(args):
-    if sys.platform != "darwin":
-        raise ValueError("App preparation requires macOS")
-    products, fresh, engine = args.products.resolve(), args.fresh.resolve(), args.engine_build.resolve()
+def prepared_inputs(products, fresh, engine):
+    """Check every input before creating an app or a private profile."""
     files = {name: products / name for name in ("FileCommander", "fc-relaunch", "fc-askpass")}
     files.update(fresh=fresh, fc=engine / "fc", **{"7z.so": engine / "third_party/7zip/_o/7z.so"})
     for path in files.values():
         if not path.is_file():
             raise ValueError("Missing built product: " + str(path))
+    resources = [products / name for name in ("FileCommander_FileCommander.bundle", "SwiftProtobuf_SwiftProtobuf.bundle")]
+    # SwiftTerm 1.11.2 has no resource target. Older products can still contain
+    # its bundle; include it when present, without requiring a nonexistent one.
+    swiftterm = products / "SwiftTerm_SwiftTerm.bundle"
+    if swiftterm.exists():
+        resources.append(swiftterm)
+    for path in resources:
+        if not path.is_dir():
+            raise ValueError("Missing built resource bundle: " + str(path))
+    return files, resources
+
+
+def prepare(args):
+    if sys.platform != "darwin":
+        raise ValueError("App preparation requires macOS")
+    products, fresh, engine = args.products.resolve(), args.fresh.resolve(), args.engine_build.resolve()
+    files, resource_bundles = prepared_inputs(products, fresh, engine)
     root = Path(tempfile.mkdtemp(prefix="fc-cq-", dir="/tmp")).resolve()
     nonce = uuid.uuid4().hex
     (root / ".owner").write_text(nonce)
@@ -206,8 +221,8 @@ def prepare(args):
     binaries.mkdir(parents=True); resources.mkdir()
     for name, path in files.items():
         shutil.copy2(path, binaries / name)
-    for name in ("FileCommander_FileCommander.bundle", "SwiftTerm_SwiftTerm.bundle", "SwiftProtobuf_SwiftProtobuf.bundle"):
-        shutil.copytree(products / name, resources / name)
+    for path in resource_bundles:
+        shutil.copytree(path, resources / path.name)
     info = dict(CFBundleIdentifier="org.filecommander.composecheck." + nonce, CFBundleName="Compose Check",
                 CFBundleDisplayName="File Commander Compose Check", CFBundleExecutable="FileCommander",
                 CFBundlePackageType="APPL", CFBundleShortVersionString="0.0.0", CFBundleVersion="1",
