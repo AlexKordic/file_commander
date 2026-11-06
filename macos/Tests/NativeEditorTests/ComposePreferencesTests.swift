@@ -6,6 +6,33 @@ import FreshKit
 
 final class ComposePreferencesTests: XCTestCase {
   @MainActor
+  func testSelectionOnlyFramesKeepCurrentTextServicesAndUnchangedGeometry() throws {
+    _ = NSApplication.shared; NSApp.setActivationPolicy(.prohibited)
+    let source = "café 👩🏽‍💻 source context"
+    var pane = WirePane.with {
+      $0.buffer = 1; $0.leaf = 2; $0.content.w = 80; $0.content.h = 20
+      $0.compose = .with {
+        $0.text = source; $0.sourceEnd = UInt64(source.utf8.count); $0.documentLen = $0.sourceEnd
+        $0.segments = [.with { $0.sourceEnd = UInt64(source.utf8.count); $0.displayEnd = $0.sourceEnd }]
+        $0.textContext.text = source
+        $0.cursors = [.with { $0.id = 1; $0.primary = true }]
+      }
+    }
+    let body = NSFont.systemFont(ofSize: 18), mono = NSFont.monospacedSystemFont(ofSize: 18, weight: .regular)
+    let first = try XCTUnwrap(ComposePresentation(pane: pane, window: 99, cell: CGSize(width: 8, height: 16), body: body, monospace: mono))
+    pane.compose.textContext.selectionEnd = 4; pane.compose.selectionRevision += 1
+    pane.compose.cursors[0].position = 5; pane.compose.cursors[0].anchor = 0
+    let next = try XCTUnwrap(ComposePresentation(pane: pane, window: 99, cell: CGSize(width: 8, height: 16), body: body, monospace: mono, reuse: first))
+    XCTAssertTrue(next.layout.text === first.layout.text)
+    XCTAssertEqual(next.textServiceSelectedRange, NSRange(location: 0, length: 4))
+    XCTAssertEqual(next.sourceRange(forTextServiceRange: next.textServiceSelectedRange), 0..<5)
+    XCTAssertEqual(next.textServiceIndex(for: 5), 4)
+    XCTAssertEqual(first.textContext?.selection, NSRange(location: 0, length: 0))
+    pane.compose.textContext.selectionEnd = UInt64.max
+    XCTAssertNil(ComposePresentation(pane: pane, window: 99, cell: CGSize(width: 8, height: 16), body: body, monospace: mono, reuse: next))
+  }
+
+  @MainActor
   func testRawTextContextReuseKeepsLiteralUnicodeAndItsCurrentUTF16SourceMap() throws {
     _ = NSApplication.shared; NSApp.setActivationPolicy(.prohibited)
     let before = "é e\u{301}", after = "e\u{301} é"

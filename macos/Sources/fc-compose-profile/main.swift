@@ -31,10 +31,33 @@ func profile() throws {
     var decode: [Double] = [], cold: [Double] = [], retained: [Double] = [], multiple: [Double] = []
     var resized: [Double] = [], returned: [Double] = []
     var sharedMultiple: [Double] = []
+    var freshContextMS: [Double] = [], selectedContextMS: [Double] = []
+    var contextBytes = 0
     var baseline: ComposePaneLayout?
-    for _ in 0..<3 {
+    for iteration in 0..<3 {
       try autoreleasepool {
         let (pane, decodeMS) = try milliseconds { try WireComposePane(serializedBytes: bytes) }
+        if pane.hasTextContext {
+          guard let prior = ComposeTextContext(pane.textContext, documentLength: pane.documentLen) else {
+            throw ProfileFailure.layout("\(name): invalid raw text context")
+          }
+          // Separately delivered messages own separate string storage. Decode
+          // outside the timed region instead of measuring pointer identity.
+          var wire = try WireComposeTextContext(serializedBytes: pane.textContext.serializedData())
+          wire.selectionStart = wire.utf16Start + UInt64(wire.text.unicodeScalars.first?.utf16.count ?? 0)
+          wire.selectionEnd = wire.selectionStart
+          var fresh: ComposeTextContext?, selected: ComposeTextContext?
+          var freshMS = 0.0, selectedMS = 0.0
+          func create() { (fresh, freshMS) = milliseconds { ComposeTextContext(wire, documentLength: pane.documentLen) } }
+          func select() { (selected, selectedMS) = milliseconds { ComposeTextContext(wire, documentLength: pane.documentLen, reuse: prior) } }
+          if iteration % 2 == 0 { create(); select() } else { select(); create() }
+          guard let fresh, let selected, fresh.selection == selected.selection, fresh.source == selected.source,
+                fresh.range == selected.range, fresh.text.utf8.elementsEqual(selected.text.utf8),
+                fresh.sourceRange(forUTF16: fresh.selection) == selected.sourceRange(forUTF16: selected.selection) else {
+            throw ProfileFailure.layout("\(name): selection reuse changed raw context coordinates")
+          }
+          freshContextMS.append(freshMS); selectedContextMS.append(selectedMS); contextBytes = wire.text.utf8.count
+        }
         let (layout, coldMS) = milliseconds { ComposePaneLayout(pane: pane, body: body, monospace: code, width: 960) }
         guard let layout else { throw ProfileFailure.layout(name) }
         let (warm, retainedMS) = milliseconds { ComposePaneLayout(pane: pane, body: body, monospace: code, width: 960, reuse: layout) }
@@ -90,6 +113,7 @@ func profile() throws {
       "decode_ms": decode, "cold_layout_ms": cold, "retained_layout_ms": retained, "four_panes_ms": multiple,
       "resized_layout_ms": resized, "returned_layout_ms": returned,
       "shared_four_panes_ms": sharedMultiple,
+      "raw_context_bytes": contextBytes, "fresh_text_context_ms": freshContextMS, "reselected_text_context_ms": selectedContextMS,
       "process_peak_rss_bytes": peakRSS(),
     ])
   }
@@ -100,7 +124,7 @@ func profile() throws {
   #endif
   let report: [String: Any] = [
     "profile": configuration,
-    "scope": "protobuf decode and measured native layout; excludes plugin formatting, image I/O/decode, drawing and input-to-paint latency",
+    "scope": "protobuf decode, raw text-service context and measured native layout; excludes plugin formatting, image I/O/decode, drawing and input-to-paint latency",
     "rss_scope": "process high-water mark since start, including prior cases",
     "body_font": "Helvetica 18", "code_font": "Menlo 18", "width_points": 960,
     "cases": records,

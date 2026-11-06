@@ -11,12 +11,18 @@ public struct ComposeTextContext {
   private let utf16ToSource: [Int: Int]
   private let sourceToUTF16: [Int: Int]
 
-  public init?(_ wire: WireComposeTextContext, documentLength: UInt64) {
+  public init?(_ wire: WireComposeTextContext, documentLength: UInt64, reuse: ComposeTextContext? = nil) {
     guard let document = Int(exactly: documentLength), let start = Int(exactly: wire.sourceStart),
           let base = Int(exactly: wire.utf16Start), start <= document, base <= start,
           wire.text.utf8.count <= document - start,
           let a = Int(exactly: wire.selectionStart), let b = Int(exactly: wire.selectionEnd),
           a <= b, b <= document else { return nil }
+    if let reuse, reuse.documentLength == document, reuse.source.lowerBound == start, reuse.range.location == base,
+       reuse.text.utf8.elementsEqual(wire.text.utf8),
+       let selected = reuse.selecting(NSRange(location: a, length: b - a)) {
+      self = selected
+      return
+    }
     var units = base, byte = start, toSource = [base: start], toUTF16 = [start: base]
     for scalar in wire.text.unicodeScalars {
       units += scalar.utf16.count; byte += scalar.utf8.count

@@ -37,10 +37,7 @@ final class ComposePresentation {
         environmentLike: ComposePresentation? = nil, geometryRevision: UInt64 = 0) {
     guard pane.hasCompose, pane.hasBuffer else { return nil }
     if pane.compose.hasTextContext {
-      if let reuse, reuse.pane.compose.documentLen == pane.compose.documentLen,
-         reuse.pane.compose.textContext.text.utf8.elementsEqual(pane.compose.textContext.text.utf8),
-         reuse.pane.compose.textContext == pane.compose.textContext { textContext = reuse.textContext }
-      else { textContext = ComposeTextContext(pane.compose.textContext, documentLength: pane.compose.documentLen) }
+      textContext = ComposeTextContext(pane.compose.textContext, documentLength: pane.compose.documentLen, reuse: reuse?.textContext)
       guard textContext != nil else { return nil }
     } else { textContext = nil }
     let rect = pane.content

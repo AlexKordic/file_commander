@@ -591,6 +591,14 @@ typing/save/undo workflows; they do not qualify actual input methods.
 A raw-context regression changes canonically equivalent source of equal byte
 length, checking literal substrings, grapheme ranges and both directions of
 the current UTF-16/source mapping.
+Selection-only context checks compare fresh and reused maps at every UTF-16
+position and source byte across emoji, combining text, CJK and CRLF. Relocated
+contexts and changed document lengths must acquire current coordinates and
+bounds; malformed incoming metadata cannot reuse a previous valid snapshot.
+A native selection frame keeps unchanged geometry while exposing the new
+text-service selection. The Release profiler reports cold and selection-only
+context preparation separately, using independently decoded message strings;
+these timings exclude input-to-paint latency.
 
 ## CI
 
