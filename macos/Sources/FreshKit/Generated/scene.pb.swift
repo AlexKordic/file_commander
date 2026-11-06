@@ -1561,6 +1561,81 @@ public nonisolated struct WireComposeTable: Sendable {
 
   public var rows: [WireComposeTableRow] = []
 
+  public var measurementID: UInt64 = 0
+
+  public var measurement: WireComposeTableMeasurement {
+    get {_measurement ?? WireComposeTableMeasurement()}
+    set {_measurement = newValue}
+  }
+  /// Returns true if `measurement` has been explicitly set.
+  public var hasMeasurement: Bool {self._measurement != nil}
+  /// Clears the value of `measurement`. Subsequent reads from it will return its default value.
+  public mutating func clearMeasurement() {self._measurement = nil}
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+
+  fileprivate var _measurement: WireComposeTableMeasurement? = nil
+}
+
+/// Complete, deduplicated font inputs; independent of source windows and cursors.
+public nonisolated struct WireComposeTableMeasurement: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var columns: [WireComposeTableColumn] = []
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
+public nonisolated struct WireComposeTableColumn: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var samples: [WireComposeTableSample] = []
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
+public nonisolated struct WireComposeTableSample: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var text: String = String()
+
+  public var spans: [WireComposeTableStyle] = []
+
+  public var minimumOnly: Bool = false
+
+  public var image: Bool = false
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
+/// Relative UTF-8 ranges with bold/italic flags and a code-font choice.
+public nonisolated struct WireComposeTableStyle: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var start: UInt64 = 0
+
+  public var end: UInt64 = 0
+
+  public var flags: UInt32 = 0
+
+  public var code: Bool = false
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
@@ -6376,7 +6451,7 @@ nonisolated extension WireComposePane: SwiftProtobuf.Message, SwiftProtobuf._Mes
 
 nonisolated extension WireComposeTable: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".ComposeTable"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}start\0\u{1}end\0\u{1}alignments\0\u{1}rows\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}start\0\u{1}end\0\u{1}alignments\0\u{1}rows\0\u{3}measurement_id\0\u{1}measurement\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -6388,12 +6463,18 @@ nonisolated extension WireComposeTable: SwiftProtobuf.Message, SwiftProtobuf._Me
       case 2: try { try decoder.decodeSingularUInt64Field(value: &self.end) }()
       case 3: try { try decoder.decodeRepeatedUInt32Field(value: &self.alignments) }()
       case 4: try { try decoder.decodeRepeatedMessageField(value: &self.rows) }()
+      case 5: try { try decoder.decodeSingularUInt64Field(value: &self.measurementID) }()
+      case 6: try { try decoder.decodeSingularMessageField(value: &self._measurement) }()
       default: break
       }
     }
   }
 
   public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
     if self.start != 0 {
       try visitor.visitSingularUInt64Field(value: self.start, fieldNumber: 1)
     }
@@ -6406,6 +6487,12 @@ nonisolated extension WireComposeTable: SwiftProtobuf.Message, SwiftProtobuf._Me
     if !self.rows.isEmpty {
       try visitor.visitRepeatedMessageField(value: self.rows, fieldNumber: 4)
     }
+    if self.measurementID != 0 {
+      try visitor.visitSingularUInt64Field(value: self.measurementID, fieldNumber: 5)
+    }
+    try { if let v = self._measurement {
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 6)
+    } }()
     try unknownFields.traverse(visitor: &visitor)
   }
 
@@ -6414,6 +6501,158 @@ nonisolated extension WireComposeTable: SwiftProtobuf.Message, SwiftProtobuf._Me
     if lhs.end != rhs.end {return false}
     if lhs.alignments != rhs.alignments {return false}
     if lhs.rows != rhs.rows {return false}
+    if lhs.measurementID != rhs.measurementID {return false}
+    if lhs._measurement != rhs._measurement {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension WireComposeTableMeasurement: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".ComposeTableMeasurement"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}columns\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeRepeatedMessageField(value: &self.columns) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if !self.columns.isEmpty {
+      try visitor.visitRepeatedMessageField(value: self.columns, fieldNumber: 1)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: WireComposeTableMeasurement, rhs: WireComposeTableMeasurement) -> Bool {
+    if lhs.columns != rhs.columns {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension WireComposeTableColumn: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".ComposeTableColumn"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}samples\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeRepeatedMessageField(value: &self.samples) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if !self.samples.isEmpty {
+      try visitor.visitRepeatedMessageField(value: self.samples, fieldNumber: 1)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: WireComposeTableColumn, rhs: WireComposeTableColumn) -> Bool {
+    if lhs.samples != rhs.samples {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension WireComposeTableSample: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".ComposeTableSample"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}text\0\u{1}spans\0\u{3}minimum_only\0\u{1}image\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularStringField(value: &self.text) }()
+      case 2: try { try decoder.decodeRepeatedMessageField(value: &self.spans) }()
+      case 3: try { try decoder.decodeSingularBoolField(value: &self.minimumOnly) }()
+      case 4: try { try decoder.decodeSingularBoolField(value: &self.image) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if !self.text.isEmpty {
+      try visitor.visitSingularStringField(value: self.text, fieldNumber: 1)
+    }
+    if !self.spans.isEmpty {
+      try visitor.visitRepeatedMessageField(value: self.spans, fieldNumber: 2)
+    }
+    if self.minimumOnly != false {
+      try visitor.visitSingularBoolField(value: self.minimumOnly, fieldNumber: 3)
+    }
+    if self.image != false {
+      try visitor.visitSingularBoolField(value: self.image, fieldNumber: 4)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: WireComposeTableSample, rhs: WireComposeTableSample) -> Bool {
+    if lhs.text != rhs.text {return false}
+    if lhs.spans != rhs.spans {return false}
+    if lhs.minimumOnly != rhs.minimumOnly {return false}
+    if lhs.image != rhs.image {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension WireComposeTableStyle: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".ComposeTableStyle"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}start\0\u{1}end\0\u{1}flags\0\u{1}code\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularUInt64Field(value: &self.start) }()
+      case 2: try { try decoder.decodeSingularUInt64Field(value: &self.end) }()
+      case 3: try { try decoder.decodeSingularUInt32Field(value: &self.flags) }()
+      case 4: try { try decoder.decodeSingularBoolField(value: &self.code) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if self.start != 0 {
+      try visitor.visitSingularUInt64Field(value: self.start, fieldNumber: 1)
+    }
+    if self.end != 0 {
+      try visitor.visitSingularUInt64Field(value: self.end, fieldNumber: 2)
+    }
+    if self.flags != 0 {
+      try visitor.visitSingularUInt32Field(value: self.flags, fieldNumber: 3)
+    }
+    if self.code != false {
+      try visitor.visitSingularBoolField(value: self.code, fieldNumber: 4)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: WireComposeTableStyle, rhs: WireComposeTableStyle) -> Bool {
+    if lhs.start != rhs.start {return false}
+    if lhs.end != rhs.end {return false}
+    if lhs.flags != rhs.flags {return false}
+    if lhs.code != rhs.code {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }

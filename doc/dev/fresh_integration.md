@@ -518,7 +518,8 @@ Terminal Markdown column counts, padded or truncated table replacements and
 character-sized frames are not a native layout contract. Parsed tables
 currently bypass those terminal conceals, retaining editable source, semantic
 fonts and image overrides. Native list prefixes also bypass terminal indent
-expansion. Measured native table cells remain unfinished. The native default
+expansion. The native client keeps this source fallback until the measured-table
+workflow is qualified. The native default
 uses all available pane width; a reading limit is optional and measured in points.
 
 For native code blocks, Fresh records the source ranges owned by the Markdown
@@ -546,6 +547,28 @@ preserving escaped pipes, entities and opaque image ranges. Tabs separate
 present cells in the projected text; no column padding or forced wrapping is
 serialized. Image objects and exact image-source previews remain disjoint.
 Edits and undo still use Fresh's original Markdown source coordinates.
+
+`ComposeTable.measurement_id` and `measurement` supply complete, deduplicated
+font inputs for every column, including rows outside the displayed source
+window. Samples contain parsed reading text, relative UTF-8 bold/italic/code
+styles, image presence and minimum-only source syntax. The latter reserves
+room for complete source glyphs without letting URI or markup length dictate
+preferred widths. Core Text computes constraints from these inputs and the
+available pixel width. Image preference is a scalable share of that width,
+independent of which image dimensions have arrived. Source reveal and image
+loading therefore do not resize columns. Font, measure or edited table content
+can legitimately replace the constraints; a provisional wider cluster can
+temporarily expand its edited column without splitting the cluster.
+
+Visible-pane updates deliver measurement inputs once and then refer to their
+ID. Scene comparison treats the full payload and its reference as the same
+pane state. Held frames do not advance the delivered set. Sender bookkeeping
+and receiver retention belong to the current window/pane/document/table;
+leaving that table retires its reference, so returning sends a complete set.
+Offscreen navigation replies remain self-contained. The consumer validates
+style ranges and column counts and reuses validated inputs and measured widths
+through source-window changes. These complete inputs still need large-table,
+multiple-pane payload and latency qualification before enabling the capability.
 
 The native editor has not opted into table cells yet. `ComposeTableModel`
 validates the new data and resolves its source/display ranges, including
@@ -595,9 +618,9 @@ empty trailing drawing placeholder is excluded from native navigation until
 the actual next line has been measured. A real document EOF line remains
 addressable. These boundary requests preserve the pending selection anchor.
 
-Cross-window paging and complex nested entry/exit still need qualification.
-Stable column measures across source windows remain a prerequisite for enabling
-the capability. Legacy rich clients keep table source and
+Cross-window paging, complex nested entry/exit and native input/performance
+qualification remain prerequisites for enabling the capability.
+Legacy rich clients keep table source and
 can share the same backend with a table-capable client without exchanging
 their per-client projections. `compose-tables.pb` records that real-plugin
 source contract; `compose-table-image-source.pb` adds edited image markup and

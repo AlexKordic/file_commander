@@ -13,6 +13,9 @@ public final class ComposePaneLayout {
   private let typography: ComposeTypography
   private let images: [UInt64: ComposeImageState]
   private let imageSizes: [Int: CGSize]
+  private let tableModel: ComposeTableModel
+  private struct TableWidthKey: Hashable { let id: UInt64; let available: CGFloat }
+  private var tableWidths: [TableWidthKey: [CGFloat]] = [:]
   private struct CodeBlock { var source, display: Range<Int>; var indent: CGFloat }
   private var codeBlocks: [CodeBlock] = []
   private static let codePadding: CGFloat = 8
@@ -25,7 +28,7 @@ public final class ComposePaneLayout {
                typography: ComposeTypography = .init(),
                images: [UInt64: ComposeImageState] = [:], reuse: ComposePaneLayout? = nil,
                preedit: ComposeMarkedText? = nil, composition: ComposeComposition? = nil) {
-    guard let baseProjection = ComposeProjection(pane), typography.isValid else { return nil }
+    guard let baseProjection = ComposeProjection(pane), typography.isValid, width.isFinite, width > 0 else { return nil }
     guard pane.images.allSatisfy({ !($0.rendered && $0.sourcePreview) }) else { return nil }
     let composition = composition ?? preedit.flatMap { ComposeComposition(primary: 0, values: [0: $0]) }
     let preedit = composition?.primary
@@ -52,7 +55,8 @@ public final class ComposePaneLayout {
     }
     let objects = baseProjection.replacingObjects(sourceRanges)
     let base = objects?.projection ?? baseProjection
-    guard let tableModel = ComposeTableModel(pane: pane, projection: base) else { return nil }
+    guard let tableModel = ComposeTableModel(pane: pane, projection: base, reuse: reuse?.tableModel) else { return nil }
+    self.tableModel = tableModel
     let replacement = composition?.project(over: base)
     guard preedit == nil || replacement != nil else { return nil }
     let projection = replacement?.projection ?? base
@@ -102,6 +106,7 @@ public final class ComposePaneLayout {
       thematicRules = reuse.thematicRules
       codeBlocks = reuse.codeBlocks
       codeFrames = reuse.codeFrames
+      tableWidths = reuse.tableWidths
       return
     }
     struct Span { var source, range: Range<Int>; var role, flags: UInt32 }
@@ -198,15 +203,26 @@ public final class ComposePaneLayout {
       let containers = pane.spans.filter { ($0.role == 9 || $0.role == 10) && $0.start <= item.contentStart && item.contentStart < $0.end }.count
       hanging.append(.init(display: lineStart..<end, contentStart: bodyStart, indent: CGFloat(containers) * typography.indent))
     }
+    var measuredWidths: [TableWidthKey: [CGFloat]] = [:]
     let tableRuns = tables.map { table in
       let containers = pane.spans.filter { ($0.role == 9 || $0.role == 10) && $0.start <= table.source.lowerBound && table.source.lowerBound < $0.end }.count
+      let indent = min(CGFloat(containers) * typography.indent, width * 0.6)
+      var columns: [CGFloat]? = nil
+      if let measurement = table.measurement {
+        let key = TableWidthKey(id: measurement.id, available: max(1, width - indent))
+        if let reuse, CFEqual(body, reuse.body), CFEqual(monospace, reuse.monospace), let previous = reuse.tableWidths[key] { columns = previous }
+        else { columns = measurement.widths(body: body, monospace: monospace, available: key.available) }
+        measuredWidths[key] = columns
+      }
       return ComposeTextLayout.TableRun(table: table, indent: CGFloat(containers) * typography.indent,
         before: table.source.lowerBound >= projection.source.lowerBound ? typography.paragraphSpacing : 0,
-        after: table.source.upperBound <= projection.source.upperBound ? typography.paragraphSpacing : 0)
+        after: table.source.upperBound <= projection.source.upperBound ? typography.paragraphSpacing : 0,
+        columns: columns, adaptiveMinimum: composition != nil)
     }
     guard let layout = ComposeTextLayout(projection: projection, font: body, width: width,
       lineSpacing: typography.lineSpacing, fonts: fonts, attachments: attachments, paragraphs: paragraphs, hanging: hanging, tables: tableRuns) else { return nil }
     text = layout
+    tableWidths = measuredWidths
   }
 
   public struct Palette {

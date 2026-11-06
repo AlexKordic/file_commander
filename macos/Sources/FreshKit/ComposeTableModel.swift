@@ -21,6 +21,7 @@ public struct ComposeTableModel {
     public let source: Range<Int>
     public let alignments: [Alignment]
     public let rows: [Row]
+    public let measurement: ComposeTableMeasurement?
   }
   public let tables: [Table]
   private let documentLength: Int
@@ -65,12 +66,12 @@ public struct ComposeTableModel {
         rows.append(.init(source: row.source, display: display, contentEnd: row.contentEnd,
           header: row.header, raw: row.raw, cells: cells))
       }
-      result.append(.init(source: table.source, alignments: table.alignments, rows: rows))
+      result.append(.init(source: table.source, alignments: table.alignments, rows: rows, measurement: table.measurement))
     }
     return result
   }
 
-  public init?(pane: WireComposePane, projection: ComposeProjection? = nil) {
+  public init?(pane: WireComposePane, projection: ComposeProjection? = nil, reuse: ComposeTableModel? = nil) {
     guard let projection = projection ?? ComposeProjection(pane), let document = Int(exactly: pane.documentLen),
           projection.source.upperBound <= document else { return nil }
     let bytes = Array(projection.text.utf8)
@@ -86,11 +87,21 @@ public struct ComposeTableModel {
       return a..<b
     }
     var result: [Table] = [], previousTableEnd = 0
+    let cached = Dictionary(reuse?.tables.compactMap { $0.measurement.map { ($0.id, $0) } } ?? [], uniquingKeysWith: { _, last in last })
     for table in pane.tables {
       guard let source = bounds(table.start, table.end), !source.isEmpty,
             source.lowerBound >= previousTableEnd, !table.alignments.isEmpty, !table.rows.isEmpty else { return nil }
       let alignments = table.alignments.compactMap(Alignment.init(rawValue:))
       guard alignments.count == table.alignments.count else { return nil }
+      let measurement: ComposeTableMeasurement?
+      if table.measurementID == 0 {
+        guard !table.hasMeasurement else { return nil }; measurement = nil
+      } else {
+        guard table.hasMeasurement, table.measurement.columns.count == alignments.count else { return nil }
+        if let old = cached[table.measurementID], old.wire == table.measurement { measurement = old }
+        else { measurement = ComposeTableMeasurement(id: table.measurementID, wire: table.measurement, columns: alignments.count) }
+        guard measurement != nil else { return nil }
+      }
       var rows: [Row] = [], previousRowEnd = source.lowerBound
       for row in table.rows {
         guard let range = bounds(row.start, row.end), !range.isEmpty,
@@ -117,7 +128,7 @@ public struct ComposeTableModel {
         rows.append(.init(source: range, display: text, contentEnd: end, header: row.header, raw: row.source, cells: cells))
         previousRowEnd = range.upperBound
       }
-      result.append(.init(source: source, alignments: alignments, rows: rows))
+      result.append(.init(source: source, alignments: alignments, rows: rows, measurement: measurement))
       previousTableEnd = source.upperBound
     }
     tables = result; documentLength = document

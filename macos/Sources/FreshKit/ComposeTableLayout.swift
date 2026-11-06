@@ -6,8 +6,11 @@ extension ComposeTextLayout {
   public struct TableRun {
     public let table: ComposeTableModel.Table
     public let indent, before, after: CGFloat
-    public init(table: ComposeTableModel.Table, indent: CGFloat = 0, before: CGFloat = 0, after: CGFloat = 0) {
+    public let columns: [CGFloat]?
+    public let adaptiveMinimum: Bool
+    public init(table: ComposeTableModel.Table, indent: CGFloat = 0, before: CGFloat = 0, after: CGFloat = 0, columns: [CGFloat]? = nil, adaptiveMinimum: Bool = false) {
       self.table = table; self.indent = indent; self.before = before; self.after = after
+      self.columns = columns; self.adaptiveMinimum = adaptiveMinimum
     }
   }
 
@@ -65,12 +68,12 @@ struct ComposeMeasuredTable {
     self.run = run
     indent = min(run.indent, width * 0.6)
     let available = max(1, width - indent)
-    let string = attributed.string as NSString
     let typesetter = CTTypesetterCreateWithAttributedString(attributed)
-    let blank = CTLineCreateWithAttributedString(NSAttributedString(string: " ", attributes: [NSAttributedString.Key(kCTFontAttributeName as String): font]))
-    let emptyWidth = max(1, CGFloat(CTLineGetTypographicBounds(blank, nil, nil, nil)))
-    var minimum = Array(repeating: emptyWidth, count: run.table.alignments.count)
-    var natural = minimum, rows: [Row] = []
+    var constraints = ComposeColumnConstraints(count: run.table.alignments.count, font: font, available: available)
+    if let columns = run.columns {
+      guard columns.count == run.table.alignments.count, columns.allSatisfy({ $0.isFinite && $0 > Self.padding * 2 }) else { return nil }
+    }
+    var rows: [Row] = []
     func range(_ bytes: Range<Int>) -> NSRange? {
       guard let a = indices[bytes.lowerBound], let b = indices[bytes.upperBound], a <= b else { return nil }
       return NSRange(location: a, length: b - a)
@@ -79,53 +82,22 @@ struct ComposeMeasuredTable {
       guard let span = range(row.display) else { return nil }
       var cells: [NSRange?] = []
       for (column, cell) in row.cells.enumerated() {
-        guard column < natural.count else { return nil }
+        guard column < run.table.alignments.count else { return nil }
         guard let display = cell.display else { cells.append(nil); continue }
         guard let span = range(display) else { return nil }
         cells.append(span)
-        guard !row.raw, span.length > 0 else { continue }
-        let line = CTTypesetterCreateLine(typesetter, CFRange(location: span.location, length: span.length))
-        var cellNatural = CGFloat(CTLineGetTypographicBounds(line, nil, nil, nil))
-        var at = span.location
-        while at < NSMaxRange(span) {
-          let cluster = string.rangeOfComposedCharacterSequence(at: at)
-          guard cluster.location == at, NSMaxRange(cluster) <= NSMaxRange(span) else { return nil }
-          let a = CTLineGetOffsetForStringIndex(line, at, nil), b = CTLineGetOffsetForStringIndex(line, NSMaxRange(cluster), nil)
-          minimum[column] = max(minimum[column], abs(b - a))
-          at = NSMaxRange(cluster)
+        if !row.raw, run.columns == nil || run.adaptiveMinimum {
+          let imageWidth = attachments.filter { $0.display.overlaps(display) }.map { min($0.size.width, available * 0.35) }.max() ?? 0
+          constraints.include(attributed, range: span, column: column, preferred: run.columns == nil,
+            imageWidth: imageWidth, typesetter: typesetter)
         }
-        do {
-          // Keep short words readable before distributing spare space by
-          // content. The bound is a pixel share, not a character count; an
-          // unbroken long word can still wrap instead of forcing a huge grid.
-          let share = max(emptyWidth, available / CGFloat(natural.count) - Self.padding * 2)
-          string.enumerateSubstrings(in: span, options: [.byWords, .substringNotRequired]) { _, word, _, _ in
-            let line = CTTypesetterCreateLine(typesetter, CFRange(location: word.location, length: word.length))
-            minimum[column] = max(minimum[column], min(share, ceil(CGFloat(CTLineGetTypographicBounds(line, nil, nil, nil))) + 0.5))
-          }
-        }
-        for image in attachments where image.display.overlaps(display) {
-          // The image is scalable. It contributes a preferred width, not an
-          // unshrinkable minimum that would force a terminal-style grid.
-          cellNatural = max(cellNatural, min(image.size.width, available * 0.35))
-        }
-        natural[column] = max(natural[column], min(available, cellNatural))
       }
-      guard row.raw || cells.count == natural.count else { return nil }
+      guard row.raw || cells.count == run.table.alignments.count else { return nil }
       rows.append(.init(model: row, range: span, cells: cells))
     }
     self.rows = rows
-    minimum = minimum.map { $0 + Self.padding * 2 }
-    natural = zip(natural, minimum).map { max($0 + Self.padding * 2, $1) }
-    let floor = minimum.reduce(0, +), desired = natural.reduce(0, +)
-    if available >= desired {
-      columns = natural.map { $0 + (available - desired) / CGFloat(natural.count) }
-    } else if available > floor {
-      columns = zip(minimum, natural).map { $0 + ($1 - $0) * (available - floor) / (desired - floor) }
-    } else {
-      // A cluster must remain intact. Expose the actual overflow extent so a
-      // consumer can scroll it; never clip text or split it to fit a column.
-      columns = minimum
-    }
+    if let fixed = run.columns {
+      columns = run.adaptiveMinimum ? zip(fixed, constraints.minimum).map { max($0, $1 + Self.padding * 2) } : fixed
+    } else { columns = constraints.widths }
   }
 }

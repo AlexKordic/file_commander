@@ -263,6 +263,7 @@ public final class SceneStore {
 
   public func apply(_ message: SceneMessage) {
     let frame = message.frame
+    let previousWindow = windowID
     var change = SceneChange()
     change.isHello = message.isHello
     if message.isHello {
@@ -322,13 +323,19 @@ public final class SceneStore {
       grid[index] = row
       change.rows.insert(index)
     }
+    let previousPanes = panes
     if frame.hasPaneLen {
       let count = Int(frame.paneLen)
       if count < panes.count { panes.removeLast(panes.count - count) }
       while panes.count < count { panes.append(WirePane()) }
     }
     for update in frame.panes where Int(update.index) < panes.count {
-      panes[Int(update.index)] = update.pane
+      var pane = update.pane
+      if pane.hasCompose, previousWindow == windowID,
+         let previous = previousPanes.first(where: { $0.leaf == pane.leaf && $0.hasBuffer && pane.hasBuffer && $0.buffer == pane.buffer }) {
+        pane.compose = pane.compose.retainingTableMeasurements(from: previous.hasCompose ? previous.compose : nil)
+      }
+      panes[Int(update.index)] = pane
     }
     if frame.hasPaneLen || !frame.panes.isEmpty { change.regions.insert("panes") }
     func region(_ present: Bool, _ name: String, _ apply: () -> Void) {
