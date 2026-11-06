@@ -108,11 +108,12 @@ final class ComposeTableMeasurementTests: XCTestCase {
         previous = reused
       }
     }
-    // An ID alone never certifies cached content, even in the same pane.
+    // An ID alone never certifies cached content, even at the same width.
+    previous = try XCTUnwrap(ComposePaneLayout(pane: pane, body: body, monospace: code, width: 500, reuse: previous))
     pane.tables[0].measurement.columns[0].samples.append(.with { $0.text = String(repeating: "W", count: 200) })
-    let changed = try XCTUnwrap(ComposePaneLayout(pane: pane, body: body, monospace: code, width: 500, reuse: previous))
-    let fresh = try XCTUnwrap(ComposePaneLayout(pane: pane, body: body, monospace: code, width: 500))
-    let original = try XCTUnwrap(ComposePaneLayout(pane: previous.pane, body: body, monospace: code, width: 500))
+    let changed = try XCTUnwrap(ComposePaneLayout(pane: pane, body: body, monospace: code, width: previous.width, reuse: previous))
+    let fresh = try XCTUnwrap(ComposePaneLayout(pane: pane, body: body, monospace: code, width: previous.width))
+    let original = try XCTUnwrap(ComposePaneLayout(pane: previous.pane, body: body, monospace: code, width: previous.width))
     XCTAssertEqual(changed.text.tables.map(\.columns), fresh.text.tables.map(\.columns))
     XCTAssertNotEqual(changed.text.tables.map(\.columns), original.text.tables.map(\.columns))
   }

@@ -14,8 +14,6 @@ public final class ComposePaneLayout {
   private let images: [UInt64: ComposeImageState]
   private let imageSizes: [Int: CGSize]
   private let tableModel: ComposeTableModel
-  private struct TableWidthKey: Hashable { let id: UInt64; let available: CGFloat }
-  private var tableWidths: [TableWidthKey: [CGFloat]] = [:]
   private struct CodeBlock { var source, display: Range<Int>; var indent: CGFloat }
   private var codeBlocks: [CodeBlock] = []
   private static let codePadding: CGFloat = 8
@@ -121,7 +119,6 @@ public final class ComposePaneLayout {
       thematicRules = reuse.thematicRules
       codeBlocks = reuse.codeBlocks
       codeFrames = reuse.codeFrames
-      tableWidths = reuse.tableWidths
       return
     }
     struct Span { var source, range: Range<Int>; var role, flags: UInt32 }
@@ -227,16 +224,14 @@ public final class ComposePaneLayout {
       let containers = pane.spans.filter { ($0.role == 9 || $0.role == 10) && $0.start <= item.contentStart && item.contentStart < $0.end }.count
       hanging.append(.init(display: lineStart..<end, contentStart: bodyStart, indent: CGFloat(containers) * typography.indent))
     }
-    var measuredWidths: [TableWidthKey: [CGFloat]] = [:]
     let tableRuns = tables.map { table in
       let containers = pane.spans.filter { ($0.role == 9 || $0.role == 10) && $0.start <= table.source.lowerBound && table.source.lowerBound < $0.end }.count
       let indent = min(CGFloat(containers) * typography.indent, width * 0.6)
       var columns: [CGFloat]? = nil
       if let measurement = table.measurement {
-        let key = TableWidthKey(id: measurement.id, available: max(1, width - indent))
-        if let reuse, CFEqual(body, reuse.body), CFEqual(monospace, reuse.monospace), let previous = reuse.tableWidths[key] { columns = previous }
-        else { columns = measurement.widths(body: body, monospace: monospace, available: key.available) }
-        measuredWidths[key] = columns
+        // The validated object owns its intrinsic font cache. An ID alone
+        // cannot certify old columns when the supplied content has changed.
+        columns = measurement.widths(body: body, monospace: monospace, available: max(1, width - indent))
       }
       return ComposeTextLayout.TableRun(table: table, indent: CGFloat(containers) * typography.indent,
         before: table.source.lowerBound >= projection.source.lowerBound ? typography.paragraphSpacing : 0,
@@ -246,7 +241,6 @@ public final class ComposePaneLayout {
     guard let layout = ComposeTextLayout(projection: projection, font: body, width: width,
       lineSpacing: typography.lineSpacing, fonts: fonts, attachments: attachments, paragraphs: paragraphs, hanging: hanging, tables: tableRuns) else { return nil }
     text = layout
-    tableWidths = measuredWidths
   }
 
   public struct Palette {
