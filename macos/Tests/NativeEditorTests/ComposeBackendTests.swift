@@ -120,6 +120,37 @@ private final class ComposeBackend {
 
 final class ComposeBackendTests: XCTestCase {
   @MainActor
+  func testParsedLinkDestinationsFollowGlyphsAndSourceEditsThroughSaveAndUndo() async throws {
+    let backend = try backend(); defer { backend.captureDiagnostics("link-targets"); backend.stop() }
+    let editor = editor(BackendPasteboard()); defer { editor.detachAll() }
+    let original = "# Destinations\r\n\r\n[**café 👩🏽‍💻**](docs/a\\(b\\).md) and [東京][ref].\r\n\r\n"
+      + "<user@example.invalid>\r\n\r\n[ref]: <docs/a b.md>\r\n\r\n"
+      + "| Key | Value |\r\n| --- | --- |\r\n| one | two |\r\n\r\nend\r\n"
+    let file = backend.root.appendingPathComponent("links.md")
+    try Data(original.utf8).write(to: file)
+    try await attach(backend, file: file, editor: editor)
+    let grid = try XCTUnwrap(editor.grid)
+    try await eventually(editor, "parser-owned link destinations") {
+      Set(grid.focusedCompose?.layout.links.map(\.target) ?? []) == Set(["docs/a(b).md", "docs/a b.md", "mailto:user@example.invalid"])
+    }
+    let shown = try XCTUnwrap(grid.focusedCompose)
+    let label = (shown.layout.text.projection.text as NSString).range(of: "café")
+    let rect = try XCTUnwrap(ComposeAccessibilityText(pane: shown).bounds(for: label))
+    XCTAssertEqual(grid.composeLinkDescription(at: CGPoint(x: rect.midX, y: rect.midY)), "docs/a(b).md")
+    let range = (original as NSString).range(of: "docs/a\\(b\\).md")
+    editor.grid(grid, replace: "docs/second.md", range: range, in: shown)
+    try await eventually(editor, "updated destination after editing its raw source") {
+      grid.focusedCompose?.layout.links.contains { $0.target == "docs/second.md" } == true
+    }
+    editor.send(.action(name: "save", argsJson: ""))
+    let expected = original.replacingOccurrences(of: "docs/a\\(b\\).md", with: "docs/second.md")
+    try await eventually(editor, "exact link source saved") { (try? Data(contentsOf: file)) == Data(expected.utf8) }
+    editor.send(.action(name: "undo", argsJson: "")); editor.send(.action(name: "save", argsJson: ""))
+    try await eventually(editor, "link undo preserves original CRLF spelling") { (try? Data(contentsOf: file)) == Data(original.utf8) }
+    XCTAssertFalse(FileManager.default.fileExists(atPath: backend.root.appendingPathComponent("docs").path))
+  }
+
+  @MainActor
   private func eventually(_ editor: NativeEditor? = nil, _ description: String,
                           timeout: TimeInterval = 12, _ condition: () -> Bool,
                           file: StaticString = #filePath, line: UInt = #line) async throws {

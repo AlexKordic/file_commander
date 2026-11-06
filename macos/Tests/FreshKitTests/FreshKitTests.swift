@@ -66,6 +66,17 @@ final class SceneWireTests: XCTestCase {
     XCTAssertEqual(try WirePopupPointer(serializedBytes: input.payload()), pointer)
   }
 
+  func testParsedLinkDestinationDecodesUnicodeAndRetainsEmptyTargetPresence() throws {
+    let bytes: [UInt8] = [0x08, 7, 0x10, 20, 0x20, 20, 0x32, 13] + Array("docs/café.md".utf8)
+    var span = try WireComposeSpan(serializedBytes: bytes)
+    XCTAssertEqual(span.start, 7); XCTAssertEqual(span.end, 20)
+    XCTAssertTrue(span.hasLinkTarget); XCTAssertEqual(span.linkTarget, "docs/café.md")
+    span = try WireComposeSpan(serializedBytes: [0x32, 0])
+    XCTAssertTrue(span.hasLinkTarget); XCTAssertEqual(span.linkTarget, "")
+    span = try WireComposeSpan(serializedBytes: [])
+    XCTAssertFalse(span.hasLinkTarget)
+  }
+
   /// Fresh's hand encoder and protoc independently produce these bytes. The
   /// matching Rust fixture lives in webui/popup_wire_tests.rs.
   func testPopupSourceOwnershipDecodesWithoutLosingCellFallbackOrRowIdentity() throws {

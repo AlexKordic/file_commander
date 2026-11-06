@@ -9,6 +9,7 @@
   "FreshKitTests.ComposeImageControllerTests",
   "FreshKitTests.ComposeImageTests",
   "FreshKitTests.ComposeIntervalIndexTests",
+  "FreshKitTests.ComposeLinkTests",
   "FreshKitTests.ComposeMarkedTextTests",
   "FreshKitTests.ComposePendingPointerTests",
   "FreshKitTests.ComposePendingTextTests",

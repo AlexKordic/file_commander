@@ -181,6 +181,39 @@ private final class ScenePeer: @unchecked Sendable {
 
 final class ComposeInputTests: XCTestCase {
   @MainActor
+  func testLinkTooltipsUseMeasuredUnicodeGlyphsAndCurrentSourceMetadataWithoutDispatchingInput() async throws {
+    let source = "Plain café 👩🏽‍💻 שלום and a long wrapped label across several fragments."
+    var scene = pane(source, width: 24)
+    scene.compose.spans = [.with {
+      $0.start = UInt64("Plain ".utf8.count); $0.end = UInt64(source.utf8.count)
+      $0.flags = 4 | 16; $0.linkTarget = "docs/café.md"
+    }]
+    let peer = try ScenePeer(pane: scene); defer { peer.close() }
+    let editor = richEditor(); defer { editor.detachAll() }
+    editor.attach(socketPath: peer.path, app: nil)
+    try await eventually { editor.grid?.focusedCompose?.layout.links.count == 1 }
+    let grid = try XCTUnwrap(editor.grid), shown = try XCTUnwrap(grid.focusedCompose)
+    var point = CGPoint.zero
+    for token in ["c", "👩🏽‍💻", "ש"] {
+      let range = (source as NSString).range(of: token)
+      let rect = try XCTUnwrap(ComposeAccessibilityText(pane: shown).bounds(for: range))
+      point = CGPoint(x: rect.midX, y: rect.midY)
+      XCTAssertEqual(grid.composeLinkDescription(at: point), "docs/café.md")
+      XCTAssertEqual(grid.view(grid, stringForToolTip: 0, point: point, userData: nil), "docs/café.md")
+    }
+    let plain = try XCTUnwrap(ComposeAccessibilityText(pane: shown).bounds(for: NSRange(location: 0, length: 1)))
+    XCTAssertNil(grid.composeLinkDescription(at: CGPoint(x: plain.midX, y: plain.midY)))
+    XCTAssertNil(grid.composeLinkDescription(at: CGPoint(x: shown.bounds.maxX + 10, y: shown.bounds.midY)))
+    scene.compose.bufferRevision = 5; scene.compose.spans[0].linkTarget = "docs/cafe\u{301}.md"
+    peer.show(scene)
+    try await eventually { grid.focusedCompose?.pane.compose.bufferRevision == 5 }
+    XCTAssertTrue(try XCTUnwrap(grid.composeLinkDescription(at: point)).utf8.elementsEqual("docs/cafe\u{301}.md".utf8))
+    XCTAssertTrue(peer.inputs.isEmpty, "reading a destination never follows it or moves a cursor")
+    editor.detachAll()
+    XCTAssertNil(grid.composeLinkDescription(at: point))
+  }
+
+  @MainActor
   func testPopupClickSerializesItsReleaseAndFollowingTextUsesTheAcceptedResultOrRecovers() async throws {
     for accept in [true, false] {
       var source = pane("alp")

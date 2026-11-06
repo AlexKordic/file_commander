@@ -97,6 +97,8 @@ final class CellGridView: NSView, @preconcurrency NSTextInputClient {
   var composePalette: ComposePaneLayout.Palette?
   private struct ImageTip: Equatable { var rect: CGRect; var text: String }
   private var imageTips: [ImageTip] = []
+  private struct LinkTip: Equatable { var rect: CGRect; var links: [ComposeLink] }
+  private var linkTips: [LinkTip] = []
   private var accessibleImages: [ComposeAccessibilityImage.ID: ComposeAccessibilityImage] = [:]
   private var accessibleImageLabels: [ComposeAccessibilityImage.ID: String] = [:]
 
@@ -224,7 +226,7 @@ final class CellGridView: NSView, @preconcurrency NSTextInputClient {
       cancelComposition(recover: true, rebuild: false)
       rebuildCompose(); needsDisplay = true; return
     }
-    updateImageTooltips()
+    updateComposeTooltips()
     updateAccessibleImages()
     if old?.layout.text.projection.text != focusedCompose?.layout.text.projection.text {
       NSAccessibility.post(element: self, notification: .valueChanged)
@@ -243,9 +245,11 @@ final class CellGridView: NSView, @preconcurrency NSTextInputClient {
     }
   }
 
-  private func updateImageTooltips() {
+  private func updateComposeTooltips() {
     var tips: [ImageTip] = []
+    var links: [LinkTip] = []
     for pane in composePanes.values {
+      if !pane.layout.links.isEmpty { links.append(LinkTip(rect: pane.bounds, links: pane.layout.links)) }
       for placed in pane.layout.text.attachments {
         let rect = placed.rect.offsetBy(dx: pane.origin.x, dy: pane.origin.y).intersection(pane.bounds)
         guard !rect.isEmpty, !rect.isNull,
@@ -254,18 +258,32 @@ final class CellGridView: NSView, @preconcurrency NSTextInputClient {
       }
     }
     tips.sort { a, b in a.rect.minY == b.rect.minY ? a.rect.minX < b.rect.minX : a.rect.minY < b.rect.minY }
-    guard tips != imageTips else { return }
-    removeAllToolTips(); imageTips = tips
+    links.sort { a, b in a.rect.minY == b.rect.minY ? a.rect.minX < b.rect.minX : a.rect.minY < b.rect.minY }
+    guard tips != imageTips || links != linkTips else { return }
+    removeAllToolTips(); imageTips = tips; linkTips = links
     for tip in tips { _ = addToolTip(tip.rect, owner: self, userData: nil) }
+    // Resolve one hovered glyph on demand. Constructing selection rectangles
+    // for every link would repeatedly scan the complete fragment list.
+    for tip in links { _ = addToolTip(tip.rect, owner: self, userData: nil) }
   }
 
   func composeImageDescription(at point: NSPoint) -> String? {
     imageTips.first { $0.rect.contains(point) }?.text
   }
 
+  func composeLinkDescription(at point: NSPoint) -> String? {
+    guard delegate?.connected == true, popup(at: point) == nil else { return nil }
+    guard let pane = composePanes.values.first(where: { $0.bounds.contains(point) }) else { return nil }
+    let local = CGPoint(x: point.x - pane.origin.x, y: point.y - pane.origin.y)
+    let character = ComposeAccessibilityText(pane: pane).character(at: local)
+    guard character.location != NSNotFound, character.length > 0,
+          let link = pane.layout.link(atUTF16: character.location) else { return nil }
+    return link.target.isEmpty ? "Current document" : link.target
+  }
+
   @objc func view(_ view: NSView, stringForToolTip tag: NSView.ToolTipTag, point: NSPoint,
                   userData: UnsafeMutableRawPointer?) -> String {
-    composeImageDescription(at: point) ?? ""
+    composeImageDescription(at: point) ?? composeLinkDescription(at: point) ?? ""
   }
 
   func composeSnapshot(_ pane: WirePane) -> ComposePresentation? { presentation(pane, includePending: false) }

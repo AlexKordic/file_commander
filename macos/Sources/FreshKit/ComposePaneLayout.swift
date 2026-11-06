@@ -7,6 +7,8 @@ import CoreGraphics
 public final class ComposePaneLayout {
   public let pane: WireComposePane
   public let text: ComposeTextLayout
+  public let links: [ComposeLink]
+  private let linkRanges: ComposeIntervalIndex
   private let body, monospace: CTFont
   /// The wrapping measure; complete glyphs and cells can expose a wider extent.
   public let width: CGFloat
@@ -37,6 +39,7 @@ public final class ComposePaneLayout {
     let preedit = composition?.primary
     self.composition = composition; self.preedit = preedit; self.virtualInsertion = virtualInsertion
     let sourceComposition = virtualInsertion?.regions ?? composition
+    let linkEdits = sourceComposition?.values.values.filter { !$0.source.isEmpty || $0.draft.length > 0 }.map(\.source) ?? []
     let visible = pane.images.filter { image in
       guard image.rendered || image.sourcePreview else { return false }
       guard let sourceComposition else { return true }
@@ -80,11 +83,13 @@ public final class ComposePaneLayout {
        pane.documentLen == reuse.pane.documentLen,
        pane.assetAuthority == reuse.pane.assetAuthority, pane.assetDocument == reuse.pane.assetDocument,
        pane.text.utf8.elementsEqual(reuse.pane.text.utf8), pane.segments == reuse.pane.segments,
-       pane.spans == reuse.pane.spans, pane.images == reuse.pane.images, pane.tables == reuse.pane.tables,
+       Self.sameTypography(pane.spans, reuse.pane.spans), pane.images == reuse.pane.images, pane.tables == reuse.pane.tables,
        pane.hangingContexts == reuse.pane.hangingContexts, sizes == reuse.imageSizes,
        width == reuse.width, typography == reuse.typography,
        CFEqual(body, reuse.body), CFEqual(monospace, reuse.monospace) else { continue }
       tableModel = reuse.tableModel; text = reuse.text
+      links = ComposeLink.resolving(pane, text: reuse.text, excluding: linkEdits)
+      linkRanges = ComposeIntervalIndex(links.map { $0.range.location..<NSMaxRange($0.range) })
       contextDisplayRanges = reuse.contextDisplayRanges; draftDisplayRanges = reuse.draftDisplayRanges
       draftDisplayRange = reuse.draftDisplayRange
       quoteRails = reuse.quoteRails; thematicRules = reuse.thematicRules
@@ -289,6 +294,21 @@ public final class ComposePaneLayout {
     guard let layout = ComposeTextLayout(projection: projection, font: body, width: width,
       lineSpacing: typography.lineSpacing, fonts: fonts, attachments: attachments, paragraphs: paragraphs, hanging: hanging, tables: tableRuns) else { return nil }
     text = layout
+    links = ComposeLink.resolving(pane, text: layout, excluding: linkEdits)
+    linkRanges = ComposeIntervalIndex(links.map { $0.range.location..<NSMaxRange($0.range) })
+  }
+
+  public func link(atUTF16 position: Int) -> ComposeLink? {
+    let matches = linkRanges.matches(at: position)
+    // Ambiguous overlapping metadata cannot choose a different destination.
+    return matches.count == 1 ? links[matches[0]] : nil
+  }
+
+  private static func sameTypography(_ lhs: [WireComposeSpan], _ rhs: [WireComposeSpan]) -> Bool {
+    lhs.count == rhs.count && zip(lhs, rhs).allSatisfy { a, b in
+      a.start == b.start && a.end == b.end && a.role == b.role && a.flags == b.flags
+        && a.hasContentStart == b.hasContentStart && a.contentStart == b.contentStart
+    }
   }
 
   public struct Palette {

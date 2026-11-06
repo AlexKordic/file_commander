@@ -454,6 +454,21 @@ and spacing changes replace that client's style revision and preserve its
 source scroll anchor. Code and raw table source use a monospace font; measured
 table cells use proportional body text unless inline markup selects code.
 
+Development scenes also supply `ComposeSpan.link_target` (field 6). Fresh's
+parser resolves destinations, including references, escaped paths, entities,
+email autolinks and empty self-links. An absent field means the peer supplied
+no destination; an explicitly empty field identifies the current document.
+The client retains the parsed UTF-8 spelling without Unicode normalization.
+Prefix measurement samples retain link styling but omit document destinations.
+Native `ComposeLink` records map these spans into the displayed UTF-16 text,
+including concealed syntax and cropped source windows. Tooltips resolve the
+actual measured glyph under the pointer and use an index for link lookup;
+they do not build selection rectangles for every link. A provisional edit
+inside a link suppresses its old destination while unrelated links remain
+available. Metadata updates survive reuse of unchanged glyph geometry.
+Receiving or inspecting a destination never follows it or fetches a resource.
+Semantic accessibility navigation remains a separate unfinished requirement.
+
 Native text, list-prefix, table-sample and presentation-label shaping first
 use Core Text's bounded typesetter factory. If that factory refuses a complex
 input, the consumer explicitly requests complete shaping. The legacy
