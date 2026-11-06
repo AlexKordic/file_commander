@@ -162,10 +162,11 @@ final class ComposeBackendTests: XCTestCase {
   }
 
   @MainActor
-  private func editor(_ pasteboard: BackendPasteboard) -> NativeEditor {
+  private func editor(_ pasteboard: BackendPasteboard,
+                      decodeImage: @escaping @Sendable (Data, Int) throws -> ComposeImageAsset = { try ComposeImageAsset.decode($0, maximumDimension: $1) }) -> NativeEditor {
     _ = NSApplication.shared; NSApp.setActivationPolicy(.prohibited)
     return NativeEditor(pasteboard: pasteboard,
-      environment: ["FC_NATIVE_RICH_COMPOSE": "1", "FC_NATIVE_MEASURED_TABLES": "1"])
+      environment: ["FC_NATIVE_RICH_COMPOSE": "1", "FC_NATIVE_MEASURED_TABLES": "1"], decodeComposeImage: decodeImage)
   }
 
   @MainActor
@@ -176,6 +177,62 @@ final class ComposeBackendTests: XCTestCase {
     XCTAssertEqual(pane.hit(at: point)?.source, Int(source))
     editor.grid(grid, point: point, in: pane, extend: false, count: 1)
     try await eventually(editor, "source click \(source)") { editor.grid?.focusedCompose?.cursor?.position == source }
+  }
+
+  @MainActor
+  func testRealBackendTypingRetainsReceivedInlineImageThroughSourceRevisionsAndSaveUndo() async throws {
+    let backend = try backend(); defer {
+      backend.captureDiagnostics("image-decode-lifetime")
+      backend.stop()
+    }
+    let started = expectation(description: "Fresh delivered the image bytes")
+    let release = DispatchSemaphore(value: 0)
+    defer { release.signal() }
+    let editor = editor(BackendPasteboard(), decodeImage: { bytes, dimension in
+      XCTAssertFalse(Thread.isMainThread)
+      started.fulfill(); release.wait()
+      return try ComposeImageAsset.decode(bytes, maximumDimension: dimension)
+    })
+    defer { editor.detachAll() }
+    let pixels = try XCTUnwrap(CGContext(data: nil, width: 80, height: 20, bitsPerComponent: 8,
+      bytesPerRow: 320, space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
+    pixels.setFillColor(CGColor(red: 0.1, green: 0.65, blue: 0.35, alpha: 1)); pixels.fill(CGRect(x: 0, y: 0, width: 80, height: 20))
+    let image = backend.root.appendingPathComponent("tiny.png")
+    let png = try XCTUnwrap(CGImageDestinationCreateWithURL(image as CFURL, "public.png" as CFString, 1, nil))
+    CGImageDestinationAddImage(png, try XCTUnwrap(pixels.makeImage()), nil); XCTAssertTrue(CGImageDestinationFinalize(png))
+    let original = "| A | B |\n|---|---|\n| one | two |\n\n# Received images\n\nBefore ![tiny](tiny.png) after.\n\n"
+      + String(repeating: "Later café 東京 👩🏽‍💻 paragraph.\n\n", count: 3000)
+    XCTAssertGreaterThan(original.utf8.count, 64 << 10)
+    let file = backend.root.appendingPathComponent("decode.md")
+    try Data(original.utf8).write(to: file)
+    try await attach(backend, file: file, editor: editor)
+    await fulfillment(of: [started], timeout: 5)
+    let grid = try XCTUnwrap(editor.grid)
+    let index = try XCTUnwrap(original.range(of: "Before"))
+    let start = UInt64(original[..<index.lowerBound].utf8.count)
+    try await click(start, editor: editor)
+    var insertion = ""
+    for text in ["日", "本", "👩🏽‍💻", " café "] {
+      let before = try XCTUnwrap(editor.store.panes.first(where: { $0.hasCompose })).compose.bufferRevision
+      grid.insertText(text, replacementRange: NSRange(location: NSNotFound, length: 0)); insertion += text
+      let expected = start + UInt64(insertion.utf8.count)
+      try await eventually(editor, "typing commits while the image decode is held") {
+        editor.store.panes.contains { $0.hasCompose && $0.compose.bufferRevision > before
+          && $0.compose.cursors.contains { $0.primary && $0.position == expected } }
+      }
+    }
+    release.signal()
+    try await eventually(editor, "received image becomes visible after intervening source edits") {
+      grid.focusedCompose?.layout.text.attachments.first?.rect.width == 80
+    }
+    editor.send(.action(name: "save", argsJson: ""))
+    let prefix = Data(original.utf8.prefix(Int(start))), suffix = Data(original.utf8.dropFirst(Int(start)))
+    try await eventually(editor, "save source after decode and typing") { (try? Data(contentsOf: file)) == prefix + Data(insertion.utf8) + suffix }
+    editor.send(.action(name: "undo", argsJson: "")); editor.send(.action(name: "save", argsJson: ""))
+    let earlier = ["日", "本", "👩🏽‍💻"].joined()
+    try await eventually(editor, "undo the final phrase without undoing image presentation") { (try? Data(contentsOf: file)) == prefix + Data(earlier.utf8) + suffix }
+    XCTAssertEqual(grid.focusedCompose?.layout.text.attachments.first?.rect.width, 80)
+    XCTAssertTrue(editor.uninsertedText.isEmpty); XCTAssertTrue(backend.server.isRunning)
   }
 
   @MainActor

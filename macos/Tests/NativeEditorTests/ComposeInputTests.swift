@@ -1586,13 +1586,14 @@ final class ComposeInputTests: XCTestCase {
   }
 
   @MainActor
-  private func richEditor(pasteboard: (any EditorPasteboard)? = nil) -> NativeEditor {
+  private func richEditor(pasteboard: (any EditorPasteboard)? = nil,
+                          decodeImage: @escaping @Sendable (Data, Int) throws -> ComposeImageAsset = { try ComposeImageAsset.decode($0, maximumDimension: $1) }) -> NativeEditor {
     _ = NSApplication.shared
     NSApp.setActivationPolicy(.prohibited)
     let gate = ProcessInfo.processInfo.environment["FC_NATIVE_RICH_COMPOSE"]
     setenv("FC_NATIVE_RICH_COMPOSE", "1", 1)
     defer { if let gate { setenv("FC_NATIVE_RICH_COMPOSE", gate, 1) } else { unsetenv("FC_NATIVE_RICH_COMPOSE") } }
-    return NativeEditor(pasteboard: pasteboard ?? MemoryPasteboard())
+    return NativeEditor(pasteboard: pasteboard ?? MemoryPasteboard(), decodeComposeImage: decodeImage)
   }
 
   @MainActor
@@ -2041,6 +2042,50 @@ final class ComposeInputTests: XCTestCase {
     XCTAssertTrue(grid.hasMarkedText()); XCTAssertTrue(peer.inputs.isEmpty)
     grid.doCommand(by: #selector(NSResponder.cancelOperation(_:)))
     XCTAssertFalse(grid.hasMarkedText()); XCTAssertTrue(peer.inputs.isEmpty)
+  }
+
+  @MainActor
+  func testReceivedImageDecodeSurvivesAnExplicitlyUnusableFormattingFrame() async throws {
+    let source = "Before ![pic](x.png) after text.\n"
+    var scene = pane(source)
+    scene.compose.assetAuthority = 5; scene.compose.assetDocument = 7
+    scene.compose.images = [.with { $0.start = 7; $0.end = 20; $0.target = "x.png"; $0.alt = "Picture"; $0.rendered = true }]
+    let peer = try ScenePeer(pane: scene); defer { peer.close() }
+    let started = expectation(description: "received bytes on the native decode queue")
+    let release = DispatchSemaphore(value: 0)
+    defer { release.signal() }
+    let editor = richEditor(decodeImage: { bytes, dimension in
+      XCTAssertFalse(Thread.isMainThread)
+      started.fulfill(); release.wait()
+      return try ComposeImageAsset.decode(bytes, maximumDimension: dimension)
+    })
+    defer { editor.detachAll() }
+    editor.attach(socketPath: peer.path, app: nil)
+    try await eventually { peer.assets.contains { !$0.cancel } }
+    let pixels = try XCTUnwrap(CGContext(data: nil, width: 40, height: 20, bitsPerComponent: 8,
+      bytesPerRow: 160, space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
+    let bytes = NSMutableData(), png = try XCTUnwrap(CGImageDestinationCreateWithData(bytes, "public.png" as CFString, 1, nil))
+    CGImageDestinationAddImage(png, try XCTUnwrap(pixels.makeImage()), nil); XCTAssertTrue(CGImageDestinationFinalize(png))
+    peer.image(.with { $0.id = peer.assets.last!.id; $0.data = bytes as Data; $0.total = UInt64(bytes.length); $0.done = true
+      $0.version = Data(repeating: 1, count: 32); $0.digest = Data(repeating: 1, count: 32) })
+    await fulfillment(of: [started], timeout: 3)
+    var pending = pane("X" + source, revision: 5)
+    pending.compose.assetAuthority = 5; pending.compose.assetDocument = 7
+    pending.compose.ready = false; pending.compose.currentProjection = false
+    peer.show(pending)
+    try await eventually { editor.store.panes.first?.compose.bufferRevision == 5 }
+    XCTAssertEqual(editor.grid?.focusedCompose?.pane.compose.bufferRevision, 4,
+      "pending source retains its original coherent presentation and image references")
+    release.signal()
+    try await eventually { editor.grid?.focusedCompose?.layout.text.attachments.first?.rect.width == 40 }
+    XCTAssertEqual(peer.assets.filter { !$0.cancel }.count, 1,
+      "a pending presentation may finish received bytes but must not start a stale source read")
+    pending.compose.ready = true; pending.compose.currentProjection = true
+    pending.compose.images = scene.compose.images.map { image in var image = image; image.start += 1; image.end += 1; return image }
+    peer.show(pending)
+    try await eventually { editor.grid?.focusedCompose?.pane.compose.bufferRevision == 5 }
+    XCTAssertEqual(editor.grid?.focusedCompose?.layout.text.attachments.first?.rect.width, 40)
+    XCTAssertEqual(peer.assets.filter { !$0.cancel }.count, 1)
   }
 
   @MainActor

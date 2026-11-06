@@ -4,6 +4,12 @@ import Foundation
 /// Fresh resolves resources; this controller never opens a local file or URL.
 @MainActor
 public final class ComposeImageController {
+  public struct DocumentIdentity: Hashable, Sendable {
+    public var window, buffer, authority, document: UInt64
+    public init(window: UInt64, buffer: UInt64, authority: UInt64, document: UInt64) {
+      self.window = window; self.buffer = buffer; self.authority = authority; self.document = document
+    }
+  }
   public struct Demand: Sendable {
     public var scope: WireComposeScope
     public var image: WireComposeImage
@@ -14,6 +20,7 @@ public final class ComposeImageController {
       self.maximumDimension = min(2048, max(1, maximumDimension))
     }
     fileprivate var key: Key { .init(window: scope.windowID, buffer: scope.buffer, authority: authority, document: document, target: image.target) }
+    public var documentIdentity: DocumentIdentity { .init(window: scope.windowID, buffer: scope.buffer, authority: authority, document: document) }
   }
   fileprivate struct Key: Hashable {
     var window, buffer, authority, document: UInt64
@@ -84,7 +91,10 @@ public final class ComposeImageController {
 
   /// Order demands nearest the viewport first. Duplicate references share a
   /// resource read/cache entry while source ranges remain on each attachment.
-  public func update(_ wanted: [Demand], revalidate: Bool = false) {
+  /// Live documents may retain already received bytes through provisional or
+  /// formatting frames without image geometry. They never authorize a read;
+  /// results stay cached by their original resource key and normal byte limit.
+  public func update(_ wanted: [Demand], retainingDocuments retained: [DocumentIdentity] = [], revalidate: Bool = false) {
     var unique: [Demand] = [], indexes: [Key: Int] = [:]
     for demand in wanted {
       if let index = indexes[demand.key] {
@@ -112,7 +122,13 @@ public final class ComposeImageController {
       receiver.cancel(id); work.removeValue(forKey: id)
       send(.with { $0.id = id; $0.cancel = true })
     }
-    for (token, pending) in decoding where !current(pending.demand) { decoding[token]?.cancelled = true }
+    // Source coordinates authorize reads, but decoded pixels belong to the
+    // resource key. Typing, moved references and split changes cannot invalidate
+    // bytes already received for the same document/authority/target.
+    let resources = Set(wanted.map(\.key)), documents = Set(retained)
+    for (token, pending) in decoding where !resources.contains(pending.demand.key) && !documents.contains(pending.demand.documentIdentity) {
+      decoding[token]?.cancelled = true
+    }
     trimCache()
     pump()
   }

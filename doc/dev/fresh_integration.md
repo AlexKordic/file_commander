@@ -1077,6 +1077,17 @@ explanation. Missing, denied or invalid resources use an editable fallback.
 Retry scheduling survives source-edit cancellation and temporary formatting
 frames, preventing a new image read for every character typed. Duplicate
 visible references share work even if their order changes between splits.
+After image bytes arrive, decoding follows the resource's window, buffer,
+filesystem authority, document identity and target, rather than the source
+revision or attachment coordinates. Typing and moved references can reuse that
+decode. Live Compose documents also retain received bytes through provisional
+input and formatting frames without attachment geometry. These document
+identities authorize no reads; new requests still need current source demands.
+Results remain under their original resource key and normal cache limits.
+Closing/hiding the last presentation or replacing its document/authority retires
+the decode. Source reads retain their stricter revision/range cancellation and
+retry behavior. The four outstanding slots, two decode workers, 64 MiB decoded
+cache and 128 cache entries remain unchanged.
 These intervals and resource budgets still need interactive/performance
 qualification; full GUI/SSH qualification remains open.
 

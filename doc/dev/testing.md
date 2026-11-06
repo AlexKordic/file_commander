@@ -540,6 +540,15 @@ namespaces, inline texts and foreign markers. All removal paths must retire
 their index entries. The dense tight-list socket fixture also requires the
 older client's full-item formatter to complete under the existing deadline.
 
+Image decode-lifetime checks hold a worker after bytes arrive, then vary source
+revisions, attachment offsets, splits and document identities. A pending
+presentation may finish received bytes but cannot start a stale source read;
+late pixels retain their original target and cannot cross documents or hosts.
+A private real-backend workflow types Unicode into a document larger than the
+background-parser threshold while its first inline PNG decode is held, then
+checks native image geometry, exact save and one undo. These checks do not
+qualify a remote connection or an actual input method.
+
 ## CI
 
 `.github/workflows/tests.yml` is the repository's only workflow. It runs on

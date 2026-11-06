@@ -110,7 +110,8 @@ final class NativeEditor: NSObject, CellGridDelegate {
   private lazy var composeViewports = ComposeViewportController { [weak self] request in
     self?.socket?.send(.composeViewport(request))
   }
-  private lazy var composeImages = ComposeImageController { [weak self] request in
+  private let decodeComposeImage: @Sendable (Data, Int) throws -> ComposeImageAsset
+  private lazy var composeImages = ComposeImageController(decode: decodeComposeImage) { [weak self] request in
     self?.socket?.send(.composeAsset(request))
   }
 
@@ -125,8 +126,10 @@ final class NativeEditor: NSObject, CellGridDelegate {
 
   override convenience init() { self.init(pasteboard: NSPasteboard.general) }
 
-  init(pasteboard: any EditorPasteboard, environment: [String: String] = ProcessInfo.processInfo.environment) {
+  init(pasteboard: any EditorPasteboard, environment: [String: String] = ProcessInfo.processInfo.environment,
+       decodeComposeImage: @escaping @Sendable (Data, Int) throws -> ComposeImageAsset = { try ComposeImageAsset.decode($0, maximumDimension: $1) }) {
     self.pasteboard = pasteboard
+    self.decodeComposeImage = decodeComposeImage
     richCompose = environment["FC_NATIVE_RICH_COMPOSE"] == "1"
     measuredTables = richCompose && environment["FC_NATIVE_MEASURED_TABLES"] == "1"
     super.init()
@@ -477,10 +480,19 @@ final class NativeEditor: NSObject, CellGridDelegate {
 
   private func updateImageDemands(revalidate: Bool = false) {
     let demands = shown && richCompose ? grid?.composeImageDemands() ?? [] : []
-    composeImages.update(demands.filter { demand in
+    let current = demands.filter { demand in
       store.panes.contains { pane in pane.leaf == demand.scope.leaf && pane.hasBuffer && pane.buffer == demand.scope.buffer
         && pane.hasCompose && pane.compose.projectionUsable && pane.compose.bufferRevision == demand.scope.bufferRevision }
-    }, revalidate: revalidate)
+    }
+    // Provisional input can temporarily omit attachment geometry even when
+    // the latest backend frame is usable. Live documents retain received
+    // decodes only; source-scoped requests still require current demands.
+    let documents: [ComposeImageController.DocumentIdentity] = shown && richCompose ? store.panes.compactMap { pane in
+      guard pane.hasBuffer, pane.hasCompose else { return nil }
+      return .init(window: UInt64(store.windowID), buffer: pane.buffer,
+        authority: pane.compose.assetAuthority, document: pane.compose.assetDocument)
+    } : []
+    composeImages.update(current, retainingDocuments: documents, revalidate: revalidate)
   }
 
   private func reportFormattingFailures() {
