@@ -820,6 +820,12 @@ kerning is retained. When bidirectional layout reorders the marker, its own
 logical glyph advances determine the inset; the visual caret can include the
 right-to-left body and must not be used as marker width. This fixes excessive
 hanging indentation without claiming full right-to-left paragraph alignment.
+Prefix shaping uses the first visual line of a shared attributed typesetter,
+including at least the first complete body grapheme for contextual spacing.
+It avoids a separate whole-paragraph substring/line for each marker. An inline
+image's run delegate still requires a final typesetter with its attachment
+metrics. This reduces redundant marker shaping; the source window, attributed
+typesetter and complete visible layout are not yet bounded by this change.
 
 For native code blocks, Fresh records the source ranges owned by the Markdown
 parser's code-text events. Gaps identify fences and container prefixes; these

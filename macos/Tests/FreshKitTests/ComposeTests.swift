@@ -243,7 +243,7 @@ final class ComposeTests: XCTestCase {
 
   func testRightToLeftListBodyDoesNotBecomePartOfTheHangingIndent() throws {
     let bodyFont = font(18)
-    for prefix in ["1) ", "- ", "  - ", "> 12. [ ] "] {
+    for prefix in ["1) ", "• ", "- ", "  - ", "> 12. [ ] "] {
       let marker = CTLineCreateWithAttributedString(NSAttributedString(string: prefix,
         attributes: [NSAttributedString.Key(kCTFontAttributeName as String): bodyFont]))
       let expected = CGFloat(CTLineGetTypographicBounds(marker, nil, nil, nil))
@@ -263,6 +263,56 @@ final class ComposeTests: XCTestCase {
         }
       }
     }
+  }
+
+  func testStyledListPrefixesAtNonzeroOffsetsAlignWithTheirFirstVisualBodyCaret() throws {
+    let preamble = "café 👩🏽‍💻 before the list\n"
+    let items = ["1) An ordinary body ", "100) Another styled body "].map {
+      $0 + String(repeating: "with enough proportional text to wrap. ", count: 20) + "\n"
+    }
+    let source = preamble + items.joined()
+    let projection = try copied(source)
+    var hanging: [ComposeTextLayout.HangingRun] = [], fonts: [ComposeTextLayout.FontRun] = []
+    var start = preamble.utf8.count
+    let prefixes = ["1) ", "100) "]
+    for (index, item) in items.enumerated() {
+      let content = start + prefixes[index].utf8.count
+      hanging.append(.init(display: start..<(start + item.utf8.count), contentStart: content, indent: 12))
+      if index == 1 {
+        fonts.append(.init(display: start..<content, font: CTFontCreateWithName("Menlo" as CFString, 22, nil)))
+      }
+      fonts.append(.init(display: content..<(content + (index == 0 ? 2 : 7)),
+        font: CTFontCreateWithName("Helvetica-Bold" as CFString, 22, nil)))
+      start += item.utf8.count
+    }
+    for width: CGFloat in [180, 360] {
+      let layout = try XCTUnwrap(ComposeTextLayout(projection: projection, font: font(18), width: width,
+        fonts: fonts, hanging: hanging))
+      for item in hanging {
+        let body = try XCTUnwrap(layout.caret(for: item.contentStart))
+        let end = try XCTUnwrap(layout.byteToUTF16[item.display.upperBound])
+        let following = layout.fragments.filter { $0.rect.minY > body.minY && $0.range.location < end }
+        XCTAssertGreaterThan(following.count, 2)
+        for fragment in following {
+          XCTAssertEqual(fragment.rect.minX, body.minX, accuracy: 0.001)
+        }
+      }
+    }
+  }
+
+  func testPrefixWiderThanThePaneKeepsTheFirstBodyGraphemeIntact() throws {
+    let source = "100) 👩🏽‍💻e\u{301} words\n"
+    let projection = try copied(source, start: 237)
+    let layout = try XCTUnwrap(ComposeTextLayout(projection: projection, font: font(22), width: 2,
+      hanging: [.init(display: 0..<source.utf8.count, contentStart: 5, indent: 12)]))
+    var boundaries: Set<Int> = [0], end = 0
+    for character in source { end += String(character).utf16.count; boundaries.insert(end) }
+    for fragment in layout.fragments {
+      XCTAssertTrue(boundaries.contains(fragment.range.location))
+      XCTAssertTrue(boundaries.contains(NSMaxRange(fragment.range)))
+    }
+    XCTAssertNotNil(layout.caret(for: 237 + 5))
+    XCTAssertEqual(layout.projection.text, source)
   }
 
   func testRealFreshListSceneKeepsWrappedBodiesAndInlineImagesWithinTheMeasure() throws {

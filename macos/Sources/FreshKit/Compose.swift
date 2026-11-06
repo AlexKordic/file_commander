@@ -365,18 +365,28 @@ public final class ComposeTextLayout {
             start < end, [paragraph.indent, paragraph.trailing, paragraph.before, paragraph.after].allSatisfy({ $0.isFinite && $0 >= 0 }) else { return nil }
       blocks.append((NSRange(location: start, length: end - start), paragraph))
     }
+    // One attributed typesetter supplies contextual marker shaping and, when
+    // attachments do not modify its attributes below, the final text layout.
+    let prefixTypesetter = hanging.isEmpty ? nil : CTTypesetterCreateWithAttributedString(attributed)
     var hangs: [(range: NSRange, content: Int, prefix: CGFloat, indent: CGFloat)] = []
     for item in hanging {
       guard let start = byteToUTF16[item.display.lowerBound], let end = byteToUTF16[item.display.upperBound],
             let content = byteToUTF16[item.contentStart], start <= content, content < end,
-            item.indent.isFinite, item.indent >= 0 else { return nil }
-      let newline = string.rangeOfCharacter(from: .newlines, range: NSRange(location: start, length: end - start)).location
-      let contextEnd = newline == NSNotFound ? end : newline
-      guard content <= contextEnd else { return nil }
-      // Shape in context: cutting after the marker changes kerning at the
-      // first body character (for example "1) An"), moving its actual caret.
-      let prefix = CTLineCreateWithAttributedString(attributed.attributedSubstring(from: NSRange(location: start, length: contextEnd - start)))
-      let measured = Self.hangingPrefixWidth(prefix, start: 0, content: content - start)
+            item.indent.isFinite, item.indent >= 0, let prefixTypesetter,
+            string.rangeOfCharacter(from: .newlines, range: NSRange(location: start, length: content - start)).location == NSNotFound else { return nil }
+      // Shape the first visual line, not a copy of the whole joined paragraph.
+      // Include at least the first complete body grapheme: cutting at the
+      // marker changes kerning ("1) An"), even when a narrow pane wraps there.
+      let measure = max(1, width - min(item.indent, width * 0.6))
+      let count = CTTypesetterSuggestLineBreak(prefixTypesetter, start, Double(measure))
+      let bodyEnd = NSMaxRange(string.rangeOfComposedCharacterSequence(at: content))
+      var contextEnd = min(end, max(start + max(0, count), bodyEnd))
+      if contextEnd < end {
+        let cluster = string.rangeOfComposedCharacterSequence(at: contextEnd)
+        if cluster.location < contextEnd { contextEnd = min(end, NSMaxRange(cluster)) }
+      }
+      let prefix = CTTypesetterCreateLine(prefixTypesetter, CFRange(location: start, length: contextEnd - start))
+      let measured = Self.hangingPrefixWidth(prefix, start: start, content: content)
       guard measured.isFinite, measured >= 0 else { return nil }
       hangs.append((NSRange(location: start, length: end - start), content, measured, item.indent))
     }
@@ -450,7 +460,11 @@ public final class ComposeTextLayout {
         NSAttributedString.Key(kCTForegroundColorAttributeName as String): CGColor(gray: 0, alpha: 0),
       ], range: NSRange(location: start, length: 1))
     }
-    let typesetter = CTTypesetterCreateWithAttributedString(attributed)
+    // Non-preview images added run delegates after marker measurement. Their
+    // final typesetter must see those new attributes instead of reusing it.
+    let typesetter = attachments.contains(where: { !$0.preview })
+      ? CTTypesetterCreateWithAttributedString(attributed)
+      : (prefixTypesetter ?? CTTypesetterCreateWithAttributedString(attributed))
     var lines: [Fragment] = []
     var from = 0
     var top: CGFloat = 0
