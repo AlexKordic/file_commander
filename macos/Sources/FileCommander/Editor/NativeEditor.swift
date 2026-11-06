@@ -262,6 +262,7 @@ final class NativeEditor: NSObject, CellGridDelegate {
     lastComposeCancellation = nil
     pendingCaretReveal = nil
     formattingFailures.removeAll()
+    grid?.invalidateAccessibleImages()
   }
 
   private func connectionEnded(_ reason: String?) {
@@ -270,6 +271,7 @@ final class NativeEditor: NSObject, CellGridDelegate {
     composeViewports.reset()
     socket = nil
     receivedHello = false
+    grid?.invalidateAccessibleImages()
     hide()
     if let reason { Trace.write("editor connection ended: \(reason)") }
   }

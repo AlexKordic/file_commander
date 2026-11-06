@@ -339,6 +339,15 @@ unfinished and keep rich Compose gated.
 Tooltip rectangles share the attachment geometry and are replaced only when
 their positions or descriptions change.
 
+The experimental rich view exposes measured accessibility text, character and
+visual-line ranges, font sizes, visible ranges and screen bounds. Primary and
+secondary provisional selections address that displayed value. Inline images
+have labeled accessibility elements and attachment attributes; an image action
+selects its Markdown source through Fresh's ordinary pointer queue. Retained
+image objects cannot act after their source ownership or connection changes.
+Direct accessibility text/selection setters, semantic heading/link navigation
+and actual VoiceOver interaction still require qualification and completion.
+
 FreshKit tests cover the refresh timer, conditional replies, source-edit
 throttling, duplicate references across splits, bounded caches/decodes,
 temporary failure recovery, missing images, and negative caching of invalid

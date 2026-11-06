@@ -167,6 +167,174 @@ private final class ScenePeer: @unchecked Sendable {
 
 final class ComposeInputTests: XCTestCase {
   @MainActor
+  func testRichAccessibilityUsesMeasuredLinesGraphemesAndScreenGeometry() async throws {
+    let source = "Title\n\nProportional café 👩🏽‍💻 office affinity אבג words wrap across several measured lines.\nTail\n"
+    var scene = pane(source, width: 24)
+    scene.compose.spans = [.with { $0.start = 0; $0.end = 5; $0.role = 1 }]
+    let peer = try ScenePeer(pane: scene); defer { peer.close() }
+    let editor = richEditor(); defer { editor.detachAll() }
+    editor.attach(socketPath: peer.path, app: nil)
+    try await eventually { editor.grid?.focusedCompose != nil }
+    let window = NSWindow(contentRect: CGRect(x: 90, y: 110, width: 1040, height: 700),
+      styleMask: .borderless, backing: .buffered, defer: false)
+    window.isReleasedWhenClosed = false; window.contentView = try XCTUnwrap(editor.view)
+    defer { window.contentView = nil; window.close() }
+    let grid = try XCTUnwrap(editor.grid), presentation = try XCTUnwrap(grid.focusedCompose)
+    let text = source as NSString
+    XCTAssertEqual(grid.accessibilityNumberOfCharacters(), text.length)
+    let emoji = text.range(of: "👩🏽‍💻")
+    XCTAssertEqual(grid.accessibilityRange(for: emoji.location + 2), emoji)
+    XCTAssertEqual(grid.accessibilityString(for: emoji), "👩🏽‍💻")
+    XCTAssertNil(grid.accessibilityString(for: NSRange(location: text.length, length: Int.max)))
+    XCTAssertEqual(grid.accessibilityRange(forLine: -1).location, NSNotFound)
+    let fragments = presentation.layout.text.fragments
+    XCTAssertGreaterThan(fragments.count, 5)
+    for (index, fragment) in fragments.enumerated() where fragment.range.length > 0 {
+      XCTAssertEqual(grid.accessibilityRange(forLine: index), fragment.range)
+      XCTAssertEqual(grid.accessibilityLine(for: fragment.range.location), index)
+    }
+    let title = try XCTUnwrap(grid.accessibilityAttributedString(for: NSRange(location: 0, length: 5)))
+    let font = try XCTUnwrap(title.attribute(.accessibilityFont, at: 0, effectiveRange: nil) as? [NSAccessibility.FontAttributeKey: Any])
+    XCTAssertGreaterThan(try XCTUnwrap(font[.fontSize] as? CGFloat), CTFontGetSize(presentation.body))
+    let range = NSRange(location: 0, length: emoji.location)
+    let frame = grid.accessibilityFrame(for: range)
+    let first = grid.accessibilityFrame(for: NSRange(location: 0, length: 1))
+    XCTAssertGreaterThan(frame.height, first.height, "AX bounds enclose every measured line, not only the first")
+    let glyph = grid.accessibilityRange(for: CGPoint(x: first.midX, y: first.midY))
+    XCTAssertEqual(glyph, NSRange(location: 0, length: 1))
+    XCTAssertEqual(grid.accessibilityRange(for: CGPoint(x: -10000, y: -10000)).location, NSNotFound)
+    var checked = 0
+    for fragment in fragments {
+      for run in CTLineGetGlyphRuns(fragment.line) as! [CTRun] {
+        let count = CTRunGetGlyphCount(run), source = CTRunGetStringRange(run)
+        var indices = [CFIndex](repeating: 0, count: count), positions = [CGPoint](repeating: .zero, count: count)
+        var advances = [CGSize](repeating: .zero, count: count)
+        CTRunGetStringIndices(run, CFRange(), &indices); CTRunGetPositions(run, CFRange(), &positions)
+        CTRunGetAdvances(run, CFRange(), &advances)
+        let boundaries = Array(Set(indices + [source.location + source.length])).sorted()
+        for index in 0..<count where advances[index].width > 1 {
+          guard let end = boundaries.first(where: { $0 > indices[index] }), end - indices[index] > 1 else { continue }
+          let local = CGPoint(x: fragment.rect.minX + positions[index].x + advances[index].width * 0.75,
+            y: fragment.rect.midY)
+          let screen = window.convertPoint(toScreen: grid.convert(CGPoint(x: presentation.origin.x + local.x, y: presentation.origin.y + local.y), to: nil))
+          let actual = grid.accessibilityRange(for: screen)
+          XCTAssertLessThanOrEqual(actual.location, indices[index]); XCTAssertGreaterThanOrEqual(NSMaxRange(actual), end)
+          checked += 1
+        }
+      }
+    }
+    XCTAssertGreaterThan(checked, 0, "the fixture exercises a shaped glyph spanning several UTF-16 units")
+    XCTAssertTrue(peer.inputs.isEmpty, "accessibility reads do not move or edit the backend")
+  }
+
+  @MainActor
+  func testRichAccessibilityFollowsPendingClickAndSecondaryCompositionSelections() async throws {
+    var scene = pane("aa BB cc\n")
+    scene.compose.cursors.append(.with { $0.id = 2; $0.position = 5; $0.utf16Position = 5 })
+    let peer = try ScenePeer(pane: scene); defer { peer.close() }
+    let editor = richEditor(); defer { editor.detachAll() }
+    editor.attach(socketPath: peer.path, app: nil)
+    try await eventually { editor.grid?.focusedCompose != nil }
+    let grid = try XCTUnwrap(editor.grid), unspecified = NSRange(location: NSNotFound, length: 0)
+    grid.insertText("日本", replacementRange: unspecified)
+    let pending = try XCTUnwrap(grid.focusedCompose)
+    let point = try XCTUnwrap(pending.layout.text.caret(atUTF16: 8))
+    editor.grid(grid, point: CGPoint(x: pending.origin.x + point.minX, y: pending.origin.y + point.midY),
+      in: pending, extend: false, count: 1)
+    XCTAssertEqual(grid.accessibilitySelectedTextRange(), NSRange(location: 8, length: 0))
+    grid.setMarkedText("XY", selectedRange: NSRange(location: 0, length: 1), replacementRange: unspecified)
+    let ranges = try XCTUnwrap(grid.accessibilitySelectedTextRanges()).map(\.rangeValue)
+    XCTAssertEqual(ranges.count, 2)
+    XCTAssertEqual(grid.accessibilitySelectedTextRange(), ranges[0])
+    XCTAssertEqual(grid.accessibilitySelectedText(), "X")
+    XCTAssertEqual(grid.accessibilityString(for: ranges[1]), "X")
+    XCTAssertEqual(grid.accessibilityInsertionPointLineNumber(), grid.accessibilityLine(for: ranges[0].location))
+  }
+
+  @MainActor
+  func testRichAccessibilityDoesNotPromoteAVisibleSecondaryWhenPrimaryIsOutsideTheSourceWindow() async throws {
+    var scene = pane("Before\nTail\n")
+    scene.compose.sourceStart = 7; scene.compose.text = "Tail\n"
+    scene.compose.segments = [.with { $0.sourceStart = 7; $0.sourceEnd = 12; $0.displayEnd = 5 }]
+    scene.compose.cursors.append(.with { $0.id = 2; $0.position = 8; $0.utf16Position = 8 })
+    let peer = try ScenePeer(pane: scene); defer { peer.close() }
+    let editor = richEditor(); defer { editor.detachAll() }
+    editor.attach(socketPath: peer.path, app: nil)
+    try await eventually { editor.grid?.focusedCompose != nil }
+    let grid = try XCTUnwrap(editor.grid)
+    XCTAssertEqual(grid.accessibilitySelectedTextRange().location, NSNotFound)
+    XCTAssertNil(grid.accessibilitySelectedText())
+    XCTAssertEqual(grid.accessibilitySelectedTextRanges()?.map(\.rangeValue), [NSRange(location: 1, length: 0)])
+    XCTAssertEqual(grid.accessibilityInsertionPointLineNumber(), NSNotFound)
+  }
+
+  @MainActor
+  func testRichAccessibilityImagesHaveLabelsGeometryAndScopedSourceSelection() async throws {
+    var scene = pane("Before ![pic](x.png) after text.\n")
+    scene.compose.assetAuthority = 5; scene.compose.assetDocument = 7
+    scene.compose.images = [.with { $0.start = 7; $0.end = 20; $0.target = "x.png"; $0.alt = "Picture"; $0.rendered = true }]
+    let peer = try ScenePeer(pane: scene); defer { peer.close() }
+    let editor = richEditor(); defer { editor.detachAll() }
+    editor.attach(socketPath: peer.path, app: nil)
+    try await eventually { editor.grid?.focusedCompose?.layout.text.attachments.count == 1 }
+    let window = NSWindow(contentRect: CGRect(x: 90, y: 110, width: 1040, height: 700),
+      styleMask: .borderless, backing: .buffered, defer: false)
+    window.isReleasedWhenClosed = false; window.contentView = try XCTUnwrap(editor.view)
+    defer { window.contentView = nil; window.close() }
+    let grid = try XCTUnwrap(editor.grid)
+    let image = try XCTUnwrap(grid.accessibilityChildren()?.first as? NSAccessibilityElement)
+    XCTAssertEqual(image.accessibilityRole(), .image)
+    XCTAssertEqual(image.accessibilityLabel(), "Picture: loading")
+    let stable = try XCTUnwrap(grid.accessibilityChildren()?.first as? NSAccessibilityElement)
+    XCTAssertTrue(image === stable)
+    let value = try XCTUnwrap(grid.accessibilityValue() as? String) as NSString
+    let object = value.range(of: "\u{fffc}")
+    let annotated = try XCTUnwrap(grid.accessibilityAttributedString(for: object))
+    XCTAssertTrue((annotated.attribute(.accessibilityAttachment, at: 0, effectiveRange: nil) as? NSAccessibilityElement) === image)
+    let frame = image.accessibilityFrame()
+    XCTAssertGreaterThan(frame.width, 1); XCTAssertGreaterThan(frame.height, 1)
+    XCTAssertTrue((grid.accessibilityHitTest(CGPoint(x: frame.midX, y: frame.midY)) as? NSAccessibilityElement) === image)
+    XCTAssertEqual(grid.accessibilityRange(for: CGPoint(x: frame.midX, y: frame.midY)), object)
+    XCTAssertEqual(grid.accessibilityVisibleChildren()?.count, 1)
+    try await eventually { !peer.assets.isEmpty }
+    peer.image(.with { $0.id = peer.assets.last!.id; $0.error = "Image not found" })
+    try await eventually { image.accessibilityLabel() == "Picture: Image not found" }
+    XCTAssertTrue((grid.accessibilityChildren()?.first as? NSAccessibilityElement) === image)
+    var revealed = scene
+    revealed.compose.images[0].rendered = false; revealed.compose.images[0].sourcePreview = true
+    revealed.compose.cursors[0].position = 10; revealed.compose.cursors[0].utf16Position = 10
+    revealed.compose.textContext.selectionStart = 10; revealed.compose.textContext.selectionEnd = 10
+    revealed.compose.selectionRevision = 5; peer.show(revealed)
+    try await eventually { grid.focusedCompose?.layout.text.attachments.first?.attachment.preview == true }
+    XCTAssertEqual(grid.accessibilityValue() as? String, scene.compose.text, "a source preview adds no AX character")
+    let markup = NSRange(location: 7, length: 13)
+    let raw = try XCTUnwrap(grid.accessibilityAttributedString(for: markup))
+    XCTAssertNil(raw.attribute(.accessibilityAttachment, at: 0, effectiveRange: nil))
+    let preview = image.accessibilityFrame(), rawBounds = grid.accessibilityFrame(for: markup)
+    XCTAssertTrue(rawBounds.contains(preview), "the source range also owns its measured preview bounds")
+    XCTAssertEqual(grid.accessibilityRange(for: CGPoint(x: preview.midX, y: preview.midY)), markup)
+    XCTAssertTrue((grid.accessibilityChildren()?.first as? NSAccessibilityElement) === image)
+    XCTAssertTrue(image.accessibilityPerformPress())
+    try await eventually { peer.inputs.count == 1 }
+    XCTAssertEqual(peer.inputs[0].attachmentStart, 7); XCTAssertEqual(peer.inputs[0].position, 20)
+    XCTAssertEqual(peer.inputs[0].scope.buffer, 3)
+    var changed = scene; changed.compose.bufferRevision = 5; peer.show(changed)
+    try await eventually { grid.focusedCompose?.pane.compose.bufferRevision == 5 }
+    XCTAssertFalse(image.accessibilityPerformPress(), "a retained old AX object cannot act on a new source revision")
+    XCTAssertNil(image.accessibilityLabel())
+    XCTAssertEqual(peer.inputs.count, 1)
+    let beforeReconnect = try XCTUnwrap(grid.accessibilityChildren()?.first as? NSAccessibilityElement)
+    editor.detachAll()
+    XCTAssertFalse(beforeReconnect.accessibilityPerformPress()); XCTAssertNil(beforeReconnect.accessibilityLabel())
+    let newPeer = try ScenePeer(pane: changed); defer { newPeer.close() }
+    editor.attach(socketPath: newPeer.path, app: nil)
+    try await eventually { editor.connected && grid.accessibilityChildren()?.count == 1 }
+    XCTAssertFalse((grid.accessibilityChildren()?.first as? NSAccessibilityElement) === beforeReconnect)
+    XCTAssertFalse(beforeReconnect.accessibilityPerformPress(), "repeated backend scene IDs do not revive an old object")
+    XCTAssertTrue(newPeer.inputs.isEmpty)
+  }
+
+  @MainActor
   func testMeasuredTableCapabilityRequiresBothDevelopmentSwitches() async throws {
     _ = NSApplication.shared; NSApp.setActivationPolicy(.prohibited)
     for (environment, rich, tables) in [

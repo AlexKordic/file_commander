@@ -688,6 +688,22 @@ Secondary carets receive document-wide UTF-16 positions and coalesced raw
 `text_chunks` around their source positions. Nearby carets share each chunk;
 these additional windows together cannot exceed the parsed document size.
 The accessibility value and its selection retain display-relative coordinates.
+Character, substring, font/style, visual-line, visible-range and screen-bounds
+queries use that same measured projection, including provisional selections
+at every known caret. An offscreen primary is unavailable rather than replaced
+by a visible secondary. Raw-source text-service indices are a separate space.
+Inline image characters carry an accessibility attachment pointing to a stable
+image element with its alt text, loading/error description and measured bounds.
+Source-edit previews remain ordinary source text and expose a separate image
+element without adding a character. Pressing an image selects its exact Markdown
+source through the normal captured pointer queue; it does not copy or edit by
+itself. Source/buffer/authority/focus changes and disconnection invalidate the
+object's action ownership; a new connection cannot revive a retained old object.
+Value, selection, image-description and hierarchy changes post accessibility
+notifications. These are reading and image-selection contracts; direct
+accessibility text/selection setters, semantic heading/link navigation and
+interactive VoiceOver qualification remain unfinished.
+
 Native rich Compose keeps marked text as a provisional replacement over that
 immutable source snapshot. Partial updates, marked/selected subranges and
 context queries use provisional document UTF-16 positions. The same measured

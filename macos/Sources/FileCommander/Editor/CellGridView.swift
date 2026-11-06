@@ -6,6 +6,7 @@ import FreshKit
 /// shape it.
 @MainActor
 protocol CellGridDelegate: AnyObject {
+  var connected: Bool { get }
   func grid(_ grid: CellGridView, send input: SceneInput)
   func gridDidResize(_ grid: CellGridView, columns: Int, rows: Int)
   /// The chord is an app shortcut (Quit, Hide, the switch key, ...) that the
@@ -93,6 +94,8 @@ final class CellGridView: NSView, @preconcurrency NSTextInputClient {
   var composePalette: ComposePaneLayout.Palette?
   private struct ImageTip: Equatable { var rect: CGRect; var text: String }
   private var imageTips: [ImageTip] = []
+  private var accessibleImages: [ComposeAccessibilityImage.ID: ComposeAccessibilityImage] = [:]
+  private var accessibleImageLabels: [ComposeAccessibilityImage.ID: String] = [:]
 
   init(store: SceneStore) {
     self.store = store
@@ -215,6 +218,13 @@ final class CellGridView: NSView, @preconcurrency NSTextInputClient {
       rebuildCompose(); needsDisplay = true; return
     }
     updateImageTooltips()
+    updateAccessibleImages()
+    if old?.layout.text.projection.text != focusedCompose?.layout.text.projection.text {
+      NSAccessibility.post(element: self, notification: .valueChanged)
+    }
+    if old?.selectedRanges != focusedCompose?.selectedRanges {
+      NSAccessibility.post(element: self, notification: .selectedTextChanged)
+    }
     if window?.firstResponder === self {
       inputContext?.invalidateCharacterCoordinates()
       let next = focusedCompose
@@ -531,7 +541,8 @@ final class CellGridView: NSView, @preconcurrency NSTextInputClient {
 
   // MARK: Accessibility
 
-  /// VoiceOver reads the visible text, one line per row, with the caret's place.
+  /// Rich text ranges address the displayed projection; grid mode retains its
+  /// row value. Neither path substitutes raw-source text for the spoken value.
   override func isAccessibilityElement() -> Bool { true }
   override func accessibilityRole() -> NSAccessibility.Role? { .textArea }
   override func accessibilityRoleDescription() -> String? { "editor" }
@@ -547,7 +558,153 @@ final class CellGridView: NSView, @preconcurrency NSTextInputClient {
     return NSRange(location: before + column, length: 0)
   }
 
-  override func accessibilityInsertionPointLineNumber() -> Int { store.cursor?.row ?? 0 }
+  override func accessibilitySelectedTextRanges() -> [NSValue]? {
+    (focusedCompose?.selectedRanges ?? [accessibilitySelectedTextRange()]).map { NSValue(range: $0) }
+  }
+
+  override func accessibilitySelectedText() -> String? { accessibilityString(for: accessibilitySelectedTextRange()) }
+  override func accessibilityNumberOfCharacters() -> Int { (accessibilityValue() as? NSString)?.length ?? 0 }
+
+  override func accessibilityString(for range: NSRange) -> String? {
+    guard let text = accessibilityValue() as? NSString, range.location >= 0, range.location <= text.length,
+          range.length >= 0, range.length <= text.length - range.location else { return nil }
+    return text.substring(with: range)
+  }
+
+  override func accessibilityRange(for index: Int) -> NSRange {
+    guard let pane = focusedCompose else { return super.accessibilityRange(for: index) }
+    return ComposeAccessibilityText(pane: pane).character(at: index)
+  }
+
+  override func accessibilityLine(for index: Int) -> Int {
+    guard let pane = focusedCompose else { return super.accessibilityLine(for: index) }
+    return ComposeAccessibilityText(pane: pane).line(at: index)
+  }
+
+  override func accessibilityRange(forLine line: Int) -> NSRange {
+    guard let pane = focusedCompose else { return super.accessibilityRange(forLine: line) }
+    guard pane.layout.text.fragments.indices.contains(line) else { return ComposeAccessibilityText.missing }
+    return pane.layout.text.fragments[line].range
+  }
+
+  override func accessibilityVisibleCharacterRange() -> NSRange {
+    guard let pane = focusedCompose else { return super.accessibilityVisibleCharacterRange() }
+    return ComposeAccessibilityText(pane: pane).visibleRange
+  }
+
+  override func accessibilityInsertionPointLineNumber() -> Int {
+    guard let pane = focusedCompose else { return store.cursor?.row ?? 0 }
+    if let caret = pane.caret, let line = pane.layout.text.fragments.firstIndex(where: {
+      $0.range.location <= pane.selectedRange.location && pane.selectedRange.location <= $0.contentEnd
+        && abs($0.rect.minY + pane.origin.y - caret.minY) < 0.5
+    }) { return line }
+    return ComposeAccessibilityText(pane: pane).line(at: pane.selectedRange.location)
+  }
+
+  override func accessibilityAttributedString(for range: NSRange) -> NSAttributedString? {
+    guard let pane = focusedCompose, let base = ComposeAccessibilityText(pane: pane).attributed(range) else { return nil }
+    let result = NSMutableAttributedString(attributedString: base)
+    for placed in pane.layout.text.attachments where !placed.attachment.preview {
+      guard let start = pane.layout.text.utf16Position(for: placed.attachment.source.lowerBound),
+            let end = pane.layout.text.utf16Position(for: placed.attachment.source.upperBound, affinity: .upstream),
+            let image = accessibleImages[.init(pane, source: placed.attachment.source)] else { continue }
+      let overlap = NSIntersectionRange(range, NSRange(location: start, length: end - start))
+      if overlap.length > 0 {
+        result.addAttribute(.accessibilityAttachment, value: image,
+          range: NSRange(location: overlap.location - range.location, length: overlap.length))
+      }
+    }
+    return result
+  }
+
+  override func accessibilityStyleRange(for index: Int) -> NSRange {
+    guard let pane = focusedCompose else { return super.accessibilityStyleRange(for: index) }
+    let text = ComposeAccessibilityText(pane: pane)
+    guard index >= 0, index < text.text.length,
+          let attributed = text.attributed(NSRange(location: 0, length: text.text.length)) else { return text.character(at: index) }
+    var range = NSRange()
+    _ = attributed.attributes(at: index, effectiveRange: &range)
+    return range
+  }
+
+  override func accessibilityFrame(for range: NSRange) -> NSRect {
+    guard let pane = focusedCompose, let rect = ComposeAccessibilityText(pane: pane).bounds(for: range) else { return .zero }
+    return accessibilityScreenRect(rect)
+  }
+
+  func accessibilityScreenRect(_ rect: CGRect) -> CGRect {
+    guard let window else { return .zero }
+    return window.convertToScreen(convert(rect, to: nil))
+  }
+
+  override func accessibilityRange(for point: NSPoint) -> NSRange {
+    guard let pane = focusedCompose, let window, point.x.isFinite, point.y.isFinite else { return ComposeAccessibilityText.missing }
+    let point = convert(window.convertPoint(fromScreen: point), from: nil)
+    guard pane.bounds.contains(point) else { return ComposeAccessibilityText.missing }
+    let local = CGPoint(x: point.x - pane.origin.x, y: point.y - pane.origin.y)
+    if let image = pane.layout.text.attachments.first(where: { $0.rect.contains(local) }),
+       let start = pane.layout.text.utf16Position(for: image.attachment.source.lowerBound),
+       let end = pane.layout.text.utf16Position(for: image.attachment.source.upperBound, affinity: .upstream) {
+      return NSRange(location: start, length: end - start)
+    }
+    return ComposeAccessibilityText(pane: pane).character(at: local)
+  }
+
+  override func accessibilityChildren() -> [Any]? {
+    guard let pane = focusedCompose else { return super.accessibilityChildren() }
+    return pane.layout.text.attachments.compactMap { accessibleImages[.init(pane, source: $0.attachment.source)] }
+  }
+
+  override func accessibilityVisibleChildren() -> [Any]? {
+    guard let pane = focusedCompose else { return super.accessibilityVisibleChildren() }
+    let visible = accessibilityScreenRect(pane.bounds)
+    return (accessibilityChildren() ?? []).filter { ($0 as? ComposeAccessibilityImage)?.accessibilityFrame().intersects(visible) == true }
+  }
+
+  func isCurrentAccessibilityImage(_ image: ComposeAccessibilityImage) -> Bool {
+    let id = image.id
+    guard delegate?.connected == true, accessibleImages[id] === image, UInt64(store.windowID) == id.window,
+          let pane = store.panes.first(where: { $0.leaf == id.leaf && $0.hasBuffer && $0.buffer == id.buffer }),
+          pane.hasCompose, pane.compose.viewport.epoch == id.epoch, pane.compose.bufferRevision == id.revision,
+          pane.compose.assetDocument == id.document, pane.compose.assetAuthority == id.authority else { return false }
+    return true
+  }
+
+  /// Scene numbers can repeat after a backend restart. Old AX objects must
+  /// not regain ownership when a new connection supplies the same numbers.
+  func invalidateAccessibleImages() {
+    let hadImages = !accessibleImages.isEmpty
+    accessibleImages.removeAll(); accessibleImageLabels.removeAll()
+    if hadImages { NSAccessibility.post(element: self, notification: .layoutChanged) }
+  }
+
+  override func accessibilityHitTest(_ point: NSPoint) -> Any? {
+    for image in accessibilityChildren() ?? [] {
+      if let image = image as? ComposeAccessibilityImage, image.accessibilityFrame().contains(point) { return image }
+    }
+    return super.accessibilityHitTest(point)
+  }
+
+  private func updateAccessibleImages() {
+    let old = Set(accessibleImages.keys)
+    var next: [ComposeAccessibilityImage.ID: ComposeAccessibilityImage] = [:]
+    var labels: [ComposeAccessibilityImage.ID: String] = [:]
+    if delegate?.connected == true, let pane = focusedCompose {
+      for placed in pane.layout.text.attachments {
+        let id = ComposeAccessibilityImage.ID(pane, source: placed.attachment.source)
+        next[id] = accessibleImages[id] ?? ComposeAccessibilityImage(id: id, grid: self)
+        if let image = pane.pane.compose.images.first(where: { $0.start == id.start && $0.end == id.end }) {
+          labels[id] = pane.layout.imageDescription(image)
+        }
+      }
+    }
+    accessibleImages = next
+    for (id, label) in labels where accessibleImageLabels[id] != nil && accessibleImageLabels[id] != label {
+      NSAccessibility.post(element: next[id]!, notification: .titleChanged)
+    }
+    accessibleImageLabels = labels
+    if old != Set(next.keys) { NSAccessibility.post(element: self, notification: .layoutChanged) }
+  }
 
   // MARK: Caret blink
 

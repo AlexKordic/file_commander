@@ -173,19 +173,47 @@ final class ComposePresentation {
     layout.text.hit(at: CGPoint(x: point.x - origin.x, y: point.y - origin.y))
   }
 
+  private var primarySelectionID: UInt64? { virtualSelections?.primaryID ?? layout.virtualInsertion?.primaryID ?? cursor?.id }
   var selectedRange: NSRange {
-    if let preedit = layout.preedit, let display = layout.draftDisplayRange {
-      return NSRange(location: display.location + preedit.selected.location, length: preedit.selected.length)
+    primarySelectionID.flatMap { displaySelections[$0] } ?? NSRange(location: NSNotFound, length: 0)
+  }
+
+  /// Accessibility ranges address the displayed value, not raw source context.
+  /// Keep primary first; an offscreen primary must not promote a secondary.
+  var selectedRanges: [NSRange] {
+    let selections = displaySelections
+    let primary = primarySelectionID
+    return selections.keys.sorted { a, b in a == primary && b != primary ? true : b == primary ? false : a < b }.compactMap { selections[$0] }
+  }
+
+  private var displaySelections: [UInt64: NSRange] {
+    let virtual = virtualSelections?.cursors ?? layout.virtualInsertion?.cursors
+    if let virtual {
+      return virtual.reduce(into: [:]) { result, value in
+        let range = value.value.selection
+        guard let a = layout.provisionalDisplayPosition(range.location),
+              let b = layout.provisionalDisplayPosition(NSMaxRange(range)), a <= b else { return }
+        result[value.key] = NSRange(location: a, length: b - a)
+      }
     }
-    guard let cursor,
-          let position = Int(exactly: cursor.position),
-          let anchor = Int(exactly: cursor.hasAnchor ? cursor.anchor : cursor.position),
-          let a = layout.text.projection.displayPosition(for: min(position, anchor)),
-          let b = layout.text.projection.displayPosition(for: max(position, anchor)) else { return NSRange(location: 0, length: 0) }
-    let bytes = Array(layout.text.projection.text.utf8)
-    let start = String(decoding: bytes[..<a], as: UTF8.self).utf16.count
-    let end = String(decoding: bytes[..<b], as: UTF8.self).utf16.count
-    return NSRange(location: start, length: max(0, end - start))
+    return pane.compose.cursors.reduce(into: [:]) { result, cursor in
+      if let draft = layout.composition?.values[cursor.id], let display = layout.draftDisplayRanges[cursor.id] {
+        result[cursor.id] = NSRange(location: display.location + draft.selected.location, length: draft.selected.length)
+        return
+      }
+      guard let a = Int(exactly: cursor.hasAnchor ? min(cursor.position, cursor.anchor) : cursor.position),
+            let b = Int(exactly: cursor.hasAnchor ? max(cursor.position, cursor.anchor) : cursor.position) else { return }
+      if let composition = layout.composition {
+        guard let start = composition.virtualPosition(for: a), composition.sourcePosition(at: start) == a,
+              let end = composition.virtualPosition(for: b), composition.sourcePosition(at: end) == b,
+              let x = layout.provisionalDisplayPosition(start), let y = layout.provisionalDisplayPosition(end), x <= y else { return }
+        result[cursor.id] = NSRange(location: x, length: y - x)
+        return
+      }
+      guard let start = layout.text.utf16Position(for: max(a, layout.text.projection.source.lowerBound)),
+            let end = layout.text.utf16Position(for: min(b, layout.text.projection.source.upperBound), affinity: .upstream), start <= end else { return }
+      result[cursor.id] = NSRange(location: start, length: end - start)
+    }
   }
 
   var textServiceSelectedRange: NSRange { virtualSelections?.selection ?? layout.composition?.selectedRange ?? textContext?.selection ?? selectedRange }

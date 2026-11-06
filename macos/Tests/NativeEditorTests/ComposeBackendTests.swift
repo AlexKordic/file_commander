@@ -181,6 +181,21 @@ final class ComposeBackendTests: XCTestCase {
       guard let pane = grid.focusedCompose, let annotation = pane.pane.compose.images.first else { return false }
       return pane.layout.imageDescription(annotation) == "tiny"
     }
+    let accessibleImage = try XCTUnwrap(grid.accessibilityChildren()?.first as? NSAccessibilityElement)
+    XCTAssertEqual(accessibleImage.accessibilityRole(), .image)
+    XCTAssertEqual(accessibleImage.accessibilityLabel(), "tiny")
+    XCTAssertTrue(accessibleImage.accessibilityPerformPress())
+    let imageSource = try XCTUnwrap(initial.pane.compose.images.first)
+    try await eventually(editor, "accessible image action selects its exact Markdown source") {
+      guard let cursor = grid.focusedCompose?.cursor else { return false }
+      return cursor.position == imageSource.end && cursor.hasAnchor && cursor.anchor == imageSource.start
+    }
+    editor.send(.action(name: "copy", argsJson: ""))
+    try await eventually(editor, "accessible image selection copies source into the private pasteboard") {
+      pasteboard.editorText == "![tiny](tiny.png)"
+    }
+    editor.send(.action(name: "save", argsJson: ""))
+    try await eventually(editor, "accessibility reads and selection preserve source bytes") { (try? Data(contentsOf: file)) == Data(original.utf8) }
     let alpha = try XCTUnwrap(original.range(of: "alpha"))
     try await click(UInt64(original[..<alpha.lowerBound].utf8.count), editor: editor)
     let row = initial.pane.compose.tables[0].rows[2]
