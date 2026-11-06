@@ -1856,67 +1856,91 @@ public nonisolated struct WireComposeSelection: Sendable {
 
 /// A revisioned input was applied exactly once, requires a fresh layout,
 /// or was cancelled with a terminal explanation. Cancelled ids are consumed.
-public nonisolated struct WireInputReply: Sendable {
+public nonisolated struct WireInputReply: @unchecked Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
 
-  public var id: UInt64 = 0
+  public var id: UInt64 {
+    get {_storage._id}
+    set {_uniqueStorage()._id = newValue}
+  }
 
-  public var accepted: Bool = false
+  public var accepted: Bool {
+    get {_storage._accepted}
+    set {_uniqueStorage()._accepted = newValue}
+  }
 
-  public var needsLayout: Bool = false
+  public var needsLayout: Bool {
+    get {_storage._needsLayout}
+    set {_uniqueStorage()._needsLayout = newValue}
+  }
 
   public var needRegion: UInt64 {
-    get {_needRegion ?? 0}
-    set {_needRegion = newValue}
+    get {_storage._needRegion ?? 0}
+    set {_uniqueStorage()._needRegion = newValue}
   }
   /// Returns true if `needRegion` has been explicitly set.
-  public var hasNeedRegion: Bool {self._needRegion != nil}
+  public var hasNeedRegion: Bool {_storage._needRegion != nil}
   /// Clears the value of `needRegion`. Subsequent reads from it will return its default value.
-  public mutating func clearNeedRegion() {self._needRegion = nil}
+  public mutating func clearNeedRegion() {_uniqueStorage()._needRegion = nil}
 
-  public var carets: [WireComposeCaret] = []
+  public var carets: [WireComposeCaret] {
+    get {_storage._carets}
+    set {_uniqueStorage()._carets = newValue}
+  }
 
   public var needY: Double {
-    get {_needY ?? 0}
-    set {_needY = newValue}
+    get {_storage._needY ?? 0}
+    set {_uniqueStorage()._needY = newValue}
   }
   /// Returns true if `needY` has been explicitly set.
-  public var hasNeedY: Bool {self._needY != nil}
+  public var hasNeedY: Bool {_storage._needY != nil}
   /// Clears the value of `needY`. Subsequent reads from it will return its default value.
-  public mutating func clearNeedY() {self._needY = nil}
+  public mutating func clearNeedY() {_uniqueStorage()._needY = nil}
 
   public var compose: WireComposePane {
-    get {_compose ?? WireComposePane()}
-    set {_compose = newValue}
+    get {_storage._compose ?? WireComposePane()}
+    set {_uniqueStorage()._compose = newValue}
   }
   /// Returns true if `compose` has been explicitly set.
-  public var hasCompose: Bool {self._compose != nil}
+  public var hasCompose: Bool {_storage._compose != nil}
   /// Clears the value of `compose`. Subsequent reads from it will return its default value.
-  public mutating func clearCompose() {self._compose = nil}
+  public mutating func clearCompose() {_uniqueStorage()._compose = nil}
 
-  public var cancelled: Bool = false
+  public var cancelled: Bool {
+    get {_storage._cancelled}
+    set {_uniqueStorage()._cancelled = newValue}
+  }
 
-  public var error: String = String()
+  public var error: String {
+    get {_storage._error}
+    set {_uniqueStorage()._error = newValue}
+  }
 
   public var edit: WireComposeEditReceipt {
-    get {_edit ?? WireComposeEditReceipt()}
-    set {_edit = newValue}
+    get {_storage._edit ?? WireComposeEditReceipt()}
+    set {_uniqueStorage()._edit = newValue}
   }
   /// Returns true if `edit` has been explicitly set.
-  public var hasEdit: Bool {self._edit != nil}
+  public var hasEdit: Bool {_storage._edit != nil}
   /// Clears the value of `edit`. Subsequent reads from it will return its default value.
-  public mutating func clearEdit() {self._edit = nil}
+  public mutating func clearEdit() {_uniqueStorage()._edit = nil}
+
+  public var result: WireComposeEditReceipt {
+    get {_storage._result ?? WireComposeEditReceipt()}
+    set {_uniqueStorage()._result = newValue}
+  }
+  /// Returns true if `result` has been explicitly set.
+  public var hasResult: Bool {_storage._result != nil}
+  /// Clears the value of `result`. Subsequent reads from it will return its default value.
+  public mutating func clearResult() {_uniqueStorage()._result = nil}
 
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
 
-  fileprivate var _needRegion: UInt64? = nil
-  fileprivate var _needY: Double? = nil
-  fileprivate var _compose: WireComposePane? = nil
-  fileprivate var _edit: WireComposeEditReceipt? = nil
+  fileprivate var _storage = _StorageClass.defaultInstance
 }
 
 /// The exact source and edited cursor set immediately after a native edit.
@@ -7210,78 +7234,139 @@ nonisolated extension WireComposeSelection: SwiftProtobuf.Message, SwiftProtobuf
 
 nonisolated extension WireInputReply: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".InputReply"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}id\0\u{1}accepted\0\u{3}needs_layout\0\u{3}need_region\0\u{1}carets\0\u{3}need_y\0\u{1}compose\0\u{1}cancelled\0\u{1}error\0\u{1}edit\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}id\0\u{1}accepted\0\u{3}needs_layout\0\u{3}need_region\0\u{1}carets\0\u{3}need_y\0\u{1}compose\0\u{1}cancelled\0\u{1}error\0\u{1}edit\0\u{1}result\0")
+
+  fileprivate class _StorageClass {
+    var _id: UInt64 = 0
+    var _accepted: Bool = false
+    var _needsLayout: Bool = false
+    var _needRegion: UInt64? = nil
+    var _carets: [WireComposeCaret] = []
+    var _needY: Double? = nil
+    var _compose: WireComposePane? = nil
+    var _cancelled: Bool = false
+    var _error: String = String()
+    var _edit: WireComposeEditReceipt? = nil
+    var _result: WireComposeEditReceipt? = nil
+
+      // This property is used as the initial default value for new instances of the type.
+      // The type itself is protecting the reference to its storage via CoW semantics.
+      // This will force a copy to be made of this reference when the first mutation occurs;
+      // hence, it is safe to mark this as `nonisolated(unsafe)`.
+      static nonisolated(unsafe) let defaultInstance = _StorageClass()
+
+    private init() {}
+
+    init(copying source: _StorageClass) {
+      _id = source._id
+      _accepted = source._accepted
+      _needsLayout = source._needsLayout
+      _needRegion = source._needRegion
+      _carets = source._carets
+      _needY = source._needY
+      _compose = source._compose
+      _cancelled = source._cancelled
+      _error = source._error
+      _edit = source._edit
+      _result = source._result
+    }
+  }
+
+  fileprivate mutating func _uniqueStorage() -> _StorageClass {
+    if !isKnownUniquelyReferenced(&_storage) {
+      _storage = _StorageClass(copying: _storage)
+    }
+    return _storage
+  }
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
-    while let fieldNumber = try decoder.nextFieldNumber() {
-      // The use of inline closures is to circumvent an issue where the compiler
-      // allocates stack space for every case branch when no optimizations are
-      // enabled. https://github.com/apple/swift-protobuf/issues/1034
-      switch fieldNumber {
-      case 1: try { try decoder.decodeSingularUInt64Field(value: &self.id) }()
-      case 2: try { try decoder.decodeSingularBoolField(value: &self.accepted) }()
-      case 3: try { try decoder.decodeSingularBoolField(value: &self.needsLayout) }()
-      case 4: try { try decoder.decodeSingularUInt64Field(value: &self._needRegion) }()
-      case 5: try { try decoder.decodeRepeatedMessageField(value: &self.carets) }()
-      case 6: try { try decoder.decodeSingularDoubleField(value: &self._needY) }()
-      case 7: try { try decoder.decodeSingularMessageField(value: &self._compose) }()
-      case 8: try { try decoder.decodeSingularBoolField(value: &self.cancelled) }()
-      case 9: try { try decoder.decodeSingularStringField(value: &self.error) }()
-      case 10: try { try decoder.decodeSingularMessageField(value: &self._edit) }()
-      default: break
+    _ = _uniqueStorage()
+    try withExtendedLifetime(_storage) { (_storage: _StorageClass) in
+      while let fieldNumber = try decoder.nextFieldNumber() {
+        // The use of inline closures is to circumvent an issue where the compiler
+        // allocates stack space for every case branch when no optimizations are
+        // enabled. https://github.com/apple/swift-protobuf/issues/1034
+        switch fieldNumber {
+        case 1: try { try decoder.decodeSingularUInt64Field(value: &_storage._id) }()
+        case 2: try { try decoder.decodeSingularBoolField(value: &_storage._accepted) }()
+        case 3: try { try decoder.decodeSingularBoolField(value: &_storage._needsLayout) }()
+        case 4: try { try decoder.decodeSingularUInt64Field(value: &_storage._needRegion) }()
+        case 5: try { try decoder.decodeRepeatedMessageField(value: &_storage._carets) }()
+        case 6: try { try decoder.decodeSingularDoubleField(value: &_storage._needY) }()
+        case 7: try { try decoder.decodeSingularMessageField(value: &_storage._compose) }()
+        case 8: try { try decoder.decodeSingularBoolField(value: &_storage._cancelled) }()
+        case 9: try { try decoder.decodeSingularStringField(value: &_storage._error) }()
+        case 10: try { try decoder.decodeSingularMessageField(value: &_storage._edit) }()
+        case 11: try { try decoder.decodeSingularMessageField(value: &_storage._result) }()
+        default: break
+        }
       }
     }
   }
 
   public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
-    // The use of inline closures is to circumvent an issue where the compiler
-    // allocates stack space for every if/case branch local when no optimizations
-    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
-    // https://github.com/apple/swift-protobuf/issues/1182
-    if self.id != 0 {
-      try visitor.visitSingularUInt64Field(value: self.id, fieldNumber: 1)
+    try withExtendedLifetime(_storage) { (_storage: _StorageClass) in
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every if/case branch local when no optimizations
+      // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+      // https://github.com/apple/swift-protobuf/issues/1182
+      if _storage._id != 0 {
+        try visitor.visitSingularUInt64Field(value: _storage._id, fieldNumber: 1)
+      }
+      if _storage._accepted != false {
+        try visitor.visitSingularBoolField(value: _storage._accepted, fieldNumber: 2)
+      }
+      if _storage._needsLayout != false {
+        try visitor.visitSingularBoolField(value: _storage._needsLayout, fieldNumber: 3)
+      }
+      try { if let v = _storage._needRegion {
+        try visitor.visitSingularUInt64Field(value: v, fieldNumber: 4)
+      } }()
+      if !_storage._carets.isEmpty {
+        try visitor.visitRepeatedMessageField(value: _storage._carets, fieldNumber: 5)
+      }
+      try { if let v = _storage._needY {
+        try visitor.visitSingularDoubleField(value: v, fieldNumber: 6)
+      } }()
+      try { if let v = _storage._compose {
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 7)
+      } }()
+      if _storage._cancelled != false {
+        try visitor.visitSingularBoolField(value: _storage._cancelled, fieldNumber: 8)
+      }
+      if !_storage._error.isEmpty {
+        try visitor.visitSingularStringField(value: _storage._error, fieldNumber: 9)
+      }
+      try { if let v = _storage._edit {
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 10)
+      } }()
+      try { if let v = _storage._result {
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 11)
+      } }()
     }
-    if self.accepted != false {
-      try visitor.visitSingularBoolField(value: self.accepted, fieldNumber: 2)
-    }
-    if self.needsLayout != false {
-      try visitor.visitSingularBoolField(value: self.needsLayout, fieldNumber: 3)
-    }
-    try { if let v = self._needRegion {
-      try visitor.visitSingularUInt64Field(value: v, fieldNumber: 4)
-    } }()
-    if !self.carets.isEmpty {
-      try visitor.visitRepeatedMessageField(value: self.carets, fieldNumber: 5)
-    }
-    try { if let v = self._needY {
-      try visitor.visitSingularDoubleField(value: v, fieldNumber: 6)
-    } }()
-    try { if let v = self._compose {
-      try visitor.visitSingularMessageField(value: v, fieldNumber: 7)
-    } }()
-    if self.cancelled != false {
-      try visitor.visitSingularBoolField(value: self.cancelled, fieldNumber: 8)
-    }
-    if !self.error.isEmpty {
-      try visitor.visitSingularStringField(value: self.error, fieldNumber: 9)
-    }
-    try { if let v = self._edit {
-      try visitor.visitSingularMessageField(value: v, fieldNumber: 10)
-    } }()
     try unknownFields.traverse(visitor: &visitor)
   }
 
   public static func ==(lhs: WireInputReply, rhs: WireInputReply) -> Bool {
-    if lhs.id != rhs.id {return false}
-    if lhs.accepted != rhs.accepted {return false}
-    if lhs.needsLayout != rhs.needsLayout {return false}
-    if lhs._needRegion != rhs._needRegion {return false}
-    if lhs.carets != rhs.carets {return false}
-    if lhs._needY != rhs._needY {return false}
-    if lhs._compose != rhs._compose {return false}
-    if lhs.cancelled != rhs.cancelled {return false}
-    if lhs.error != rhs.error {return false}
-    if lhs._edit != rhs._edit {return false}
+    if lhs._storage !== rhs._storage {
+      let storagesAreEqual: Bool = withExtendedLifetime((lhs._storage, rhs._storage)) { (_args: (_StorageClass, _StorageClass)) in
+        let _storage = _args.0
+        let rhs_storage = _args.1
+        if _storage._id != rhs_storage._id {return false}
+        if _storage._accepted != rhs_storage._accepted {return false}
+        if _storage._needsLayout != rhs_storage._needsLayout {return false}
+        if _storage._needRegion != rhs_storage._needRegion {return false}
+        if _storage._carets != rhs_storage._carets {return false}
+        if _storage._needY != rhs_storage._needY {return false}
+        if _storage._compose != rhs_storage._compose {return false}
+        if _storage._cancelled != rhs_storage._cancelled {return false}
+        if _storage._error != rhs_storage._error {return false}
+        if _storage._edit != rhs_storage._edit {return false}
+        if _storage._result != rhs_storage._result {return false}
+        return true
+      }
+      if !storagesAreEqual {return false}
+    }
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }

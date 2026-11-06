@@ -489,4 +489,123 @@ final class ComposeBackendTests: XCTestCase {
     XCTAssertTrue(editor.uninsertedText.isEmpty)
   }
 
+  @MainActor
+  func testCompositionBehindNavigationUsesItsResultForActiveAndAlreadyCommittedText() async throws {
+    let backend = try backend(); defer { backend.stop() }
+    let editor = editor(BackendPasteboard()); defer { editor.detachAll() }
+    let original = "| A | B |\n|---|---|\n| cell | value |\n\nalpha Tail\n"
+    let file = backend.root.appendingPathComponent("navigation-compose.md")
+    try Data(original.utf8).write(to: file)
+    try await attach(backend, file: file, editor: editor)
+    let grid = try XCTUnwrap(editor.grid), word = (original as NSString).range(of: "alpha")
+    let unspecified = NSRange(location: NSNotFound, length: 0)
+    for (committed, selection) in [(false, false), (true, false), (true, true)] {
+      let expected = Data(original.replacingOccurrences(of: "alpha", with: selection ? "日lpha" : "a日lpha").utf8)
+      try await click(UInt64(word.location), editor: editor)
+      editor.send(.key(.with { $0.key = "ArrowRight"; $0.shift = selection }))
+      grid.setMarkedText("日", selectedRange: NSRange(location: 1, length: 0), replacementRange: unspecified)
+      if committed { grid.insertText("日", replacementRange: unspecified) }
+      else {
+        try await eventually(editor, "active draft follows the acknowledged navigation") {
+          grid.hasMarkedText() && grid.markedRange().location == word.location + 1 && grid.focusedCompose?.cursor?.position == UInt64(word.location + 1)
+        }
+        grid.insertText("日", replacementRange: unspecified)
+      }
+      try await eventually(editor, "composition committed at the resulting caret") {
+        grid.focusedCompose?.pane.compose.documentLen == UInt64(expected.count) && grid.focusedCompose?.cursor?.position == UInt64(word.location + (selection ? 3 : 4))
+      }
+      editor.send(.action(name: "save", argsJson: ""))
+      try await eventually(editor, "save follows navigation rather than the older source cursor") { (try? Data(contentsOf: file)) == expected }
+      editor.send(.action(name: "undo", argsJson: ""))
+      try await eventually(editor, "undo the composed phrase") { grid.focusedCompose?.pane.compose.documentLen == UInt64(original.utf8.count) }
+      editor.send(.action(name: "save", argsJson: ""))
+      try await eventually(editor, "save original after undoing navigation-following text") { (try? Data(contentsOf: file)) == Data(original.utf8) }
+    }
+    XCTAssertTrue(editor.uninsertedText.isEmpty)
+  }
+
+  @MainActor
+  func testPendingPrefixNavigationAndFollowingCommitKeepSourceOrderAndSeparateUndos() async throws {
+    let backend = try backend(); defer { backend.stop() }
+    let editor = editor(BackendPasteboard()); defer { editor.detachAll() }
+    let original = "| A | B |\n|---|---|\n| cell | value |\n\nalpha Tail\n"
+    let file = backend.root.appendingPathComponent("prefix-navigation-compose.md")
+    try Data(original.utf8).write(to: file)
+    try await attach(backend, file: file, editor: editor)
+    let grid = try XCTUnwrap(editor.grid), word = (original as NSString).range(of: "alpha")
+    try await click(UInt64(word.location), editor: editor)
+    let unspecified = NSRange(location: NSNotFound, length: 0)
+    grid.insertText("日本", replacementRange: unspecified)
+    editor.send(.key(.with { $0.key = "ArrowLeft" }))
+    grid.setMarkedText("語", selectedRange: NSRange(location: 1, length: 0), replacementRange: unspecified)
+    grid.insertText("語", replacementRange: unspecified)
+    let expected = Data(original.replacingOccurrences(of: "alpha", with: "日語本alpha").utf8)
+    try await eventually(editor, "all three queued inputs complete at the measured source caret") {
+      grid.focusedCompose?.pane.compose.documentLen == UInt64(expected.count) && grid.focusedCompose?.cursor?.position == UInt64(word.location + 6)
+    }
+    editor.send(.action(name: "save", argsJson: ""))
+    try await eventually(editor, "save prefix, navigation and following phrase without duplication") { (try? Data(contentsOf: file)) == expected }
+    for size in [original.utf8.count + 6, original.utf8.count] {
+      editor.send(.action(name: "undo", argsJson: ""))
+      try await eventually(editor, "undo one native text transaction") { grid.focusedCompose?.pane.compose.documentLen == UInt64(size) }
+    }
+    editor.send(.action(name: "save", argsJson: ""))
+    try await eventually(editor, "save exact original after both text undos") { (try? Data(contentsOf: file)) == Data(original.utf8) }
+    XCTAssertTrue(editor.uninsertedText.isEmpty)
+  }
+
+  @MainActor
+  func testCompositionBehindAddCaretUsesTheActionsEntireResultingGroup() async throws {
+    let backend = try backend(); defer { backend.stop() }
+    let editor = editor(BackendPasteboard()); defer { editor.detachAll() }
+    let original = "| A | B |\n|---|---|\n| cell | value |\n\nalpha one\nalpha two\n"
+    let file = backend.root.appendingPathComponent("add-caret-compose.md")
+    try Data(original.utf8).write(to: file)
+    try await attach(backend, file: file, editor: editor)
+    let grid = try XCTUnwrap(editor.grid), word = (original as NSString).range(of: "alpha")
+    try await click(UInt64(word.location), editor: editor)
+    editor.send(.action(name: "add_cursor_below", argsJson: ""))
+    grid.setMarkedText("日", selectedRange: NSRange(location: 1, length: 0), replacementRange: NSRange(location: NSNotFound, length: 0))
+    grid.insertText("日", replacementRange: NSRange(location: NSNotFound, length: 0))
+    let expected = Data(original.replacingOccurrences(of: "alpha", with: "日alpha").utf8)
+    try await eventually(editor, "new composition uses both action-created carets") {
+      grid.focusedCompose?.pane.compose.documentLen == UInt64(expected.count) && grid.focusedCompose?.pane.compose.cursors.count == 2
+    }
+    editor.send(.action(name: "save", argsJson: ""))
+    try await eventually(editor, "save both new-group insertions") { (try? Data(contentsOf: file)) == expected }
+    editor.send(.action(name: "undo", argsJson: ""))
+    try await eventually(editor, "one undo removes both insertions") { grid.focusedCompose?.pane.compose.documentLen == UInt64(original.utf8.count) }
+    editor.send(.action(name: "save", argsJson: ""))
+    try await eventually(editor, "save exact original after undoing new-group conversion") { (try? Data(contentsOf: file)) == Data(original.utf8) }
+    XCTAssertTrue(editor.uninsertedText.isEmpty)
+  }
+
+  @MainActor
+  func testCompositionBehindClipboardPasteUsesItsResultingSourceAndUndoesSeparately() async throws {
+    let backend = try backend(); defer { backend.stop() }
+    let editor = editor(BackendPasteboard()); defer { editor.detachAll() }
+    let original = "| A | B |\n|---|---|\n| cell | value |\n\nalpha Tail\n"
+    let file = backend.root.appendingPathComponent("paste-compose.md")
+    try Data(original.utf8).write(to: file)
+    try await attach(backend, file: file, editor: editor)
+    let grid = try XCTUnwrap(editor.grid), word = (original as NSString).range(of: "alpha")
+    try await click(UInt64(word.location), editor: editor)
+    editor.send(.paste("base"))
+    grid.setMarkedText("日", selectedRange: NSRange(location: 1, length: 0), replacementRange: NSRange(location: NSNotFound, length: 0))
+    grid.insertText("日", replacementRange: NSRange(location: NSNotFound, length: 0))
+    let expected = Data(original.replacingOccurrences(of: "alpha", with: "base日alpha").utf8)
+    try await eventually(editor, "paste and following native composition finish in order") {
+      grid.focusedCompose?.pane.compose.documentLen == UInt64(expected.count) && grid.focusedCompose?.cursor?.position == UInt64(word.location + 7)
+    }
+    editor.send(.action(name: "save", argsJson: ""))
+    try await eventually(editor, "save composition after the clipboard paste") { (try? Data(contentsOf: file)) == expected }
+    for size in [original.utf8.count + 4, original.utf8.count] {
+      editor.send(.action(name: "undo", argsJson: ""))
+      try await eventually(editor, "undo one paste/native transaction") { grid.focusedCompose?.pane.compose.documentLen == UInt64(size) }
+    }
+    editor.send(.action(name: "save", argsJson: ""))
+    try await eventually(editor, "save original after undoing paste and native text") { (try? Data(contentsOf: file)) == Data(original.utf8) }
+    XCTAssertTrue(editor.uninsertedText.isEmpty)
+  }
+
 }

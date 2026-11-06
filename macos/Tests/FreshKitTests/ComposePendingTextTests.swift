@@ -208,4 +208,48 @@ final class ComposePendingTextTests: XCTestCase {
     XCTAssertNil(next.resolved(pane: pane("Åcat 日", [NSRange(location: 1, length: 3), NSRange(location: 6, length: 0)]), edited: [2], preserved: [1]),
       "canonical equivalence cannot authorize deleting different surrounding source bytes")
   }
+
+  func testActionResultUsesItsSelectionAndRetainsPartialPreeditIntent() throws {
+    let source = pane("alpha Tail", [NSRange(location: 0, length: 5)])
+    let initial = try draft(source, "abc")
+    var current = initial
+    XCTAssertTrue(current.update(NSAttributedString(string: "日"), selected: NSRange(location: 1, length: 0),
+      replacement: NSRange(location: 1, length: 1)))
+    let result = pane("alpha Tail", [NSRange(location: 6, length: 4)])
+    let bound = try XCTUnwrap(current.afterAction(initial, pane: result))
+    XCTAssertEqual(bound.presentation.primary.source, 6..<10)
+    XCTAssertEqual(bound.markedRange, NSRange(location: 7, length: 1))
+    XCTAssertEqual(bound.selectedRange, NSRange(location: 8, length: 0))
+    XCTAssertEqual(bound.substring(for: NSRange(location: 0, length: 100))?.text.string, "alpha a日c")
+  }
+
+  func testActionResultExcludesPreviouslyCommittedPrefixesAndChecksExpandedSource() throws {
+    let source = pane("alpha Tail", [NSRange(location: 0, length: 5)])
+    let prefix = try XCTUnwrap(try draft(source, "日本").committed(nativeNewline: 1))
+    let initial = try following(prefix, pane: source, text: "語")
+    let result = pane("日本 Tail", [NSRange(location: 1, length: 0)])
+    let bound = try XCTUnwrap(initial.afterAction(initial, pane: result))
+    XCTAssertEqual(bound.presentation.primary.source, 3..<3)
+    XCTAssertEqual(bound.presentation.primary.draft.string, "語")
+    XCTAssertEqual(bound.substring(for: NSRange(location: 0, length: 100))?.text.string, "日語本 Tail")
+    var expanded = initial
+    XCTAssertTrue(expanded.update(NSAttributedString(string: "X"), selected: NSRange(location: 1, length: 0),
+      replacement: NSRange(location: 1, length: 1)))
+    XCTAssertNil(expanded.afterAction(initial, pane: result), "the old preceding 本 cannot authorize replacing a different 日 at the resulting cursor")
+  }
+
+  func testActionCanCreateANewCursorGroupAndCommitsUseItsDeclaredNewlinePolicy() throws {
+    let source = pane("alpha Tail", [NSRange(location: 0, length: 0)], newline: 2)
+    let initial = try draft(source, "🙂\n")
+    let committed = try XCTUnwrap(initial.committed(nativeNewline: 2))
+    var result = pane("alpha Tail", [NSRange(location: 1, length: 0), NSRange(location: 6, length: 4)])
+    result.cursors[0].id = 10; result.cursors[1].id = 20
+    let bound = try XCTUnwrap(committed.afterAction(initial, pane: result))
+    XCTAssertEqual(bound.ordered, [10, 20]); XCTAssertEqual(bound.presentation.primaryID, 20)
+    XCTAssertEqual(bound.presentation.values[10]?.draft.string, "🙂\n")
+    XCTAssertEqual(bound.presentation.values[20]?.source, 6..<10)
+    XCTAssertEqual(bound.presentation.values[20]?.draft.string, "🙂\n")
+    result.cursors[0].utf16Position = 2
+    XCTAssertNil(committed.afterAction(initial, pane: result))
+  }
 }

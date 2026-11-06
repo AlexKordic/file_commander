@@ -501,6 +501,115 @@ final class ComposeInputTests: XCTestCase {
   }
 
   @MainActor
+  func testMarkedCommitBehindNavigationUsesItsCorrelatedResultRatherThanANewerCursor() async throws {
+    let peer = try ScenePeer(pane: pane("alpha Tail")); defer { peer.close() }
+    let editor = richEditor(); defer { editor.detachAll() }
+    editor.attach(socketPath: peer.path, app: nil)
+    try await eventually { editor.grid?.focusedCompose != nil }
+    let grid = try XCTUnwrap(editor.grid), unspecified = NSRange(location: NSNotFound, length: 0)
+    editor.send(.key(.with { $0.key = "ArrowRight" }))
+    try await eventually { peer.inputs.count == 1 }
+    grid.setMarkedText("日", selectedRange: NSRange(location: 1, length: 0), replacementRange: unspecified)
+    grid.insertText("日", replacementRange: unspecified)
+    var moved = pane("alpha Tail")
+    moved.compose.cursors[0].position = 1; moved.compose.cursors[0].utf16Position = 1
+    moved.compose.textContext.selectionStart = 1; moved.compose.textContext.selectionEnd = 1
+    moved.compose.selectionRevision = 5
+    let result = WireComposeEditReceipt.with {
+      $0.window = 1; $0.leaf = 2; $0.buffer = 3; $0.epoch = 7; $0.cursors = [1]; $0.pane = moved.compose
+    }
+    var newer = moved
+    newer.compose.cursors[0].position = 7; newer.compose.cursors[0].utf16Position = 7
+    newer.compose.textContext.selectionStart = 7; newer.compose.textContext.selectionEnd = 7
+    newer.compose.selectionRevision = 6
+    peer.reply(.with { $0.id = 1; $0.accepted = true; $0.result = result }, pane: newer)
+    try await eventually { peer.inputs.count == 2 }
+    XCTAssertEqual(peer.inputs[1].replacementStart, 1, "the composition follows the queued navigation, not its old or newer scene cursor")
+    XCTAssertEqual(peer.inputs[1].replacementEnd, 1)
+    XCTAssertEqual(try WirePaste(serializedBytes: peer.inputs[1].payload).text, "日")
+    peer.reply(.with { $0.id = 2; $0.accepted = true })
+  }
+
+  @MainActor
+  func testActiveCompositionFollowsAnActionsNewGroupAfterItsOriginalCaretRetires() async throws {
+    let peer = try ScenePeer(pane: pane("alpha Tail")); defer { peer.close() }
+    let editor = richEditor(); defer { editor.detachAll() }
+    editor.attach(socketPath: peer.path, app: nil)
+    try await eventually { editor.grid?.focusedCompose != nil }
+    let grid = try XCTUnwrap(editor.grid), unspecified = NSRange(location: NSNotFound, length: 0)
+    editor.send(.action(name: "add_cursor_below", argsJson: ""))
+    grid.setMarkedText("日", selectedRange: NSRange(location: 1, length: 0), replacementRange: unspecified)
+    try await eventually { peer.inputs.count == 1 }
+    var resulting = pane("alpha Tail")
+    resulting.compose.cursors = [.with { $0.id = 10; $0.position = 1; $0.utf16Position = 1 },
+      .with { $0.id = 20; $0.primary = true; $0.position = 6; $0.utf16Position = 6 }]
+    resulting.compose.textContext.selectionStart = 6; resulting.compose.textContext.selectionEnd = 6
+    resulting.compose.selectionRevision = 5
+    let result = WireComposeEditReceipt.with {
+      $0.window = 1; $0.leaf = 2; $0.buffer = 3; $0.epoch = 7; $0.pane = resulting.compose
+    }
+    peer.reply(.with { $0.id = 1; $0.accepted = true; $0.result = result }, pane: resulting)
+    try await eventually { grid.hasMarkedText() && grid.markedRange().location == 7 }
+    XCTAssertEqual(grid.focusedCompose?.layout.composition?.ordered, [10, 20])
+    grid.insertText("日", replacementRange: unspecified)
+    try await eventually { peer.inputs.count == 2 }
+    XCTAssertEqual(peer.inputs[1].replacementCursor, 20)
+    XCTAssertEqual(peer.inputs[1].replacementStart, 6)
+    XCTAssertEqual(peer.inputs[1].replacements.first?.cursor, 10)
+    XCTAssertEqual(peer.inputs[1].replacements.first?.start, 1)
+    XCTAssertTrue(editor.uninsertedText.isEmpty)
+    peer.reply(.with { $0.id = 2; $0.accepted = true })
+  }
+
+  @MainActor
+  func testCanceledActionRecoversQueuedAndMarkedFollowingTextWithoutPartialInsertion() async throws {
+    let peer = try ScenePeer(pane: pane("alpha Tail")); defer { peer.close() }
+    let editor = richEditor(); defer { editor.detachAll() }
+    editor.attach(socketPath: peer.path, app: nil)
+    try await eventually { editor.grid?.focusedCompose != nil }
+    let grid = try XCTUnwrap(editor.grid), unspecified = NSRange(location: NSNotFound, length: 0)
+    editor.send(.key(.with { $0.key = "ArrowRight" }))
+    grid.insertText("日", replacementRange: unspecified)
+    grid.setMarkedText("語", selectedRange: NSRange(location: 1, length: 0), replacementRange: unspecified)
+    try await eventually { peer.inputs.count == 1 }
+    peer.reply(.with { $0.id = 1; $0.cancelled = true; $0.error = "The original view was replaced." })
+    try await eventually { editor.uninsertedText == ["日", "語"] }
+    XCTAssertFalse(grid.hasMarkedText()); XCTAssertEqual(peer.inputs.count, 1)
+  }
+
+  @MainActor
+  func testExplicitReplacementInPendingPrefixKeepsItsSourceTargetAcrossQueuedNavigation() async throws {
+    let peer = try ScenePeer(pane: pane("alpha Tail")); defer { peer.close() }
+    let editor = richEditor(); defer { editor.detachAll() }
+    editor.attach(socketPath: peer.path, app: nil)
+    try await eventually { editor.grid?.focusedCompose != nil }
+    let grid = try XCTUnwrap(editor.grid), unspecified = NSRange(location: NSNotFound, length: 0)
+    grid.insertText("beta", replacementRange: unspecified)
+    editor.send(.key(.with { $0.key = "ArrowLeft" }))
+    XCTAssertEqual(grid.attributedSubstring(forProposedRange: NSRange(location: 0, length: 100), actualRange: nil)?.string, "betaalpha Tail")
+    grid.insertText("theta", replacementRange: NSRange(location: 0, length: 4))
+    try await eventually { peer.inputs.count == 1 }
+    var first = pane("betaalpha Tail", revision: 5)
+    first.compose.cursors[0].position = 4; first.compose.cursors[0].utf16Position = 4
+    first.compose.textContext.selectionStart = 4; first.compose.textContext.selectionEnd = 4
+    let edit = WireComposeEditReceipt.with {
+      $0.window = 1; $0.leaf = 2; $0.buffer = 3; $0.epoch = 7; $0.cursors = [1]; $0.pane = first.compose
+    }
+    peer.reply(.with { $0.id = 1; $0.accepted = true; $0.edit = edit }, pane: first)
+    try await eventually { peer.inputs.count == 2 }
+    first.compose.cursors[0].position = 3; first.compose.cursors[0].utf16Position = 3
+    first.compose.textContext.selectionStart = 3; first.compose.textContext.selectionEnd = 3
+    var result = edit; result.pane = first.compose; result.cursors = []
+    peer.reply(.with { $0.id = 2; $0.accepted = true; $0.result = result }, pane: first)
+    try await eventually { peer.inputs.count == 3 }
+    XCTAssertEqual(peer.inputs[2].sourceRevision, 5)
+    XCTAssertEqual(peer.inputs[2].replacementStart, 0); XCTAssertEqual(peer.inputs[2].replacementEnd, 4)
+    XCTAssertEqual(try WirePaste(serializedBytes: peer.inputs[2].payload).text, "theta")
+    XCTAssertTrue(editor.uninsertedText.isEmpty)
+    peer.reply(.with { $0.id = 3; $0.accepted = true })
+  }
+
+  @MainActor
   func testRejectingAPredecessorRecoversQueuedAndStillMarkedDependentPhrasesOnce() async throws {
     let peer = try ScenePeer(pane: pane("alpha Tail")); defer { peer.close() }
     let editor = richEditor(); defer { editor.detachAll() }

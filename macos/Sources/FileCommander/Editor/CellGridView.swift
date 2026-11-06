@@ -17,7 +17,8 @@ protocol CellGridDelegate: AnyObject {
   func grid(_ grid: CellGridView, revealCaretIn pane: ComposePresentation)
   func grid(_ grid: CellGridView, replace text: String, range: NSRange, in pane: ComposePresentation)
   func grid(_ grid: CellGridView, pendingTextFor pane: WirePane) -> ComposePendingPreview?
-  func grid(_ grid: CellGridView, commit text: ComposePendingText, after: UUID?, in pane: ComposePresentation)
+  func grid(_ grid: CellGridView, commit text: ComposePendingText, initial: ComposePendingText,
+            after: UUID?, afterAction: Bool, in pane: ComposePresentation)
   func grid(_ grid: CellGridView, recover text: String)
   var optionAsAlt: Bool { get }
 }
@@ -26,7 +27,9 @@ protocol CellGridDelegate: AnyObject {
 struct ComposePendingPreview {
   let token: UUID
   let target: ComposePresentation
-  let text: ComposePendingText
+  let text: ComposePendingText?
+  let afterAction: Bool
+  let prefixToken: UUID?
 }
 
 /// Draws Fresh's frame as cells, the way its terminal interface does, and turns
@@ -61,7 +64,9 @@ final class CellGridView: NSView, @preconcurrency NSTextInputClient {
   private struct Composition {
     let target: ComposePresentation
     var text: ComposePendingText
+    let initial: ComposePendingText
     let after: UUID?
+    let afterAction: Bool
   }
   private var composition: Composition?
   private var compositionDragAnchor: Int?
@@ -190,7 +195,7 @@ final class CellGridView: NSView, @preconcurrency NSTextInputClient {
       let live = Set(current?.compose.cursors.map(\.id) ?? [])
       if UInt64(store.windowID) != target.identity.window || current?.hasCompose != true
           || current?.compose.viewport.epoch != target.pane.compose.viewport.epoch
-          || current?.compose.focused != true || !composition.text.presentation.values.keys.allSatisfy(live.contains) {
+          || current?.compose.focused != true || (!composition.afterAction && !composition.text.presentation.values.keys.allSatisfy(live.contains)) {
         cancelComposition(recover: true, rebuild: false)
       } else if current?.compose.keyboard == false || !composeInputAllowed {
         finishComposition(rebuild: false)
@@ -247,7 +252,9 @@ final class CellGridView: NSView, @preconcurrency NSTextInputClient {
   private func presentation(_ input: WirePane, reuse: ComposePresentation? = nil, includePending: Bool = true) -> ComposePresentation? {
     var pane = input
     let pending = includePending ? delegate?.grid(self, pendingTextFor: input) : nil
-    let overlay = includePending ? composition ?? pending.map { Composition(target: $0.target, text: $0.text, after: nil) } : nil
+    let overlay = includePending ? composition ?? pending.flatMap { pending in pending.text.map {
+      Composition(target: pending.target, text: $0, initial: $0, after: nil, afterAction: false)
+    } } : nil
     let preedit = overlay.flatMap { value -> ComposeComposition? in
       guard value.target.identity == .init(window: UInt64(store.windowID), leaf: input.leaf, buffer: input.buffer),
             input.compose.viewport.epoch == value.target.pane.compose.viewport.epoch else { return nil }
@@ -303,7 +310,11 @@ final class CellGridView: NSView, @preconcurrency NSTextInputClient {
           pane.compose.selectionRevision == projection.selectionRevision,
           pane.compose.assetDocument == projection.assetDocument else { return nil }
     pane.compose = projection
-    return presentation(pane, reuse: composePanes[pane.leaf])
+    return presentation(pane, reuse: composePanes[pane.leaf], includePending: false)
+  }
+
+  func composeInputSnapshot(_ pane: WirePane) -> ComposePresentation? {
+    presentation(pane, reuse: composePanes[pane.leaf], includePending: false)
   }
 
   func refreshComposeImages(geometryChanged: Bool = false) {
@@ -635,11 +646,15 @@ final class CellGridView: NSView, @preconcurrency NSTextInputClient {
     }
     if let target = focusedCompose, target.textContext != nil, target.cursor != nil {
       let pending = delegate?.grid(self, pendingTextFor: target.pane)
-      let value = pending.flatMap {
-        ComposePendingText(following: $0.text, pane: $0.target.pane.compose, text: text, selected: selectedRange, replacement: replacementRange)
-      } ?? (pending == nil ? ComposePendingText(pane: target.pane.compose, text: text, selected: selectedRange, replacement: replacementRange) : nil)
+      let prefix = pending?.text
+      let root = pending.flatMap { $0.text == nil ? nil : $0.target } ?? target
+      let value = prefix.flatMap {
+        ComposePendingText(following: $0, pane: root.pane.compose, text: text, selected: selectedRange, replacement: replacementRange)
+      } ?? (prefix == nil ? ComposePendingText(pane: root.pane.compose, text: text, selected: selectedRange, replacement: replacementRange) : nil)
       guard let value else { delegate?.grid(self, recover: text.string); return }
-      composition = Composition(target: pending?.target ?? target, text: value, after: pending?.token)
+      let action = replacementRange.location == NSNotFound && pending?.afterAction == true
+      let after = action ? pending?.token : (prefix == nil ? nil : (pending?.prefixToken ?? pending?.token))
+      composition = Composition(target: root, text: value, initial: value, after: after, afterAction: action)
       marked = ""; rebuildCompose(); revealCompositionCaret(); needsDisplay = true; return
     }
     marked = (string as? NSAttributedString)?.string ?? (string as? String) ?? ""
@@ -662,7 +677,7 @@ final class CellGridView: NSView, @preconcurrency NSTextInputClient {
     composition = nil
     compositionDragAnchor = nil
     if let committed = current.text.committed(nativeNewline: current.target.pane.compose.nativeNewline) {
-      delegate?.grid(self, commit: committed, after: current.after, in: current.target)
+      delegate?.grid(self, commit: committed, initial: current.initial, after: current.after, afterAction: current.afterAction, in: current.target)
     } else {
       for text in current.text.recoveryTexts { delegate?.grid(self, recover: text) }
     }
@@ -672,14 +687,16 @@ final class CellGridView: NSView, @preconcurrency NSTextInputClient {
 
   /// Only a draft explicitly following this queued edit can use its receipt.
   /// A later scene's cursor is never substituted for the captured owner.
-  func resolveComposition(after token: UUID, receipt: WireComposeEditReceipt?) {
+  func resolveComposition(after token: UUID, edit: WireComposeEditReceipt?, result: WireComposeEditReceipt?) {
     guard let current = composition, current.after == token else { return }
     let target = current.target
+    let receipt = current.afterAction ? result : edit
     guard let receipt, receipt.matches(target.scope, epoch: target.pane.compose.viewport.epoch),
           UInt64(store.windowID) == receipt.window,
           store.panes.contains(where: { $0.leaf == receipt.leaf && $0.buffer == receipt.buffer && $0.hasCompose
             && $0.compose.viewport.epoch == receipt.epoch }),
-          let text = current.text.resolved(pane: receipt.pane, edited: receipt.cursors, preserved: receipt.preservedCursors) else {
+          let text = current.afterAction ? current.text.afterAction(current.initial, pane: receipt.pane)
+            : current.text.resolved(pane: receipt.pane, edited: receipt.cursors, preserved: receipt.preservedCursors) else {
       cancelComposition(recover: true); return
     }
     var pane = target.pane; pane.compose = receipt.pane
@@ -687,7 +704,7 @@ final class CellGridView: NSView, @preconcurrency NSTextInputClient {
     guard let next = composeSnapshot(pane) else {
       composition = current; cancelComposition(recover: true); return
     }
-    composition = Composition(target: next, text: text, after: nil)
+    composition = Composition(target: next, text: text, initial: text, after: nil, afterAction: false)
     rebuildCompose(); revealCompositionCaret(); needsDisplay = true
     inputContext?.invalidateCharacterCoordinates()
   }

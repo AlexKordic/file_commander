@@ -198,6 +198,61 @@ public struct ComposePendingText {
     committedEdits = committed ? [:] : nil
   }
 
+  /// A conversion begun after a queued non-text action follows that action's
+  /// resulting selections. Its entered text is retained; expansions outside
+  /// the initial conversion still require the same surrounding source. For a
+  /// caret created by the action, use the primary conversion's input intent.
+  /// Already submitted prefixes are excluded from the resulting replacement.
+  public func afterAction(_ initial: ComposePendingText, pane: WireComposePane) -> ComposePendingText? {
+    guard let fresh = ComposeComposition(pane: pane, text: NSAttributedString(string: ""),
+      selected: NSRange(location: 0, length: 0), replacement: NSRange(location: NSNotFound, length: 0)) else { return nil }
+    let cursors = Dictionary(uniqueKeysWithValues: pane.cursors.map { ($0.id, $0) })
+    var values: [UInt64: ComposeMarkedText] = [:]
+    for id in fresh.ordered {
+      let template = active.contains(id) ? id : presentation.primaryID
+      guard let intent = intent(for: template, initial: initial), let target = fresh.values[id],
+            let cursor = cursors[id], cursor.hasUtf16Position,
+            let byte = Int(exactly: cursor.position), let unit = Int(exactly: cursor.utf16Position),
+            target.context.utf16Position(for: byte) == unit else { return nil }
+      let left = intent.leading.utf16.count, right = intent.trailing.utf16.count
+      guard let range = Self.range(at: target.originalRange.location, offset: -left,
+        length: target.originalRange.length + left + right),
+        left == 0 || Self.exact(target.context.exactText(for: NSRange(location: range.location, length: left)), intent.leading),
+        right == 0 || Self.exact(target.context.exactText(for: NSRange(location: NSMaxRange(target.originalRange), length: right)), intent.trailing),
+        target.source.lowerBound >= intent.leading.utf8.count,
+        intent.trailing.utf8.count <= Int(pane.documentLen) - target.source.upperBound else { return nil }
+      let source = (target.source.lowerBound - intent.leading.utf8.count)..<(target.source.upperBound + intent.trailing.utf8.count)
+      guard let value = ComposeMarkedText(context: target.context, range: range, source: source,
+        text: intent.inserted, selected: intent.selected, marked: intent.marked) else { return nil }
+      values[id] = value
+    }
+    guard let composition = ComposeComposition(primary: fresh.primaryID, values: values) else { return nil }
+    let result = ComposePendingText(presentation: composition, committed: false, observedCursors: Self.anchors(pane))
+    return committedEdits == nil ? result : result.committed(nativeNewline: pane.nativeNewline)
+  }
+
+  private func intent(for id: UInt64, initial: ComposePendingText) -> Edit? {
+    if baseline != nil {
+      guard var current = committedEdits?[id] ?? edit(for: id), let start = initial.edit(for: id) else { return nil }
+      if current.selectionLength == nil {
+        let left = start.offset - current.offset
+        let right = current.offset + current.removed.utf16.count - start.offset - start.removed.utf16.count
+        let old = current.removed as NSString
+        guard left >= 0, right >= 0, left + right <= old.length else { return nil }
+        current.leading = old.substring(to: left); current.trailing = old.substring(from: old.length - right)
+      }
+      return current
+    }
+    guard let current = presentation.values[id], let start = initial.presentation.values[id] else { return nil }
+    let left = start.originalRange.location - current.originalRange.location
+    let right = NSMaxRange(current.originalRange) - NSMaxRange(start.originalRange)
+    guard left >= 0, right >= 0,
+      let leading = left == 0 ? "" : current.context.exactText(for: NSRange(location: current.originalRange.location, length: left)),
+      let trailing = right == 0 ? "" : current.context.exactText(for: NSRange(location: NSMaxRange(start.originalRange), length: right)) else { return nil }
+    return Edit(offset: 0, removed: "", inserted: current.draft, marked: current.marked, selected: current.selected,
+      display: NSRange(location: 0, length: current.draft.length), leading: leading, trailing: trailing)
+  }
+
   private func edit(for id: UInt64) -> Edit? {
     guard let after = presentation.values[id] else { return nil }
     if let original = newlyIncluded[id] {

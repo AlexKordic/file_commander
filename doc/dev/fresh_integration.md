@@ -506,6 +506,14 @@ cursor's source/UTF-16 position, with the client's viewport epoch. The source
 may still owe its formatting projection. Retries of the current accepted input
 repeat that receipt; later edits cannot rewrite it.
 
+Successful scoped non-text actions also supply `InputReply.result` (field 11).
+It uses the same source envelope, with empty edited/preserved ID lists; its
+`pane.cursors` is the action's resulting group. Fresh captures it immediately
+after navigation, pointer placement, clipboard paste or an editor action,
+using the view and buffer lifetime captured before execution. A changed tab,
+view or lifetime cannot supply a result in the original Compose owner. Current
+input-ID retries repeat the immutable result instead of executing again.
+
 A new composition can record a dependency on the preceding queued native edit
 that owns its captured carets. The native controller uses
 only that edit's matching receipt to rebase active drafts and already queued
@@ -541,6 +549,21 @@ receipt supplies real byte/UTF-16 coordinates and matching context. Virtual
 source ranges never travel on the wire, and already submitted prefixes are
 not inserted or recovered twice. This is a presentation overlay over Fresh's
 snapshot, not a second Markdown parser or editable buffer.
+
+A default-range conversion begun behind a queued action records that action's
+local queue token. Both active drafts and already committed queued text bind
+to its correlated result rather than the old cursor or a newer unrelated
+scene. The entered text and partial marked/selected ranges survive; the
+resulting selection becomes the replacement range. An action that creates
+carets can supply the full new group. Previously submitted prefixes are
+excluded from the new replacement. Expansions outside the initial conversion
+still require exact surrounding source. An explicit initial source range
+retains its captured target; a range in a pending text prefix depends on that
+prefix's receipt, even if navigation is queued between them. Missing/cancelled
+results recover dependent queued and marked text without inserting a subset.
+Navigation measurement uses the actual source snapshot independently of
+the provisional drawing overlay, so a key awaiting geometry can finish while
+a following conversion is marked.
 
 `ComposePane.native_newline` (field 23) declares Fresh's insertion separator:
 0 unknown, 1 LF, 2 CRLF. CR disk files use LF internally. The native preview
@@ -597,13 +620,16 @@ does not erase the retained text. This is not a persistent crash checkpoint.
 Dependent active and queued conversions now use accepted source receipts.
 Immediate presentation and explicit initial replacements during consecutive
 queued text edits have automated coverage. Existing unchanged carets may join
-through captured source witnesses; newly created carets still require a fresh
-authoritative context. Opaque queued navigation, clipboard
-paste and other actions form a boundary for local prediction; arbitrary
-interleavings, interactive input-method behavior and full recovery qualification
-remain open. This development implementation does not establish full IME
-support. Context sizing and scene traffic still need performance qualification
-before release.
+through captured source witnesses; an action's correlated result can supply
+its newly created carets. Navigation, selection, paste, caret creation and text
+queued behind those actions have automated source/save/undo coverage. Until
+an action's result arrives, the provisional draft remains in its captured
+presentation; this is not complete local prediction of pending navigation.
+Immediate input-method context/candidate behavior across arbitrary queued
+actions, other action/view transitions and full recovery qualification remain
+open. This development implementation does not establish full IME support.
+Context sizing and scene traffic still need performance qualification before
+release, including the new action-result snapshots.
 
 Native Compose must wrap using measured fonts and available pixel width.
 Terminal Markdown column counts, padded or truncated table replacements and

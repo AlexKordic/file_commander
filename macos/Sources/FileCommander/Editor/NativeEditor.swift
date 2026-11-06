@@ -70,7 +70,8 @@ final class NativeEditor: NSObject, CellGridDelegate {
   }
   private struct CompositionChain {
     let predecessor: UUID
-    let text: ComposePendingText
+    let initial, text: ComposePendingText
+    let afterAction: Bool
   }
   private struct QueuedInput {
     let token = UUID()
@@ -79,7 +80,7 @@ final class NativeEditor: NSObject, CellGridDelegate {
     var target: InputTarget?
     var chain: CompositionChain?
     var preview: ComposePendingText?
-    var previewTarget: ComposePresentation?
+    var snapshot: ComposePresentation?
   }
   private var composeQueue: [QueuedInput] = []
   private var nextComposeID: UInt64 = 0
@@ -349,7 +350,8 @@ final class NativeEditor: NSObject, CellGridDelegate {
           if let preview = first.preview { for text in preview.recoveryTexts { self.grid(grid, recover: text) } }
           else if case .replacement(let replacement) = first.input { for text in replacement.texts { self.grid(grid, recover: text) } }
         }
-        resolveCompositionChains(receipt: reply.accepted && reply.hasEdit ? reply.edit : nil)
+        resolveCompositionChains(edit: reply.accepted && reply.hasEdit ? reply.edit : nil,
+          result: reply.accepted && reply.hasResult ? reply.result : nil)
         if !composeQueue.isEmpty { composeQueue.removeFirst() }
         grid?.refreshComposeImages()
         pendingComposeID = nil
@@ -579,15 +581,25 @@ final class NativeEditor: NSObject, CellGridDelegate {
   }
 
   func grid(_ grid: CellGridView, pendingTextFor pane: WirePane) -> ComposePendingPreview? {
-    guard let last = composeQueue.last, let target = last.previewTarget, let text = last.preview,
+    guard let last = composeQueue.last, let target = last.snapshot,
           target.identity == .init(window: UInt64(store.windowID), leaf: pane.leaf, buffer: pane.buffer),
           pane.hasCompose, pane.compose.viewport.epoch == target.pane.compose.viewport.epoch else { return nil }
-    return ComposePendingPreview(token: last.token, target: target, text: text)
+    if let text = last.preview {
+      return ComposePendingPreview(token: last.token, target: target, text: text, afterAction: false, prefixToken: nil)
+    }
+    var prefix: QueuedInput?
+    for queued in composeQueue.dropLast().reversed() {
+      guard queued.target?.identity == last.target?.identity, queued.target?.epoch == last.target?.epoch else { break }
+      if queued.preview != nil { prefix = queued; break }
+    }
+    return ComposePendingPreview(token: last.token, target: prefix?.snapshot ?? target,
+      text: prefix?.preview, afterAction: true, prefixToken: prefix?.token)
   }
 
-  func grid(_ grid: CellGridView, commit text: ComposePendingText, after: UUID?, in pane: ComposePresentation) {
+  func grid(_ grid: CellGridView, commit text: ComposePendingText, initial: ComposePendingText,
+            after: UUID?, afterAction: Bool, in pane: ComposePresentation) {
     guard receivedHello else { for value in text.recoveryTexts { self.grid(grid, recover: value) }; return }
-    let chain = after.map { CompositionChain(predecessor: $0, text: text) }
+    let chain = after.map { CompositionChain(predecessor: $0, initial: initial, text: text, afterAction: afterAction) }
     if let after, !composeQueue.contains(where: { $0.token == after }) {
       for value in text.recoveryTexts { self.grid(grid, recover: value) }; return
     }
@@ -600,23 +612,26 @@ final class NativeEditor: NSObject, CellGridDelegate {
 
   /// Rebase only descendants of this acknowledged native edit. Its immutable
   /// receipt remains valid even if the same frame includes a newer scene.
-  private func resolveCompositionChains(receipt: WireComposeEditReceipt?) {
+  private func resolveCompositionChains(edit: WireComposeEditReceipt?, result: WireComposeEditReceipt?) {
     guard let first = composeQueue.first else { return }
-    let valid: WireComposeEditReceipt?
-    if let receipt, let target = first.target, receipt.matches(target.scope, epoch: target.epoch) { valid = receipt }
-    else { valid = nil }
-    var failed: Set<UUID> = valid == nil ? [first.token] : []
+    func valid(_ receipt: WireComposeEditReceipt?) -> WireComposeEditReceipt? {
+      guard let receipt, let target = first.target, receipt.matches(target.scope, epoch: target.epoch) else { return nil }
+      return receipt
+    }
+    let edit = valid(edit), result = valid(result ?? edit)
+    var failed: Set<UUID> = edit == nil && result == nil ? [first.token] : []
     var retained = [first]
     for var queued in composeQueue.dropFirst() {
       if let chain = queued.chain, chain.predecessor == first.token || failed.contains(chain.predecessor) {
-        if let receipt = valid, chain.predecessor == first.token, let target = queued.target,
+        if let receipt = chain.afterAction ? result : edit, chain.predecessor == first.token, let target = queued.target,
            receipt.matches(target.scope, epoch: target.epoch),
-           let text = chain.text.resolved(pane: receipt.pane, edited: receipt.cursors, preserved: receipt.preservedCursors),
+           let text = chain.afterAction ? chain.text.afterAction(chain.initial, pane: receipt.pane)
+             : chain.text.resolved(pane: receipt.pane, edited: receipt.cursors, preserved: receipt.preservedCursors),
            let replacement = text.replacement(scope: receipt.scope, epoch: receipt.epoch),
-           let original = queued.previewTarget {
+           let original = queued.snapshot {
           var pane = original.pane; pane.compose = receipt.pane
           queued.input = .replacement(replacement); queued.target?.scope = receipt.scope; queued.chain = nil
-          queued.preview = text; queued.previewTarget = grid?.composeSnapshot(pane)
+          queued.preview = text; queued.snapshot = grid?.composeSnapshot(pane)
         } else {
           failed.insert(queued.token)
           if let grid { for text in chain.text.recoveryTexts { self.grid(grid, recover: text) } }
@@ -626,8 +641,8 @@ final class NativeEditor: NSObject, CellGridDelegate {
       retained.append(queued)
     }
     composeQueue = retained
-    grid?.resolveComposition(after: first.token, receipt: valid)
-    for token in failed where token != first.token { grid?.resolveComposition(after: token, receipt: nil) }
+    grid?.resolveComposition(after: first.token, edit: edit, result: result)
+    for token in failed where token != first.token { grid?.resolveComposition(after: token, edit: nil, result: nil) }
   }
 
   func grid(_ grid: CellGridView, recover text: String) {
@@ -709,14 +724,15 @@ final class NativeEditor: NSObject, CellGridDelegate {
       if case .text(let text) = input, let target {
         let unspecified = NSRange(location: NSNotFound, length: 0)
         let pending = grid.flatMap { self.grid($0, pendingTextFor: target.pane) }
-        let draft = pending.flatMap {
-          ComposePendingText(following: $0.text, pane: $0.target.pane.compose,
+        let prefix = pending?.text
+        let root = pending.flatMap { $0.text == nil ? nil : $0.target } ?? target
+        let draft = prefix.flatMap {
+          ComposePendingText(following: $0, pane: root.pane.compose,
             text: NSAttributedString(string: text), selected: NSRange(location: text.utf16.count, length: 0), replacement: unspecified)
-        } ?? (pending == nil ? ComposePendingText(pane: target.pane.compose, text: NSAttributedString(string: text),
+        } ?? (prefix == nil ? ComposePendingText(pane: root.pane.compose, text: NSAttributedString(string: text),
           selected: NSRange(location: text.utf16.count, length: 0), replacement: unspecified) : nil)
-        let root = pending?.target ?? target
-        if let preview = draft?.committed(nativeNewline: root.pane.compose.nativeNewline) {
-          let chain = pending.map { CompositionChain(predecessor: $0.token, text: preview) }
+        if let draft, let preview = draft.committed(nativeNewline: root.pane.compose.nativeNewline) {
+          let chain = pending.map { CompositionChain(predecessor: $0.token, initial: draft, text: preview, afterAction: $0.afterAction) }
           enqueueCompose(chain == nil ? .message(input) : .pendingText(preview), target: root, chain: chain, preview: preview)
         } else {
           // Older peers or opaque queued actions still use Fresh's ordinary
@@ -734,7 +750,7 @@ final class NativeEditor: NSObject, CellGridDelegate {
     if composeQueue.isEmpty { lastComposeCancellation = nil }
     composeQueue.append(.init(input: input, scrollGeneration: composeViewports.userScrollGeneration,
       target: target.map(InputTarget.init), chain: chain,
-      preview: preview, previewTarget: preview == nil ? nil : target))
+      preview: preview, snapshot: target))
     grid?.refreshComposeImages()
     pumpComposeInput()
   }
@@ -772,7 +788,7 @@ final class NativeEditor: NSObject, CellGridDelegate {
       }
       if let identity = pendingComposePane {
         input.bufferEpoch = queued.target?.epoch ?? 0
-        guard let visible = grid?.composePanes[identity.leaf], visible.identity == identity else {
+        guard var visible = grid?.composePanes[identity.leaf], visible.identity == identity else {
           // A modal can temporarily hide a still-open Compose view. Its raw
           // UI input remains usable; Fresh proactively cancels this request if
           // its tab, buffer lifetime, presentation or keyboard focus changes.
@@ -786,6 +802,8 @@ final class NativeEditor: NSObject, CellGridDelegate {
           input.cancel = true
           break
         }
+        if visible.layout.composition != nil, let actual = store.panes.first(where: { $0.leaf == identity.leaf && $0.hasBuffer && $0.buffer == identity.buffer }),
+           let measured = grid?.composeInputSnapshot(actual) { visible = measured }
         let pane = pendingComposeProjection.flatMap { grid?.composeMeasurement(identity: identity, projection: $0) } ?? visible
         pendingComposeBefore = (visible.pane.compose.bufferRevision, visible.pane.compose.cursors)
         if pane.pane.compose.keyboard {
