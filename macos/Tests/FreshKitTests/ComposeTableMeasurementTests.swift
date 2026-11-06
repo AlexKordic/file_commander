@@ -86,6 +86,52 @@ final class ComposeTableMeasurementTests: XCTestCase {
       "the row subsets exercise the original width drift")
   }
 
+  func testPeerMeasurementsKeepFreshRowsFontsAndGeometryForEachPane() throws {
+    var pane = try fixture(); pane.assetAuthority = 11; pane.assetDocument = 22
+    let first = try crop(pane, row: pane.tables[0].rows[0]), last = try crop(pane, row: pane.tables[0].rows[4])
+    let firstModel = try XCTUnwrap(ComposeTableModel(pane: first))
+    let lastModel = try XCTUnwrap(ComposeTableModel(pane: last, sharingMeasurementsWith: [firstModel]))
+    XCTAssertTrue(firstModel.tables[0].measurement === lastModel.tables[0].measurement)
+    XCTAssertEqual(lastModel.tables[0].rows.map(\.source), [Int(last.sourceStart)..<Int(last.sourceEnd)])
+    let top = try XCTUnwrap(ComposePaneLayout(pane: first, body: body, monospace: code, width: 320))
+    let originalColumns = top.text.tables.map(\.columns)
+    let larger = CTFontCreateCopyWithAttributes(body, 26, nil, nil)
+    let bottom = try XCTUnwrap(ComposePaneLayout(pane: last, body: larger, monospace: code, width: 620,
+      sharingMeasurementsWith: [top]))
+    let fresh = try XCTUnwrap(ComposePaneLayout(pane: last, body: larger, monospace: code, width: 620))
+    XCTAssertFalse(top.text === bottom.text)
+    XCTAssertEqual(bottom.text.tables.map(\.columns), fresh.text.tables.map(\.columns))
+    XCTAssertEqual(bottom.text.fragments.map(\.rect), fresh.text.fragments.map(\.rect))
+    XCTAssertEqual(bottom.text.projection.source, Int(last.sourceStart)..<Int(last.sourceEnd))
+    XCTAssertNil(bottom.text.caret(for: Int(first.sourceStart)))
+    XCTAssertEqual(top.text.tables.map(\.columns), originalColumns, "another pane's fonts cannot mutate an existing layout")
+  }
+
+  func testPeerCandidatesRequireMatchingScopeCompleteInputsAndValidDeliveredMetadata() throws {
+    var pane = try fixture(); pane.assetAuthority = 11; pane.assetDocument = 22
+    let original = try XCTUnwrap(ComposeTableModel(pane: pane))
+    var different = pane
+    different.tables[0].measurement.columns[0].samples.append(.with { $0.text = "another input" })
+    let other = try XCTUnwrap(ComposeTableModel(pane: different))
+    let matching = try XCTUnwrap(ComposeTableModel(pane: pane, sharingMeasurementsWith: [original, other]))
+    XCTAssertTrue(matching.tables[0].measurement === original.tables[0].measurement,
+      "a later ID collision cannot hide an earlier matching candidate")
+    for changeAuthority in [true, false] {
+      var foreign = pane
+      if changeAuthority { foreign.assetAuthority += 1 } else { foreign.assetDocument += 1 }
+      let model = try XCTUnwrap(ComposeTableModel(pane: foreign, sharingMeasurementsWith: [original]))
+      XCTAssertFalse(model.tables[0].measurement === original.tables[0].measurement)
+    }
+    var reference = pane; reference.tables[0].clearMeasurement()
+    XCTAssertNil(ComposeTableModel(pane: reference, sharingMeasurementsWith: [original]),
+      "a peer cannot supply metadata absent from this pane's delivered contract")
+    var bad = pane
+    bad.tables[0].measurement.columns[0].samples[0].text = "é"
+    bad.tables[0].measurement.columns[0].samples[0].spans = [.with { $0.start = 1; $0.end = 2; $0.flags = 1 }]
+    XCTAssertNil(ComposeTableModel(pane: bad, sharingMeasurementsWith: [original]),
+      "a repeated ID cannot bypass UTF-8 style validation")
+  }
+
   func testCachedMetricsMatchFreshGeometryThroughResizingFontChangesAndChangedInputs() throws {
     var pane = try fixture()
     pane.tables[0].measurement.columns[0].samples.append(.with {

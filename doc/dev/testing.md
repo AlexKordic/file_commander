@@ -451,6 +451,11 @@ three samples, unchanged-layout reuse and four simultaneous pane layouts.
 It also records a resize from 960 to 640 points and a return to 960, retaining
 the preceding pane so complete table measurements can be reused. Returning
 to the original width must restore its fragment count and table columns.
+Two four-pane modes compare independent construction with measurement sharing
+across the same document. Each pane has a distinct protobuf decode, and the
+first shared pane starts without a provider. The resulting fragment ranges,
+rectangles and table columns must match. Timing excludes those extra decodes
+and geometry comparisons; process peak memory includes both retained sets.
 Construction and first reuse are timed separately; reuse can also materialize
 lazy quote/code ornament geometry that the fresh layout has not requested yet.
 Artifacts include hardware/compiler/repository metadata, fixture SHA-256s,

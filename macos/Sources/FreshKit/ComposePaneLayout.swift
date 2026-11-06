@@ -27,6 +27,7 @@ public final class ComposePaneLayout {
   public init?(pane: WireComposePane, body: CTFont, monospace: CTFont, width: CGFloat,
                typography: ComposeTypography = .init(),
                images: [UInt64: ComposeImageState] = [:], reuse: ComposePaneLayout? = nil,
+               sharingMeasurementsWith peers: [ComposePaneLayout] = [],
                preedit: ComposeMarkedText? = nil, composition: ComposeComposition? = nil, virtualInsertion: ComposeVirtualInsertion? = nil) {
     guard let baseProjection = ComposeProjection(pane), typography.isValid, width.isFinite, width > 0 else { return nil }
     guard pane.images.allSatisfy({ !($0.rendered && $0.sourcePreview) }) else { return nil }
@@ -59,7 +60,8 @@ public final class ComposePaneLayout {
     }
     let objects = baseProjection.replacingObjects(sourceRanges)
     let base = objects?.projection ?? baseProjection
-    guard let tableModel = ComposeTableModel(pane: pane, projection: base, reuse: reuse?.tableModel) else { return nil }
+    guard let tableModel = ComposeTableModel(pane: pane, projection: base, reuse: reuse?.tableModel,
+      sharingMeasurementsWith: peers.map(\.tableModel)) else { return nil }
     self.tableModel = tableModel
     let layered = virtualInsertion?.projected(over: base)
     let replacement: (projection: ComposeProjection, displays: [UInt64: Range<Int>])? = layered.map { ($0.projection, $0.drafts) }

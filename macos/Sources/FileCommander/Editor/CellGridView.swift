@@ -210,9 +210,12 @@ final class CellGridView: NSView, @preconcurrency NSTextInputClient {
     }
     let old = focusedCompose
     let previous = composePanes
-    composePanes = Dictionary(uniqueKeysWithValues: store.panes.compactMap { pane in
-      presentation(pane, reuse: previous[pane.leaf]).map { (pane.leaf, $0) }
-    })
+    var next: [UInt64: ComposePresentation] = [:]
+    for pane in store.panes {
+      if let value = presentation(pane, reuse: previous[pane.leaf],
+        sharingMeasurementsWith: Array(previous.values) + Array(next.values)) { next[pane.leaf] = value }
+    }
+    composePanes = next
     if let composition, composePanes[composition.target.identity.leaf] == nil {
       cancelComposition(recover: true, rebuild: false)
       rebuildCompose(); needsDisplay = true; return
@@ -263,7 +266,8 @@ final class CellGridView: NSView, @preconcurrency NSTextInputClient {
 
   func composeSnapshot(_ pane: WirePane) -> ComposePresentation? { presentation(pane, includePending: false) }
 
-  private func presentation(_ input: WirePane, reuse: ComposePresentation? = nil, includePending: Bool = true) -> ComposePresentation? {
+  private func presentation(_ input: WirePane, reuse: ComposePresentation? = nil,
+                            sharingMeasurementsWith peers: [ComposePresentation]? = nil, includePending: Bool = true) -> ComposePresentation? {
     var pane = input
     let pending = includePending ? delegate?.grid(self, pendingTextFor: input) : nil
     let selection = pending?.selection
@@ -325,7 +329,8 @@ final class CellGridView: NSView, @preconcurrency NSTextInputClient {
     return ComposePresentation(pane: pane, window: UInt64(store.windowID),
       cell: CGSize(width: cellWidth, height: cellHeight), body: bodyFont, monospace: monoFont,
       typography: composePreferences.typography(zoom: composeZoom), pageWidth: composePreferences.pageWidth * composeZoom,
-      reuse: reuse, caretStates: caretStates, images: images, viewport: viewport, composition: preedit,
+      reuse: reuse, sharingMeasurementsWith: peers ?? Array(composePanes.values),
+      caretStates: caretStates, images: images, viewport: viewport, composition: preedit,
       pendingSelection: selection != nil || virtualSelection != nil,
       virtualInsertion: virtualInsertion, virtualSelections: virtualSelection,
       environmentLike: reuse ?? composePanes[pane.leaf], geometryRevision: composeGeometryRevision)

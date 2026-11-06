@@ -5,6 +5,59 @@ import FreshKit
 @testable import FileCommander
 
 final class ComposePreferencesTests: XCTestCase {
+  @MainActor
+  func testSplitPanesKeepTheirOwnScopeCursorViewportAndGeometry() throws {
+    _ = NSApplication.shared
+    NSApp.setActivationPolicy(.prohibited)
+    let fixture = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
+      .appendingPathComponent("FreshKitTests/Fixtures/compose-tables.pb")
+    var compose = try WireComposePane(serializedBytes: Data(contentsOf: fixture))
+    compose.assetAuthority = 11; compose.assetDocument = 22; compose.clearTextContext()
+    let top = compose.tables[0].rows[0], bottom = compose.tables[0].rows[4]
+    var left = WirePane.with {
+      $0.leaf = 1; $0.buffer = 10; $0.content.w = 90; $0.content.h = 6; $0.compose = compose
+    }
+    left.compose.focused = true; left.compose.keyboard = true; left.compose.selectionRevision = 1
+    left.compose.cursors = [.with { $0.id = 1; $0.primary = true; $0.position = top.cells[0].start }]
+    left.compose.viewport = .with { $0.epoch = 7; $0.position = top.start }
+    var right = left
+    right.leaf = 2; right.content.x = 90; right.content.w = 65
+    right.compose.focused = false; right.compose.keyboard = false; right.compose.selectionRevision = 2
+    right.compose.cursors[0].position = bottom.cells[0].start
+    right.compose.viewport.position = bottom.start
+    let store = SceneStore(), grid = CellGridView(store: store)
+    store.onChange = { [weak grid] change in grid?.apply(change) }
+    func show(_ panes: [WirePane]) throws {
+      let frame = WireFrame.with {
+        $0.windowID = 99; $0.width = 155; $0.height = 6; $0.paneLen = UInt32(panes.count)
+        $0.panes = panes.enumerated().map { index, pane in .with { $0.index = UInt32(index); $0.pane = pane } }
+      }
+      let bytes: [UInt8] = try frame.serializedBytes()
+      store.apply(try XCTUnwrap(SceneMessage(kind: SceneWire.Kind.frame.rawValue, payload: bytes[...])))
+    }
+    try show([left, right])
+    let a = try XCTUnwrap(grid.composePanes[1]), b = try XCTUnwrap(grid.composePanes[2])
+    XCTAssertEqual(a.scope.windowID, 99); XCTAssertEqual(b.scope.windowID, 99)
+    XCTAssertEqual(a.scope.leaf, 1); XCTAssertEqual(b.scope.leaf, 2)
+    XCTAssertEqual(a.scope.selectionRevision, 1); XCTAssertEqual(b.scope.selectionRevision, 2)
+    XCTAssertEqual(a.cursor?.position, top.cells[0].start); XCTAssertEqual(b.cursor?.position, bottom.cells[0].start)
+    XCTAssertEqual(a.viewport.position, top.start); XCTAssertEqual(b.viewport.position, bottom.start)
+    XCTAssertFalse(a.layout.text === b.layout.text)
+    XCTAssertNotEqual(a.layout.width, b.layout.width)
+    for (pane, row) in [(a, top), (b, bottom)] {
+      let caret = try XCTUnwrap(pane.caret)
+      let hit = try XCTUnwrap(pane.hit(at: CGPoint(x: caret.minX + 0.1, y: caret.midY)))
+      XCTAssertTrue((Int(row.start)..<Int(row.end)).contains(hit.source))
+    }
+    right.compose.cursors[0].position = top.cells[0].start
+    right.compose.selectionRevision = 3; right.compose.viewport.position = top.start
+    try show([left, right])
+    XCTAssertEqual(grid.composePanes[1]?.scope, a.scope)
+    XCTAssertEqual(grid.composePanes[1]?.viewport, a.viewport)
+    XCTAssertEqual(grid.composePanes[2]?.scope.selectionRevision, 3)
+    XCTAssertEqual(grid.composePanes[2]?.cursor?.position, top.cells[0].start)
+  }
+
   func testOldProfilesKeepDefaultsAndComposeSettingsPersistInTheAppProfile() throws {
     let old = try JSONDecoder().decode(AppPreferences.self, from: Data(#"{"terminalEditor":true,"scrollMargin":7}"#.utf8))
     XCTAssertEqual(old.compose, ComposePreferences())

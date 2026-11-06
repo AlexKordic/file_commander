@@ -30,6 +30,7 @@ func profile() throws {
     let bytes = try Data(contentsOf: file), name = file.deletingPathExtension().lastPathComponent
     var decode: [Double] = [], cold: [Double] = [], retained: [Double] = [], multiple: [Double] = []
     var resized: [Double] = [], returned: [Double] = []
+    var sharedMultiple: [Double] = []
     var baseline: ComposePaneLayout?
     for _ in 0..<3 {
       try autoreleasepool {
@@ -45,17 +46,40 @@ func profile() throws {
               restored.text.tables.map(\.columns) == layout.text.tables.map(\.columns) else {
           throw ProfileFailure.layout("\(name): returning to the same width changed the geometry")
         }
-        let (_, multipleMS) = try milliseconds {
-          let panes = try [CGFloat(480), 640, 960, 480].map { width in
-            guard let value = ComposePaneLayout(pane: pane, body: body, monospace: code, width: width) else { throw ProfileFailure.layout(name) }
+        let widths = [CGFloat(480), 640, 960, 480]
+        // Distinct decodes model separately delivered split panes; shared
+        // inputs must compare by content rather than protobuf storage identity.
+        let inputs = try widths.map { _ in try WireComposePane(serializedBytes: bytes) }
+        let (independent, multipleMS) = try milliseconds {
+          let panes = try zip(inputs, widths).map { input, width in
+            guard let value = ComposePaneLayout(pane: input, body: body, monospace: code, width: width) else { throw ProfileFailure.layout(name) }
             return value
           }
           // Retain all four layouts at once, as independent editor splits do.
           precondition(panes.reduce(0) { $0 + $1.text.fragments.count } > 0)
-          withExtendedLifetime(panes) {}
+          return panes
+        }
+        let (shared, sharedMS) = try milliseconds {
+          var panes: [ComposePaneLayout] = []
+          for (input, width) in zip(inputs, widths) {
+            guard let value = ComposePaneLayout(pane: input, body: body, monospace: code, width: width,
+              sharingMeasurementsWith: panes) else { throw ProfileFailure.layout(name) }
+            panes.append(value)
+          }
+          return panes
+        }
+        // Geometry comparison stays outside the timed construction. The first
+        // shared pane has no previous provider: this includes its cold cost.
+        guard zip(independent, shared).allSatisfy({ a, b in
+          a.text.fragments.map(\.range) == b.text.fragments.map(\.range)
+            && a.text.fragments.map(\.rect) == b.text.fragments.map(\.rect)
+            && a.text.tables.map(\.columns) == b.text.tables.map(\.columns)
+        }) else {
+          throw ProfileFailure.layout("\(name): sharing changed split geometry")
         }
         decode.append(decodeMS); cold.append(coldMS); retained.append(retainedMS); multiple.append(multipleMS)
         resized.append(resizedMS); returned.append(returnedMS)
+        sharedMultiple.append(sharedMS)
         baseline = layout
       }
     }
@@ -65,6 +89,7 @@ func profile() throws {
       "fragments": layout.text.fragments.count, "attachments": layout.text.attachments.count, "tables": layout.text.tables.count,
       "decode_ms": decode, "cold_layout_ms": cold, "retained_layout_ms": retained, "four_panes_ms": multiple,
       "resized_layout_ms": resized, "returned_layout_ms": returned,
+      "shared_four_panes_ms": sharedMultiple,
       "process_peak_rss_bytes": peakRSS(),
     ])
   }

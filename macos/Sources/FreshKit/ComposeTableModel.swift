@@ -25,6 +25,7 @@ public struct ComposeTableModel {
   }
   public let tables: [Table]
   private let documentLength: Int
+  private let authority, document: UInt64
 
   /// Remap an already validated model after presentation-only replacements.
   /// A draft spanning cells uses shared text flow instead of losing or
@@ -71,7 +72,8 @@ public struct ComposeTableModel {
     return result
   }
 
-  public init?(pane: WireComposePane, projection: ComposeProjection? = nil, reuse: ComposeTableModel? = nil) {
+  public init?(pane: WireComposePane, projection: ComposeProjection? = nil, reuse: ComposeTableModel? = nil,
+               sharingMeasurementsWith peers: [ComposeTableModel] = []) {
     guard let projection = projection ?? ComposeProjection(pane), let document = Int(exactly: pane.documentLen),
           projection.source.upperBound <= document else { return nil }
     let bytes = Array(projection.text.utf8)
@@ -87,7 +89,14 @@ public struct ComposeTableModel {
       return a..<b
     }
     var result: [Table] = [], previousTableEnd = 0
-    let cached = Dictionary(reuse?.tables.compactMap { $0.measurement.map { ($0.id, $0) } } ?? [], uniquingKeysWith: { _, last in last })
+    var cached: [UInt64: [ComposeTableMeasurement]] = [:]
+    var seen: Set<ObjectIdentifier> = []
+    for model in (reuse.map { [$0] } ?? []) + peers
+      where model.authority == pane.assetAuthority && model.document == pane.assetDocument {
+      for measurement in model.tables.compactMap(\.measurement) where seen.insert(ObjectIdentifier(measurement)).inserted {
+        cached[measurement.id, default: []].append(measurement)
+      }
+    }
     for table in pane.tables {
       guard let source = bounds(table.start, table.end), !source.isEmpty,
             source.lowerBound >= previousTableEnd, !table.alignments.isEmpty, !table.rows.isEmpty else { return nil }
@@ -98,7 +107,7 @@ public struct ComposeTableModel {
         guard !table.hasMeasurement else { return nil }; measurement = nil
       } else {
         guard table.hasMeasurement, table.measurement.columns.count == alignments.count else { return nil }
-        if let old = cached[table.measurementID], old.wire == table.measurement { measurement = old }
+        if let old = cached[table.measurementID]?.first(where: { $0.wire == table.measurement }) { measurement = old }
         else { measurement = ComposeTableMeasurement(id: table.measurementID, wire: table.measurement, columns: alignments.count) }
         guard measurement != nil else { return nil }
       }
@@ -132,5 +141,6 @@ public struct ComposeTableModel {
       previousTableEnd = source.upperBound
     }
     tables = result; documentLength = document
+    authority = pane.assetAuthority; self.document = pane.assetDocument
   }
 }

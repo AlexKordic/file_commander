@@ -157,6 +157,50 @@ final class ComposeBackendTests: XCTestCase {
   }
 
   @MainActor
+  func testRealBackendSplitTablesKeepDocumentIdentityAndIndependentCursorsThroughSaveUndo() async throws {
+    let backend = try backend(); defer { backend.stop() }
+    let editor = editor(BackendPasteboard()); defer { editor.detachAll() }
+    let original = "# Split tables\n\n| A | B |\n|---|---|\n| alpha | beta |\n| one | two |\n\nTail\n"
+    let file = backend.root.appendingPathComponent("splits.md")
+    try Data(original.utf8).write(to: file)
+    try await attach(backend, file: file, editor: editor)
+    let grid = try XCTUnwrap(editor.grid), before = try XCTUnwrap(grid.focusedCompose)
+    editor.send(.action(name: "split_vertical", argsJson: ""))
+    try await eventually(editor, "two native split panes") { editor.store.panes.count == 2 }
+    if grid.composePanes.count < 2 { editor.send(.action(name: "markdownToggleCompose", argsJson: "")) }
+    try await eventually(editor, "both split panes have ready tables") {
+      grid.composePanes.count == 2 && grid.composePanes.values.allSatisfy {
+        $0.pane.compose.formattingReady && !$0.layout.text.tables.isEmpty
+      }
+    }
+    let peers = Array(grid.composePanes.values)
+    XCTAssertEqual(Set(peers.map { $0.pane.buffer }).count, 1)
+    XCTAssertEqual(Set(peers.map { $0.pane.compose.assetAuthority }).count, 1)
+    XCTAssertEqual(Set(peers.map { $0.pane.compose.assetDocument }).count, 1)
+    XCTAssertEqual(Set(peers.map { $0.pane.compose.tables[0].measurementID }).count, 1)
+    XCTAssertFalse(peers[0].layout.text === peers[1].layout.text)
+    let active = try XCTUnwrap(grid.focusedCompose)
+    let other = try XCTUnwrap(peers.first { $0.identity != active.identity })
+    let position = UInt64(original[..<original.range(of: "alpha")!.lowerBound].utf8.count)
+    try await click(position, editor: editor)
+    grid.insertText("X", replacementRange: NSRange(location: NSNotFound, length: 0))
+    editor.send(.action(name: "save", argsJson: ""))
+    let expected = Data(original.utf8.prefix(Int(position))) + Data("X".utf8) + Data(original.utf8.dropFirst(Int(position)))
+    try await eventually(editor, "save updates the shared source in both independent views") {
+      (try? Data(contentsOf: file)) == expected
+        && grid.composePanes.values.allSatisfy { $0.pane.compose.documentLen == UInt64(expected.count) }
+    }
+    XCTAssertEqual(grid.composePanes[other.identity.leaf]?.cursor?.position, other.cursor?.position)
+    XCTAssertEqual(grid.focusedCompose?.cursor?.position, position + 1)
+    editor.send(.action(name: "undo", argsJson: "")); editor.send(.action(name: "save", argsJson: ""))
+    try await eventually(editor, "one undo restores the original source in both splits") {
+      (try? Data(contentsOf: file)) == Data(original.utf8)
+        && grid.composePanes.values.allSatisfy { $0.pane.compose.documentLen == before.pane.compose.documentLen }
+    }
+    XCTAssertTrue(editor.uninsertedText.isEmpty)
+  }
+
+  @MainActor
   func testRealBackendTableEditingImagesResizeUndoSaveAndSwitching() async throws {
     let backend = try backend(); defer { backend.stop() }
     let pasteboard = BackendPasteboard(), editor = editor(pasteboard)

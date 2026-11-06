@@ -418,6 +418,13 @@ visible text still needs layout. Font or measurement-content changes rebuild
 the aggregate. It retains no shaped lines, attributed sample strings or
 tokenizers. Complete grapheme minima remain uncapped, allowing horizontal
 overflow when a pane is too narrow for a glyph.
+Pane construction can share these validated measurements with other live panes
+of the same document and filesystem authority. An equal ID also requires equal
+complete input data. Each pane still validates and builds its own source rows,
+projection, geometry, cursor and viewport; peer layouts are not retained by the
+new layout. The rebuild uses a temporary candidate set, without a process-wide
+measurement registry. A peer cannot supply metadata missing from the receiving
+pane's delivered contract.
 Preferred minimum widths follow native line-break units rather than linguistic
 dictionary words. A shared line-break tokenizer handles the pass, allowing CJK
 character breaks while keeping nonbreaking phrases together. Whitespace still
