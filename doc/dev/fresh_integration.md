@@ -399,26 +399,42 @@ and spacing changes replace that client's style revision and preserve its
 source scroll anchor. Code and raw table source use a monospace font; measured
 table cells use proportional body text unless inline markup selects code.
 
-`ComposePane.ready` distinguishes a coherent projection from formatting still
-being applied. Readiness correlates the source revision, window, buffer
-lifetime, and a token assigned by the host to each batch of lines. Commands
-may span several editor ticks; offering lines or receiving a hook-name-only
-acknowledgment is not enough. Tracked source decorations apply to their
-original owner even after workspace focus changes. Edits invalidate the
-affected ranges and shift unaffected completed ranges without rebuilding them.
+`ComposePane.ready` reports formatter completion. Readiness correlates the
+source revision, window, buffer lifetime, and a host-assigned token for each
+batch of lines. Commands may span several editor ticks; offering lines or
+receiving a hook-name-only acknowledgment is not enough. Tracked source
+decorations apply to their original owner after workspace focus changes.
+Edits invalidate affected ranges and shift unaffected completed ranges.
 
-Pending snapshots contain a raw copy map, never partially applied conceals.
-The native pane holds its previous presentation with its source map and
-revisions, and queues document input until the current projection is ready.
-An accepted edit's caret reveal can wait for readiness; a later physical
-scroll still takes precedence.
-Offscreen measurements remain demanded until their completion can wake the
-pending input. Failed formatting, missing coverage, or the prototype's
-formatting deadline of five seconds produces an explained, editable source
-fallback.
-Fallback editing does not restart that wait on every character. A successful
-new formatting batch can restore rich presentation. These timing and resource
-bounds still need validation against representative documents before release.
+Fresh retains a marker-free snapshot of completed decorations, including
+cursor-dependent alternatives. Source and activation scopes must both have
+completed coverage. During formatting it projects the current source using
+only this snapshot, never the formatter's partially cleared/rebuilt conceal
+stream. Across edits, retained source and activation ranges must survive
+unchanged, including their boundaries. Changed parser-owned semantic context
+invalidates decorations in the affected old/new regions. Expired edit history
+or buffer replacement discards them. Cursor activation is evaluated afresh.
+The existing Markdown parser supplies current heading, code, table and image
+structure; the native client has no second parser or editable source buffer.
+
+`ComposePane.current_projection` (field 24) identifies this current-source
+projection. It remains usable for measured input, headings and images even
+when `ready` is false. The native client uses its current source map rather
+than drawing a previous revision. An older peer without this field retains
+the previous coherent presentation while formatting completes, subject to
+accepted source/cursor bounds. Automatic viewport continuation waits for
+completed formatting, because replacing retained decorations can change the
+measured height. A physical scroll still takes precedence over an accepted
+edit's caret reveal. Offscreen measurements remain demanded until their
+completion can wake pending input.
+
+Failed formatting, missing coverage, or the prototype's five-second deadline
+produces an explained, editable source fallback. Fallback editing does not
+restart that wait on every character. A successful current batch can restore
+rich presentation. These timing and resource bounds still need representative
+document qualification before release. Prose remains proportional, headings
+are larger, and wrapping uses available pixels; terminal columns, padding and
+fixed-width formatting do not constrain native layout.
 
 - Type 27, `ComposeInput`, serializes document commands and returns an
   `InputReply`. Accepted and cancelled requests are terminal and consume their
@@ -453,8 +469,9 @@ nested emphasis or table-cell conceals. Its preview occupies measured space
 below that text without inserting characters or caret positions. Preview
 clicks address the same image source range. Selection, copy, cut, paste and
 undo use Fresh's Markdown source, including reference syntax; they do not
-copy the graphical object or relocate its asset. Pending/fallback projections
-set neither image presentation flag. Invalid markup remains editable source
+copy the graphical object or relocate its asset. Current-source pending
+projections retain their parser-owned image presentation flags; failed raw
+fallbacks set neither flag. Invalid markup remains editable source
 and may no longer have a parsed preview until it becomes a valid image again.
 
 List-item spans carry optional `content_start`: the source-byte position of

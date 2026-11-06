@@ -1545,6 +1545,11 @@ public nonisolated struct WireComposePane: @unchecked Sendable {
     set {_uniqueStorage()._nativeNewline = newValue}
   }
 
+  public var currentProjection: Bool {
+    get {_storage._currentProjection}
+    set {_uniqueStorage()._currentProjection = newValue}
+  }
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
@@ -6383,7 +6388,7 @@ nonisolated extension WirePane: SwiftProtobuf.Message, SwiftProtobuf._MessageImp
 
 nonisolated extension WireComposePane: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".ComposePane"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}buffer_revision\0\u{3}projection_revision\0\u{3}source_start\0\u{3}source_end\0\u{1}text\0\u{1}segments\0\u{1}spans\0\u{1}images\0\u{1}cursors\0\u{1}focused\0\u{3}top_byte\0\u{3}document_len\0\u{3}selection_revision\0\u{1}keyboard\0\u{3}asset_authority\0\u{3}asset_document\0\u{1}viewport\0\u{1}ready\0\u{1}error\0\u{3}text_context\0\u{3}text_chunks\0\u{1}tables\0\u{3}native_newline\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}buffer_revision\0\u{3}projection_revision\0\u{3}source_start\0\u{3}source_end\0\u{1}text\0\u{1}segments\0\u{1}spans\0\u{1}images\0\u{1}cursors\0\u{1}focused\0\u{3}top_byte\0\u{3}document_len\0\u{3}selection_revision\0\u{1}keyboard\0\u{3}asset_authority\0\u{3}asset_document\0\u{1}viewport\0\u{1}ready\0\u{1}error\0\u{3}text_context\0\u{3}text_chunks\0\u{1}tables\0\u{3}native_newline\0\u{3}current_projection\0")
 
   fileprivate class _StorageClass {
     var _bufferRevision: UInt64 = 0
@@ -6409,6 +6414,7 @@ nonisolated extension WireComposePane: SwiftProtobuf.Message, SwiftProtobuf._Mes
     var _textChunks: [WireComposeTextChunk] = []
     var _tables: [WireComposeTable] = []
     var _nativeNewline: UInt32 = 0
+    var _currentProjection: Bool = false
 
       // This property is used as the initial default value for new instances of the type.
       // The type itself is protecting the reference to its storage via CoW semantics.
@@ -6442,6 +6448,7 @@ nonisolated extension WireComposePane: SwiftProtobuf.Message, SwiftProtobuf._Mes
       _textChunks = source._textChunks
       _tables = source._tables
       _nativeNewline = source._nativeNewline
+      _currentProjection = source._currentProjection
     }
   }
 
@@ -6483,6 +6490,7 @@ nonisolated extension WireComposePane: SwiftProtobuf.Message, SwiftProtobuf._Mes
         case 21: try { try decoder.decodeRepeatedMessageField(value: &_storage._textChunks) }()
         case 22: try { try decoder.decodeRepeatedMessageField(value: &_storage._tables) }()
         case 23: try { try decoder.decodeSingularUInt32Field(value: &_storage._nativeNewline) }()
+        case 24: try { try decoder.decodeSingularBoolField(value: &_storage._currentProjection) }()
         default: break
         }
       }
@@ -6564,6 +6572,9 @@ nonisolated extension WireComposePane: SwiftProtobuf.Message, SwiftProtobuf._Mes
       if _storage._nativeNewline != 0 {
         try visitor.visitSingularUInt32Field(value: _storage._nativeNewline, fieldNumber: 23)
       }
+      if _storage._currentProjection != false {
+        try visitor.visitSingularBoolField(value: _storage._currentProjection, fieldNumber: 24)
+      }
     }
     try unknownFields.traverse(visitor: &visitor)
   }
@@ -6596,6 +6607,7 @@ nonisolated extension WireComposePane: SwiftProtobuf.Message, SwiftProtobuf._Mes
         if _storage._textChunks != rhs_storage._textChunks {return false}
         if _storage._tables != rhs_storage._tables {return false}
         if _storage._nativeNewline != rhs_storage._nativeNewline {return false}
+        if _storage._currentProjection != rhs_storage._currentProjection {return false}
         return true
       }
       if !storagesAreEqual {return false}

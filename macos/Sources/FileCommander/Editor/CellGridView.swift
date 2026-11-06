@@ -272,7 +272,7 @@ final class CellGridView: NSView, @preconcurrency NSTextInputClient {
       pane.compose.focused = input.compose.focused; pane.compose.keyboard = input.compose.keyboard
       return value.text.presentation
     }
-    if preedit == nil, pane.hasCompose, !pane.compose.formattingReady, let reuse, reuse.pane.compose.formattingReady,
+    if preedit == nil, pane.hasCompose, !pane.compose.projectionUsable, let reuse, reuse.pane.compose.formattingReady,
        reuse.identity == .init(window: UInt64(store.windowID), leaf: pane.leaf, buffer: pane.buffer),
        reuse.pane.compose.viewport.epoch == pane.compose.viewport.epoch,
        store.composeAcceptances[pane.leaf]?.permits(reuse.pane, window: UInt64(store.windowID)) ?? true,
@@ -306,7 +306,7 @@ final class CellGridView: NSView, @preconcurrency NSTextInputClient {
   /// Geometry for a deferred key is measured with the same fonts, width and
   /// images, but never replaces a visible pane or starts offscreen image I/O.
   func composeMeasurement(identity: ComposePresentation.Identity, projection: WireComposePane) -> ComposePresentation? {
-    guard projection.formattingReady, identity.window == UInt64(store.windowID), var pane = store.panes.first(where: { $0.leaf == identity.leaf && $0.hasBuffer && $0.buffer == identity.buffer }),
+    guard projection.projectionUsable, identity.window == UInt64(store.windowID), var pane = store.panes.first(where: { $0.leaf == identity.leaf && $0.hasBuffer && $0.buffer == identity.buffer }),
           pane.hasCompose, pane.compose.bufferRevision == projection.bufferRevision,
           pane.compose.selectionRevision == projection.selectionRevision,
           pane.compose.assetDocument == projection.assetDocument else { return nil }

@@ -474,7 +474,7 @@ final class NativeEditor: NSObject, CellGridDelegate {
     let demands = shown && richCompose ? grid?.composeImageDemands() ?? [] : []
     composeImages.update(demands.filter { demand in
       store.panes.contains { pane in pane.leaf == demand.scope.leaf && pane.hasBuffer && pane.buffer == demand.scope.buffer
-        && pane.hasCompose && pane.compose.formattingReady && pane.compose.bufferRevision == demand.scope.bufferRevision }
+        && pane.hasCompose && pane.compose.projectionUsable && pane.compose.bufferRevision == demand.scope.bufferRevision }
     }, revalidate: revalidate)
   }
 
@@ -502,7 +502,10 @@ final class NativeEditor: NSObject, CellGridDelegate {
       guard let self else { return }
       self.viewportRefreshQueued = false
       guard self.receivedHello, self.shown else { return }
-      for pane in self.grid?.composePanes.values.map({ $0 }) ?? [] where pane.pane.compose.hasViewport {
+      // Completed formatting may still replace retained decorations and change
+      // the measured height. Do not page merely to fill that provisional gap.
+      // Current-source projections remain available for input and drawing.
+      for pane in self.grid?.composePanes.values.map({ $0 }) ?? [] where pane.pane.compose.hasViewport && pane.pane.compose.formattingReady {
         if let next = pane.scrolling.continuation(pane.viewport) {
           self.composeViewports.move(scope: pane.scope, from: pane.viewport, to: next, user: false)
         }
@@ -530,7 +533,7 @@ final class NativeEditor: NSObject, CellGridDelegate {
           identity.window == UInt64(store.windowID),
           let current = store.panes.first(where: { $0.leaf == identity.leaf && $0.hasBuffer && $0.buffer == identity.buffer && $0.hasCompose }),
           current.compose.viewport.epoch == pending.target.epoch else { pendingCaretReveal = nil; return }
-    guard current.compose.formattingReady, let pane = grid?.composePanes[identity.leaf], pane.identity == identity,
+    guard current.compose.projectionUsable, let pane = grid?.composePanes[identity.leaf], pane.identity == identity,
           pane.pane.compose.bufferRevision == current.compose.bufferRevision else { return }
     pendingCaretReveal = nil
     revealComposeCaret(pane)
@@ -777,12 +780,12 @@ final class NativeEditor: NSObject, CellGridDelegate {
     }
     if let identity = pendingComposePane,
        let current = store.panes.first(where: { $0.leaf == identity.leaf && $0.hasBuffer && $0.buffer == identity.buffer && $0.hasCompose }) {
-      guard current.compose.formattingReady else { return }
+      guard current.compose.projectionUsable else { return }
       if let projection = pendingComposeProjection {
         if projection.bufferRevision != current.compose.bufferRevision || projection.selectionRevision != current.compose.selectionRevision
             || projection.assetDocument != current.compose.assetDocument {
           pendingComposeProjection = nil; pendingComposeY = nil; pendingComposeRegion = nil
-        } else if !projection.formattingReady { return }
+        } else if !projection.projectionUsable { return }
       }
     }
     var input = WireComposeInput()

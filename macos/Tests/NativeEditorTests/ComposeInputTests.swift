@@ -1295,6 +1295,92 @@ final class ComposeInputTests: XCTestCase {
   }
 
   @MainActor
+  func testAutomaticWindowContinuationWaitsForCompleteFormattingOfCurrentSource() async throws {
+    var pending = pane("Current source\n")
+    pending.compose.documentLen = 10_000; pending.compose.ready = false; pending.compose.currentProjection = true
+    let peer = try ScenePeer(pane: pending); defer { peer.close() }
+    let editor = richEditor(); defer { editor.detachAll() }
+    editor.attach(socketPath: peer.path, app: nil)
+    try await eventually { editor.grid?.focusedCompose?.pane.compose.currentProjection == true }
+    editor.send(.key(.with { $0.key = "ArrowRight" }))
+    try await eventually { peer.inputs.count == 1 }
+    XCTAssertTrue(peer.viewports.isEmpty, "a provisional height cannot trigger automatic source-window loading")
+    pending.compose.ready = true
+    peer.show(pending)
+    try await eventually { peer.viewports.count == 1 }
+    XCTAssertEqual(peer.viewports[0].position, pending.compose.sourceEnd)
+  }
+
+  @MainActor
+  func testCurrentPendingProjectionKeepsLargeHeadingsAndDecodedInlineImagesInteractive() async throws {
+    let markup = "![pic](x.png)"
+    func rich(_ word: String, revision: UInt64) -> WirePane {
+      let source = "# Title\n\n\(word) \(markup) after.\n"
+      let start = source[..<source.range(of: markup)!.lowerBound].utf8.count, end = start + markup.utf8.count
+      var value = pane(source, revision: revision)
+      value.compose.text = String(source.dropFirst(2)).replacingOccurrences(of: markup, with: "\u{fffc}")
+      value.compose.segments = [
+        .with { $0.sourceEnd = 2; $0.kind = 1 },
+        .with { $0.sourceStart = 2; $0.sourceEnd = UInt64(start); $0.displayEnd = UInt64(start - 2) },
+        .with { $0.sourceStart = UInt64(start); $0.sourceEnd = UInt64(end); $0.displayStart = UInt64(start - 2); $0.displayEnd = UInt64(start + 1); $0.kind = 2 },
+        .with { $0.sourceStart = UInt64(end); $0.sourceEnd = UInt64(source.utf8.count); $0.displayStart = UInt64(start + 1); $0.displayEnd = UInt64(value.compose.text.utf8.count) },
+      ]
+      value.compose.spans = [.with { $0.start = 0; $0.end = 8; $0.role = 1 }]
+      value.compose.assetAuthority = 5; value.compose.assetDocument = 7
+      value.compose.images = [.with { $0.start = UInt64(start); $0.end = UInt64(end); $0.target = "x.png"; $0.alt = "Picture"; $0.rendered = true }]
+      value.compose.cursors[0].position = UInt64(source.utf8.count); value.compose.cursors[0].utf16Position = UInt64(source.utf16.count)
+      value.compose.textContext.selectionStart = UInt64(source.utf16.count); value.compose.textContext.selectionEnd = UInt64(source.utf16.count)
+      return value
+    }
+    let peer = try ScenePeer(pane: rich("Before", revision: 4)); defer { peer.close() }
+    let editor = richEditor(); defer { editor.detachAll() }
+    editor.attach(socketPath: peer.path, app: nil)
+    try await eventually { peer.assets.contains { !$0.cancel } }
+    let pixels = try XCTUnwrap(CGContext(data: nil, width: 80, height: 20, bitsPerComponent: 8,
+      bytesPerRow: 320, space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
+    pixels.setFillColor(CGColor(red: 0.1, green: 0.65, blue: 0.35, alpha: 1)); pixels.fill(CGRect(x: 0, y: 0, width: 80, height: 20))
+    let bytes = NSMutableData(), png = try XCTUnwrap(CGImageDestinationCreateWithData(bytes, "public.png" as CFString, 1, nil))
+    CGImageDestinationAddImage(png, try XCTUnwrap(pixels.makeImage()), nil); XCTAssertTrue(CGImageDestinationFinalize(png))
+    peer.image(.with { $0.id = peer.assets.last!.id; $0.data = bytes as Data; $0.total = UInt64(bytes.length); $0.done = true
+      $0.version = Data(repeating: 1, count: 32); $0.digest = Data(repeating: 1, count: 32) })
+    try await eventually { editor.grid?.focusedCompose?.layout.text.attachments.first?.rect.width == 80 }
+    let grid = try XCTUnwrap(editor.grid)
+    func artifact(_ name: String) throws {
+      guard let directory = ProcessInfo.processInfo.environment["FC_COMPOSE_ARTIFACT_DIR"] else { return }
+      let pane = try XCTUnwrap(grid.focusedCompose), width = Int(ceil(pane.bounds.width)), height = Int(ceil(pane.bounds.height))
+      let context = try XCTUnwrap(CGContext(data: nil, width: width, height: height, bitsPerComponent: 8,
+        bytesPerRow: width * 4, space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
+      context.setFillColor(NSColor.white.cgColor); context.fill(CGRect(x: 0, y: 0, width: width, height: height))
+      context.translateBy(x: 0, y: CGFloat(height)); context.scaleBy(x: 1, y: -1)
+      pane.draw(in: context, dirty: pane.bounds, foreground: .black, background: .white, selection: .blue)
+      let url = URL(fileURLWithPath: directory).appendingPathComponent(name + ".png")
+      try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+      let output = try XCTUnwrap(CGImageDestinationCreateWithURL(url as CFURL, "public.png" as CFString, 1, nil))
+      CGImageDestinationAddImage(output, try XCTUnwrap(context.makeImage()), nil); XCTAssertTrue(CGImageDestinationFinalize(output))
+    }
+    try artifact("before")
+    var pending = rich("Changed", revision: 5)
+    pending.compose.ready = false; pending.compose.currentProjection = true
+    let before = peer.lastApplied; peer.show(pending)
+    try await eventually { peer.lastApplied > before }
+    let current = try XCTUnwrap(grid.focusedCompose)
+    XCTAssertEqual(current.pane.compose.bufferRevision, 5)
+    XCTAssertEqual(current.layout.text.projection.text, "Title\n\nChanged \u{fffc} after.\n")
+    XCTAssertEqual(current.layout.text.attachments.first?.rect.width, 80)
+    XCTAssertEqual(peer.assets.filter { !$0.cancel }.count, 1, "a source offset change retains the decoded resource")
+    XCTAssertGreaterThan(try XCTUnwrap(current.layout.text.fragments.first?.rect.height), try XCTUnwrap(current.layout.text.fragments.last?.rect.height))
+    try artifact("pending")
+    editor.send(.key(.with { $0.key = "ArrowRight" }))
+    try await eventually { peer.inputs.count == 1 }
+    XCTAssertEqual(peer.inputs[0].scope.bufferRevision, 5)
+    peer.reply(.with { $0.id = 1; $0.needsLayout = true; $0.compose = pending.compose })
+    try await eventually { peer.inputs.count == 2 }
+    XCTAssertEqual(peer.inputs[1].id, 1); XCTAssertTrue(peer.inputs[1].hasLayout)
+    XCTAssertEqual(peer.inputs[1].scope.projectionRevision, 5)
+    peer.reply(.with { $0.id = 1; $0.accepted = true })
+  }
+
+  @MainActor
   func testSourcePreviewUsesTheImageRangeAndPasteSendsOnlyCopiedMarkdown() async throws {
     let markup = "![**café**](<images/a b.png>)"
     let source = "Before \(markup) after.\r\n"

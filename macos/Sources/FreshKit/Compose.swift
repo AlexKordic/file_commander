@@ -5,6 +5,9 @@ import CoreGraphics
 extension WireComposePane {
   /// Older fixtures and grid-era scenes omit the readiness extension.
   public var formattingReady: Bool { !hasReady || ready }
+  /// A current-source projection can retain certified completed formatting
+  /// while another range's formatter is pending. It is safe for measured input.
+  public var projectionUsable: Bool { formattingReady || currentProjection }
 }
 
 /// Fresh's source-preserving Compose projection. Coordinates in this contract
