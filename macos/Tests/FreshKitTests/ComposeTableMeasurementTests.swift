@@ -125,4 +125,32 @@ final class ComposeTableMeasurementTests: XCTestCase {
     try apply(next, window: 2)
     XCTAssertNil(ComposeTableModel(pane: store.panes[0].compose))
   }
+
+  func testMinimumGlyphConstraintsUseLogicalClustersAcrossBidiBoundariesAndFontRuns() throws {
+    for value in ["iiii אבג ffi e\u{301} 👩🏽‍💻 W", "שלום אבג 👩🏽‍💻 e\u{301} ffi W", "سلام لا 👩🏽‍💻 e\u{301} ffi W"] {
+      let text = NSMutableAttributedString(string: value,
+        attributes: [NSAttributedString.Key(kCTFontAttributeName as String): body])
+      let large = CTFontCreateWithName("Helvetica-Bold" as CFString, 24, nil)
+      text.addAttribute(NSAttributedString.Key(kCTFontAttributeName as String), value: large,
+        range: NSRange(location: text.length - 1, length: 1))
+      var expected: CGFloat = 0, offset = 0
+      for cluster in value {
+        let count = String(cluster).utf16.count
+        let sample = text.attributedSubstring(from: NSRange(location: offset, length: count))
+        let line = CTLineCreateWithAttributedString(sample)
+        expected = max(expected, CGFloat(CTLineGetTypographicBounds(line, nil, nil, nil)))
+        offset += count
+      }
+      var constraints = ComposeColumnConstraints(count: 1, font: body, available: 200)
+      constraints.include(text, range: NSRange(location: 0, length: text.length), column: 0, preferred: false)
+      XCTAssertEqual(constraints.minimum[0], expected, accuracy: 0.01,
+        "a primary-caret jump across an RTL run is not one glyph's width")
+      let prefix = NSMutableAttributedString(string: "unmeasured prefix ", attributes: [NSAttributedString.Key(kCTFontAttributeName as String): code])
+      let start = prefix.length; prefix.append(text)
+      var scoped = ComposeColumnConstraints(count: 1, font: body, available: 200)
+      scoped.include(prefix, range: NSRange(location: start, length: text.length), column: 0, preferred: false)
+      XCTAssertEqual(scoped.minimum[0], expected, accuracy: 0.01, "typesetter indices remain document-relative")
+    }
+  }
+
 }

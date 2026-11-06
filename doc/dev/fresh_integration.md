@@ -638,10 +638,15 @@ URI, with selection and an offscreen original cursor. Unit checks cover
 multiple forward windows, backwards continuation and rendering/selection
 invalidation of resolved and deferred cursors. These are bounded functional
 checks; complex nested entry/exit and native input/performance qualification
-remain prerequisites for enabling the capability. The large-URI native
-fixture exposed about 29 seconds of synchronous measurement on the development
-machine. Minimum-glyph measurement must be profiled and fixed before release;
-small-table correctness tests do not qualify its latency.
+remain prerequisites for enabling the capability. Minimum-glyph measurement
+collects logical caret edges once per shaped sample and combines them by
+complete Unicode cluster. Repeated point queries previously scanned the whole
+line for every cluster, making the 90 KB URI fixture take 29.67 seconds in
+Debug; the same check takes about 0.10 seconds after the change. Logical edges
+also avoid treating a primary insertion-point jump across an RTL run as one
+glyph's width. The temporary edge buffer uses 16 bytes per UTF-16 unit of the
+current sample. Large unique tables, allocations and multiple-pane scene
+payload/latency still require qualification; this fixture is not that budget.
 Legacy rich clients keep table source and
 can share the same backend with a table-capable client without exchanging
 their per-client projections. `compose-tables.pb` records that real-plugin

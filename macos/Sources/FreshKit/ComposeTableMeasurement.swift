@@ -75,11 +75,26 @@ struct ComposeColumnConstraints {
     let typesetter = typesetter ?? CTTypesetterCreateWithAttributedString(text)
     let line = CTTypesetterCreateLine(typesetter, CFRange(location: range.location, length: range.length))
     let string = text.string as NSString
+    // A point query enumerates the shaped line internally. Asking at every
+    // cluster boundary is quadratic for long source/URI samples. Collect both
+    // logical edges once, then measure the extent of each complete cluster.
+    // Primary insertion positions at bidi boundaries can span an entire RTL
+    // run; those jumps are not the width of the adjacent source character.
+    var edges = Array(repeating: SIMD2<Double>(.infinity, -.infinity), count: range.length)
+    CTLineEnumerateCaretOffsets(line) { offset, index, _, _ in
+      let at = index - range.location
+      guard at >= 0, at < edges.count else { return }
+      edges[at].x = min(edges[at].x, offset); edges[at].y = max(edges[at].y, offset)
+    }
     var at = range.location
     while at < NSMaxRange(range) {
       let next = min(NSMaxRange(range), NSMaxRange(string.rangeOfComposedCharacterSequence(at: at)))
-      let a = CTLineGetOffsetForStringIndex(line, at, nil), b = CTLineGetOffsetForStringIndex(line, next, nil)
-      minimum[column] = max(minimum[column], abs(b - a)); at = next
+      var low = Double.infinity, high = -Double.infinity
+      for index in (at - range.location)..<(next - range.location) {
+        low = min(low, edges[index].x); high = max(high, edges[index].y)
+      }
+      if low.isFinite, high.isFinite { minimum[column] = max(minimum[column], CGFloat(high - low)) }
+      at = next
     }
     guard preferred else { return }
     natural[column] = max(natural[column], min(available, CGFloat(CTLineGetTypographicBounds(line, nil, nil, nil))))
