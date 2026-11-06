@@ -94,6 +94,22 @@ private final class ComposeBackend {
     try? log.close()
     try? FileManager.default.removeItem(at: root)
   }
+
+  func captureDiagnostics(_ name: String) {
+    guard let path = ProcessInfo.processInfo.environment["FC_COMPOSE_ARTIFACT_DIR"] else { return }
+    let destination = URL(fileURLWithPath: path).appendingPathComponent(name + "-" + root.lastPathComponent)
+    let keys: [URLResourceKey] = [.isRegularFileKey, .isSymbolicLinkKey]
+    // Keep just this fixture and its command/launcher logs. Runtime sockets
+    // and extracted plugin caches are neither copyable nor useful here.
+    guard let files = try? FileManager.default.contentsOfDirectory(at: root, includingPropertiesForKeys: keys) else { return }
+    try? FileManager.default.createDirectory(at: destination, withIntermediateDirectories: true)
+    for file in files {
+      guard let values = try? file.resourceValues(forKeys: Set(keys)),
+            values.isRegularFile == true, values.isSymbolicLink != true else { continue }
+      let output = destination.appendingPathComponent(file.lastPathComponent)
+      try? FileManager.default.copyItem(at: file, to: output)
+    }
+  }
 }
 
 final class ComposeBackendTests: XCTestCase {
@@ -265,6 +281,62 @@ final class ComposeBackendTests: XCTestCase {
     XCTAssertEqual(grid.focusedCompose?.identity, identity)
     XCTAssertTrue(backend.server.isRunning)
     XCTAssertEqual(try Data(contentsOf: file), expected)
+  }
+
+  @MainActor
+  func testRealBackendLongWrappedListKeepsMeasuredInputThroughResizeSaveAndUndo() async throws {
+    let backend = try backend(); defer {
+      backend.captureDiagnostics("long-paragraph")
+      backend.stop()
+    }
+    let editor = editor(BackendPasteboard()); defer { editor.detachAll() }
+    let header = "| A | B |\n|---|---|\n| one | two |\n\n# Long paragraph\n\n1) "
+    let body = String(repeating: "Measured **prose** café 👩🏽‍💻 東京 with words that continue in one physical paragraph. ", count: 2000)
+    let original = header + body + "\n\nTail\n"
+    let bodyStart = UInt64(header.utf8.count), bodyEnd = bodyStart + UInt64(body.utf8.count)
+    XCTAssertGreaterThan(body.utf8.count, 64 << 10)
+    let file = backend.root.appendingPathComponent("long-paragraph.md")
+    try Data(original.utf8).write(to: file)
+    try await attach(backend, file: file, editor: editor)
+    let grid = try XCTUnwrap(editor.grid), initial = try XCTUnwrap(grid.focusedCompose)
+    XCTAssertFalse(CTFontGetSymbolicTraits(initial.body).contains(.traitMonoSpace))
+    XCTAssertTrue(initial.pane.compose.spans.contains { $0.role == 1 })
+    let hangingX = try XCTUnwrap(initial.layout.text.caret(for: Int(bodyStart))).minX
+    editor.send(.action(name: "move_document_end", argsJson: ""))
+    try await eventually(editor, "end of document after the long paragraph") {
+      grid.focusedCompose?.cursor?.position == UInt64(original.utf8.count)
+    }
+    for _ in 0..<4 {
+      let before = try XCTUnwrap(grid.focusedCompose?.cursor?.position)
+      if before < bodyEnd { break }
+      editor.send(.action(name: "move_up", argsJson: ""))
+      try await eventually(editor, "measured Up across a long-paragraph boundary") {
+        guard let position = grid.focusedCompose?.cursor?.position else { return false }
+        return position < before
+      }
+    }
+    let position = try XCTUnwrap(grid.focusedCompose?.cursor?.position)
+    XCTAssertGreaterThan(position, bodyStart + UInt64(body.utf8.count / 2))
+    XCTAssertLessThan(position, bodyEnd)
+    XCTAssertEqual(try XCTUnwrap(grid.focusedCompose?.layout.text.caret(for: Int(position))).minX,
+      hangingX, accuracy: 0.001, "a continuation window must retain its offscreen list marker's measured inset")
+    let prefix = Data(original.utf8.prefix(Int(position))), suffix = Data(original.utf8.dropFirst(Int(position)))
+    XCTAssertEqual(grid.selectedRange(), NSRange(location: String(decoding: prefix, as: UTF8.self).utf16.count, length: 0))
+    let width = try XCTUnwrap(grid.focusedCompose?.layout.width)
+    grid.setFrameSize(CGSize(width: 460, height: 420))
+    try await eventually(editor, "resize preserves the long-paragraph source caret") {
+      guard let pane = grid.focusedCompose else { return false }
+      return pane.layout.width < width && pane.cursor?.position == position
+    }
+    XCTAssertNotNil(grid.focusedCompose?.layout.text.caret(for: Int(position)))
+    let insertion = "追加👩🏽‍💻"
+    grid.insertText(insertion, replacementRange: NSRange(location: NSNotFound, length: 0))
+    editor.send(.action(name: "save", argsJson: ""))
+    let expected = prefix + Data(insertion.utf8) + suffix
+    try await eventually(editor, "save exact source from the long measured paragraph") { (try? Data(contentsOf: file)) == expected }
+    editor.send(.action(name: "undo", argsJson: "")); editor.send(.action(name: "save", argsJson: ""))
+    try await eventually(editor, "undo the long-paragraph edit once") { (try? Data(contentsOf: file)) == Data(original.utf8) }
+    XCTAssertTrue(editor.uninsertedText.isEmpty); XCTAssertTrue(backend.server.isRunning)
   }
 
   @MainActor
