@@ -342,8 +342,9 @@ keeps its own JSON protocol over TCP and is not affected.
   [macos_app.md](macos_app.md#frames-and-the-app)).
 - **Sizing and liveness**: the shared grid fits the smallest viewport among
   the primary terminal and the scene clients. A connection ends when either
-  side closes it; an app that stops reading with 8 MiB of frames waiting is
-  dropped.
+  side closes it; an app that stops reading is dropped when queued output
+  exceeds the producer's cap. The packaged Fresh pin uses 8 MiB; the current
+  development producer allows two 16 MiB protocol messages plus TLV headers.
 
 A connected scene client counts as attached: the session does not shut down
 idle, and `prepare-restart` refuses while one is connected, so the app
