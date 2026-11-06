@@ -409,6 +409,22 @@ are reused within one layout by face, point size and traits; a changed font,
 width or source still invalidates the appropriate layout. These are measured
 layout optimizations, independent of terminal columns.
 
+Long paragraphs in the projected text reuse a native Unicode line-break
+index instead of repeating Core Text's contextual break search at every wrapped
+row. Core Text still measures the current font runs and image delegates and
+shapes the full attributed text, preserving its bidi context. Short paragraphs, special
+whitespace/format controls, forced word splits and contextual punctuation units
+retain the original Core Text break path. The index is scoped to one layout
+construction; it supplies no fixed column count and does not bound source
+windows or payloads.
+
+An oversized physical source line can currently exceed the formatter's bounded
+offer while remaining inside a native source window. The missing coverage
+expires into editable-source fallback. The native/backend long-paragraph
+regression preserves a 200 KB example of this release gap. Native break-index
+timings do not qualify that workflow; bounded source/formatter continuation
+still needs to be implemented and verified.
+
 Complete table-input measurement reuses each derived body/code font variant
 within its pass, including bold and italic combinations. Each validated
 measurement retains one immutable aggregate for its current body/code font

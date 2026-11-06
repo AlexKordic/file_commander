@@ -344,12 +344,25 @@ public final class ComposeTextLayout {
     let string = projection.text as NSString
     var utf16ToByte = [0: 0]
     var byteToUTF16 = [0: 0]
-    var byte = 0, unit = 0
+    var byte = 0, unit = 0, paragraphStart = 0
+    var hasLongParagraph = false
     for scalar in projection.text.unicodeScalars {
       byte += scalar.utf8.count
       unit += scalar.utf16.count
       utf16ToByte[unit] = byte
       byteToUTF16[byte] = unit
+      if !hasLongParagraph {
+        // LF-delimited runs overestimate the length for other newline kinds.
+        // This cheap rejection avoids another scan on ordinary short prose;
+        // the wrapping index still validates its actual paragraph ranges.
+        if unit - paragraphStart >= ComposeWrappingBreaks.minimumLength { hasLongParagraph = true }
+        if scalar.value == 0x0a { paragraphStart = unit }
+      }
+    }
+    let wrapping = hasLongParagraph ? ComposeWrappingBreaks(string) : nil
+    func suggest(_ typesetter: CTTypesetter, from: Int, width: Double) -> Int {
+      wrapping?.suggest(typesetter, from: from, width: width)
+        ?? CTTypesetterSuggestLineBreak(typesetter, from, width)
     }
     let attributed = NSMutableAttributedString(string: projection.text,
       attributes: [NSAttributedString.Key(kCTFontAttributeName as String): font,
@@ -378,7 +391,7 @@ public final class ComposeTextLayout {
       // Include at least the first complete body grapheme: cutting at the
       // marker changes kerning ("1) An"), even when a narrow pane wraps there.
       let measure = max(1, width - min(item.indent, width * 0.6))
-      let count = CTTypesetterSuggestLineBreak(prefixTypesetter, start, Double(measure))
+      let count = suggest(prefixTypesetter, from: start, width: Double(measure))
       let bodyEnd = NSMaxRange(string.rangeOfComposedCharacterSequence(at: content))
       var contextEnd = min(end, max(start + max(0, count), bodyEnd))
       if contextEnd < end {
@@ -531,7 +544,7 @@ public final class ComposeTextLayout {
       var at = range.location
       if range.length == 0 { append(range, block: nil, indent: indent, measure: measure, table: table, alignment: alignment) }
       while at < NSMaxRange(range) {
-        let suggestion = CTTypesetterSuggestLineBreak(typesetter, at, Double(measure))
+        let suggestion = suggest(typesetter, from: at, width: Double(measure))
         var count = min(suggestion > 0 ? suggestion : string.rangeOfComposedCharacterSequence(at: at).length, NSMaxRange(range) - at)
         if at + count < NSMaxRange(range) {
           let cluster = string.rangeOfComposedCharacterSequence(at: at + count)
@@ -617,7 +630,7 @@ public final class ComposeTextLayout {
         }
       }
       let indent = min(desired, width * 0.6)
-      let suggested = CTTypesetterSuggestLineBreak(typesetter, from, Double(max(1, width - indent - (paragraph?.style.trailing ?? 0))))
+      let suggested = suggest(typesetter, from: from, width: Double(max(1, width - indent - (paragraph?.style.trailing ?? 0))))
       var count = suggested > 0 ? suggested : string.rangeOfComposedCharacterSequence(at: from).length
       if nextRow < tableRows.count { count = min(count, tableRows[nextRow].range.location - from) }
       guard count > 0, count <= string.length - from else { return nil }
