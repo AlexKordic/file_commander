@@ -353,10 +353,13 @@ public final class ComposeTextLayout {
       guard measured.isFinite, measured >= 0 else { return nil }
       hangs.append((NSRange(location: start, length: end - start), content, measured, item.indent))
     }
+    let hangingIndex = ComposeIntervalIndex(hangs.map { $0.range.location..<NSMaxRange($0.range) })
     func hangingItem(at position: Int) -> (range: NSRange, content: Int, prefix: CGFloat, indent: CGFloat)? {
-      hangs.filter { NSLocationInRange(position, $0.range) }.min {
-        $0.range.length == $1.range.length ? $0.content > $1.content : $0.range.length < $1.range.length
-      }
+      hangingIndex.matches(at: position).min { a, b in
+        if hangs[a].range.length != hangs[b].range.length { return hangs[a].range.length < hangs[b].range.length }
+        if hangs[a].content != hangs[b].content { return hangs[a].content > hangs[b].content }
+        return a < b
+      }.map { hangs[$0] }
     }
     guard attachments.allSatisfy({ $0.size.width.isFinite && $0.size.height.isFinite && $0.size.width > 0 && $0.size.height > 0 }) else { return nil }
     var measuredTables: [ComposeMeasuredTable] = []
@@ -429,8 +432,11 @@ public final class ComposeTextLayout {
     previews.sort { $0.end == $1.end ? $0.index < $1.index : $0.end < $1.end }
     var nextPreview = 0
     let baseHeight = CTFontGetAscent(font) + CTFontGetDescent(font) + CTFontGetLeading(font)
+    let blockIndex = ComposeIntervalIndex(blocks.map { $0.range.location..<NSMaxRange($0.range) })
     func block(at position: Int) -> (range: NSRange, style: ParagraphRun)? {
-      blocks.filter { NSLocationInRange(position, $0.range) }.min { $0.range.length < $1.range.length }
+      blockIndex.matches(at: position).min { a, b in
+        blocks[a].range.length == blocks[b].range.length ? a < b : blocks[a].range.length < blocks[b].range.length
+      }.map { blocks[$0] }
     }
     func append(_ range: NSRange, block: (range: NSRange, style: ParagraphRun)?, indent: CGFloat,
                 measure: CGFloat? = nil, table: TablePosition? = nil, alignment: ComposeTableModel.Alignment = .left) {

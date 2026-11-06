@@ -448,6 +448,8 @@ Compose panes, then measures protobuf decoding and Core Text layout with the
 native consumer. Fixtures cover small and large prose, nested quotes/lists/code,
 an image-heavy paragraph, and a large table with unique cells. Each records
 three samples, unchanged-layout reuse and four simultaneous pane layouts.
+Construction and first reuse are timed separately; reuse can also materialize
+lazy quote/code ornament geometry that the fresh layout has not requested yet.
 Artifacts include hardware/compiler/repository metadata, fixture SHA-256s,
 source/window/payload sizes, timings and process peak RSS. RSS is a cumulative
 process high-water mark, not the allocation cost of an individual case.

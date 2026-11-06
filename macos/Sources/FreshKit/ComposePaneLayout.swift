@@ -145,7 +145,10 @@ public final class ComposePaneLayout {
       }
     }
     let boundaries = Set([0, projection.text.utf8.count] + spans.flatMap { [$0.range.lowerBound, $0.range.upperBound] }).sorted()
+    let styleIndex = ComposeIntervalIndex(spans.map(\.range))
     var fonts: [ComposeTextLayout.FontRun] = []
+    struct FontKey: Hashable { let mono: Bool; let size: CGFloat; let traits: UInt32 }
+    var fontCache: [FontKey: CTFont] = [:]
     func fontRun(_ active: [Span], _ range: Range<Int>) -> ComposeTextLayout.FontRun {
       let heading = active.map(\.role).filter { (1...6).contains($0) }.min()
       let flags = active.reduce(UInt32(0)) { $0 | $1.flags }
@@ -153,16 +156,22 @@ public final class ComposePaneLayout {
         span.role == 7 || span.role == 12 || (span.role == 8 && !tables.contains { $0.source.overlaps(span.source) })
       }
       let pointSize = CTFontGetSize(body) * (heading.map { typography.headingScales[Int($0) - 1] } ?? 1)
-      let base = CTFontCreateCopyWithAttributes(mono ? monospace : body, pointSize, nil, nil)
       var traits: CTFontSymbolicTraits = []
       if heading != nil || flags & 1 != 0 { traits.insert(.traitBold) }
       if flags & 2 != 0 { traits.insert(.traitItalic) }
-      let font = CTFontCreateCopyWithSymbolicTraits(base, pointSize, nil, traits, [.traitBold, .traitItalic]) ?? base
+      let key = FontKey(mono: mono, size: pointSize, traits: traits.rawValue)
+      let font: CTFont
+      if let cached = fontCache[key] { font = cached }
+      else {
+        let base = CTFontCreateCopyWithAttributes(mono ? monospace : body, pointSize, nil, nil)
+        font = CTFontCreateCopyWithSymbolicTraits(base, pointSize, nil, traits, [.traitBold, .traitItalic]) ?? base
+        fontCache[key] = font
+      }
       let role: UInt32 = heading ?? (active.contains { $0.role == 12 } ? 12 : mono ? 7 : active.contains { $0.role == 9 } ? 9 : 0)
       return .init(display: range, font: font, role: role, flags: flags)
     }
     for (start, end) in zip(boundaries, boundaries.dropFirst()) where start < end {
-      fonts.append(fontRun(spans.filter { $0.range.contains(start) }, start..<end))
+      fonts.append(fontRun(styleIndex.matches(at: start).map { spans[$0] }, start..<end))
     }
     if let sourceComposition {
       for (id, display) in sourceDisplays where !display.isEmpty {
@@ -176,7 +185,7 @@ public final class ComposePaneLayout {
       + spans.filter { $0.role == 9 }
     var codeGeometry: [CodeBlock] = []
     let paragraphs = blocks.compactMap { block -> ComposeTextLayout.ParagraphRun? in
-      let containers = spans.filter { ($0.role == 9 || $0.role == 10) && $0.range.contains(block.range.lowerBound) }.count
+      let containers = styleIndex.matches(at: block.range.lowerBound).filter { spans[$0].role == 9 || spans[$0].role == 10 }.count
       let heading = (1...6).contains(block.role)
       let code = block.role == 12, padding = code ? Self.codePadding : 0
       let indent = code ? min(CGFloat(containers) * typography.indent, max(0, width * 0.6 - padding)) : CGFloat(containers) * typography.indent

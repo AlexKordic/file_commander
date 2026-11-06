@@ -399,6 +399,24 @@ and spacing changes replace that client's style revision and preserve its
 source scroll anchor. Code and raw table source use a monospace font; measured
 table cells use proportional body text unless inline markup selects code.
 
+Validated source/display maps use ordered coordinate queries, preserving both
+sides of hidden and inserted boundaries without scanning the entire map for
+each image, caret or span. Object substitution visits only intersecting map
+segments and still refuses partial atomic replacements or copied UTF-8 scalars.
+Native paragraph, hanging-item and text-style queries use immutable interval
+indexes. Equal ranges retain their original style precedence. Font objects
+are reused within one layout by face, point size and traits; a changed font,
+width or source still invalidates the appropriate layout. These are measured
+layout optimizations, independent of terminal columns.
+
+The [resource profile](testing.md#rich-compose-resource-profiles) records real
+parser-generated panes, native construction/reuse costs, payload sizes and
+process peak memory. It does not qualify interactive latency. The current
+native cache accepts UTF-8 sources up to 2 MiB; larger documents retain grid
+Compose. Its 64 KiB source-window target can expand for line/block context.
+Whole-document parsing, that cutoff and complete-table measurement budgets
+remain experimental limitations pending the remaining release work.
+
 `ComposePane.ready` reports formatter completion. Readiness correlates the
 source revision, window, buffer lifetime, and a host-assigned token for each
 batch of lines. Commands may span several editor ticks; offering lines or
