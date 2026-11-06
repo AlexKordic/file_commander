@@ -47,6 +47,26 @@ final class ComposeVirtualInsertionTests: XCTestCase {
     XCTAssertEqual(original.cursors[1]?.position, 2)
   }
 
+  func testVirtualInsertionCannotReuseTheCommittedOrAnOlderPendingProjection() throws {
+    var source = sourcePane()
+    source.text = source.textContext.text; source.sourceEnd = source.documentLen
+    source.segments = [.with { $0.sourceEnd = source.sourceEnd; $0.displayEnd = source.sourceEnd }]
+    let font = CTFontCreateWithName("Helvetica" as CFString, 20, nil)
+    let committed = try XCTUnwrap(ComposePaneLayout(pane: source, body: font, monospace: font, width: 180))
+    let selections = try XCTUnwrap(ComposeVirtualSelections(prefix: prefix()).flatMap { $0.movingPrimary(to: 6, extend: false) })
+    var previous = committed
+    for text in ["X", "Y"] {
+      let insertion = try XCTUnwrap(ComposeVirtualInsertion(selections: selections,
+        text: NSAttributedString(string: text), selected: NSRange(location: 1, length: 0)))
+      let next = try XCTUnwrap(ComposePaneLayout(pane: source, body: font, monospace: font, width: 180,
+        reuse: previous, virtualInsertion: insertion))
+      XCTAssertFalse(next.text === previous.text)
+      XCTAssertEqual(next.text.projection.text, "日本aa 日\(text)本\(text)BB cc")
+      XCTAssertNotNil(next.provisionalDisplayPosition(7))
+      previous = next
+    }
+  }
+
   func testSelectionAcrossMultipleDraftsFoldsToOneOriginalSourceRange() throws {
     let base = try prefix()
     let selected = try XCTUnwrap(ComposeVirtualSelections(prefix: base, primary: 30,

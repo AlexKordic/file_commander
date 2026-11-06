@@ -12,6 +12,20 @@ public struct ComposeComposition {
   public var markedRange: NSRange { shifted(primary.markedRange, by: shift(before: primaryID)) }
   public var selectedRange: NSRange { shifted(primary.selectedRange, by: shift(before: primaryID)) }
 
+  /// Marked/selected clauses change caret feedback, not shaped text. Include
+  /// raw context because a replacement can reveal part of an atomic conceal.
+  func hasSameLayout(as other: Self) -> Bool {
+    guard primaryID == other.primaryID, ordered == other.ordered else { return false }
+    return ordered.allSatisfy { id in
+      let a = values[id]!, b = other.values[id]!
+      return a.source == b.source && a.originalRange == b.originalRange
+        && a.draft.string.utf8.elementsEqual(b.draft.string.utf8) && a.draft.isEqual(to: b.draft)
+        && a.context.source == b.context.source && a.context.range == b.context.range
+        && a.context.documentLength == b.context.documentLength
+        && a.context.text.utf8.elementsEqual(b.context.text.utf8)
+    }
+  }
+
   public init?(primary: UInt64, values: [UInt64: ComposeMarkedText]) {
     guard values[primary] != nil, Self.valid(values) else { return nil }
     primaryID = primary; self.values = values

@@ -29,15 +29,9 @@ public final class ComposePaneLayout {
                images: [UInt64: ComposeImageState] = [:], reuse: ComposePaneLayout? = nil,
                sharingMeasurementsWith peers: [ComposePaneLayout] = [],
                preedit: ComposeMarkedText? = nil, composition: ComposeComposition? = nil, virtualInsertion: ComposeVirtualInsertion? = nil) {
-    guard let baseProjection = ComposeProjection(pane), typography.isValid, width.isFinite, width > 0 else { return nil }
+    guard typography.isValid, width.isFinite, width > 0,
+          let sourceStart = Int(exactly: pane.sourceStart), let sourceEnd = Int(exactly: pane.sourceEnd), sourceStart <= sourceEnd else { return nil }
     guard pane.images.allSatisfy({ !($0.rendered && $0.sourcePreview) }) else { return nil }
-    let items = Dictionary(grouping: pane.spans.filter { $0.role == 13 }, by: \.start)
-    var hangingContexts: [UInt64: ComposeHangingContext] = [:]
-    for wire in pane.hangingContexts {
-      guard hangingContexts[wire.itemStart] == nil, let owners = items[wire.itemStart], owners.count == 1,
-            let context = ComposeHangingContext(wire, item: owners[0]) else { return nil }
-      hangingContexts[wire.itemStart] = context
-    }
     let composition = composition ?? preedit.flatMap { ComposeComposition(primary: 0, values: [0: $0]) }
     let preedit = composition?.primary
     self.composition = composition; self.preedit = preedit; self.virtualInsertion = virtualInsertion
@@ -54,7 +48,7 @@ public final class ComposePaneLayout {
     var sourceRanges: [Range<Int>] = [], sizes: [Int: CGSize] = [:]
     for image in visible {
       guard let start = Int(exactly: image.start), let end = Int(exactly: image.end), start < end,
-            start >= baseProjection.source.lowerBound, end <= baseProjection.source.upperBound else { return nil }
+            start >= sourceStart, end <= sourceEnd else { return nil }
       if image.rendered { sourceRanges.append(start..<end) }
       let containers = pane.spans.filter { ($0.role == 9 || $0.role == 10) && $0.start <= image.start && image.start < $0.end }.count
       let available = width - min(CGFloat(containers) * typography.indent, width * 0.6)
@@ -64,6 +58,42 @@ public final class ComposePaneLayout {
         size.width *= 240 / size.height; size.height = 240
       }
       sizes[start] = size
+    }
+    self.pane = pane; self.body = body; self.monospace = monospace
+    self.width = width; self.typography = typography; self.images = images; self.imageSizes = sizes
+    let sameComposition: Bool
+    switch (composition, reuse?.composition) {
+    case (nil, nil): sameComposition = true
+    case (.some(let a), .some(let b)): sameComposition = a.hasSameLayout(as: b)
+    default: sameComposition = false
+    }
+    // Geometry depends on literal content and measured inputs, not scene
+    // revisions or caret/marked-clause selection. A matching prior snapshot
+    // already validated this exact map; skip rebuilding its indices and model.
+    // Virtual insertion has additional placement maps and uses the full path.
+    if let reuse, sameComposition, virtualInsertion == nil, reuse.virtualInsertion == nil,
+       pane.sourceStart == reuse.pane.sourceStart, pane.sourceEnd == reuse.pane.sourceEnd,
+       pane.documentLen == reuse.pane.documentLen,
+       pane.assetAuthority == reuse.pane.assetAuthority, pane.assetDocument == reuse.pane.assetDocument,
+       pane.text.utf8.elementsEqual(reuse.pane.text.utf8), pane.segments == reuse.pane.segments,
+       pane.spans == reuse.pane.spans, pane.images == reuse.pane.images, pane.tables == reuse.pane.tables,
+       pane.hangingContexts == reuse.pane.hangingContexts, sizes == reuse.imageSizes,
+       width == reuse.width, typography == reuse.typography,
+       CFEqual(body, reuse.body), CFEqual(monospace, reuse.monospace) {
+      tableModel = reuse.tableModel; text = reuse.text
+      contextDisplayRanges = reuse.contextDisplayRanges; draftDisplayRanges = reuse.draftDisplayRanges
+      draftDisplayRange = reuse.draftDisplayRange
+      quoteRails = reuse.quoteRails; thematicRules = reuse.thematicRules
+      codeBlocks = reuse.codeBlocks; codeFrames = reuse.codeFrames
+      return
+    }
+    guard let baseProjection = ComposeProjection(pane) else { return nil }
+    let items = Dictionary(grouping: pane.spans.filter { $0.role == 13 }, by: \.start)
+    var hangingContexts: [UInt64: ComposeHangingContext] = [:]
+    for wire in pane.hangingContexts {
+      guard hangingContexts[wire.itemStart] == nil, let owners = items[wire.itemStart], owners.count == 1,
+            let context = ComposeHangingContext(wire, item: owners[0]) else { return nil }
+      hangingContexts[wire.itemStart] = context
     }
     let objects = baseProjection.replacingObjects(sourceRanges)
     let base = objects?.projection ?? baseProjection
@@ -110,26 +140,6 @@ public final class ComposePaneLayout {
             let end = projection.displayPosition(for: source.upperBound, affinity: .upstream), start < end,
             let size = sizes[source.lowerBound] else { return nil }
       attachments.append(.init(source: source, display: start..<end, size: size, preview: true))
-    }
-    self.pane = pane
-    self.body = body
-    self.monospace = monospace
-    self.width = width
-    self.typography = typography
-    self.images = images
-    self.imageSizes = sizes
-    if preedit == nil, let reuse, reuse.preedit == nil, pane.projectionRevision == reuse.pane.projectionRevision,
-       pane.text == reuse.pane.text, pane.segments == reuse.pane.segments,
-       pane.spans == reuse.pane.spans, pane.images == reuse.pane.images, pane.tables == reuse.pane.tables, sizes == reuse.imageSizes,
-       pane.hangingContexts == reuse.pane.hangingContexts,
-       width == reuse.width, typography == reuse.typography,
-       CFEqual(body, reuse.body), CFEqual(monospace, reuse.monospace) {
-      text = reuse.text
-      quoteRails = reuse.quoteRails
-      thematicRules = reuse.thematicRules
-      codeBlocks = reuse.codeBlocks
-      codeFrames = reuse.codeFrames
-      return
     }
     struct Span { var source, range: Range<Int>; var role, flags: UInt32 }
     var spans: [Span] = []

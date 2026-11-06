@@ -536,6 +536,71 @@ final class ComposeTests: XCTestCase {
     XCTAssertFalse(zoomed.text === moved.text)
   }
 
+  func testMarkedSelectionUpdatesReuseGeometryWhileKeepingTheCurrentDraftMetadata() throws {
+    let source = "Before prose after.", pane = wirePane(source)
+    let context = try XCTUnwrap(ComposeTextContext(.with { $0.text = source }, documentLength: UInt64(source.utf8.count)))
+    var marked = try XCTUnwrap(ComposeMarkedText(context: context, range: NSRange(location: 7, length: 5), source: 7..<12,
+      text: NSAttributedString(string: "日本👩🏽‍💻"), selected: NSRange(location: 0, length: 0)))
+    let mono = CTFontCreateWithName("Menlo" as CFString, 16, nil)
+    let first = try XCTUnwrap(ComposePaneLayout(pane: pane, body: font(16), monospace: mono, width: 180, preedit: marked))
+    XCTAssertTrue(marked.select(NSRange(location: 7 + marked.draft.length, length: 0)))
+    let selected = try XCTUnwrap(ComposePaneLayout(pane: pane, body: font(16), monospace: mono, width: 180, reuse: first, preedit: marked))
+    XCTAssertTrue(first.text === selected.text, "a marked-clause selection cannot reflow unchanged text")
+    XCTAssertEqual(selected.preedit?.selected, marked.selected)
+    XCTAssertEqual(selected.text.projection.text, "Before 日本👩🏽‍💻 after.")
+    XCTAssertEqual(selected.draftDisplayRange, first.draftDisplayRange)
+    XCTAssertTrue(marked.update(NSAttributedString(string: "語"), selected: NSRange(location: 1, length: 0),
+      replacement: NSRange(location: NSNotFound, length: 0)))
+    let edited = try XCTUnwrap(ComposePaneLayout(pane: pane, body: font(16), monospace: mono, width: 180, reuse: selected, preedit: marked))
+    XCTAssertFalse(edited.text === selected.text)
+    XCTAssertEqual(edited.text.projection.text, "Before 語 after.")
+  }
+
+  func testReusedEmptyWindowsKeepTheirNewSourceCoordinatesAndOwner() throws {
+    var pane = wirePane("")
+    pane.sourceStart = 100; pane.sourceEnd = 100; pane.documentLen = 200
+    pane.assetAuthority = 1; pane.assetDocument = 2
+    let mono = CTFontCreateWithName("Menlo" as CFString, 16, nil)
+    let first = try XCTUnwrap(ComposePaneLayout(pane: pane, body: font(16), monospace: mono, width: 180))
+    pane.sourceStart = 200; pane.sourceEnd = 200
+    let moved = try XCTUnwrap(ComposePaneLayout(pane: pane, body: font(16), monospace: mono, width: 180, reuse: first))
+    XCTAssertFalse(first.text === moved.text)
+    XCTAssertEqual(moved.text.projection.source, 200..<200)
+    XCTAssertEqual(moved.text.caret(for: 200), first.text.caret(for: 100))
+    pane.documentLen = 199
+    XCTAssertNil(ComposePaneLayout(pane: pane, body: font(16), monospace: mono, width: 180, reuse: moved),
+      "cached geometry cannot bypass a changed document's source bounds")
+  }
+
+  func testGeometryReusePreservesLiteralProjectionBytesForCanonicalEquivalentText() throws {
+    let before = "a\u{0315}\u{0300} text", after = "a\u{0300}\u{0315} text"
+    XCTAssertEqual(before, after, "Swift string equality folds canonical equivalence")
+    XCTAssertEqual(before.utf8.count, after.utf8.count)
+    let mono = CTFontCreateWithName("Menlo" as CFString, 16, nil)
+    let first = try XCTUnwrap(ComposePaneLayout(pane: wirePane(before), body: font(16), monospace: mono, width: 180))
+    let next = try XCTUnwrap(ComposePaneLayout(pane: wirePane(after), body: font(16), monospace: mono, width: 180, reuse: first))
+    XCTAssertFalse(first.text === next.text)
+    XCTAssertEqual(Array(next.text.projection.text.utf8), Array(after.utf8))
+  }
+
+  func testPendingGeometryReuseRechecksRawContextOutsideAnAtomicReplacement() throws {
+    let pane = WireComposePane.with {
+      $0.text = "X"; $0.sourceEnd = 6; $0.documentLen = 6
+      $0.segments = [.with { $0.sourceEnd = 6; $0.displayEnd = 1; $0.kind = 2 }]
+    }
+    let mono = CTFontCreateWithName("Menlo" as CFString, 16, nil)
+    var previous: ComposePaneLayout?
+    for source in ["abcdef", "zbcdef"] {
+      let context = try XCTUnwrap(ComposeTextContext(.with { $0.text = source }, documentLength: 6))
+      let marked = try XCTUnwrap(ComposeMarkedText(context: context, range: NSRange(location: 2, length: 1), source: 2..<3,
+        text: NSAttributedString(string: "Y"), selected: NSRange(location: 1, length: 0)))
+      let next = try XCTUnwrap(ComposePaneLayout(pane: pane, body: font(16), monospace: mono, width: 180, reuse: previous, preedit: marked))
+      XCTAssertEqual(next.text.projection.text, String(source.prefix(2)) + "Ydef")
+      if let previous { XCTAssertFalse(previous.text === next.text, "revealed source can change even with identical draft and base projection") }
+      previous = next
+    }
+  }
+
   func testSelectionUsesWrappedMeasuredLinesAndKeepsUTF8SourceRanges() throws {
     let projection = try copied("Héllo words that wrap on several lines", start: 30)
     let layout = try XCTUnwrap(ComposeTextLayout(projection: projection, font: font(22), width: 130))
