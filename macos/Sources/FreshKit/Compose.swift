@@ -261,19 +261,22 @@ public final class ComposeTextLayout {
 
   public struct Fragment {
     public let line: CTLine
-    /// The exact Core Text range, in UTF-16, including a consumed line ending.
+    /// Global projection UTF-16 range, including a consumed line ending.
+    /// An empty cell retains its global index even though its CTLine is empty.
     public let range: NSRange
     public let rect: CGRect
     /// Baseline measured down from the block's top.
     public let baseline: CGFloat
     /// A caret may reach this index, but not enter a line ending's interior.
     public let contentEnd: Int
+    public let table: TablePosition?
   }
 
   public let projection: ComposeProjection
   public let fragments: [Fragment]
   public let size: CGSize
   public let attachments: [PlacedAttachment]
+  public let tables: [Table]
   private let utf16ToByte: [Int: Int]
   private let byteToUTF16: [Int: Int]
   private let string: NSString
@@ -282,7 +285,7 @@ public final class ComposeTextLayout {
   /// takes place. Invalid font ranges fail instead of quietly mis-styling text.
   public init?(projection: ComposeProjection, font: CTFont, width: CGFloat,
                lineSpacing: CGFloat = 3, fonts: [FontRun] = [], attachments: [Attachment] = [],
-               paragraphs: [ParagraphRun] = [], hanging: [HangingRun] = []) {
+               paragraphs: [ParagraphRun] = [], hanging: [HangingRun] = [], tables: [TableRun] = []) {
     guard width.isFinite, width > 0, lineSpacing.isFinite, lineSpacing >= 0 else { return nil }
     let string = projection.text as NSString
     var utf16ToByte = [0: 0]
@@ -328,11 +331,35 @@ public final class ComposeTextLayout {
         $0.range.length == $1.range.length ? $0.content > $1.content : $0.range.length < $1.range.length
       }
     }
+    guard attachments.allSatisfy({ $0.size.width.isFinite && $0.size.height.isFinite && $0.size.width > 0 && $0.size.height > 0 }) else { return nil }
+    var measuredTables: [ComposeMeasuredTable] = []
+    var tableRows: [(table: Int, row: Int, range: NSRange)] = []
+    var previousRowEnd = 0
+    for run in tables {
+      guard let measured = ComposeMeasuredTable(run: run, attributed: attributed, font: font, width: width,
+        indices: byteToUTF16, attachments: attachments), !measured.rows.isEmpty else { return nil }
+      for (row, value) in measured.rows.enumerated() {
+        guard value.range.location >= previousRowEnd else { return nil }
+        tableRows.append((measuredTables.count, row, value.range)); previousRowEnd = NSMaxRange(value.range)
+      }
+      measuredTables.append(measured)
+    }
     // Reserve the same content measure for attachments as for continuation
     // text, including on a first line that also contains the marker.
     let attachments = attachments.map { attachment in
-      guard let start = byteToUTF16[attachment.display.lowerBound], let item = hangingItem(at: start) else { return attachment }
-      let available = width - min(item.indent + item.prefix, width * 0.6)
+      var available = width
+      if let start = byteToUTF16[attachment.display.lowerBound], let item = hangingItem(at: start) {
+        available = width - min(item.indent + item.prefix, width * 0.6)
+      }
+      for table in measuredTables {
+        for row in table.rows where row.model.source.overlaps(attachment.source) {
+          if row.model.raw { available = min(available, table.width - ComposeMeasuredTable.padding * 2) }
+          else if let column = row.model.cells.firstIndex(where: { $0.source.overlaps(attachment.source) }) {
+            available = min(available, table.columns[column] - ComposeMeasuredTable.padding * 2)
+          }
+        }
+      }
+      available = max(1, available)
       guard attachment.size.width > available else { return attachment }
       return Attachment(source: attachment.source, display: attachment.display,
         size: CGSize(width: available, height: attachment.size.height * available / attachment.size.width), preview: attachment.preview)
@@ -371,17 +398,21 @@ public final class ComposeTextLayout {
     var from = 0
     var top: CGFloat = 0
     var placed: [PlacedAttachment] = []
+    var placedRows = Array(repeating: [TableRow](), count: measuredTables.count)
     previews.sort { $0.end == $1.end ? $0.index < $1.index : $0.end < $1.end }
     var nextPreview = 0
     let baseHeight = CTFontGetAscent(font) + CTFontGetDescent(font) + CTFontGetLeading(font)
     func block(at position: Int) -> (range: NSRange, style: ParagraphRun)? {
       blocks.filter { NSLocationInRange(position, $0.range) }.min { $0.range.length < $1.range.length }
     }
-    func append(_ range: NSRange, block: (range: NSRange, style: ParagraphRun)?, indent: CGFloat) {
+    func append(_ range: NSRange, block: (range: NSRange, style: ParagraphRun)?, indent: CGFloat,
+                measure: CGFloat? = nil, table: TablePosition? = nil, alignment: ComposeTableModel.Alignment = .left) {
       if let block, range.location == block.range.location { top += block.style.before }
-      let line = CTTypesetterCreateLine(typesetter, CFRange(location: range.location, length: range.length))
+      // Core Text interprets length zero as "to the end", not an empty cell.
+      let line = range.length == 0 ? CTLineCreateWithAttributedString(NSAttributedString(string: ""))
+        : CTTypesetterCreateLine(typesetter, CFRange(location: range.location, length: range.length))
       var ascent: CGFloat = 0, descent: CGFloat = 0, leading: CGFloat = 0
-      CTLineGetTypographicBounds(line, &ascent, &descent, &leading)
+      let natural = CGFloat(CTLineGetTypographicBounds(line, &ascent, &descent, &leading))
       if range.length == 0 {
         ascent = CTFontGetAscent(font)
         descent = CTFontGetDescent(font)
@@ -394,9 +425,12 @@ public final class ComposeTextLayout {
         guard ch == 10 || ch == 13 else { break }
         contentEnd -= 1
       }
+      let measure = measure ?? max(1, width - indent - (block?.style.trailing ?? 0))
+      let shift = max(0, measure - natural) * (alignment == .center ? 0.5 : alignment == .right ? 1 : 0)
+      let left = indent + shift
       lines.append(Fragment(line: line, range: range,
-        rect: CGRect(x: indent, y: top, width: max(1, width - indent - (block?.style.trailing ?? 0)), height: height),
-        baseline: top + ascent, contentEnd: contentEnd))
+        rect: CGRect(x: left, y: top, width: max(1, measure - shift), height: height),
+        baseline: top + ascent, contentEnd: contentEnd, table: table))
       for run in CTLineGetGlyphRuns(line) as! [CTRun] {
         let attributes = CTRunGetAttributes(run) as NSDictionary
         guard let index = attributes[Self.attachmentKey] as? Int, attachments.indices.contains(index) else { continue }
@@ -404,13 +438,13 @@ public final class ComposeTextLayout {
         CTRunGetPositions(run, CFRange(location: 0, length: 1), &position)
         let attachment = attachments[index]
         placed.append(.init(attachment: attachment,
-          rect: CGRect(x: indent + position.x, y: top + ascent - attachment.size.height, width: attachment.size.width, height: attachment.size.height)))
+          rect: CGRect(x: left + position.x, y: top + ascent - attachment.size.height, width: attachment.size.width, height: attachment.size.height)))
       }
       top += height
       while nextPreview < previews.count, previews[nextPreview].end <= NSMaxRange(range) {
         let attachment = attachments[previews[nextPreview].index]
         top += 18 // Caption; presentation only, with no source/caret position.
-        let item = byteToUTF16[attachment.display.lowerBound].flatMap { hangingItem(at: $0) }
+        let item = table == nil ? byteToUTF16[attachment.display.lowerBound].flatMap { hangingItem(at: $0) } : nil
         let previewIndent = item.map { min($0.indent + $0.prefix, width * 0.6) } ?? indent
         placed.append(.init(attachment: attachment, rect: CGRect(x: previewIndent, y: top,
           width: attachment.size.width, height: attachment.size.height)))
@@ -419,7 +453,66 @@ public final class ComposeTextLayout {
       }
       if let block, NSMaxRange(range) >= NSMaxRange(block.range) { top += block.style.after }
     }
-    while from < string.length {
+    func wrapped(_ range: NSRange, indent: CGFloat, measure: CGFloat, table: TablePosition, alignment: ComposeTableModel.Alignment) -> Bool {
+      var at = range.location
+      if range.length == 0 { append(range, block: nil, indent: indent, measure: measure, table: table, alignment: alignment) }
+      while at < NSMaxRange(range) {
+        let suggestion = CTTypesetterSuggestLineBreak(typesetter, at, Double(measure))
+        var count = min(suggestion > 0 ? suggestion : string.rangeOfComposedCharacterSequence(at: at).length, NSMaxRange(range) - at)
+        if at + count < NSMaxRange(range) {
+          let cluster = string.rangeOfComposedCharacterSequence(at: at + count)
+          if cluster.location < at + count { count = NSMaxRange(cluster) - at }
+        }
+        guard count > 0, count <= NSMaxRange(range) - at else { return false }
+        append(NSRange(location: at, length: count), block: nil, indent: indent, measure: measure, table: table, alignment: alignment)
+        at += count
+      }
+      return true
+    }
+    var nextRow = 0, emptyTableEOF = false
+    while from < string.length || nextRow < tableRows.count {
+      if nextRow < tableRows.count, tableRows[nextRow].range.location == from {
+        let next = tableRows[nextRow], table = measuredTables[next.table], row = table.rows[next.row]
+        if next.row == 0 { top += table.run.before }
+        let rowTop = top, padding = ComposeMeasuredTable.padding
+        var bottom = rowTop + padding + baseHeight + lineSpacing
+        var cells: [TableCell] = []
+        if row.model.raw {
+          top = rowTop + padding
+          let position = TablePosition(table: table.run.table.source.lowerBound, row: row.model.source, column: nil, source: row.model.source)
+          guard wrapped(row.range, indent: table.indent + padding, measure: max(1, table.width - padding * 2), table: position, alignment: .left) else { return nil }
+          bottom = max(bottom, top)
+        } else {
+          var left = table.indent
+          for (column, cell) in row.model.cells.enumerated() {
+            let measure = max(1, table.columns[column] - padding * 2)
+            if let range = row.cells[column] {
+              top = rowTop + padding
+              let position = TablePosition(table: table.run.table.source.lowerBound, row: row.model.source, column: column, source: cell.source)
+              let alignment: ComposeTableModel.Alignment = cell.revealed ? .left : table.run.table.alignments[column]
+              guard wrapped(range, indent: left + padding, measure: measure, table: position, alignment: alignment) else { return nil }
+              bottom = max(bottom, top)
+            }
+            cells.append(TableCell(source: cell.missing ? nil : cell.source, display: row.cells[column],
+              rect: CGRect(x: left, y: rowTop, width: table.columns[column], height: 0),
+              content: CGRect(x: left + padding, y: rowTop + padding, width: measure, height: 0), column: column))
+            left += table.columns[column]
+          }
+        }
+        top = bottom + padding
+        cells = cells.map { cell in
+          TableCell(source: cell.source, display: cell.display,
+            rect: CGRect(x: cell.rect.minX, y: rowTop, width: cell.rect.width, height: top - rowTop),
+            content: CGRect(x: cell.content.minX, y: cell.content.minY, width: cell.content.width, height: bottom - cell.content.minY), column: cell.column)
+        }
+        placedRows[next.table].append(TableRow(source: row.model.source, contentEnd: row.model.contentEnd,
+          rect: CGRect(x: table.indent, y: rowTop, width: table.width, height: top - rowTop), header: row.model.header, raw: row.model.raw, cells: cells))
+        if next.row + 1 == table.rows.count { top += table.run.after }
+        from = NSMaxRange(row.range); nextRow += 1
+        emptyTableEOF = from == string.length && row.range.length == 0
+        continue
+      }
+      guard from < string.length else { return nil }
       let paragraph = block(at: from)
       var desired = paragraph?.style.indent ?? 0
       if paragraph?.style.verbatim != true, let item = hangingItem(at: from) {
@@ -442,6 +535,7 @@ public final class ComposeTextLayout {
       let indent = min(desired, width * 0.6)
       let suggested = CTTypesetterSuggestLineBreak(typesetter, from, Double(max(1, width - indent - (paragraph?.style.trailing ?? 0))))
       var count = suggested > 0 ? suggested : string.rangeOfComposedCharacterSequence(at: from).length
+      if nextRow < tableRows.count { count = min(count, tableRows[nextRow].range.location - from) }
       guard count > 0, count <= string.length - from else { return nil }
       // A viewport narrower than a single composed character must overflow
       // that character intact instead of splitting an emoji/combining cluster.
@@ -452,12 +546,17 @@ public final class ComposeTextLayout {
       append(NSRange(location: from, length: count), block: paragraph, indent: indent)
       from += count
     }
-    if string.length == 0 || string.character(at: string.length - 1) == 10 || string.character(at: string.length - 1) == 13 {
+    if !emptyTableEOF && (string.length == 0 || string.character(at: string.length - 1) == 10 || string.character(at: string.length - 1) == 13) {
       append(NSRange(location: string.length, length: 0), block: nil, indent: 0)
     }
     self.projection = projection
     self.fragments = lines
-    self.size = CGSize(width: width, height: top)
+    self.tables = measuredTables.enumerated().compactMap { index, table in
+      guard let first = placedRows[index].first, let last = placedRows[index].last else { return nil }
+      return Table(source: table.run.table.source, rect: CGRect(x: table.indent, y: first.rect.minY,
+        width: table.width, height: last.rect.maxY - first.rect.minY), columns: table.columns, rows: placedRows[index])
+    }
+    self.size = CGSize(width: max(width, self.tables.map(\.rect.maxX).max() ?? width), height: top)
     self.utf16ToByte = utf16ToByte
     self.byteToUTF16 = byteToUTF16
     self.string = string
@@ -468,6 +567,7 @@ public final class ComposeTextLayout {
   /// never returns the middle of a surrogate pair, CRLF, or composed character.
   public func sourcePosition(at point: CGPoint, affinity: ComposeProjection.Affinity = .downstream) -> Int? {
     if let object = attachmentHit(at: point) { return object.source }
+    if let anchor = tableAnchor(at: point) { return anchor }
     guard let (_, boundary) = hitIndex(at: point), let byte = utf16ToByte[boundary] else { return nil }
     return projection.sourcePosition(at: byte, affinity: affinity)
   }
@@ -476,6 +576,7 @@ public final class ComposeTextLayout {
   /// cannot distinguish a line's end from the following line's beginning.
   public func hit(at point: CGPoint) -> Hit? {
     if let object = attachmentHit(at: point) { return object }
+    if let anchor = tableAnchor(at: point) { return Hit(source: anchor, affinity: .downstream) }
     guard let (fragment, boundary) = hitIndex(at: point), let byte = utf16ToByte[boundary] else { return nil }
     let affinity: ComposeProjection.Affinity = boundary == fragment.contentEnd && boundary > fragment.range.location ? .upstream : .downstream
     guard let source = projection.sourcePosition(at: byte, affinity: affinity) else { return nil }
@@ -489,9 +590,29 @@ public final class ComposeTextLayout {
     return Hit(source: before ? range.lowerBound : range.upperBound, affinity: before ? .downstream : .upstream, attachment: range)
   }
 
+  private func tableRegion(at point: CGPoint) -> (Table, TableRow, TableCell?)? {
+    guard point.x.isFinite, point.y.isFinite,
+          let table = tables.first(where: { point.y >= $0.rect.minY && point.y < $0.rect.maxY }),
+          let row = table.rows.first(where: { point.y >= $0.rect.minY && point.y < $0.rect.maxY }) else { return nil }
+    let cell = row.cells.first(where: { point.x >= $0.rect.minX && point.x < $0.rect.maxX })
+      ?? row.cells.min(by: { abs($0.rect.midX - point.x) < abs($1.rect.midX - point.x) })
+    return (table, row, cell)
+  }
+
+  private func tableAnchor(at point: CGPoint) -> Int? {
+    guard let (_, row, cell) = tableRegion(at: point), let cell else { return nil }
+    if cell.missing { return row.contentEnd }
+    return cell.display?.length == 0 ? cell.source?.lowerBound : nil
+  }
+
   private func hitIndex(at point: CGPoint) -> (Fragment, Int)? {
-    guard point.x.isFinite, point.y.isFinite, let first = fragments.first else { return nil }
-    let fragment = fragments.first(where: { point.y < $0.rect.maxY }) ?? fragments.last ?? first
+    guard point.x.isFinite, point.y.isFinite else { return nil }
+    let candidates: [Fragment]
+    if let (table, row, cell) = tableRegion(at: point) {
+      candidates = fragments.filter { $0.table?.table == table.source.lowerBound && $0.table?.row == row.source && $0.table?.column == cell?.column }
+    } else { candidates = fragments }
+    func distance(_ rect: CGRect) -> CGFloat { max(0, rect.minY - point.y, point.y - rect.maxY) }
+    guard let fragment = candidates.min(by: { distance($0.rect) < distance($1.rect) }) else { return nil }
     let x = point.x - fragment.rect.minX
     let raw = CTLineGetStringIndexForPosition(fragment.line, CGPoint(x: x, y: 0))
     let index = min(fragment.contentEnd, max(fragment.range.location, raw == kCFNotFound ? fragment.contentEnd : raw))
@@ -507,7 +628,10 @@ public final class ComposeTextLayout {
     return (fragment, boundary)
   }
 
-  public func hitUTF16(at point: CGPoint) -> Int? { hitIndex(at: point)?.1 }
+  public func hitUTF16(at point: CGPoint) -> Int? {
+    if let anchor = tableAnchor(at: point) { return utf16Position(for: anchor) }
+    return hitIndex(at: point)?.1
+  }
 
   /// Caret geometry from the same shaped lines that supply hit testing. The
   /// affinity selects the visible side of a soft-wrap boundary.
@@ -535,6 +659,12 @@ public final class ComposeTextLayout {
   }
 
   public func caret(atUTF16 position: Int, affinity: ComposeProjection.Affinity = .downstream) -> CGRect? {
+    guard let (fragment, index) = caretFragment(atUTF16: position, affinity: affinity) else { return nil }
+    let x = fragment.rect.minX + CTLineGetOffsetForStringIndex(fragment.line, index, nil)
+    return CGRect(x: x, y: fragment.rect.minY, width: 1, height: fragment.rect.height)
+  }
+
+  private func caretFragment(atUTF16 position: Int, affinity: ComposeProjection.Affinity = .downstream) -> (Fragment, Int)? {
     guard utf16ToByte[position] != nil else { return nil }
     var index = position
     var matches = fragments.filter { index >= $0.range.location && index <= $0.contentEnd }
@@ -543,15 +673,13 @@ public final class ComposeTextLayout {
       matches = [ending]
     }
     guard let fragment = affinity == .upstream ? matches.first : matches.last else { return nil }
-    let x = fragment.rect.minX + CTLineGetOffsetForStringIndex(fragment.line, index, nil)
-    return CGRect(x: x, y: fragment.rect.minY, width: 1, height: fragment.rect.height)
+    return (fragment, index)
   }
 
   public func firstRect(forUTF16 range: NSRange) -> (rect: CGRect, range: NSRange)? {
     guard range.location >= 0, range.length >= 0, range.location <= string.length,
           range.length <= string.length - range.location, utf16ToByte[NSMaxRange(range)] != nil,
-          let caret = caret(atUTF16: range.location),
-          let fragment = fragments.first(where: { $0.rect.minY == caret.minY }) else { return nil }
+          let (fragment, _) = caretFragment(atUTF16: range.location) else { return nil }
     let start = min(range.location, fragment.contentEnd), end = max(start, min(NSMaxRange(range), fragment.contentEnd))
     let a = CTLineGetOffsetForStringIndex(fragment.line, start, nil), b = CTLineGetOffsetForStringIndex(fragment.line, end, nil)
     return (CGRect(x: fragment.rect.minX + min(a, b), y: fragment.rect.minY, width: max(1, abs(b-a)), height: fragment.rect.height),
@@ -563,6 +691,9 @@ public final class ComposeTextLayout {
   /// treating a gap between exported regions as adjacent visual lines.
   public func navigation(id: UInt64, pageHeight: CGFloat, documentLength: UInt64,
                          positions: [UInt64], aroundY: CGFloat? = nil, styleRevision: UInt64 = 0) -> WireComposeLayout? {
+    // The current wire contract requires disjoint y intervals. A table's
+    // two-dimensional geometry must be negotiated before exporting its lines.
+    guard tables.isEmpty else { return nil }
     guard id != 0, pageHeight.isFinite, pageHeight > 0 else { return nil }
     var centers = positions.compactMap { Int(exactly: $0).flatMap { caret(for: $0)?.midY } }
     if let aroundY, aroundY.isFinite { centers.append(aroundY) }

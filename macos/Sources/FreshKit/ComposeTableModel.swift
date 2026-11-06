@@ -23,6 +23,52 @@ public struct ComposeTableModel {
     public let rows: [Row]
   }
   public let tables: [Table]
+  private let documentLength: Int
+
+  /// Remap an already validated model after presentation-only replacements.
+  /// A draft spanning cells uses shared text flow instead of losing or
+  /// repeating that draft in independently shaped cells.
+  func remapping(to projection: ComposeProjection,
+                 drafts: [(source: Range<Int>, display: Range<Int>)] = []) -> [Table]? {
+    func mapped(_ source: Range<Int>, including owned: [(source: Range<Int>, display: Range<Int>)]) -> Range<Int>? {
+      guard let a = projection.displayPosition(for: source.lowerBound, affinity: .downstream),
+            let b = projection.displayPosition(for: source.upperBound, affinity: .upstream) else { return nil }
+      return min(a, owned.map(\.display.lowerBound).min() ?? a)..<max(b, owned.map(\.display.upperBound).max() ?? b)
+    }
+    func contains(_ outer: Range<Int>, _ inner: Range<Int>) -> Bool {
+      outer.lowerBound <= inner.lowerBound && inner.upperBound <= outer.upperBound
+    }
+    func owns(_ outer: Range<Int>, _ inner: Range<Int>) -> Bool {
+      if inner.isEmpty {
+        return outer.contains(inner.lowerBound) || (inner.lowerBound == documentLength && outer.upperBound == documentLength)
+      }
+      return contains(outer, inner)
+    }
+    var result: [Table] = []
+    for table in tables {
+      let relevant = drafts.filter { $0.source.overlaps(table.source) || ($0.source.isEmpty && owns(table.source, $0.source)) }
+      guard relevant.allSatisfy({ draft in table.rows.contains { row in
+        owns(row.source, draft.source) && (row.raw || row.cells.contains { !$0.missing && contains($0.source, draft.source) })
+      } }) else { continue }
+      var rows: [Row] = []
+      for row in table.rows {
+        let owned = relevant.filter { owns(row.source, $0.source) }
+        guard let display = mapped(row.source, including: owned) else { return nil }
+        var cells: [Cell] = []
+        if !row.raw {
+          for cell in row.cells {
+            let display = cell.missing ? nil : mapped(cell.source, including: owned.filter { contains(cell.source, $0.source) })
+            guard cell.missing || display != nil else { return nil }
+            cells.append(.init(source: cell.source, display: display, revealed: cell.revealed))
+          }
+        }
+        rows.append(.init(source: row.source, display: display, contentEnd: row.contentEnd,
+          header: row.header, raw: row.raw, cells: cells))
+      }
+      result.append(.init(source: table.source, alignments: table.alignments, rows: rows))
+    }
+    return result
+  }
 
   public init?(pane: WireComposePane, projection: ComposeProjection? = nil) {
     guard let projection = projection ?? ComposeProjection(pane), let document = Int(exactly: pane.documentLen),
@@ -74,6 +120,6 @@ public struct ComposeTableModel {
       result.append(.init(source: source, alignments: alignments, rows: rows))
       previousTableEnd = source.upperBound
     }
-    tables = result
+    tables = result; documentLength = document
   }
 }

@@ -51,9 +51,14 @@ public final class ComposePaneLayout {
     }
     let objects = baseProjection.replacingObjects(sourceRanges)
     let base = objects?.projection ?? baseProjection
+    guard let tableModel = ComposeTableModel(pane: pane, projection: base) else { return nil }
     let replacement = composition?.project(over: base)
     guard preedit == nil || replacement != nil else { return nil }
     let projection = replacement?.projection ?? base
+    let drafts = (replacement?.displays ?? [:]).compactMap { id, display -> (source: Range<Int>, display: Range<Int>)? in
+      composition?.values[id].map { ($0.source, display) }
+    }
+    guard let tables = tableModel.remapping(to: projection, drafts: drafts) else { return nil }
     let displayBytes = Array(projection.text.utf8)
     let displayRanges = (replacement?.displays ?? [:]).mapValues {
       NSRange(location: String(decoding: displayBytes[..<$0.lowerBound], as: UTF8.self).utf16.count,
@@ -88,7 +93,7 @@ public final class ComposePaneLayout {
     self.imageSizes = sizes
     if preedit == nil, let reuse, reuse.preedit == nil, pane.projectionRevision == reuse.pane.projectionRevision,
        pane.text == reuse.pane.text, pane.segments == reuse.pane.segments,
-       pane.spans == reuse.pane.spans, pane.images == reuse.pane.images, sizes == reuse.imageSizes,
+       pane.spans == reuse.pane.spans, pane.images == reuse.pane.images, pane.tables == reuse.pane.tables, sizes == reuse.imageSizes,
        width == reuse.width, typography == reuse.typography,
        CFEqual(body, reuse.body), CFEqual(monospace, reuse.monospace) {
       text = reuse.text
@@ -112,12 +117,20 @@ public final class ComposePaneLayout {
     for attachment in attachments where attachment.preview {
       spans.append(.init(source: attachment.source, range: attachment.display, role: 7, flags: 0))
     }
+    for table in tables {
+      for row in table.rows where !row.display.isEmpty {
+        if row.raw { spans.append(.init(source: row.source, range: row.display, role: 7, flags: 0)) }
+        else if row.header { spans.append(.init(source: row.source, range: row.display, role: 0, flags: 1)) }
+      }
+    }
     let boundaries = Set([0, projection.text.utf8.count] + spans.flatMap { [$0.range.lowerBound, $0.range.upperBound] }).sorted()
     var fonts: [ComposeTextLayout.FontRun] = []
     func fontRun(_ active: [Span], _ range: Range<Int>) -> ComposeTextLayout.FontRun {
       let heading = active.map(\.role).filter { (1...6).contains($0) }.min()
       let flags = active.reduce(UInt32(0)) { $0 | $1.flags }
-      let mono = active.contains { $0.role == 7 || $0.role == 8 || $0.role == 12 }
+      let mono = active.contains { span in
+        span.role == 7 || span.role == 12 || (span.role == 8 && !tables.contains { $0.source.overlaps(span.source) })
+      }
       let pointSize = CTFontGetSize(body) * (heading.map { typography.headingScales[Int($0) - 1] } ?? 1)
       let base = CTFontCreateCopyWithAttributes(mono ? monospace : body, pointSize, nil, nil)
       var traits: CTFontSymbolicTraits = []
@@ -184,8 +197,14 @@ public final class ComposePaneLayout {
       let containers = pane.spans.filter { ($0.role == 9 || $0.role == 10) && $0.start <= item.contentStart && item.contentStart < $0.end }.count
       hanging.append(.init(display: lineStart..<end, contentStart: bodyStart, indent: CGFloat(containers) * typography.indent))
     }
+    let tableRuns = tables.map { table in
+      let containers = pane.spans.filter { ($0.role == 9 || $0.role == 10) && $0.start <= table.source.lowerBound && table.source.lowerBound < $0.end }.count
+      return ComposeTextLayout.TableRun(table: table, indent: CGFloat(containers) * typography.indent,
+        before: table.source.lowerBound >= projection.source.lowerBound ? typography.paragraphSpacing : 0,
+        after: table.source.upperBound <= projection.source.upperBound ? typography.paragraphSpacing : 0)
+    }
     guard let layout = ComposeTextLayout(projection: projection, font: body, width: width,
-      lineSpacing: typography.lineSpacing, fonts: fonts, attachments: attachments, paragraphs: paragraphs, hanging: hanging) else { return nil }
+      lineSpacing: typography.lineSpacing, fonts: fonts, attachments: attachments, paragraphs: paragraphs, hanging: hanging, tables: tableRuns) else { return nil }
     text = layout
   }
 
@@ -218,7 +237,8 @@ public final class ComposePaneLayout {
       let rows = text.selectionRects(for: source)
       let assets = text.attachments.filter { $0.attachment.source.overlaps(source) }.map(\.rect)
       let code = codeFrames.filter { $0.source.overlaps(source) }.map(\.rect)
-      guard let top = (rows + assets + code).map(\.minY).min(), let bottom = (rows + assets + code).map(\.maxY).max() else { return nil }
+      let tables = text.tables.filter { $0.source.overlaps(source) }.map(\.rect)
+      guard let top = (rows + assets + code + tables).map(\.minY).min(), let bottom = (rows + assets + code + tables).map(\.maxY).max() else { return nil }
       let containers = pane.spans.filter { ($0.role == 9 || $0.role == 10) && $0.start <= quote.start && quote.start < $0.end }.count
       return CGRect(x: min(CGFloat(containers) * typography.indent, width * 0.6) - 10,
         y: top, width: 2, height: bottom - top)
@@ -276,6 +296,32 @@ public final class ComposePaneLayout {
     context.fill(clip)
     let palette = palette ?? Palette(link: foreground, quote: foreground, code: foreground,
       codeBackground: foreground.copy(alpha: 0.07) ?? foreground)
+    for table in text.tables {
+      let rect = table.rect.offsetBy(dx: origin.x, dy: origin.y)
+      guard rect.intersects(clip.intersection(dirty)) else { continue }
+      context.setLineWidth(1)
+      context.setStrokeColor(foreground.copy(alpha: 0.25) ?? foreground)
+      context.move(to: CGPoint(x: rect.minX, y: rect.minY)); context.addLine(to: CGPoint(x: rect.minX, y: rect.maxY))
+      context.move(to: CGPoint(x: rect.maxX, y: rect.minY)); context.addLine(to: CGPoint(x: rect.maxX, y: rect.maxY))
+      if table.source.lowerBound >= text.projection.source.lowerBound {
+        context.move(to: CGPoint(x: rect.minX, y: rect.minY)); context.addLine(to: CGPoint(x: rect.maxX, y: rect.minY))
+      }
+      for (index, row) in table.rows.enumerated() {
+        let bounds = row.rect.offsetBy(dx: origin.x, dy: origin.y)
+        if row.header || row.raw {
+          context.setFillColor(row.raw ? palette.codeBackground : foreground.copy(alpha: 0.05) ?? foreground)
+          context.fill(bounds)
+        }
+        for cell in row.cells.dropFirst() {
+          let x = origin.x + cell.rect.minX
+          context.move(to: CGPoint(x: x, y: bounds.minY)); context.addLine(to: CGPoint(x: x, y: bounds.maxY))
+        }
+        if index + 1 < table.rows.count || table.source.upperBound <= text.projection.source.upperBound {
+          context.move(to: CGPoint(x: bounds.minX, y: bounds.maxY)); context.addLine(to: CGPoint(x: bounds.maxX, y: bounds.maxY))
+        }
+      }
+      context.strokePath()
+    }
     for frame in codeFrames {
       let rect = frame.rect.offsetBy(dx: origin.x, dy: origin.y)
       guard rect.intersects(clip.intersection(dirty)) else { continue }

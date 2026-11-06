@@ -275,11 +275,17 @@ without a fixed column count; its background and border follow the theme.
 
 FreshKit also decodes and validates the experimental parser-owned table model
 in `compose-tables.pb`: alignments, Unicode, images, real empty cells, missing
-cells, bounded rows and source reveal. The native editor still requests table
-source while measured cells and two-dimensional caret navigation are connected.
-`SceneSocket.open(measuredTables:)` defaults to false; enabling it requires a
-consumer that implements the new cell geometry. These data-model tests are
-foundations for that renderer, not interactive table qualification.
+cells, bounded rows and source reveal. Shared Core Text layout now renders
+measured cells and native rules, with proportional text, wrapping, alignment,
+full-height click targets and image/preview constraints. Selection, caret and
+text-service geometry use those same cell fragments. Real empty cells retain
+an anchor; missing cells enter source flow. Marked text reflows within a cell;
+a cross-cell draft temporarily uses one shared projected flow. The additional
+`compose-table-image-source.pb` fixture exercises edited image markup/previews.
+The native editor still requests table source while two-dimensional navigation,
+horizontal scrolling and stable measures across source windows are completed.
+`SceneSocket.open(measuredTables:)` defaults to false. These renderer tests do
+not establish complete interactive table qualification.
 Native clipboard access is injectable; scene/input tests use memory storage
 instead of reading or overwriting the user's system pasteboard.
 

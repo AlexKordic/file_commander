@@ -548,12 +548,21 @@ Edits and undo still use Fresh's original Markdown source coordinates.
 
 The native editor has not opted into table cells yet. `ComposeTableModel`
 validates the new data and resolves its source/display ranges, including
-Unicode and malformed-input checks. Pixel cell layout, table-aware input
-geometry and two-dimensional navigation remain to be connected and qualified
-before enabling the capability. Legacy rich clients keep table source and
+Unicode and malformed-input checks. The shared Core Text renderer now measures
+column constraints from fonts/content and available pixel width, wraps complete
+cell text, draws native rules and constrains images/previews to cells. Caret,
+selection, hit testing and text-service rectangles share those fragments.
+Short cells keep a full-height click region beside taller cells; real empty
+cells retain their own anchor, while missing-cell clicks enter structural
+source. Provisional text reflows within its cell; a draft crossing cells uses
+one shared projected flow until commit. Structural source rows span the table.
+Two-dimensional navigation, horizontal scrolling when complete clusters exceed
+the pane, and stable column measures across source windows remain prerequisites
+for enabling and qualifying the capability. Legacy rich clients keep table source and
 can share the same backend with a table-capable client without exchanging
 their per-client projections. `compose-tables.pb` records that real-plugin
-source contract; its model checks do not prove complete table ergonomics.
+source contract; `compose-table-image-source.pb` adds edited image markup and
+its preview. Renderer/model checks do not prove complete table ergonomics.
 
 Visible images are checked on a five-second prototype interval and when the
 editor is shown again. POSIX local/SSH stats include file identity plus
