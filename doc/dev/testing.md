@@ -588,6 +588,9 @@ current text and cannot supply backend navigation. Native sample checks keep
 nearby measured carets, resample a distant caret, and retire geometry exchanges
 when source or rendering ownership changes. These complement the real-backend
 typing/save/undo workflows; they do not qualify actual input methods.
+A raw-context regression changes canonically equivalent source of equal byte
+length, checking literal substrings, grapheme ranges and both directions of
+the current UTF-16/source mapping.
 
 ## CI
 

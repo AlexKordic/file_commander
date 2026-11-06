@@ -1124,6 +1124,8 @@ window bounds, document/authority identity, structure, measured image sizes,
 fonts and width. Scene revisions and caret/marked-clause selections alone
 can share the validated geometry while retaining current presentation metadata.
 Draft text, source ranges and raw reveal context also belong to the reuse key.
+Raw text-service snapshot reuse also requires literal UTF-8 bytes, preserving
+the current UTF-16/source map when canonically equivalent source changes.
 Virtual insertions use their complete placement path and cannot publish their
 provisional geometry as backend navigation. Sparse navigation samples retain
 their source/rendering ownership and must contain every current caret and

@@ -6,6 +6,36 @@ import FreshKit
 
 final class ComposePreferencesTests: XCTestCase {
   @MainActor
+  func testRawTextContextReuseKeepsLiteralUnicodeAndItsCurrentUTF16SourceMap() throws {
+    _ = NSApplication.shared; NSApp.setActivationPolicy(.prohibited)
+    let before = "é e\u{301}", after = "e\u{301} é"
+    XCTAssertEqual(before, after); XCTAssertEqual(before.utf8.count, after.utf8.count)
+    func pane(_ source: String, revision: UInt64) -> WirePane {
+      .with {
+        $0.buffer = 1; $0.leaf = 2; $0.content.w = 80; $0.content.h = 20
+        $0.compose = .with {
+          $0.text = source; $0.sourceEnd = UInt64(source.utf8.count); $0.documentLen = $0.sourceEnd
+          $0.bufferRevision = revision; $0.projectionRevision = revision
+          $0.segments = [.with { $0.sourceEnd = UInt64(source.utf8.count); $0.displayEnd = $0.sourceEnd }]
+          $0.textContext.text = source
+        }
+      }
+    }
+    let body = NSFont.systemFont(ofSize: 18), mono = NSFont.monospacedSystemFont(ofSize: 18, weight: .regular)
+    let oldPane = pane(before, revision: 4), newPane = pane(after, revision: 5)
+    XCTAssertEqual(oldPane.compose.textContext, newPane.compose.textContext, "generated String equality folds these distinct snapshots")
+    let first = try XCTUnwrap(ComposePresentation(pane: oldPane, window: 99, cell: CGSize(width: 8, height: 16), body: body, monospace: mono))
+    let next = try XCTUnwrap(ComposePresentation(pane: newPane, window: 99, cell: CGSize(width: 8, height: 16), body: body, monospace: mono, reuse: first))
+    let context = try XCTUnwrap(next.textContext)
+    XCTAssertEqual(Array(context.text.utf8), Array(after.utf8))
+    XCTAssertEqual(context.sourceRange(forUTF16: NSRange(location: 1, length: 0)), 1..<1)
+    XCTAssertEqual(context.utf16Position(for: 1), 1)
+    let queried = try XCTUnwrap(context.substring(forProposedRange: NSRange(location: 1, length: 1)))
+    XCTAssertEqual(Array(queried.text.utf8), Array("e\u{301}".utf8))
+    XCTAssertEqual(queried.range, NSRange(location: 0, length: 2))
+  }
+
+  @MainActor
   func testVirtualPendingProjectionCannotBePublishedAsBackendNavigation() throws {
     _ = NSApplication.shared; NSApp.setActivationPolicy(.prohibited)
     let source = "aa BB cc"
