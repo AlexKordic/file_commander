@@ -3629,6 +3629,32 @@ public nonisolated struct WireComposeLayout: Sendable {
 
   public var styleRevision: UInt64 = 0
 
+  public var environmentRevision: UInt64 = 0
+
+  public var anchors: [WireComposeFlowAnchor] = []
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
+/// A repeatable source-to-flow point. Context is retained while measuring a
+/// page continuation; kind: 0 physical text start, 1 table row, 2 document EOF.
+public nonisolated struct WireComposeFlowAnchor: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var source: UInt64 = 0
+
+  public var y: Double = 0
+
+  public var contextStart: UInt64 = 0
+
+  public var contextEnd: UInt64 = 0
+
+  public var kind: UInt32 = 0
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
@@ -9908,7 +9934,7 @@ nonisolated extension WireComposeViewportRequest: SwiftProtobuf.Message, SwiftPr
 
 nonisolated extension WireComposeLayout: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".ComposeLayout"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}id\0\u{3}page_height\0\u{3}source_start\0\u{3}source_end\0\u{3}document_len\0\u{1}lines\0\u{3}total_lines\0\u{1}height\0\u{3}style_revision\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}id\0\u{3}page_height\0\u{3}source_start\0\u{3}source_end\0\u{3}document_len\0\u{1}lines\0\u{3}total_lines\0\u{1}height\0\u{3}style_revision\0\u{3}environment_revision\0\u{1}anchors\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -9925,6 +9951,8 @@ nonisolated extension WireComposeLayout: SwiftProtobuf.Message, SwiftProtobuf._M
       case 7: try { try decoder.decodeSingularUInt64Field(value: &self.totalLines) }()
       case 8: try { try decoder.decodeSingularDoubleField(value: &self.height) }()
       case 9: try { try decoder.decodeSingularUInt64Field(value: &self.styleRevision) }()
+      case 10: try { try decoder.decodeSingularUInt64Field(value: &self.environmentRevision) }()
+      case 11: try { try decoder.decodeRepeatedMessageField(value: &self.anchors) }()
       default: break
       }
     }
@@ -9958,6 +9986,12 @@ nonisolated extension WireComposeLayout: SwiftProtobuf.Message, SwiftProtobuf._M
     if self.styleRevision != 0 {
       try visitor.visitSingularUInt64Field(value: self.styleRevision, fieldNumber: 9)
     }
+    if self.environmentRevision != 0 {
+      try visitor.visitSingularUInt64Field(value: self.environmentRevision, fieldNumber: 10)
+    }
+    if !self.anchors.isEmpty {
+      try visitor.visitRepeatedMessageField(value: self.anchors, fieldNumber: 11)
+    }
     try unknownFields.traverse(visitor: &visitor)
   }
 
@@ -9971,6 +10005,58 @@ nonisolated extension WireComposeLayout: SwiftProtobuf.Message, SwiftProtobuf._M
     if lhs.totalLines != rhs.totalLines {return false}
     if lhs.height != rhs.height {return false}
     if lhs.styleRevision != rhs.styleRevision {return false}
+    if lhs.environmentRevision != rhs.environmentRevision {return false}
+    if lhs.anchors != rhs.anchors {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension WireComposeFlowAnchor: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".ComposeFlowAnchor"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}source\0\u{1}y\0\u{3}context_start\0\u{3}context_end\0\u{1}kind\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularUInt64Field(value: &self.source) }()
+      case 2: try { try decoder.decodeSingularDoubleField(value: &self.y) }()
+      case 3: try { try decoder.decodeSingularUInt64Field(value: &self.contextStart) }()
+      case 4: try { try decoder.decodeSingularUInt64Field(value: &self.contextEnd) }()
+      case 5: try { try decoder.decodeSingularUInt32Field(value: &self.kind) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if self.source != 0 {
+      try visitor.visitSingularUInt64Field(value: self.source, fieldNumber: 1)
+    }
+    if self.y.bitPattern != 0 {
+      try visitor.visitSingularDoubleField(value: self.y, fieldNumber: 2)
+    }
+    if self.contextStart != 0 {
+      try visitor.visitSingularUInt64Field(value: self.contextStart, fieldNumber: 3)
+    }
+    if self.contextEnd != 0 {
+      try visitor.visitSingularUInt64Field(value: self.contextEnd, fieldNumber: 4)
+    }
+    if self.kind != 0 {
+      try visitor.visitSingularUInt32Field(value: self.kind, fieldNumber: 5)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: WireComposeFlowAnchor, rhs: WireComposeFlowAnchor) -> Bool {
+    if lhs.source != rhs.source {return false}
+    if lhs.y != rhs.y {return false}
+    if lhs.contextStart != rhs.contextStart {return false}
+    if lhs.contextEnd != rhs.contextEnd {return false}
+    if lhs.kind != rhs.kind {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }

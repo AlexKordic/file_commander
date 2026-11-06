@@ -22,12 +22,14 @@ final class ComposePresentation {
   private(set) var navigation: WireComposeLayout?
   private let monospace: CTFont
   private let styleRevision: UInt64
+  private let environmentRevision, geometryRevision: UInt64
   private let typography: ComposeTypography
 
   init?(pane: WirePane, window: UInt64, cell: CGSize, body: NSFont, monospace: NSFont,
         typography: ComposeTypography = .init(), pageWidth: CGFloat = 0, reuse: ComposePresentation? = nil,
         caretStates: [UInt64: WireComposeCaret] = [:], images: [UInt64: ComposeImageState] = [:], viewport: WireComposeViewport? = nil,
-        preedit: ComposeMarkedText? = nil, composition: ComposeComposition? = nil) {
+        preedit: ComposeMarkedText? = nil, composition: ComposeComposition? = nil,
+        environmentLike: ComposePresentation? = nil, geometryRevision: UInt64 = 0) {
     guard pane.hasCompose, pane.hasBuffer else { return nil }
     if pane.compose.hasTextContext {
       if let reuse, reuse.pane.compose.documentLen == pane.compose.documentLen,
@@ -48,6 +50,12 @@ final class ComposePresentation {
     self.body = body as CTFont
     self.monospace = monospace as CTFont
     self.typography = typography
+    self.geometryRevision = geometryRevision
+    if let previous = environmentLike ?? reuse, previous.layout.width == width, previous.bounds.height == bounds.height,
+       CFEqual(previous.body, body as CTFont), CFEqual(previous.monospace, monospace as CTFont),
+       previous.typography == typography, previous.geometryRevision == geometryRevision {
+      environmentRevision = previous.environmentRevision
+    } else { environmentRevision = UInt64.random(in: 1...UInt64.max) }
     let sameColumns = reuse.map { previous in
       previous.layout.text.tables.count == layout.text.tables.count && zip(previous.layout.text.tables, layout.text.tables).allSatisfy {
         $0.source == $1.source && $0.columns == $1.columns && $0.rect.minX == $1.rect.minX
@@ -129,7 +137,7 @@ final class ComposePresentation {
     if let navigation, aroundY == nil { return navigation }
     let positions = pane.compose.cursors.flatMap { $0.hasAnchor ? [$0.position, $0.anchor] : [$0.position] }
     navigation = layout.text.navigation(id: UInt64.random(in: 1...UInt64.max), pageHeight: max(1, bounds.height - 40),
-      documentLength: pane.compose.documentLen, positions: positions, aroundY: aroundY, styleRevision: styleRevision)
+      documentLength: pane.compose.documentLen, positions: positions, aroundY: aroundY, styleRevision: styleRevision, environmentRevision: environmentRevision)
     return navigation
   }
 

@@ -115,7 +115,7 @@ final class NativeEditor: NSObject, CellGridDelegate {
     self.pasteboard = pasteboard
     super.init()
     composeImages.onChange = { [weak self] in
-      self?.grid?.refreshComposeImages()
+      self?.grid?.refreshComposeImages(geometryChanged: true)
       self?.updateImageDemands()
       self?.scheduleViewportContinuation()
     }

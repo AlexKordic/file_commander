@@ -63,6 +63,7 @@ final class CellGridView: NSView, @preconcurrency NSTextInputClient {
   private(set) var composePanes: [UInt64: ComposePresentation] = [:]
   weak var composeImageController: ComposeImageController?
   weak var composeViewportController: ComposeViewportController?
+  private var composeGeometryRevision: UInt64 = 0
   private var composeDrag: UInt64?
   private var composeCaretIdentity: ComposePresentation.Identity?
   private var composeCaretRevision: UInt64 = 0
@@ -269,7 +270,8 @@ final class CellGridView: NSView, @preconcurrency NSTextInputClient {
       cell: CGSize(width: cellWidth, height: cellHeight), body: bodyFont, monospace: monoFont,
       typography: composePreferences.typography(zoom: composeZoom), pageWidth: composePreferences.pageWidth * composeZoom,
       reuse: reuse, caretStates: composeCaretIdentity == .init(window: UInt64(store.windowID), leaf: pane.leaf, buffer: pane.buffer)
-        && composeCaretRevision == pane.compose.bufferRevision ? composeCarets : [:], images: images, viewport: viewport, composition: preedit)
+        && composeCaretRevision == pane.compose.bufferRevision ? composeCarets : [:], images: images, viewport: viewport, composition: preedit,
+      environmentLike: reuse ?? composePanes[pane.leaf], geometryRevision: composeGeometryRevision)
   }
 
   /// Geometry for a deferred key is measured with the same fonts, width and
@@ -280,10 +282,13 @@ final class CellGridView: NSView, @preconcurrency NSTextInputClient {
           pane.compose.selectionRevision == projection.selectionRevision,
           pane.compose.assetDocument == projection.assetDocument else { return nil }
     pane.compose = projection
-    return presentation(pane)
+    return presentation(pane, reuse: composePanes[pane.leaf])
   }
 
-  func refreshComposeImages() { rebuildCompose(); needsDisplay = true }
+  func refreshComposeImages(geometryChanged: Bool = false) {
+    if geometryChanged { composeGeometryRevision &+= 1 }
+    rebuildCompose(); needsDisplay = true
+  }
 
   func composeImageDemands() -> [ComposeImageController.Demand] {
     let scale = window?.backingScaleFactor ?? 2

@@ -13,7 +13,7 @@ extension ComposeTextLayout {
   /// Source-order numbers detect gaps between sparse regions. Cell part
   /// ordinals prove adjacency within a column, whose y may overlap siblings.
   public func navigation(id: UInt64, pageHeight: CGFloat, documentLength: UInt64,
-                         positions: [UInt64], aroundY: CGFloat? = nil, styleRevision: UInt64 = 0) -> WireComposeLayout? {
+                         positions: [UInt64], aroundY: CGFloat? = nil, styleRevision: UInt64 = 0, environmentRevision: UInt64 = 0) -> WireComposeLayout? {
     guard id != 0, pageHeight.isFinite, pageHeight > 0 else { return nil }
     var centers = positions.compactMap { Int(exactly: $0).flatMap { caret(for: $0)?.midY } }
     if let aroundY, aroundY.isFinite { centers.append(aroundY) }
@@ -124,10 +124,15 @@ extension ComposeTextLayout {
       }
       lines.append(line)
     }
+    guard let anchors = flowAnchors(documentLength: documentLength, nearby: nearby) else { return nil }
+    let croppedEnd = projection.source.upperBound < documentLength && fragments.last?.range.length == 0
+      && fragments.last?.range.location == string.length
+    let height = croppedEnd ? fragments.last!.rect.minY : size.height
     return WireComposeLayout.with {
       $0.id = id; $0.pageHeight = Double(pageHeight); $0.sourceStart = UInt64(projection.source.lowerBound)
       $0.sourceEnd = UInt64(projection.source.upperBound); $0.documentLen = documentLength
-      $0.lines = lines; $0.totalLines = UInt64(all.count); $0.height = Double(size.height); $0.styleRevision = styleRevision
+      $0.lines = lines; $0.totalLines = UInt64(all.count); $0.height = Double(height); $0.styleRevision = styleRevision
+      $0.environmentRevision = environmentRevision; $0.anchors = anchors
     }
   }
 }

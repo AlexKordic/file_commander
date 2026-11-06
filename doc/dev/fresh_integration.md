@@ -618,8 +618,30 @@ empty trailing drawing placeholder is excluded from native navigation until
 the actual next line has been measured. A real document EOF line remains
 addressable. These boundary requests preserve the pending selection anchor.
 
-Cross-window paging, complex nested entry/exit and native input/performance
-qualification remain prerequisites for enabling the capability.
+Pixel Page Up/Down now retains its remaining distance through source-window
+changes. `ComposeLayout.environment_revision` identifies the fonts, available
+measure, viewport height, typography and image-geometry generation; ordinary
+scrolling and a different row subset preserve it. Optional flow anchors name
+physical text starts, complete parser-owned table rows and document EOF, with
+UTF-8 source context and measured y positions. Soft wraps and display-only
+prefixes cannot invent source context. Fresh retains the pivot's paragraph or
+list marker/complete row while measuring the next region, then resumes from
+its new y plus the captured pixel offset. Further windows can rebase the pivot
+without changing the intended distance. The original cursor need not be in
+the next window, and the visible viewport does not move merely to measure.
+Changed rendering environments, source or selections invalidate all cursor
+plans before any moves are emitted. A page landing in line padding preserves
+its pixel column instead of accidentally acting as Home.
+
+The complete socket test replays actual Core Text geometry across a long image
+URI, with selection and an offscreen original cursor. Unit checks cover
+multiple forward windows, backwards continuation and rendering/selection
+invalidation of resolved and deferred cursors. These are bounded functional
+checks; complex nested entry/exit and native input/performance qualification
+remain prerequisites for enabling the capability. The large-URI native
+fixture exposed about 29 seconds of synchronous measurement on the development
+machine. Minimum-glyph measurement must be profiled and fixed before release;
+small-table correctness tests do not qualify its latency.
 Legacy rich clients keep table source and
 can share the same backend with a table-capable client without exchanging
 their per-client projections. `compose-tables.pb` records that real-plugin

@@ -680,6 +680,8 @@ final class ComposeInputTests: XCTestCase {
     try await eventually { editor.connected && editor.grid?.focusedCompose != nil }
     let grid = try XCTUnwrap(editor.grid), original = try XCTUnwrap(grid.focusedCompose)
     let navigation = try XCTUnwrap(original.measuredNavigation())
+    let measurement = try XCTUnwrap(grid.composeMeasurement(identity: original.identity, projection: original.pane.compose))
+    XCTAssertEqual(try XCTUnwrap(measurement.measuredNavigation()).environmentRevision, navigation.environmentRevision)
     let before = try XCTUnwrap(original.layout.text.caret(for: anchor)).minY + original.origin.y
     var settings = ComposePreferences()
     settings.bodyFamily = "system-rounded"; settings.bodySize = 22
@@ -695,6 +697,7 @@ final class ComposeInputTests: XCTestCase {
     XCTAssertEqual(try XCTUnwrap(changed.layout.text.caret(for: anchor)).minY + changed.origin.y, before, accuracy: 0.001)
     let updated = try XCTUnwrap(changed.measuredNavigation())
     XCTAssertNotEqual(updated.styleRevision, navigation.styleRevision)
+    XCTAssertNotEqual(updated.environmentRevision, navigation.environmentRevision)
     editor.send(.key(.with { $0.key = "T" }))
     try await eventually { peer.inputs.count == 1 }
     XCTAssertEqual(peer.inputs[0].layoutID, updated.id)
