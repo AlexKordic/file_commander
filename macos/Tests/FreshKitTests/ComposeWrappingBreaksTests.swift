@@ -64,8 +64,8 @@ final class ComposeWrappingBreaksTests: XCTestCase {
 
   func testSpecialWhitespaceAndControlsKeepNativeContextualBreaks() throws {
     let ordinary = String(repeating: "An ordinary paragraph with words. ", count: 140) + "\r\n"
-    for special in ["\t", "\u{00a0}", "\u{202f}", "\u{200b}", "\u{2060}", "\u{00ad}",
-                    "\u{2067}אבג\u{2069}", "\u{2028}", "\u{0085}"] {
+    for special in ["\u{0000}", "\u{001f}", "\u{007f}", "\t", "\u{00a0}", "\u{202f}", "\u{200b}", "\u{2060}", "\u{00ad}",
+                    "\u{2067}אבג\u{2069}", "\u{2028}", "\u{2029}", "\u{0085}"] {
       let source = ordinary + String(repeating: "A\(special) word and more text. ", count: 260) + "\r\n" + ordinary
       try check(styled(source, variant: 1), widths: [19, 93, 273, 640])
     }

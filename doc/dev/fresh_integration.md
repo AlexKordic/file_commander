@@ -1115,6 +1115,9 @@ breaking. Font or image-metric changes create a new typesetter and invalidate
 the temporary advances. Only the last measured paragraph is retained during
 construction. No source context is clipped, and neither a character count nor
 terminal columns determine the wrapping measure.
+The long-paragraph preparation scan handles printable ASCII directly, avoiding
+Unicode-category lookup for those scalars. Other scalars retain the existing
+category checks and contextual break policy; source text remains unchanged.
 
 Native geometry reuse compares literal UTF-8 projection bytes, source maps and
 window bounds, document/authority identity, structure, measured image sizes,

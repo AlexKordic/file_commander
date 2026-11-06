@@ -576,6 +576,9 @@ must retain the native contextual path. A private real-backend workflow keeps
 resizes, checks document-wide text-service coordinates, inserts Unicode, saves
 exact CRLF source and undoes once. This does not establish a latency budget for
 the complete workflow or qualify arbitrary soft-wrap clipping.
+The native break oracles also cover NUL, U+001F, DEL and paragraph/line
+separators alongside tabs, nonbreaking spaces, formatting controls and ZWJ
+emoji. Printable-ASCII preparation must preserve those contextual fallbacks.
 
 Geometry-reuse regressions vary marked-clause selection independently of its
 draft, then replace the draft or raw reveal context. Empty-window relocation

@@ -87,10 +87,16 @@ final class ComposeWrappingBreaks {
       // forced break inside an unbroken word also uses Core Text below.
       var objects = 0
       let eligible = !string.substring(with: range).unicodeScalars.contains { scalar in
-        if scalar.value == 0xfffc { objects += 1 }
-        if [0x20, 0x0a, 0x0d, 0x200d].contains(scalar.value) { return false }
-        return [.control, .format, .spaceSeparator, .lineSeparator, .paragraphSeparator]
-          .contains(scalar.properties.generalCategory)
+        switch scalar.value {
+        case 0x20, 0x0a, 0x0d, 0x200d: return false
+        case 0xfffc: objects += 1; return false
+        case 0x21...0x7e: return false // Printable ASCII needs no Unicode property lookup.
+        default:
+          switch scalar.properties.generalCategory {
+          case .control, .format, .spaceSeparator, .lineSeparator, .paragraphSeparator: return true
+          default: return false
+          }
+        }
       }
       guard eligible else { continue }
       if tokenizer == nil {
