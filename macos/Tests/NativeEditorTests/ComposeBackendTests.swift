@@ -23,7 +23,7 @@ private final class ComposeBackend {
   init(binary: URL) throws {
     self.binary = binary
     root = URL(fileURLWithPath: "/tmp/fc-cn-\(UUID().uuidString.prefix(10))")
-    for directory in ["", "home", "config", "data", "cache", "runtime", "session"] {
+    for directory in ["", "home", "config", "data", "cache", "state", "runtime", "session"] {
       try FileManager.default.createDirectory(at: root.appendingPathComponent(directory), withIntermediateDirectories: true,
         attributes: [.posixPermissions: 0o700])
     }
@@ -38,10 +38,10 @@ private final class ComposeBackend {
     try JSONSerialization.data(withJSONObject: settings).write(to: config)
     var env = ProcessInfo.processInfo.environment
     for (key, directory) in [("HOME", "home"), ("XDG_CONFIG_HOME", "config"), ("XDG_DATA_HOME", "data"),
-      ("XDG_CACHE_HOME", "cache"), ("XDG_RUNTIME_DIR", "runtime"), ("FRESH_FC_DATA_DIR", "session")] {
+      ("XDG_CACHE_HOME", "cache"), ("XDG_STATE_HOME", "state"), ("XDG_RUNTIME_DIR", "runtime"), ("FRESH_FC_DATA_DIR", "session")] {
       env[key] = root.appendingPathComponent(directory).path
     }
-    env["FC_EDITOR_SWITCH_KEY"] = "f10"; env["RUST_LOG"] = "warn"
+    env["FC_EDITOR_SWITCH_KEY"] = "f10"; env["RUST_LOG"] = env["FC_COMPOSE_TEST_LOG"] ?? "warn"
     env.removeValue(forKey: "FC_LEGACY_CHECKPOINT")
     environment = env
     let path = root.appendingPathComponent("launcher.log")
@@ -99,8 +99,8 @@ private final class ComposeBackend {
     guard let path = ProcessInfo.processInfo.environment["FC_COMPOSE_ARTIFACT_DIR"] else { return }
     let destination = URL(fileURLWithPath: path).appendingPathComponent(name + "-" + root.lastPathComponent)
     let keys: [URLResourceKey] = [.isRegularFileKey, .isSymbolicLinkKey]
-    // Keep just this fixture and its command/launcher logs. Runtime sockets
-    // and extracted plugin caches are neither copyable nor useful here.
+    // Keep this fixture and its command/launcher/server logs. The detached
+    // backend redirects stderr into XDG_STATE_HOME, rather than launcher.log.
     guard let files = try? FileManager.default.contentsOfDirectory(at: root, includingPropertiesForKeys: keys) else { return }
     try? FileManager.default.createDirectory(at: destination, withIntermediateDirectories: true)
     for file in files {
@@ -108,6 +108,12 @@ private final class ComposeBackend {
             values.isRegularFile == true, values.isSymbolicLink != true else { continue }
       let output = destination.appendingPathComponent(file.lastPathComponent)
       try? FileManager.default.copyItem(at: file, to: output)
+    }
+    let logs = root.appendingPathComponent("state/fresh/logs")
+    for file in (try? FileManager.default.contentsOfDirectory(at: logs, includingPropertiesForKeys: keys)) ?? [] {
+      guard let values = try? file.resourceValues(forKeys: Set(keys)),
+            values.isRegularFile == true, values.isSymbolicLink != true else { continue }
+      try? FileManager.default.copyItem(at: file, to: destination.appendingPathComponent(file.lastPathComponent))
     }
   }
 }
