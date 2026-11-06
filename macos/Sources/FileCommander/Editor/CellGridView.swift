@@ -13,7 +13,8 @@ protocol CellGridDelegate: AnyObject {
   func grid(_ grid: CellGridView, handleAppChord event: NSEvent) -> Bool
   func gridPaste(_ grid: CellGridView)
   func grid(_ grid: CellGridView, point: CGPoint, in pane: ComposePresentation, extend: Bool, count: Int)
-  func grid(_ grid: CellGridView, scroll delta: CGFloat, in pane: ComposePresentation)
+  func grid(_ grid: CellGridView, scroll delta: CGPoint, in pane: ComposePresentation)
+  func grid(_ grid: CellGridView, revealCaretIn pane: ComposePresentation)
   func grid(_ grid: CellGridView, replace text: String, range: NSRange, in pane: ComposePresentation)
   func grid(_ grid: CellGridView, commit replacement: ComposeReplacement, in pane: ComposePresentation)
   func grid(_ grid: CellGridView, recover text: String)
@@ -603,14 +604,14 @@ final class CellGridView: NSView, @preconcurrency NSTextInputClient {
     let text = (string as? NSAttributedString) ?? NSAttributedString(string: string as? String ?? "")
     if var current = composition {
       guard current.text.update(text, selected: selectedRange, replacement: replacementRange) else { return }
-      composition = current; rebuildCompose(); needsDisplay = true; return
+      composition = current; rebuildCompose(); revealCompositionCaret(); needsDisplay = true; return
     }
     if let target = focusedCompose, target.textContext != nil, target.cursor != nil {
       guard let value = ComposeComposition(pane: target.pane.compose, text: text, selected: selectedRange, replacement: replacementRange) else {
         delegate?.grid(self, recover: text.string); return
       }
       composition = Composition(target: target, text: value)
-      marked = ""; rebuildCompose(); needsDisplay = true; return
+      marked = ""; rebuildCompose(); revealCompositionCaret(); needsDisplay = true; return
     }
     marked = (string as? NSAttributedString)?.string ?? (string as? String) ?? ""
     setNeedsDisplayCaret()
@@ -620,6 +621,11 @@ final class CellGridView: NSView, @preconcurrency NSTextInputClient {
     if composition != nil { finishComposition(); return }
     marked = ""
     setNeedsDisplayCaret()
+  }
+
+  private func revealCompositionCaret() {
+    guard composition != nil, let pane = focusedCompose else { return }
+    delegate?.grid(self, revealCaretIn: pane)
   }
 
   func finishComposition(rebuild: Bool = true) {
@@ -721,7 +727,7 @@ final class CellGridView: NSView, @preconcurrency NSTextInputClient {
     let anchor = extend ? compositionDragAnchor ?? current.text.selectedRange.location : position
     guard current.text.select(NSRange(location: min(position, anchor), length: abs(position - anchor))) else { return false }
     compositionDragAnchor = anchor; composition = current
-    rebuildCompose(); needsDisplay = true; inputContext?.invalidateCharacterCoordinates()
+    rebuildCompose(); revealCompositionCaret(); needsDisplay = true; inputContext?.invalidateCharacterCoordinates()
     return true
   }
 
@@ -804,8 +810,9 @@ final class CellGridView: NSView, @preconcurrency NSTextInputClient {
   /// Fresh; a wheel sends a step per notch.
   override func scrollWheel(with event: NSEvent) {
     if let pane = compose(at: point(of: event)), pane.pane.compose.hasViewport {
-      let delta = -event.scrollingDeltaY * (event.hasPreciseScrollingDeltas ? 1 : CTFontGetSize(pane.body) * 3)
-      if delta != 0 { delegate?.grid(self, scroll: delta, in: pane) }
+      let scale = event.hasPreciseScrollingDeltas ? 1 : CTFontGetSize(pane.body) * 3
+      let delta = CGPoint(x: -event.scrollingDeltaX * scale, y: -event.scrollingDeltaY * scale)
+      if delta != .zero { delegate?.grid(self, scroll: delta, in: pane) }
       return
     }
     let precise = event.hasPreciseScrollingDeltas

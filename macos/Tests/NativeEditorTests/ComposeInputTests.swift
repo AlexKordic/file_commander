@@ -130,6 +130,12 @@ private final class ScenePeer: @unchecked Sendable {
 
   func show(_ pane: WirePane) { send(.frame, frame(pane: pane)) }
 
+  func acknowledgeScroll(_ request: WireComposeViewportRequest, pane: WirePane) {
+    var frame = frame(pane: pane)
+    frame.viewportReply = .with { $0.id = request.id; $0.accepted = true }
+    send(.frame, frame)
+  }
+
   @discardableResult
   func copy(_ text: String, sequence: UInt64) -> UInt64 {
     var frame = frame(pane: nil)
@@ -684,7 +690,7 @@ final class ComposeInputTests: XCTestCase {
     XCTAssertEqual(changed.scope, original.scope, "changing presentation does not relabel source revisions")
     XCTAssertEqual(changed.layout.text.projection.text, source)
     XCTAssertEqual(CTFontGetSize(changed.body), 22)
-    XCTAssertEqual(changed.layout.text.size.width, 400)
+    XCTAssertEqual(changed.layout.width, 400)
     XCTAssertFalse(changed.layout.text === original.layout.text)
     XCTAssertEqual(try XCTUnwrap(changed.layout.text.caret(for: anchor)).minY + changed.origin.y, before, accuracy: 0.001)
     let updated = try XCTUnwrap(changed.measuredNavigation())
@@ -693,6 +699,94 @@ final class ComposeInputTests: XCTestCase {
     try await eventually { peer.inputs.count == 1 }
     XCTAssertEqual(peer.inputs[0].layoutID, updated.id)
     XCTAssertEqual(peer.inputs[0].scope.bufferRevision, 4)
+  }
+
+  @MainActor
+  func testHorizontalRevealAndScrollingShareTableInputGeometryAndSurviveAcknowledgment() async throws {
+    let fixture = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
+      .appendingPathComponent("FreshKitTests/Fixtures/compose-tables.pb")
+    var initial = pane("", width: 10)
+    initial.compose = try WireComposePane(serializedBytes: Data(contentsOf: fixture))
+    initial.compose.focused = true; initial.compose.keyboard = true
+    initial.compose.viewport = .with { $0.epoch = 7 }
+    let peer = try ScenePeer(pane: initial)
+    defer { peer.close() }
+    let editor = richEditor(); defer { editor.detachAll() }
+    editor.attach(socketPath: peer.path, app: nil)
+    try await eventually { editor.grid?.focusedCompose != nil }
+    let grid = try XCTUnwrap(editor.grid), before = try XCTUnwrap(grid.focusedCompose)
+    let target = initial.compose.tables[0].rows[0].cells[2].start + 2
+    let navigation = try XCTUnwrap(before.measuredNavigation())
+    editor.send(.key(.with { $0.key = "ArrowRight" }))
+    try await eventually { peer.inputs.count == 1 }
+    var updated = initial
+    updated.compose.cursors[0].position = target; updated.compose.selectionRevision &+= 1
+    updated.compose.textContext.selectionStart = target; updated.compose.textContext.selectionEnd = target
+    peer.reply(.with { $0.id = 1; $0.accepted = true }, pane: updated)
+    try await eventually { peer.viewports.count == 1 }
+    let request = peer.viewports[0]
+    XCTAssertGreaterThan(request.horizontalOffset, 0)
+    XCTAssertEqual(request.position, 0)
+    let scrolled = try XCTUnwrap(grid.focusedCompose), caret = try XCTUnwrap(scrolled.caret)
+    XCTAssertTrue(scrolled.layout.text === before.layout.text)
+    XCTAssertLessThan(scrolled.origin.x, before.origin.x)
+    XCTAssertGreaterThanOrEqual(caret.minX, scrolled.bounds.minX + 16 - 0.01)
+    XCTAssertLessThanOrEqual(caret.maxX, scrolled.bounds.maxX - 16 + 0.01)
+    XCTAssertEqual(scrolled.hit(at: CGPoint(x: caret.midX, y: caret.midY))?.source, Int(target))
+    XCTAssertEqual(try XCTUnwrap(scrolled.measuredNavigation()).styleRevision, navigation.styleRevision,
+      "panning changes the presentation origin, not its layout coordinates or pixel goal")
+    let index = try XCTUnwrap(scrolled.textServiceIndex(for: Int(target)))
+    let area = try XCTUnwrap(scrolled.textServiceRect(for: NSRange(location: index, length: 0)))
+    XCTAssertEqual(area.rect.minX + scrolled.origin.x, caret.minX, accuracy: 0.01)
+
+    updated.compose.viewport = .with {
+      $0.epoch = request.epoch; $0.sequence = request.id; $0.position = request.position
+      $0.offset = request.offset; $0.affinity = request.affinity; $0.horizontalOffset = request.horizontalOffset
+    }
+    peer.acknowledgeScroll(request, pane: updated)
+    try await eventually { grid.focusedCompose?.pane.compose.viewport.sequence == request.id }
+    let acknowledged = try XCTUnwrap(grid.focusedCompose)
+    XCTAssertEqual(acknowledged.origin.x, scrolled.origin.x, accuracy: 0.001)
+    editor.grid(grid, scroll: CGPoint(x: -10_000, y: 0), in: acknowledged)
+    try await eventually { peer.viewports.count == 2 }
+    XCTAssertEqual(peer.viewports[1].horizontalOffset, 0)
+    XCTAssertEqual(peer.inputs.count, 1, "scrolling cannot edit source or move its cursor")
+    XCTAssertEqual(grid.focusedCompose?.layout.text.projection.text, before.layout.text.projection.text)
+  }
+
+  @MainActor
+  func testMarkedCaretCanRevealHorizontallyWithoutCommittingAndRetainsItsPanAfterAcknowledgment() async throws {
+    var initial = pane("x", width: 5)
+    initial.compose.cursors[0].position = 1; initial.compose.cursors[0].anchor = 0
+    initial.compose.textContext.selectionStart = 0; initial.compose.textContext.selectionEnd = 1
+    let peer = try ScenePeer(pane: initial)
+    defer { peer.close() }
+    let editor = richEditor(); defer { editor.detachAll() }
+    editor.attach(socketPath: peer.path, app: nil)
+    try await eventually { editor.grid?.focusedCompose != nil }
+    let grid = try XCTUnwrap(editor.grid), draft = "👩🏽‍💻"
+    grid.setMarkedText(draft, selectedRange: NSRange(location: draft.utf16.count, length: 0),
+      replacementRange: NSRange(location: NSNotFound, length: 0))
+    try await eventually { peer.viewports.count == 1 }
+    let request = peer.viewports[0]
+    XCTAssertGreaterThan(request.horizontalOffset, 0)
+    XCTAssertTrue(peer.inputs.isEmpty)
+    let presentation = try XCTUnwrap(grid.focusedCompose), caret = try XCTUnwrap(presentation.caret)
+    XCTAssertLessThanOrEqual(caret.maxX, presentation.bounds.maxX - 16 + 0.01)
+    XCTAssertEqual(presentation.pane.compose.text, "x")
+    XCTAssertEqual(presentation.layout.text.projection.text, draft)
+    let area = try XCTUnwrap(presentation.textServiceRect(for: grid.selectedRange()))
+    XCTAssertEqual(area.rect.minX + presentation.origin.x, caret.minX, accuracy: 0.01)
+    initial.compose.viewport = .with {
+      $0.epoch = request.epoch; $0.sequence = request.id; $0.position = request.position
+      $0.offset = request.offset; $0.affinity = request.affinity; $0.horizontalOffset = request.horizontalOffset
+    }
+    peer.acknowledgeScroll(request, pane: initial)
+    try await eventually { grid.focusedCompose?.pane.compose.viewport.sequence == request.id }
+    XCTAssertEqual(try XCTUnwrap(grid.focusedCompose?.caret).minX, caret.minX, accuracy: 0.01)
+    XCTAssertTrue(grid.hasMarkedText()); XCTAssertTrue(peer.inputs.isEmpty)
+    grid.doCommand(by: #selector(NSResponder.cancelOperation(_:)))
+    XCTAssertFalse(grid.hasMarkedText()); XCTAssertTrue(peer.inputs.isEmpty)
   }
 
   @MainActor

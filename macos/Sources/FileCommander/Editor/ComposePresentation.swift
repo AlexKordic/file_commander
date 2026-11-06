@@ -53,7 +53,7 @@ final class ComposePresentation {
         $0.source == $1.source && $0.columns == $1.columns && $0.rect.minX == $1.rect.minX
       }
     } ?? false
-    if let reuse, reuse.layout.text.size.width == layout.text.size.width, reuse.bounds.height == bounds.height,
+    if let reuse, reuse.layout.width == layout.width, reuse.bounds.height == bounds.height,
        CFEqual(reuse.body, body as CTFont), CFEqual(reuse.monospace, monospace as CTFont), reuse.typography == typography, sameColumns {
       styleRevision = reuse.styleRevision
     } else { styleRevision = UInt64.random(in: 1...UInt64.max) }
@@ -61,7 +61,8 @@ final class ComposePresentation {
     if let reuse, reuse.layout.text === layout.text, reuse.bounds.height == bounds.height { navigation = reuse.navigation }
     identity = .init(window: window, leaf: pane.leaf, buffer: pane.buffer)
     self.viewport = viewport ?? .with { $0.position = pane.compose.topByte }
-    scrolling = ComposeViewport(text: layout.text, documentLength: pane.compose.documentLen, height: max(1, bounds.height - 24))
+    scrolling = ComposeViewport(text: layout.text, documentLength: pane.compose.documentLen, height: max(1, bounds.height - 24),
+      width: available, leading: max(0, (available - width) / 2))
     let top = Int(exactly: pane.compose.topByte).flatMap { layout.text.caret(for: $0)?.minY } ?? 0
     var y = bounds.minY + 12 - top
     if let reuse, reuse.identity == identity,
@@ -77,7 +78,7 @@ final class ComposePresentation {
       let fallback = max(0, bounds.minY + 12 - (reuse?.origin.y ?? bounds.minY + 12))
       y = bounds.minY + 12 - scrolling.displayedTop(self.viewport, fallback: fallback)
     }
-    origin = CGPoint(x: bounds.midX - width / 2, y: y)
+    origin = CGPoint(x: bounds.midX - width / 2 - scrolling.displayedLeft(self.viewport), y: y)
   }
 
   var scope: WireComposeScope {

@@ -405,7 +405,7 @@ bounds still need validation against representative documents before release.
   Unmappable positions, changed image annotations, and retired targets terminate
   explicitly rather than selecting unrelated text or holding up later input.
 - Type 29, `ComposeViewportRequest`, updates a per-client source marker and
-  pixel offset. Its acknowledgments and coalescing are independent of the text
+  vertical pixel offset plus a horizontal translation in points. Its acknowledgments and coalescing are independent of the text
   input queue. It changes neither the source cursor nor the terminal viewport.
   Geometry needed outside the visible region travels in a separate Compose
   projection in the input reply, so measuring a pending command does not move
@@ -596,9 +596,8 @@ the actual next line has been measured. A real document EOF line remains
 addressable. These boundary requests preserve the pending selection anchor.
 
 Cross-window paging and complex nested entry/exit still need qualification.
-Horizontal scrolling when complete clusters exceed the pane and stable
-column measures across source windows also remain
-prerequisites for enabling the capability. Legacy rich clients keep table source and
+Stable column measures across source windows remain a prerequisite for enabling
+the capability. Legacy rich clients keep table source and
 can share the same backend with a table-capable client without exchanging
 their per-client projections. `compose-tables.pb` records that real-plugin
 source contract; `compose-table-image-source.pb` adds edited image markup and
@@ -606,6 +605,27 @@ its preview. `compose-tables-missing-source.pb` records a missing-cell motion
 revealing structural source. Core Text navigation fixtures are replayed by
 Fresh's scene socket test, including source reveal and style changes.
 These checks do not prove complete interactive table ergonomics.
+
+Native wheel input moves both pixel axes. `ComposeViewport.horizontal_offset`
+(field 6) and `ComposeViewportRequest.horizontal_offset` (field 7) carry a
+nonnegative, finite translation; omitted values mean zero. The backend keeps
+it per client/split/buffer, preserves it through ordinary source edits, and
+resets it when the buffer lifetime or edit history becomes opaque. Horizontal
+coordinates use the navigation geometry's prototype 100-million-point bound.
+Duplicate requests cannot reapply a changed translation. Coalescing retains
+the latest horizontal intent while an edit requires the backend's current
+vertical source anchor. The consumer clamps drawing to the current content
+extent without discarding intent merely because a source window is narrower.
+
+The wrapping measure and content extent are distinct. Complete glyph advances,
+ink, caret strokes, table borders and image rectangles can expose an extent
+beyond the chosen measure. Horizontal scrolling changes the shared native
+origin for drawing, hit testing, selections, images and text-service rectangles;
+it does not change source coordinates or navigation's pixel goals. Accepted
+caret moves and provisional marked-text updates can reveal both axes. A marked
+caret reveal sends only a viewport request, and an acknowledgment keeps the
+provisional text and pan intact. Interactive trackpad, source reveal and image
+workflows still require the broader native qualification before table opt-in.
 
 Visible images are checked on a five-second prototype interval and when the
 editor is shown again. POSIX local/SSH stats include file identity plus

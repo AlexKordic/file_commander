@@ -106,6 +106,74 @@ final class ComposeViewportTests: XCTestCase {
     XCTAssertNil(partial.revealing(1001, affinity: 0, from: anchor))
   }
 
+  func testHorizontalScrollAndRevealUseCompleteShapedClustersRatherThanTheWrapMeasure() throws {
+    let value = "👩🏽‍💻", text = try layout(value, width: 1)
+    XCTAssertEqual(text.fragments.count, 1)
+    XCTAssertGreaterThan(text.size.width, 8, "the full glyph and its caret exceed this narrow measure")
+    let view = ComposeViewport(text: text, documentLength: UInt64(value.utf8.count), height: 80, width: 8)
+    let initial = WireComposeViewport.with { $0.epoch = 7; $0.offset = -2 }
+    let moved = try XCTUnwrap(view.moved(initial, by: 0, horizontally: 1_000))
+    XCTAssertEqual(view.displayedLeft(moved), text.size.width - 8, accuracy: 0.001)
+    XCTAssertEqual(moved.position, initial.position); XCTAssertEqual(moved.offset, initial.offset)
+    let reset = try XCTUnwrap(view.moved(moved, by: 0, horizontally: -1_000))
+    XCTAssertEqual(reset.horizontalOffset, 0)
+    let reveal = try XCTUnwrap(view.revealing(UInt64(value.utf8.count), affinity: 1, from: initial))
+    let caret = try XCTUnwrap(text.caret(for: value.utf8.count, affinity: .upstream))
+    XCTAssertGreaterThan(reveal.horizontalOffset, 0)
+    XCTAssertLessThanOrEqual(caret.maxX - view.displayedLeft(reveal), 8.001)
+    XCTAssertNil(view.revealing(UInt64(value.utf8.count), affinity: 1, from: reveal))
+    XCTAssertEqual(try XCTUnwrap(view.revealing(0, affinity: 0, from: reveal)).horizontalOffset, 0)
+    XCTAssertEqual(text.projection.text, value)
+  }
+
+  func testWideTableCellRevealAndCenteredReadingMeasureUseOneHorizontalOrigin() throws {
+    let url = try XCTUnwrap(Bundle.module.url(forResource: "compose-tables", withExtension: "pb", subdirectory: "Fixtures"))
+    let pane = try WireComposePane(serializedBytes: Data(contentsOf: url))
+    let layout = try XCTUnwrap(ComposePaneLayout(pane: pane, body: font, monospace: font, width: 60))
+    let text = layout.text
+    XCTAssertGreaterThan(text.tables[0].rect.width, 60)
+    let view = ComposeViewport(text: text, documentLength: pane.documentLen, height: 10_000, width: 60, leading: 10)
+    let source = pane.tables[0].rows[0].cells.last!.end
+    let initial = WireComposeViewport.with { $0.epoch = 7 }
+    let caret = try XCTUnwrap(text.caret(for: Int(source), affinity: .upstream))
+    let reveal = try XCTUnwrap(view.revealing(source, affinity: 1, from: initial))
+    XCTAssertGreaterThan(reveal.horizontalOffset, 0)
+    XCTAssertGreaterThanOrEqual(caret.minX + view.leading - view.displayedLeft(reveal), -0.001)
+    XCTAssertLessThanOrEqual(caret.maxX + view.leading - view.displayedLeft(reveal), view.width + 0.001)
+    XCTAssertEqual(reveal.position, initial.position)
+    XCTAssertEqual(text.projection.source.upperBound, Int(pane.sourceEnd))
+    if let path = ProcessInfo.processInfo.environment["FC_COMPOSE_HORIZONTAL_PREVIEW"] {
+      let context = try XCTUnwrap(CGContext(data: nil, width: 400, height: 680, bitsPerComponent: 8,
+        bytesPerRow: 0, space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
+      context.translateBy(x: 0, y: 680); context.scaleBy(x: 2, y: -2)
+      context.setFillColor(CGColor(gray: 0.85, alpha: 1)); context.fill(CGRect(x: 0, y: 0, width: 200, height: 340))
+      for (index, left) in [CGFloat(0), view.displayedLeft(reveal)].enumerated() {
+        let clip = CGRect(x: 20 + CGFloat(index) * 100, y: 20, width: view.width, height: 300)
+        let origin = CGPoint(x: clip.minX + view.leading - left, y: clip.minY - text.tables[0].rect.minY)
+        layout.draw(in: context, origin: origin, clip: clip, dirty: clip, foreground: CGColor(gray: 0.1, alpha: 1),
+          background: CGColor(gray: 1, alpha: 1), selection: CGColor(gray: 0.7, alpha: 1))
+        if index == 1 {
+          context.setFillColor(CGColor(red: 0, green: 0.3, blue: 1, alpha: 1))
+          context.fill(caret.offsetBy(dx: origin.x, dy: origin.y).intersection(clip))
+        }
+      }
+      let output = try XCTUnwrap(CGImageDestinationCreateWithURL(URL(fileURLWithPath: path) as CFURL, "public.png" as CFString, 1, nil))
+      CGImageDestinationAddImage(output, try XCTUnwrap(context.makeImage()), nil)
+      XCTAssertTrue(CGImageDestinationFinalize(output))
+    }
+  }
+
+  func testHorizontalIntentSurvivesVerticalMovementContinuationAndTemporarilyNarrowContent() throws {
+    let text = try layout(String(repeating: "row\n", count: 100), start: 1000)
+    let view = ComposeViewport(text: text, documentLength: 10_000, height: 180, width: 320)
+    let anchor = WireComposeViewport.with { $0.position = 1388; $0.offset = -5; $0.epoch = 7; $0.horizontalOffset = 129.75 }
+    XCTAssertEqual(view.displayedLeft(anchor), 0, "draw available content while retaining an intent from a wider window")
+    XCTAssertEqual(try XCTUnwrap(view.continuation(anchor)).horizontalOffset, 129.75)
+    XCTAssertEqual(try XCTUnwrap(view.moved(anchor, by: 11)).horizontalOffset, 129.75)
+    let unknown = try XCTUnwrap(view.revealing(8000, affinity: 0, from: anchor))
+    XCTAssertEqual(unknown.position, 8000); XCTAssertEqual(unknown.horizontalOffset, 129.75)
+  }
+
   private func scope(_ leaf: UInt64 = 2, buffer: UInt64 = 3) -> WireComposeScope {
     .with { $0.windowID = 1; $0.leaf = leaf; $0.buffer = buffer; $0.bufferRevision = 4 }
   }
@@ -145,6 +213,31 @@ final class ComposeViewportTests: XCTestCase {
     remote.sequence = 4; remote.position = 40
     controller.observe(window: 1, panes: [pane(a, anchor: remote), pane(b, anchor: initial)], reply: .with { $0.id = 4; $0.accepted = true })
     XCTAssertEqual(controller.value(scope: a, remote: remote), remote)
+  }
+
+  @MainActor
+  func testHorizontalOnlyRequestsCoalesceAndKeepCurrentSourceCoordinatesAcrossAnEdit() async throws {
+    var sent: [WireComposeViewportRequest] = []
+    let controller = ComposeViewportController { sent.append($0) }
+    let original = scope(), remote = WireComposeViewport.with { $0.epoch = 7; $0.position = 12 }
+    var first = remote; first.horizontalOffset = 10.25
+    XCTAssertTrue(controller.move(scope: original, from: remote, to: first, user: true))
+    var next = first; next.horizontalOffset = 60.75
+    XCTAssertTrue(controller.move(scope: original, from: first, to: next, user: true))
+    XCTAssertEqual(sent.count, 1)
+    XCTAssertEqual(controller.value(scope: original, remote: remote).horizontalOffset, 60.75)
+    var edited = original; edited.bufferRevision += 1
+    var current = remote; current.position = 14; current.sequence = 1; current.horizontalOffset = first.horizontalOffset
+    let duringEdit = controller.value(scope: edited, remote: current)
+    XCTAssertEqual(duringEdit.position, 14); XCTAssertEqual(duringEdit.horizontalOffset, 60.75)
+    controller.observe(window: 1, panes: [pane(edited, anchor: current)], reply: .with { $0.id = 1; $0.accepted = true })
+    XCTAssertEqual(sent.map(\.horizontalOffset), [10.25, 60.75])
+    let encoded = SceneInput.composeViewport(sent[1]).payload()
+    XCTAssertEqual(try WireComposeViewportRequest(serializedBytes: encoded).horizontalOffset, 60.75)
+    current.sequence = 2; current.horizontalOffset = 60.75
+    controller.observe(window: 1, panes: [pane(edited, anchor: current)], reply: .with { $0.id = 2; $0.accepted = true })
+    XCTAssertEqual(controller.value(scope: edited, remote: current), current)
+    XCTAssertEqual(controller.userScrollGeneration, 2)
   }
 
   @MainActor

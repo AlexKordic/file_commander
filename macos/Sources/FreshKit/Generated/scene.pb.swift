@@ -130,7 +130,7 @@ public nonisolated enum WireMouseButton: SwiftProtobuf.Enum, Swift.CaseIterable 
 
 }
 
-/// A source marker and a caret-fragment offset in native points, per client.
+/// A source marker, caret-fragment offset and horizontal translation in native points, per client.
 public nonisolated struct WireComposeViewport: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
@@ -145,6 +145,8 @@ public nonisolated struct WireComposeViewport: Sendable {
   public var sequence: UInt64 = 0
 
   public var epoch: UInt64 = 0
+
+  public var horizontalOffset: Double = 0
 
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
@@ -3518,6 +3520,8 @@ public nonisolated struct WireComposeViewportRequest: Sendable {
 
   public var epoch: UInt64 = 0
 
+  public var horizontalOffset: Double = 0
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
@@ -3885,7 +3889,7 @@ nonisolated extension WireMouseButton: SwiftProtobuf._ProtoNameProviding {
 
 nonisolated extension WireComposeViewport: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".ComposeViewport"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}position\0\u{1}affinity\0\u{1}offset\0\u{1}sequence\0\u{1}epoch\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}position\0\u{1}affinity\0\u{1}offset\0\u{1}sequence\0\u{1}epoch\0\u{3}horizontal_offset\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -3898,6 +3902,7 @@ nonisolated extension WireComposeViewport: SwiftProtobuf.Message, SwiftProtobuf.
       case 3: try { try decoder.decodeSingularDoubleField(value: &self.offset) }()
       case 4: try { try decoder.decodeSingularUInt64Field(value: &self.sequence) }()
       case 5: try { try decoder.decodeSingularUInt64Field(value: &self.epoch) }()
+      case 6: try { try decoder.decodeSingularDoubleField(value: &self.horizontalOffset) }()
       default: break
       }
     }
@@ -3919,6 +3924,9 @@ nonisolated extension WireComposeViewport: SwiftProtobuf.Message, SwiftProtobuf.
     if self.epoch != 0 {
       try visitor.visitSingularUInt64Field(value: self.epoch, fieldNumber: 5)
     }
+    if self.horizontalOffset.bitPattern != 0 {
+      try visitor.visitSingularDoubleField(value: self.horizontalOffset, fieldNumber: 6)
+    }
     try unknownFields.traverse(visitor: &visitor)
   }
 
@@ -3928,6 +3936,7 @@ nonisolated extension WireComposeViewport: SwiftProtobuf.Message, SwiftProtobuf.
     if lhs.offset != rhs.offset {return false}
     if lhs.sequence != rhs.sequence {return false}
     if lhs.epoch != rhs.epoch {return false}
+    if lhs.horizontalOffset != rhs.horizontalOffset {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
@@ -9596,7 +9605,7 @@ nonisolated extension WireComposeAssetRequest: SwiftProtobuf.Message, SwiftProto
 
 nonisolated extension WireComposeViewportRequest: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".ComposeViewportRequest"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}id\0\u{1}scope\0\u{1}position\0\u{1}affinity\0\u{1}offset\0\u{1}epoch\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}id\0\u{1}scope\0\u{1}position\0\u{1}affinity\0\u{1}offset\0\u{1}epoch\0\u{3}horizontal_offset\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -9610,6 +9619,7 @@ nonisolated extension WireComposeViewportRequest: SwiftProtobuf.Message, SwiftPr
       case 4: try { try decoder.decodeSingularUInt32Field(value: &self.affinity) }()
       case 5: try { try decoder.decodeSingularDoubleField(value: &self.offset) }()
       case 6: try { try decoder.decodeSingularUInt64Field(value: &self.epoch) }()
+      case 7: try { try decoder.decodeSingularDoubleField(value: &self.horizontalOffset) }()
       default: break
       }
     }
@@ -9638,6 +9648,9 @@ nonisolated extension WireComposeViewportRequest: SwiftProtobuf.Message, SwiftPr
     if self.epoch != 0 {
       try visitor.visitSingularUInt64Field(value: self.epoch, fieldNumber: 6)
     }
+    if self.horizontalOffset.bitPattern != 0 {
+      try visitor.visitSingularDoubleField(value: self.horizontalOffset, fieldNumber: 7)
+    }
     try unknownFields.traverse(visitor: &visitor)
   }
 
@@ -9648,6 +9661,7 @@ nonisolated extension WireComposeViewportRequest: SwiftProtobuf.Message, SwiftPr
     if lhs.affinity != rhs.affinity {return false}
     if lhs.offset != rhs.offset {return false}
     if lhs.epoch != rhs.epoch {return false}
+    if lhs.horizontalOffset != rhs.horizontalOffset {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }

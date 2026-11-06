@@ -8,7 +8,8 @@ public final class ComposePaneLayout {
   public let pane: WireComposePane
   public let text: ComposeTextLayout
   private let body, monospace: CTFont
-  private let width: CGFloat
+  /// The wrapping measure; complete glyphs and cells can expose a wider extent.
+  public let width: CGFloat
   private let typography: ComposeTypography
   private let images: [UInt64: ComposeImageState]
   private let imageSizes: [Int: CGSize]

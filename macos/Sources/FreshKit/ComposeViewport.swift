@@ -8,10 +8,15 @@ public struct ComposeViewport {
   public let text: ComposeTextLayout
   public let documentLength: UInt64
   public let height: CGFloat
+  public let width: CGFloat
+  /// Centering space before a user-selected reading measure, in points.
+  public let leading: CGFloat
 
-  public init(text: ComposeTextLayout, documentLength: UInt64, height: CGFloat) {
+  public init(text: ComposeTextLayout, documentLength: UInt64, height: CGFloat, width: CGFloat? = nil, leading: CGFloat = 0) {
     self.text = text; self.documentLength = documentLength
     self.height = height.isFinite ? max(1, height) : 1
+    self.width = width.map { $0.isFinite ? max(1, $0) : 1 } ?? text.size.width
+    self.leading = leading.isFinite ? max(0, leading) : 0
   }
 
   public func requestedTop(_ anchor: WireComposeViewport) -> CGFloat? {
@@ -26,10 +31,20 @@ public struct ComposeViewport {
     min(max(0, text.size.height - height), max(0, requestedTop(anchor) ?? fallback))
   }
 
-  public func moved(_ anchor: WireComposeViewport, by delta: CGFloat, fallback: CGFloat = 0) -> WireComposeViewport? {
-    guard delta.isFinite, delta != 0 else { return nil }
-    let top = requestedTop(anchor) ?? displayedTop(anchor, fallback: fallback)
-    return anchored(at: top + delta, epoch: anchor.epoch)
+  public func displayedLeft(_ anchor: WireComposeViewport) -> CGFloat {
+    limitedHorizontal(CGFloat(anchor.horizontalOffset))
+  }
+
+  public func moved(_ anchor: WireComposeViewport, by delta: CGFloat, horizontally horizontal: CGFloat = 0, fallback: CGFloat = 0) -> WireComposeViewport? {
+    guard delta.isFinite, horizontal.isFinite, delta != 0 || horizontal != 0 else { return nil }
+    var result = anchor
+    if delta != 0 {
+      let top = requestedTop(anchor) ?? displayedTop(anchor, fallback: fallback)
+      guard let moved = anchored(at: top + delta, from: anchor) else { return nil }
+      result = moved
+    }
+    if horizontal != 0 { result.horizontalOffset = Double(limitedHorizontal(displayedLeft(anchor) + horizontal)) }
+    return result
   }
 
   /// Request the source beyond a loaded edge while retaining the same pixel
@@ -37,10 +52,10 @@ public struct ComposeViewport {
   public func continuation(_ anchor: WireComposeViewport) -> WireComposeViewport? {
     guard let top = requestedTop(anchor) else { return nil }
     if top < 0, text.projection.source.lowerBound > 0 {
-      return edge(text.projection.source.lowerBound, top: top, epoch: anchor.epoch, affinity: 0)
+      return edge(text.projection.source.lowerBound, top: top, from: anchor, affinity: 0)
     }
     if top + height > text.size.height, UInt64(text.projection.source.upperBound) < documentLength {
-      return edge(text.projection.source.upperBound, top: top, epoch: anchor.epoch, affinity: 1)
+      return edge(text.projection.source.upperBound, top: top, from: anchor, affinity: 1)
     }
     return nil
   }
@@ -49,34 +64,57 @@ public struct ComposeViewport {
     guard let source = Int(exactly: position),
           let caret = text.caret(for: source, affinity: affinity == 1 ? .upstream : .downstream) else {
       guard position <= documentLength else { return nil }
-      return .with { $0.position = position; $0.affinity = affinity; $0.epoch = anchor.epoch }
+      var result = anchor; result.position = position; result.affinity = affinity; result.offset = 0
+      return result
     }
-    let top = displayedTop(anchor)
-    if caret.minY < top { return anchored(at: caret.minY, epoch: anchor.epoch) }
-    if caret.maxY > top + height {
-      return anchored(at: min(caret.minY, caret.maxY - height), epoch: anchor.epoch)
-    }
-    return nil
+    return revealing(caret: caret, from: anchor)
   }
 
-  private func anchored(at requested: CGFloat, epoch: UInt64) -> WireComposeViewport? {
+  /// The provisional IME caret is measured in the same layout coordinates as
+  /// committed text. Revealing it does not invent a source edit or move Fresh's cursor.
+  public func revealing(caret: CGRect, from anchor: WireComposeViewport) -> WireComposeViewport? {
+    guard !caret.isNull, [caret.minX, caret.maxX, caret.minY, caret.maxY].allSatisfy(\.isFinite) else { return nil }
+    let top = displayedTop(anchor)
+    var result = anchor, changed = false
+    if caret.minY < top {
+      guard let next = anchored(at: caret.minY, from: anchor) else { return nil }
+      result = next; changed = true
+    }
+    if caret.maxY > top + height {
+      guard let next = anchored(at: min(caret.minY, caret.maxY - height), from: anchor) else { return nil }
+      result = next; changed = true
+    }
+    let left = displayedLeft(anchor)
+    if caret.minX + leading < left {
+      result.horizontalOffset = Double(limitedHorizontal(caret.minX + leading)); changed = true
+    } else if caret.maxX + leading > left + width {
+      result.horizontalOffset = Double(limitedHorizontal(caret.maxX + leading - width)); changed = true
+    }
+    return changed ? result : nil
+  }
+
+  private func limitedHorizontal(_ requested: CGFloat) -> CGFloat {
+    min(100_000_000, max(0, text.size.width + leading - width), max(0, requested.isFinite ? requested : 0))
+  }
+
+  private func anchored(at requested: CGFloat, from anchor: WireComposeViewport) -> WireComposeViewport? {
     var top = requested
     if text.projection.source.lowerBound == 0 { top = max(0, top) }
     if UInt64(text.projection.source.upperBound) == documentLength { top = min(top, max(0, text.size.height - height)) }
-    if top < 0 { return edge(text.projection.source.lowerBound, top: top, epoch: epoch, affinity: 0) }
-    if top >= text.size.height { return edge(text.projection.source.upperBound, top: top, epoch: epoch, affinity: 1) }
+    if top < 0 { return edge(text.projection.source.lowerBound, top: top, from: anchor, affinity: 0) }
+    if top >= text.size.height { return edge(text.projection.source.upperBound, top: top, from: anchor, affinity: 1) }
     guard let hit = text.hit(at: CGPoint(x: 0, y: top)),
           let caret = text.caret(for: hit.source, affinity: hit.affinity) else { return nil }
     return .with {
       $0.position = UInt64(hit.source); $0.affinity = hit.affinity == .upstream ? 1 : 0
-      $0.offset = Double(caret.minY - top); $0.epoch = epoch
+      $0.offset = Double(caret.minY - top); $0.epoch = anchor.epoch; $0.horizontalOffset = anchor.horizontalOffset
     }
   }
 
-  private func edge(_ position: Int, top: CGFloat, epoch: UInt64, affinity: UInt32) -> WireComposeViewport? {
+  private func edge(_ position: Int, top: CGFloat, from anchor: WireComposeViewport, affinity: UInt32) -> WireComposeViewport? {
     guard let caret = text.caret(for: position, affinity: affinity == 1 ? .upstream : .downstream) else { return nil }
     let offset = Double(caret.minY - top)
     guard offset.isFinite, abs(offset) <= 100_000 else { return nil }
-    return .with { $0.position = UInt64(position); $0.affinity = affinity; $0.offset = offset; $0.epoch = epoch }
+    return .with { $0.position = UInt64(position); $0.affinity = affinity; $0.offset = offset; $0.epoch = anchor.epoch; $0.horizontalOffset = anchor.horizontalOffset }
   }
 }

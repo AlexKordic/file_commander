@@ -484,7 +484,13 @@ final class NativeEditor: NSObject, CellGridDelegate {
 
   private func revealComposeCaret(_ pane: ComposePresentation) {
     guard pane.pane.compose.hasViewport, let cursor = pane.cursor else { return }
-    if let next = pane.scrolling.revealing(cursor.position, affinity: pane.cursorAffinity, from: pane.viewport) {
+    let next: WireComposeViewport?
+    if let rect = pane.caret {
+      next = pane.scrolling.revealing(caret: rect.offsetBy(dx: -pane.origin.x, dy: -pane.origin.y), from: pane.viewport)
+    } else {
+      next = pane.scrolling.revealing(cursor.position, affinity: pane.cursorAffinity, from: pane.viewport)
+    }
+    if let next {
       composeViewports.move(scope: pane.scope, from: pane.viewport, to: next, user: false)
     }
   }
@@ -519,9 +525,15 @@ final class NativeEditor: NSObject, CellGridDelegate {
     enqueueCompose(.pointer(pointer), target: pane)
   }
 
-  func grid(_ grid: CellGridView, scroll delta: CGFloat, in pane: ComposePresentation) {
-    guard receivedHello, let next = pane.scrolling.moved(pane.viewport, by: delta, fallback: pane.bounds.minY + 12 - pane.origin.y) else { return }
+  func grid(_ grid: CellGridView, scroll delta: CGPoint, in pane: ComposePresentation) {
+    guard receivedHello, let next = pane.scrolling.moved(pane.viewport, by: delta.y, horizontally: delta.x,
+      fallback: pane.bounds.minY + 12 - pane.origin.y) else { return }
     composeViewports.move(scope: pane.scope, from: pane.viewport, to: next, user: true)
+  }
+
+  func grid(_ grid: CellGridView, revealCaretIn pane: ComposePresentation) {
+    guard receivedHello else { return }
+    revealComposeCaret(pane)
   }
 
   func gridDidResize(_ grid: CellGridView, columns: Int, rows: Int) {

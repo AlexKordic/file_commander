@@ -556,7 +556,14 @@ public final class ComposeTextLayout {
       return Table(source: table.run.table.source, rect: CGRect(x: table.indent, y: first.rect.minY,
         width: table.width, height: last.rect.maxY - first.rect.minY), columns: table.columns, rows: placedRows[index])
     }
-    self.size = CGSize(width: max(width, self.tables.map(\.rect.maxX).max() ?? width), height: top)
+    // A complete grapheme can exceed a narrow measure. Its real shaped
+    // advance/ink and caret must remain reachable by horizontal scrolling.
+    let right = lines.map { fragment in
+      fragment.rect.minX + max(CGFloat(CTLineGetTypographicBounds(fragment.line, nil, nil, nil)),
+        CTLineGetBoundsWithOptions(fragment.line, .useGlyphPathBounds).maxX)
+    }.max() ?? width
+    self.size = CGSize(width: max(width, right + 1, self.tables.map(\.rect.maxX).max() ?? width,
+      placed.map(\.rect.maxX).max() ?? width), height: top)
     self.utf16ToByte = utf16ToByte
     self.byteToUTF16 = byteToUTF16
     self.string = string
