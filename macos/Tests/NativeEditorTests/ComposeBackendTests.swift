@@ -120,6 +120,49 @@ private final class ComposeBackend {
 
 final class ComposeBackendTests: XCTestCase {
   @MainActor
+  func testAccessibilitySourceSelectionsAndImmediateTypingPreserveMarkdownAndOneUndoHistory() async throws {
+    let backend = try backend(); defer { backend.captureDiagnostics("accessibility-source-actions"); backend.stop() }
+    let pasteboard = BackendPasteboard(), editor = editor(pasteboard); defer { editor.detachAll() }
+    let original = "# Accessibility\r\n\r\nalpha **café** and 👩🏽‍💻 omega.\r\n\r\n"
+      + "![mark](missing.png)\r\n\r\n| Key | Value |\r\n| --- | --- |\r\n| one | two |\r\n\r\nend\r\n"
+    let file = backend.root.appendingPathComponent("accessible.md")
+    try Data(original.utf8).write(to: file)
+    try await attach(backend, file: file, editor: editor)
+    let grid = try XCTUnwrap(editor.grid)
+    try await eventually(editor, "source selection capability") { editor.store.composeSourceSelections && grid.focusedCompose?.pane.compose.editable == true }
+    let display = try XCTUnwrap(grid.accessibilityValue() as? String) as NSString
+    grid.setAccessibilitySelectedTextRanges([NSValue(range: display.range(of: "👩🏽‍💻")), NSValue(range: display.range(of: "café"))])
+    grid.insertText("X", replacementRange: NSRange(location: NSNotFound, length: 0))
+    editor.send(.action(name: "save", argsJson: ""))
+    let expected = original.replacingOccurrences(of: "café", with: "X").replacingOccurrences(of: "👩🏽‍💻", with: "X")
+    try await eventually(editor, "immediate text at both source selections") { (try? Data(contentsOf: file)) == Data(expected.utf8) }
+    editor.send(.action(name: "undo", argsJson: "")); editor.send(.action(name: "save", argsJson: ""))
+    try await eventually(editor, "one undo restores both selections' exact CRLF Markdown") { (try? Data(contentsOf: file)) == Data(original.utf8) }
+    let current = try XCTUnwrap(grid.accessibilityValue() as? String) as NSString
+    grid.setAccessibilitySelectedTextRange(current.range(of: "alpha"))
+    grid.setAccessibilitySelectedText("ALPHA")
+    editor.send(.action(name: "save", argsJson: ""))
+    try await eventually(editor, "AXSelectedText replaces the confirmed primary range") {
+      (try? Data(contentsOf: file)) == Data(original.replacingOccurrences(of: "alpha", with: "ALPHA").utf8)
+    }
+    editor.send(.action(name: "undo", argsJson: "")); editor.send(.action(name: "save", argsJson: ""))
+    try await eventually(editor, "AX replacement has the same Fresh undo history") { (try? Data(contentsOf: file)) == Data(original.utf8) }
+    try await eventually(editor, "rendered image exposes one AX object character") {
+      (grid.accessibilityValue() as? String)?.contains("\u{fffc}") == true
+    }
+    let image = (try XCTUnwrap(grid.accessibilityValue() as? String) as NSString).range(of: "\u{fffc}")
+    grid.setAccessibilitySelectedTextRange(image)
+    grid.setAccessibilitySelectedText("")
+    editor.send(.action(name: "save", argsJson: ""))
+    try await eventually(editor, "AX object deletion removes only its exact image source") {
+      (try? Data(contentsOf: file)) == Data(original.replacingOccurrences(of: "![mark](missing.png)", with: "").utf8)
+    }
+    editor.send(.action(name: "undo", argsJson: "")); editor.send(.action(name: "save", argsJson: ""))
+    try await eventually(editor, "image AX deletion undoes to exact original Markdown") { (try? Data(contentsOf: file)) == Data(original.utf8) }
+    XCTAssertNil(pasteboard.editorText)
+  }
+
+  @MainActor
   func testParsedLinkDestinationsFollowGlyphsAndSourceEditsThroughSaveAndUndo() async throws {
     let backend = try backend(); defer { backend.captureDiagnostics("link-targets"); backend.stop() }
     let editor = editor(BackendPasteboard()); defer { editor.detachAll() }

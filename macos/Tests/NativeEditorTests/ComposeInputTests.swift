@@ -36,7 +36,7 @@ private final class ScenePeer: @unchecked Sendable {
   var lastApplied: UInt64 { lock.lock(); defer { lock.unlock() }; return applied }
 
   init(pane: WirePane, version: UInt32 = SceneWire.version, regionProbes: Bool = true, nativePopups: Bool = true,
-       greeting: Greeting = .normal) throws {
+       sourceSelections: Bool = true, greeting: Greeting = .normal) throws {
     try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
     listener = Darwin.socket(AF_UNIX, SOCK_STREAM, 0)
     var started = false
@@ -72,6 +72,7 @@ private final class ScenePeer: @unchecked Sendable {
           if greeting == .frame { send(.frame, self.frame(pane: pane)) }
           let hello = WireServerHello.with {
             $0.version = version; $0.composeRegionProbes = regionProbes; $0.nativePopupProjection = nativePopups; $0.scene = self.frame(pane: pane)
+            $0.composeSourceSelections = sourceSelections
           }
           send(.serverHello, hello)
           if greeting == .duplicate { send(.serverHello, hello) }
@@ -180,6 +181,201 @@ private final class ScenePeer: @unchecked Sendable {
 }
 
 final class ComposeInputTests: XCTestCase {
+  @MainActor
+  func testOrdinaryKeysAndSaveKeepTheirNormalQueuePathAfterAccessibilitySelection() async throws {
+    var scene = pane("alpha beta"); scene.compose.editable = true
+    let peer = try ScenePeer(pane: scene); defer { peer.close() }
+    let editor = richEditor(); defer { editor.detachAll() }
+    editor.attach(socketPath: peer.path, app: nil)
+    try await eventually { editor.grid?.focusedCompose != nil }
+    let grid = try XCTUnwrap(editor.grid)
+    grid.setAccessibilitySelectedTextRange(NSRange(location: 0, length: 5))
+    editor.send(.key(.with { $0.key = "ArrowRight" }))
+    editor.send(.action(name: "save", argsJson: ""))
+    try await eventually { peer.inputs.count == 1 }
+    scene.compose.cursors[0].position = 5; scene.compose.cursors[0].anchor = 0
+    let result = WireComposeEditReceipt.with { $0.window = 1; $0.leaf = 2; $0.buffer = 3; $0.epoch = 7; $0.pane = scene.compose }
+    peer.reply(.with { $0.id = 1; $0.accepted = true; $0.result = result }, pane: scene)
+    try await eventually { peer.inputs.count == 2 }
+    XCTAssertEqual(UInt64(peer.inputs[1].kind), SceneWire.Kind.key.rawValue)
+    XCTAssertEqual(try WireKey(serializedBytes: peer.inputs[1].payload).key, "ArrowRight")
+    peer.reply(.with { $0.id = 2; $0.accepted = true }, pane: scene)
+    try await eventually { peer.inputs.count == 3 }
+    XCTAssertEqual(UInt64(peer.inputs[2].kind), SceneWire.Kind.action.rawValue)
+  }
+
+  @MainActor
+  func testAccessibilitySelectionDefersBehindModalWithoutRetryingOrRedirectingItsDependentText() async throws {
+    for retire in [false, true] {
+      var scene = pane("alpha beta"); scene.compose.editable = true
+      let peer = try ScenePeer(pane: scene); defer { peer.close() }
+      let editor = richEditor(); defer { editor.detachAll() }
+      editor.attach(socketPath: peer.path, app: nil)
+      try await eventually { editor.grid?.focusedCompose != nil }
+      let grid = try XCTUnwrap(editor.grid)
+      grid.setAccessibilitySelectedTextRange(NSRange(location: 0, length: 5))
+      grid.setAccessibilitySelectedText("ALPHA")
+      try await eventually { peer.inputs.count == 1 }
+      var modal = scene; modal.compose.keyboard = false
+      peer.reply(.with { $0.id = 1; $0.needsLayout = true }, pane: modal)
+      for _ in 0..<5 { peer.show(modal) }
+      let stopped = peer.lastApplied
+      try await eventually { peer.lastApplied >= max(stopped, 7) }
+      XCTAssertEqual(peer.inputs.count, 1, "healthy modal frames must not trigger selection retries")
+      if retire { scene.compose.viewport.epoch = 8 }
+      peer.show(scene)
+      try await eventually { peer.inputs.count == 2 }
+      XCTAssertEqual(peer.inputs[1].id, 1)
+      XCTAssertEqual(peer.inputs[1].cancel, retire)
+      if retire {
+        let sequence = peer.reply(.with { $0.id = 1; $0.cancelled = true; $0.error = "The source view was replaced" }, pane: scene)
+        try await eventually { peer.lastApplied >= sequence }
+        XCTAssertEqual(peer.inputs.count, 2); XCTAssertEqual(editor.uninsertedText, ["ALPHA"])
+      } else {
+        scene.compose.cursors[0].position = 5; scene.compose.cursors[0].anchor = 0
+        let result = WireComposeEditReceipt.with { $0.window = 1; $0.leaf = 2; $0.buffer = 3; $0.epoch = 7; $0.pane = scene.compose }
+        peer.reply(.with { $0.id = 1; $0.accepted = true; $0.result = result }, pane: scene)
+        try await eventually { peer.inputs.count == 3 }
+        XCTAssertEqual(peer.inputs[2].replacementStart, 0); XCTAssertEqual(peer.inputs[2].replacementEnd, 5)
+        XCTAssertEqual(try WirePaste(serializedBytes: peer.inputs[2].payload).text, "ALPHA")
+      }
+    }
+  }
+
+  @MainActor
+  func testAccessibilityEditsCannotReplaceACroppedSelectionOrInterruptMarkedText() async throws {
+    var scene = pane("visible"); scene.compose.editable = true; scene.compose.documentLen = 100
+    scene.compose.cursors[0].position = 80; scene.compose.cursors[0].anchor = 0
+    let peer = try ScenePeer(pane: scene); defer { peer.close() }
+    let editor = richEditor(); defer { editor.detachAll() }
+    editor.attach(socketPath: peer.path, app: nil)
+    try await eventually { editor.grid?.focusedCompose != nil }
+    let grid = try XCTUnwrap(editor.grid)
+    XCTAssertFalse(grid.isAccessibilitySelectorAllowed(#selector(grid.setAccessibilitySelectedText(_:))))
+    grid.setAccessibilitySelectedText("must not edit only the visible part")
+    XCTAssertTrue(peer.inputs.isEmpty)
+    scene = pane("alpha café"); scene.compose.editable = true
+    peer.show(scene)
+    try await eventually { grid.focusedCompose?.pane.compose.documentLen == UInt64(scene.compose.text.utf8.count) }
+    grid.setMarkedText("中", selectedRange: NSRange(location: 1, length: 0), replacementRange: NSRange(location: NSNotFound, length: 0))
+    XCTAssertTrue(grid.hasMarkedText())
+    XCTAssertFalse(grid.isAccessibilitySelectorAllowed(#selector(grid.setAccessibilitySelectedTextRange(_:))))
+    grid.setAccessibilitySelectedTextRange(NSRange(location: 0, length: 1))
+    XCTAssertTrue(grid.hasMarkedText()); XCTAssertTrue(peer.inputs.isEmpty)
+  }
+
+  @MainActor
+  func testAccessibilitySelectionSettersRequireCapabilityAndValidateWholeDisplayedRanges() async throws {
+    for supported in [false, true] {
+      var scene = pane("alpha café 👩🏽‍💻 omega")
+      scene.compose.editable = false
+      let peer = try ScenePeer(pane: scene, sourceSelections: supported); defer { peer.close() }
+      let editor = richEditor(); defer { editor.detachAll() }
+      editor.attach(socketPath: peer.path, app: nil)
+      try await eventually { editor.grid?.focusedCompose != nil }
+      let grid = try XCTUnwrap(editor.grid)
+      XCTAssertEqual(grid.isAccessibilitySelectorAllowed(#selector(grid.setAccessibilitySelectedTextRange(_:))), supported)
+      XCTAssertFalse(grid.isAccessibilitySelectorAllowed(#selector(grid.setAccessibilitySelectedText(_:))), "read-only source still permits selection")
+      XCTAssertFalse(grid.isAccessibilitySelectorAllowed(#selector(grid.setAccessibilityValue(_:))), "a displayed crop is never a whole-source replacement")
+      for range in [NSRange(location: NSNotFound, length: 0), NSRange(location: 999, length: 0),
+                    NSRange(location: 1, length: Int.max), NSRange(location: 12, length: 0)] {
+        grid.setAccessibilitySelectedTextRange(range) // UTF-16 12 splits the first emoji surrogate pair.
+      }
+      grid.setAccessibilitySelectedTextRanges([NSValue(point: .zero)])
+      grid.setAccessibilitySelectedTextRanges([NSValue(range: NSRange(location: 0, length: 5)), NSValue(range: NSRange(location: 2, length: 4))])
+      grid.setAccessibilitySelectedText("forbidden")
+      XCTAssertTrue(peer.inputs.isEmpty)
+      grid.setAccessibilitySelectedTextRange(NSRange(location: 0, length: 5))
+      if supported {
+        try await eventually { peer.inputs.count == 1 }
+        XCTAssertEqual(peer.inputs[0].selectionTargets[0].position, 5)
+        XCTAssertEqual(grid.accessibilitySelectedText(), "alpha")
+        scene.compose.editable = true; scene.compose.bufferRevision += 1
+        peer.show(scene)
+        try await eventually { grid.focusedCompose?.pane.compose.bufferRevision == scene.compose.bufferRevision }
+        XCTAssertFalse(grid.isAccessibilitySelectorAllowed(#selector(grid.setAccessibilitySelectedText(_:))),
+          "a changed source cannot supply a different selection while the requested one is unconfirmed")
+        grid.setAccessibilitySelectedText("must not redirect to another range")
+        XCTAssertEqual(peer.inputs.count, 1)
+      } else { XCTAssertTrue(peer.inputs.isEmpty) }
+    }
+  }
+
+  @MainActor
+  func testAccessibilitySelectionAndFollowingReplacementWaitForOneConfirmedOwner() async throws {
+    for accept in [false, true] {
+      var scene = pane("alpha café 👩🏽‍💻 omega"); scene.compose.editable = true
+      let peer = try ScenePeer(pane: scene); defer { peer.close() }
+      let pasteboard = MemoryPasteboard(), editor = richEditor(pasteboard: pasteboard); defer { editor.detachAll() }
+      editor.attach(socketPath: peer.path, app: nil)
+      try await eventually { editor.grid?.focusedCompose != nil }
+      let grid = try XCTUnwrap(editor.grid)
+      grid.setAccessibilitySelectedTextRanges([NSValue(range: NSRange(location: 6, length: 4)), NSValue(range: NSRange(location: 0, length: 5))])
+      try await eventually { peer.inputs.count == 1 }
+      XCTAssertEqual(peer.inputs[0].selectionTargets.map(\.position), [11, 5], "wire endpoints are UTF-8 source, not displayed UTF-16")
+      XCTAssertEqual(grid.accessibilitySelectedText(), "café")
+      XCTAssertEqual(grid.accessibilitySelectedTextRanges()?.map(\.rangeValue), [NSRange(location: 6, length: 4), NSRange(location: 0, length: 5)])
+      grid.setAccessibilitySelectedText("新しい")
+      XCTAssertEqual(peer.inputs.count, 1, "dependent text waits for the selection result")
+      scene.compose.cursors = [.with { $0.id = 1; $0.primary = true; $0.position = 11; $0.anchor = 6; $0.utf16Position = 10; $0.utf16Anchor = 6 },
+        .with { $0.id = 451; $0.position = 5; $0.anchor = 0; $0.utf16Position = 5; $0.utf16Anchor = 0 }]
+      scene.compose.textContext.selectionStart = 6; scene.compose.textContext.selectionEnd = 10
+      let result = WireComposeEditReceipt.with { $0.window = 1; $0.leaf = 2; $0.buffer = 3; $0.epoch = 7; $0.pane = scene.compose }
+      let sequence = peer.reply(.with {
+        $0.id = 1
+        if accept { $0.accepted = true; $0.result = result }
+        else { $0.cancelled = true; $0.error = "The selected source changed" }
+      }, pane: scene)
+      try await eventually { peer.lastApplied >= sequence }
+      if accept {
+        try await eventually { peer.inputs.count == 2 }
+        XCTAssertEqual(peer.inputs[1].replacementStart, 6); XCTAssertEqual(peer.inputs[1].replacementEnd, 11)
+        XCTAssertEqual(peer.inputs[1].replacementCursor, 1); XCTAssertTrue(peer.inputs[1].replacements.isEmpty, "AXSelectedText replaces the primary selection")
+        XCTAssertEqual(try WirePaste(serializedBytes: peer.inputs[1].payload).text, "新しい")
+      } else {
+        XCTAssertEqual(peer.inputs.count, 1); XCTAssertEqual(editor.uninsertedText, ["新しい"])
+      }
+      XCTAssertNil(pasteboard.editorText)
+    }
+  }
+
+  @MainActor
+  func testTypingAfterAccessibilitySelectionOutsideRawContextUsesRealReceiptCursorIdsOrRecovers() async throws {
+    for outcome in ["accepted", "cancelled", "disconnect"] {
+      var scene = pane(String(repeating: "text ", count: 400)); scene.compose.editable = true
+      scene.compose.textContext.text = "text text text "
+      let peer = try ScenePeer(pane: scene); defer { peer.close() }
+      let editor = richEditor(); defer { editor.detachAll() }
+      editor.attach(socketPath: peer.path, app: nil)
+      try await eventually { editor.grid?.focusedCompose != nil }
+      let grid = try XCTUnwrap(editor.grid)
+      grid.setAccessibilitySelectedTextRanges([NSValue(range: NSRange(location: 800, length: 5)), NSValue(range: NSRange(location: 0, length: 5))])
+      try await eventually { peer.inputs.count == 1 }
+      grid.insertText("日本語", replacementRange: NSRange(location: NSNotFound, length: 0))
+      XCTAssertEqual(peer.inputs.count, 1)
+      if outcome == "disconnect" {
+        editor.detachAll(); XCTAssertEqual(editor.uninsertedText, ["日本語"]); continue
+      }
+      scene.compose.cursors = [.with { $0.id = 1; $0.primary = true; $0.position = 805; $0.anchor = 800 },
+        .with { $0.id = 424; $0.position = 5; $0.anchor = 0 }]
+      let result = WireComposeEditReceipt.with { $0.window = 1; $0.leaf = 2; $0.buffer = 3; $0.epoch = 7; $0.pane = scene.compose }
+      let sequence = peer.reply(.with {
+        $0.id = 1
+        if outcome == "accepted" { $0.accepted = true; $0.result = result }
+        else { $0.cancelled = true; $0.error = "Selection changed" }
+      }, pane: scene)
+      try await eventually { peer.lastApplied >= sequence }
+      if outcome == "accepted" {
+        try await eventually { peer.inputs.count == 2 }
+        let next = peer.inputs[1]
+        XCTAssertEqual(next.replacementStart, 800); XCTAssertEqual(next.replacementEnd, 805)
+        XCTAssertEqual(next.replacements.map(\.cursor), [424], "temporary preview IDs never edit source")
+        XCTAssertEqual(next.replacements[0].start, 0); XCTAssertEqual(next.replacements[0].end, 5)
+        XCTAssertEqual(try WirePaste(serializedBytes: next.payload).text, "日本語")
+      } else { XCTAssertEqual(peer.inputs.count, 1); XCTAssertEqual(editor.uninsertedText, ["日本語"]) }
+    }
+  }
+
   @MainActor
   func testLinkTooltipsUseMeasuredUnicodeGlyphsAndCurrentSourceMetadataWithoutDispatchingInput() async throws {
     let source = "Plain café 👩🏽‍💻 שלום and a long wrapped label across several fragments."

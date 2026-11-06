@@ -37,6 +37,29 @@ public struct ComposeReplacement {
     }
   }
 
+  /// After an acknowledged selection action, exact source endpoints and real
+  /// Fresh IDs suffice even when its selected text exceeds native raw context.
+  public init?(scope: WireComposeScope, epoch: UInt64, pane: WireComposePane, text: String) {
+    guard scope.bufferRevision == pane.bufferRevision, pane.cursors.filter(\.primary).count == 1,
+          let primary = pane.cursors.first(where: \.primary), pane.cursors.count <= 1024,
+          Set(pane.cursors.map(\.id)).count == pane.cursors.count else { return nil }
+    func source(_ cursor: WireComposeSelection) -> Range<Int>? {
+      let other = cursor.hasAnchor ? cursor.anchor : cursor.position
+      guard let start = Int(exactly: min(cursor.position, other)),
+            let end = Int(exactly: max(cursor.position, other)), UInt64(end) <= pane.documentLen else { return nil }
+      return start..<end
+    }
+    guard let range = source(primary), let value = Self(scope: scope, epoch: epoch, source: range, cursor: primary.id, text: text) else { return nil }
+    var input = value.captured
+    for cursor in pane.cursors where cursor.id != primary.id {
+      guard let range = source(cursor) else { return nil }
+      input.replacements.append(.with {
+        $0.start = UInt64(range.lowerBound); $0.end = UInt64(range.upperBound); $0.cursor = cursor.id
+      })
+    }
+    captured = input
+  }
+
   public func input(id: UInt64) -> WireComposeInput {
     var value = captured; value.id = id; return value
   }

@@ -16,6 +16,7 @@
   "FreshKitTests.ComposePointerTests",
   "FreshKitTests.ComposePopupPlacementTests",
   "FreshKitTests.ComposeShapingTests",
+  "FreshKitTests.ComposeSelectionChangeTests",
   "FreshKitTests.ComposeTableLayoutTests",
   "FreshKitTests.ComposeTableMeasurementTests",
   "FreshKitTests.ComposeTableModelTests",

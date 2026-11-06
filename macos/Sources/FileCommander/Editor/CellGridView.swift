@@ -17,6 +17,8 @@ protocol CellGridDelegate: AnyObject {
   func grid(_ grid: CellGridView, scroll delta: CGPoint, in pane: ComposePresentation)
   func grid(_ grid: CellGridView, revealCaretIn pane: ComposePresentation)
   func grid(_ grid: CellGridView, replace text: String, range: NSRange, in pane: ComposePresentation)
+  func grid(_ grid: CellGridView, select ranges: [Range<Int>], in pane: ComposePresentation)
+  func grid(_ grid: CellGridView, replaceSource range: Range<Int>, with text: String, in pane: ComposePresentation)
   func grid(_ grid: CellGridView, pendingTextFor pane: WirePane) -> ComposePendingPreview?
   func grid(_ grid: CellGridView, commit text: ComposePendingText, initial: ComposePendingText,
             after: UUID?, afterAction: Bool, virtualPrefix: ComposeVirtualSelections?, in pane: ComposePresentation)
@@ -34,6 +36,8 @@ struct ComposePendingPreview {
   var selection: ComposePointer.Preview? = nil
   var virtualSelection: ComposeVirtualSelections? = nil
   var virtualPrefix: ComposeVirtualSelections? = nil
+  var selectionGroup: WireComposePane? = nil
+  var sourceSelection = false
 }
 
 /// Draws Fresh's frame as cells, the way its terminal interface does, and turns
@@ -294,6 +298,9 @@ final class CellGridView: NSView, @preconcurrency NSTextInputClient {
     var pane = input
     let pending = includePending ? delegate?.grid(self, pendingTextFor: input) : nil
     let selection = pending?.selection
+    if let group = pending?.selectionGroup {
+      pane.compose.cursors = group.cursors; pane.compose.textContext = group.textContext
+    }
     if let selection, let cursor = selection.pane.cursors.first(where: { $0.id == selection.caret.id }),
        let index = pane.compose.cursors.firstIndex(where: { $0.id == cursor.id }) {
       pane.compose.cursors[index] = cursor
@@ -334,6 +341,8 @@ final class CellGridView: NSView, @preconcurrency NSTextInputClient {
       pane.content = input.content
       pane.compose.focused = input.compose.focused
       pane.compose.keyboard = input.compose.keyboard
+      if input.compose.hasEditable { pane.compose.editable = input.compose.editable }
+      else { pane.compose.clearEditable() }
     }
     let virtualSelection = composition == nil ? pending?.virtualSelection : nil
     let scope = WireComposeScope.with {
@@ -348,6 +357,7 @@ final class CellGridView: NSView, @preconcurrency NSTextInputClient {
     let viewport = pane.compose.hasViewport ? composeViewportController?.value(scope: scope, remote: pane.compose.viewport) ?? pane.compose.viewport : nil
     var caretStates = composeCaretIdentity == .init(window: UInt64(store.windowID), leaf: pane.leaf, buffer: pane.buffer)
       && composeCaretRevision == pane.compose.bufferRevision ? composeCarets : [:]
+    if pending?.selectionGroup != nil { caretStates = [:] }
     if let selection { caretStates[selection.caret.id] = selection.caret }
     return ComposePresentation(pane: pane, window: UInt64(store.windowID),
       cell: CGSize(width: cellWidth, height: cellHeight), body: bodyFont, monospace: monoFont,
@@ -355,7 +365,7 @@ final class CellGridView: NSView, @preconcurrency NSTextInputClient {
       reuse: reuse, sharingMeasurementsWith: peers ?? Array(composePanes.values),
       measuredBase: measuredBase,
       caretStates: caretStates, images: images, viewport: viewport, composition: preedit,
-      pendingSelection: selection != nil || virtualSelection != nil,
+      pendingSelection: selection != nil || virtualSelection != nil || pending?.selectionGroup != nil,
       virtualInsertion: virtualInsertion, virtualSelections: virtualSelection,
       environmentLike: reuse ?? composePanes[pane.leaf], geometryRevision: composeGeometryRevision)
   }
@@ -599,6 +609,61 @@ final class CellGridView: NSView, @preconcurrency NSTextInputClient {
   override func accessibilitySelectedText() -> String? { accessibilityString(for: accessibilitySelectedTextRange()) }
   override func accessibilityNumberOfCharacters() -> Int { (accessibilityValue() as? NSString)?.length ?? 0 }
 
+  private var accessibilitySelectionPane: ComposePresentation? {
+    guard delegate?.connected == true, store.composeSourceSelections,
+          let pane = focusedCompose, pane.layout.composition == nil,
+          pane.layout.virtualInsertion == nil, pane.virtualSelections == nil,
+          pane.pane.compose.hasViewport, pane.pane.compose.viewport.epoch != 0 else { return nil }
+    return pane
+  }
+
+  private var accessibilityReplacement: (pane: ComposePresentation, source: Range<Int>)? {
+    guard let pane = accessibilitySelectionPane, pane.pane.compose.editable, let cursor = pane.cursor,
+          let a = Int(exactly: cursor.position), let b = Int(exactly: cursor.hasAnchor ? cursor.anchor : cursor.position),
+          pane.selectedRange.location != NSNotFound else { return nil }
+    if let pending = delegate?.grid(self, pendingTextFor: pane.pane), pending.sourceSelection, pending.selectionGroup == nil { return nil }
+    let source = min(a, b)..<max(a, b)
+    guard source.lowerBound >= pane.layout.text.projection.source.lowerBound,
+          source.upperBound <= pane.layout.text.projection.source.upperBound else { return nil }
+    return (pane, source)
+  }
+
+  override func isAccessibilitySelectorAllowed(_ selector: Selector) -> Bool {
+    if selector == #selector(setAccessibilitySelectedTextRange(_:)) || selector == #selector(setAccessibilitySelectedTextRanges(_:)) {
+      return accessibilitySelectionPane != nil
+    }
+    if selector == #selector(setAccessibilitySelectedText(_:)) {
+      return accessibilityReplacement != nil
+    }
+    // AXValue is a displayed, potentially cropped projection. Treating it as
+    // the whole source would destroy hidden Markdown or offscreen content.
+    if selector == #selector(setAccessibilityValue(_:)), focusedCompose != nil { return false }
+    return super.isAccessibilitySelectorAllowed(selector)
+  }
+
+  override func setAccessibilitySelectedTextRange(_ range: NSRange) {
+    setAccessibilitySelectedTextRanges([NSValue(range: range)])
+  }
+
+  override func setAccessibilitySelectedTextRanges(_ ranges: [NSValue]?) {
+    guard let pane = accessibilitySelectionPane, let ranges, !ranges.isEmpty, ranges.count <= 1024 else { return }
+    let type = String(cString: NSValue(range: NSRange()).objCType)
+    var sources: [Range<Int>] = []
+    for value in ranges {
+      guard String(cString: value.objCType) == type,
+            let source = pane.layout.text.sourceRange(forUTF16: value.rangeValue,
+              insertion: pane.cursor.flatMap { Int(exactly: $0.position) }) else { return }
+      sources.append(source)
+    }
+    guard ComposeSelectionChange(scope: pane.scope, epoch: pane.pane.compose.viewport.epoch, ranges: sources) != nil else { return }
+    delegate?.grid(self, select: sources, in: pane)
+  }
+
+  override func setAccessibilitySelectedText(_ text: String?) {
+    guard let text, let target = accessibilityReplacement else { return }
+    delegate?.grid(self, replaceSource: target.source, with: text, in: target.pane)
+  }
+
   override func accessibilityString(for range: NSRange) -> String? {
     guard let text = accessibilityValue() as? NSString, range.location >= 0, range.location <= text.length,
           range.length >= 0, range.length <= text.length - range.location else { return nil }
@@ -835,6 +900,11 @@ final class CellGridView: NSView, @preconcurrency NSTextInputClient {
     }
     marked = ""
     if let pane = focusedCompose {
+      if replacementRange.location == NSNotFound,
+         delegate?.grid(self, pendingTextFor: pane.pane)?.sourceSelection == true {
+        if !text.isEmpty { delegate?.grid(self, send: .text(text)) }
+        setNeedsDisplayCaret(); return
+      }
       if replacementRange.location != NSNotFound || delegate?.grid(self, pendingTextFor: pane.pane) != nil {
         setMarkedText(text, selectedRange: NSRange(location: text.utf16.count, length: 0), replacementRange: replacementRange)
         finishComposition()

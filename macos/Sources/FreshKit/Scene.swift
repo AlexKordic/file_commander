@@ -171,6 +171,7 @@ public struct SceneMessage: @unchecked Sendable {
   /// Advertised by the initial hello; false for frames and older backends.
   public let composeRegionProbes: Bool
   public let nativePopupProjection: Bool
+  public let composeSourceSelections: Bool
   public let sequence: Int
   /// What changed (everything, for a hello).
   public let frame: WireFrame
@@ -200,6 +201,7 @@ public struct SceneMessage: @unchecked Sendable {
       protocolVersion = hello.version
       composeRegionProbes = hello.composeRegionProbes
       nativePopupProjection = hello.nativePopupProjection
+      composeSourceSelections = hello.composeSourceSelections
       frame = hello.scene
     case .frame:
       guard let decoded = try? WireFrame(serializedBytes: Array(payload)) else { return nil }
@@ -207,6 +209,7 @@ public struct SceneMessage: @unchecked Sendable {
       protocolVersion = nil
       composeRegionProbes = false
       nativePopupProjection = false
+      composeSourceSelections = false
       frame = decoded
     default:
       return nil
@@ -261,6 +264,7 @@ public final class SceneStore {
   @ObservationIgnored public private(set) var separators: [WireSeparator] = []
   @ObservationIgnored public private(set) var popups: [WireScenePopup] = []
   @ObservationIgnored public private(set) var nativePopupProjection = false
+  @ObservationIgnored public private(set) var composeSourceSelections = false
   @ObservationIgnored public private(set) var palette: WirePaletteView?
   @ObservationIgnored public private(set) var trustDialog: WireTrustDialogView?
   @ObservationIgnored public private(set) var contextMenu: WireContextMenuView?
@@ -276,7 +280,10 @@ public final class SceneStore {
 
   public func apply(_ message: SceneMessage, acceptedCompose: WireComposeEditReceipt? = nil) {
     let frame = message.frame
-    if message.isHello { composeAcceptances.removeAll(); nativePopupProjection = message.nativePopupProjection }
+    if message.isHello {
+      composeAcceptances.removeAll(); nativePopupProjection = message.nativePopupProjection
+      composeSourceSelections = message.composeSourceSelections
+    }
     let previousWindow = windowID
     var change = SceneChange()
     change.isHello = message.isHello

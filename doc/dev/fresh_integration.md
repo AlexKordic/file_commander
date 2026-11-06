@@ -963,9 +963,29 @@ source through the normal captured pointer queue; it does not copy or edit by
 itself. Source/buffer/authority/focus changes and disconnection invalidate the
 object's action ownership; a new connection cannot revive a retained old object.
 Value, selection, image-description and hierarchy changes post accessibility
-notifications. These are reading and image-selection contracts; direct
-accessibility text/selection setters, semantic heading/link navigation and
-interactive VoiceOver qualification remain unfinished.
+notifications.
+
+Development peers advertise `ServerHello.compose_source_selections` (field 5).
+The native accessibility selection setters map displayed UTF-16 ranges into
+absolute UTF-8 source targets (`ComposeInput.selection_targets`, field 22).
+Fresh validates the entire nonoverlapping group before changing any cursor,
+rebases unchanged ranges, keeps the primary identity and assigns secondary
+IDs. Selection itself does not edit source and remains available in read-only
+buffers. `ComposePane.editable` (optional field 26) separately enables the
+primary selected-text setter. An accepted action receipt supplies real cursor
+ownership for immediately following text, including text outside the current
+raw context. Cancellation, missing ownership and disconnect retain dependent
+text for explicit recovery. Deferred modal selections wait for keyboard focus
+without repeated retries; retired targets consume cancellation instead.
+
+Setter availability is explicit: older peers, active provisional composition
+and unavailable ownership disable these actions. An unconfirmed selection
+after a source change cannot redirect a selected-text replacement. Replacing
+only the displayed part of a larger selected range is refused. AXValue is
+not writable because it may be a cropped projection with concealed Markdown.
+Document-wide semantic heading/link navigation, accessibility actions across
+provisional composition, a complete document text model and interactive
+VoiceOver qualification remain unfinished.
 
 Native rich Compose keeps marked text as a provisional replacement over that
 immutable source snapshot. Partial updates, marked/selected subranges and
