@@ -4,14 +4,14 @@ import ImageIO
 @testable import FreshKit
 
 final class ComposeImageControllerTests: XCTestCase {
-  private func asset(_ width: Int = 16) throws -> ComposeImageAsset {
+  private func asset(_ width: Int = 16, maximumDimension: Int = 2048) throws -> ComposeImageAsset {
     let context = try XCTUnwrap(CGContext(data: nil, width: width, height: 16, bitsPerComponent: 8, bytesPerRow: width * 4,
       space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
     let data = NSMutableData()
     let destination = try XCTUnwrap(CGImageDestinationCreateWithData(data, "public.png" as CFString, 1, nil))
     CGImageDestinationAddImage(destination, try XCTUnwrap(context.makeImage()), nil)
     XCTAssertTrue(CGImageDestinationFinalize(destination))
-    return try ComposeImageAsset.decode(data as Data)
+    return try ComposeImageAsset.decode(data as Data, maximumDimension: maximumDimension)
   }
 
   private func demand(target: String = "x.png", authority: UInt64 = 5, revision: UInt64 = 4) -> ComposeImageController.Demand {
@@ -178,6 +178,31 @@ final class ComposeImageControllerTests: XCTestCase {
   }
 
   @MainActor
+  func testMemoryLimitedPreviewDoesNotReloadWhenNearbyDemandChanges() async throws {
+    let decoded = try asset(80)
+    var sent: [WireComposeAssetRequest] = [], time = 0.0
+    let controller = ComposeImageController(maximumCacheBytes: 0, now: { time }, decode: { _, _ in decoded }, send: { sent.append($0) })
+    defer { controller.reset() }
+    let original = demand()
+    controller.update([original]); controller.receive([complete(sent[0])])
+    try await eventually { controller.outstandingCount == 0 }
+    let expected = ComposeImageState.ready(decoded).size(body: 16, width: 300, block: true)
+    XCTAssertEqual(controller.state(scope: original.scope, image: original.image, authority: 5, document: 7).size(body: 16, width: 300, block: true), expected,
+      "evicting pixels must retain known image geometry")
+    time = 100
+    var neighbor = demand(target: "neighbor.png"); neighbor.image.start = 40; neighbor.image.end = 60
+    for _ in 0..<10 {
+      controller.update([neighbor, original]); controller.update([original, neighbor])
+    }
+    XCTAssertEqual(sent.filter { !$0.cancel && $0.start == original.image.start }.count, 1,
+      "viewport ordering and nearby images cannot restart an over-budget preview")
+    controller.update([], retainingDocuments: [original.documentIdentity])
+    controller.update([original], retainingDocuments: [original.documentIdentity])
+    XCTAssertEqual(sent.filter { !$0.cancel && $0.start == original.image.start }.count, 1,
+      "provisional formatting gaps cannot discard the memory-pressure decision")
+  }
+
+  @MainActor
   func testCacheEvictionIsBoundedAndDoesNotContinuouslyReloadVisibleImages() async throws {
     let decoded = try asset(), changed = expectation(description: "bounded cache result")
     var sent: [WireComposeAssetRequest] = []
@@ -189,10 +214,96 @@ final class ComposeImageControllerTests: XCTestCase {
     XCTAssertEqual(controller.decodedBytes, 0)
     controller.update([original])
     XCTAssertEqual(sent.count, 1, "eviction cannot create a read/decode/reflow loop")
-    if case .failed = controller.state(scope: original.scope, image: original.image, authority: 5, document: 7) {} else {
+    if case .deferred(let size) = controller.state(scope: original.scope, image: original.image, authority: 5, document: 7) {
+      XCTAssertEqual(size, decoded.originalSize)
+    } else {
       XCTFail("a bounded-cache fallback is missing")
     }
     controller.reset()
+  }
+
+  @MainActor
+  func testMemoryLimitedPreviewRetriesWhenOtherVisiblePixelsLeave() async throws {
+    let image = try asset()
+    var sent: [WireComposeAssetRequest] = [], time = 0.0
+    let controller = ComposeImageController(maximumCacheBytes: image.cost, now: { time }, decode: { _, _ in image }, send: { sent.append($0) })
+    defer { controller.reset() }
+    let first = demand(), second = demand(target: "second.png")
+    controller.update([first, second]); controller.receive(sent.map { complete($0) })
+    try await eventually { controller.outstandingCount == 0 }
+    XCTAssertTrue(controller.state(scope: first.scope, image: first.image, authority: 5, document: 7).asset === image)
+    XCTAssertNil(controller.state(scope: second.scope, image: second.image, authority: 5, document: 7).asset)
+    time = 6
+    controller.update([second])
+    XCTAssertEqual(sent.filter { !$0.cancel }.count, 3, "leaving the competing image frees capacity for the deferred one")
+    XCTAssertTrue(sent.last!.knownVersion.isEmpty)
+    XCTAssertTrue(sent.last!.knownDigest.isEmpty, "evicted pixels require bytes, not an unchanged response")
+    controller.receive([complete(sent.last!)])
+    try await eventually { controller.outstandingCount == 0 }
+    XCTAssertTrue(controller.state(scope: second.scope, image: second.image, authority: 5, document: 7).asset === image)
+    XCTAssertLessThanOrEqual(controller.decodedBytes, image.cost)
+  }
+
+  @MainActor
+  func testMemoryLimitedPreviewCanRetryASmallerThumbnailOrExplicitReload() async throws {
+    let large = try asset(80), small = try asset(80, maximumDimension: 16)
+    var sent: [WireComposeAssetRequest] = [], time = 0.0
+    let controller = ComposeImageController(maximumCacheBytes: small.cost, now: { time },
+      decode: { _, dimension in dimension <= 16 ? small : large }, send: { sent.append($0) })
+    defer { controller.reset() }
+    var wanted = demand()
+    controller.update([wanted]); controller.receive([complete(sent[0])])
+    try await eventually { controller.outstandingCount == 0 }
+    XCTAssertEqual(controller.decodedBytes, 0)
+    controller.reloadVisible()
+    XCTAssertEqual(sent.count, 2, "an explicit reload can retry the same resource under memory pressure")
+    controller.receive([complete(sent[1])])
+    try await eventually { controller.outstandingCount == 0 }
+    XCTAssertEqual(sent.count, 2, "an explicit reload does not start an automatic retry loop")
+    time = 6; wanted.maximumDimension = 16
+    controller.update([wanted])
+    XCTAssertEqual(sent.count, 3)
+    controller.receive([complete(sent[2])])
+    try await eventually { controller.outstandingCount == 0 }
+    XCTAssertTrue(controller.state(scope: wanted.scope, image: wanted.image, authority: 5, document: 7).asset === small)
+    XCTAssertEqual(small.originalSize, large.originalSize)
+    XCTAssertLessThanOrEqual(controller.decodedBytes, small.cost)
+  }
+
+  @MainActor
+  func testBitmapFreeMetadataStaysBoundedWithoutCyclingVisibleResources() async throws {
+    let image = try asset()
+    var sent: [WireComposeAssetRequest] = []
+    let controller = ComposeImageController(maximumCacheBytes: 0, decode: { _, _ in image }, send: { sent.append($0) })
+    defer { controller.reset() }
+    let wanted = (0..<160).map { demand(target: "\($0).png") }
+    controller.update(wanted)
+    var delivered = 0
+    while delivered < 128 {
+      let requests = Array(sent.dropFirst(delivered))
+      guard !requests.isEmpty else { return XCTFail("scheduler stopped before the metadata bound") }
+      delivered += requests.count
+      controller.receive(requests.map { complete($0) })
+      try await eventually { sent.count > delivered || controller.outstandingCount == 0 }
+      XCTAssertLessThanOrEqual(controller.cachedResourceCount, 128)
+      XCTAssertEqual(controller.decodedBytes, 0)
+    }
+    XCTAssertEqual(sent.count, 128)
+    XCTAssertEqual(controller.cachedResourceCount, 128)
+    for _ in 0..<10 { controller.update(Array(wanted.reversed())); controller.update(wanted) }
+    XCTAssertEqual(sent.count, 128, "visible metadata cannot evict its peers and cycle source reads")
+    let next = try XCTUnwrap(wanted.last)
+    guard case .deferred(let size) = controller.state(scope: next.scope, image: next.image, authority: 5, document: 7) else {
+      return XCTFail("an unadmitted resource needs an explained memory fallback")
+    }
+    XCTAssertNil(size, "an unread resource has no invented source geometry")
+    controller.update([next])
+    XCTAssertEqual(sent.count, 129, "a resource can start once the old metadata is offscreen")
+    controller.receive([complete(sent.last!)])
+    try await eventually { controller.outstandingCount == 0 }
+    XCTAssertEqual(controller.cachedResourceCount, 128)
+    controller.reset()
+    XCTAssertEqual(controller.cachedResourceCount, 0)
   }
 
   @MainActor

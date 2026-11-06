@@ -549,6 +549,16 @@ background-parser threshold while its first inline PNG decode is held, then
 checks native image geometry, exact save and one undo. These checks do not
 qualify a remote connection or an actual input method.
 
+Image-cache pressure checks preserve known geometry after evicting pixels,
+including inline/block selection, hit testing, caret placement and accessible
+explanations at narrow and wide measures. They vary nearby demands, ordering
+and provisional gaps without allowing repeated source reads; free competing
+capacity, request smaller thumbnails and explicitly reload to exercise
+recovery. A 160-resource fixture checks that bitmap-free metadata stays at
+128 entries without cycling visible resources, then admits a new resource
+once the old entries are offscreen. These are decoded-cache bounds, not total
+process-memory or interactive latency qualification.
+
 ## CI
 
 `.github/workflows/tests.yml` is the repository's only workflow. It runs on

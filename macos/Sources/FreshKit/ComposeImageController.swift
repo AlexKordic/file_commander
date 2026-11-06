@@ -44,6 +44,7 @@ public final class ComposeImageController {
     var version = Data(), digest = Data()
     var verified: TimeInterval = 0
     var attemptDimension = 0
+    var evictedCost: Int?
     var cost: Int { state.asset?.cost ?? 0 }
   }
 
@@ -61,7 +62,6 @@ public final class ComposeImageController {
   private var work: [UInt64: Work] = [:]
   private var decoding: [UUID: Decode] = [:]
   private var cache: [Key: Cached] = [:]
-  private var deferred: Set<Key> = []
   private var timer: Timer?
   private var pumping = false
   private var revalidationRequested = false
@@ -81,12 +81,14 @@ public final class ComposeImageController {
 
   public var outstandingCount: Int { work.count + decoding.count }
   public var decodedBytes: Int { cache.values.reduce(0) { $0 + $1.cost } }
+  var cachedResourceCount: Int { cache.count }
 
   deinit { timer?.invalidate() }
 
   public func state(scope: WireComposeScope, image: WireComposeImage, authority: UInt64, document: UInt64) -> ComposeImageState {
     let key = Key(window: scope.windowID, buffer: scope.buffer, authority: authority, document: document, target: image.target)
-    return cache[key]?.state ?? (deferred.contains(key) ? .failed("Preview memory limit reached") : .loading)
+    if let cached = cache[key] { return cached.state }
+    return cache.count >= 128 && demands.contains(where: { $0.key == key }) ? .deferred(originalSize: nil) : .loading
   }
 
   /// Order demands nearest the viewport first. Duplicate references share a
@@ -103,7 +105,6 @@ public final class ComposeImageController {
         indexes[demand.key] = unique.count; unique.append(demand)
       }
     }
-    if unique.map(\.key) != demands.map(\.key) { deferred.removeAll() }
     demands = unique
     revalidationRequested = revalidationRequested || revalidate
     if revalidationRequested && !demands.isEmpty {
@@ -170,7 +171,7 @@ public final class ComposeImageController {
   /// their slots until they finish, so repeated reconnects cannot queue an
   /// unbounded number of compressed images behind the two decode workers.
   public func reset() {
-    update([]); receiver.reset(); nextID = 0; cache.removeAll(); deferred.removeAll(); revalidationRequested = false
+    update([]); receiver.reset(); nextID = 0; cache.removeAll(); revalidationRequested = false
   }
 
   /// Explicit refresh bypasses the stat shortcut, retaining both the existing
@@ -181,8 +182,9 @@ public final class ComposeImageController {
     for demand in wanted {
       if cache[demand.key]?.state.asset == nil { cache[demand.key]?.digest = Data() }
       cache[demand.key]?.version = Data(); cache[demand.key]?.retry = 0
+      cache[demand.key]?.evictedCost = nil
     }
-    deferred.removeAll(); update(wanted); onChange?()
+    update(wanted); onChange?()
   }
 
   private func decoded(_ token: UUID, result: Result<ComposeImageAsset, Error>) {
@@ -191,16 +193,20 @@ public final class ComposeImageController {
       var notify = true
       switch result {
       case .success(let asset):
-        cache[pending.demand.key] = .init(state: .ready(asset), dimension: pending.demand.maximumDimension, used: clock,
-          retry: now() + refreshInterval, version: pending.version, digest: pending.digest, verified: now())
+        if makeRoom(for: pending.demand.key) {
+          cache[pending.demand.key] = .init(state: .ready(asset), dimension: pending.demand.maximumDimension, used: clock,
+            retry: now() + refreshInterval, version: pending.version, digest: pending.digest, verified: now())
+        }
       case .failure(let error):
         let permanent: Bool
         if let error = error as? ComposeImageAsset.Failure {
           switch error { case .invalid, .unsupported, .dimensions: permanent = true; case .decode: permanent = false }
         } else { permanent = false }
         if permanent {
-          cache[pending.demand.key] = .init(state: .failed(error.localizedDescription), dimension: pending.demand.maximumDimension, used: clock,
-            retry: now() + refreshInterval, version: pending.version, digest: pending.digest, verified: now())
+          if makeRoom(for: pending.demand.key) {
+            cache[pending.demand.key] = .init(state: .failed(error.localizedDescription), dimension: pending.demand.maximumDimension, used: clock,
+              retry: now() + refreshInterval, version: pending.version, digest: pending.digest, verified: now())
+          }
         } else { failed(pending.demand, message: error.localizedDescription, retryable: true); notify = false }
       }
       trimCache()
@@ -214,20 +220,25 @@ public final class ComposeImageController {
     pumping = true
     defer { pumping = false; updateTimer() }
     let now = self.now()
-    for demand in demands {
-      if deferred.contains(demand.key) { continue }
+    // First service new resources and normal validation. A memory-limited
+    // preview can retry only after that work settles, using known byte costs.
+    let ordered = demands.filter { cache[$0.key]?.evictedCost == nil }
+      + demands.filter { cache[$0.key]?.evictedCost != nil }
+    for demand in ordered {
       if work.values.contains(where: { $0.demand.key == demand.key }) || decoding.values.contains(where: { !$0.cancelled && $0.demand.key == demand.key }) { continue }
       if let cached = cache[demand.key] {
+        if cached.evictedCost != nil && (outstandingCount != 0 || !canReadmit(demand, cached: cached)) { continue }
         if cached.state.asset == nil || cached.dimension >= demand.maximumDimension || cached.attemptDimension >= demand.maximumDimension {
           if now < cached.retry { continue }
         }
       }
       guard outstandingCount < ComposeAssetReceiver.maximumRequests else { break }
+      guard makeRoom(for: demand.key) else { continue }
       nextID += 1
       let request = WireComposeAssetRequest.with {
         $0.id = nextID; $0.scope = demand.scope; $0.start = demand.image.start; $0.end = demand.image.end
         $0.authority = demand.authority; $0.document = demand.document
-        if let cached = cache[demand.key], cached.digest.count == 32,
+        if let cached = cache[demand.key], cached.evictedCost == nil, cached.digest.count == 32,
            cached.state.asset == nil || cached.dimension >= demand.maximumDimension {
           // Periodic content validation also covers filesystems that cache
           // attributes or have coarse timestamps. Fresh hashes on the host.
@@ -249,19 +260,51 @@ public final class ComposeImageController {
   }
 
   private func trimCache() {
-    let visible = Set(demands.map(\.key))
-    while decodedBytes > maximumCacheBytes || cache.count > 128 {
-      guard let victim = cache.min(by: { a, b in
-        let av = visible.contains(a.key), bv = visible.contains(b.key)
-        return av == bv ? a.value.used < b.value.used : !av
+    let ranks = Dictionary(uniqueKeysWithValues: demands.enumerated().map { ($0.element.key, $0.offset) })
+    while decodedBytes > maximumCacheBytes {
+      guard let victim = cache.filter({ $0.value.cost > 0 }).min(by: { a, b in
+        switch (ranks[a.key], ranks[b.key]) {
+        case (.some(let a), .some(let b)): return a > b
+        case (.some, .none): return false
+        case (.none, .some): return true
+        case (.none, .none): return a.value.used < b.value.used
+        }
       })?.key else { break }
-      cache.removeValue(forKey: victim)
-      if visible.contains(victim) { deferred.insert(victim) }
+      guard var entry = cache[victim], let asset = entry.state.asset else { break }
+      entry.evictedCost = asset.cost
+      entry.state = .deferred(originalSize: asset.originalSize)
+      entry.version = Data(); entry.digest = Data()
+      cache[victim] = entry
     }
   }
 
+  /// Bitmap-free failures and deferred geometry share the same bounded cache.
+  /// Visible entries cannot evict each other merely by reordering demands.
+  private func makeRoom(for key: Key) -> Bool {
+    if cache[key] != nil || cache.count < 128 { return true }
+    let visible = Set(demands.map(\.key))
+    guard let victim = cache.filter({ !visible.contains($0.key) }).min(by: { $0.value.used < $1.value.used })?.key else { return false }
+    cache.removeValue(forKey: victim)
+    return true
+  }
+
+  private func canReadmit(_ demand: Demand, cached: Cached) -> Bool {
+    guard let cost = cached.evictedCost else { return true }
+    // A smaller thumbnail may fit; actual Image I/O cost is checked again on
+    // completion. Never assume that changing viewport order frees capacity.
+    let ratio = min(1, Double(demand.maximumDimension) / Double(max(1, cached.dimension)))
+    let estimate = max(1, Int(ceil(Double(cost) * ratio * ratio)))
+    guard estimate <= maximumCacheBytes else { return false }
+    let visible = Set(demands.map(\.key))
+    let protected = cache.reduce(0) { $0 + (visible.contains($1.key) ? $1.value.cost : 0) }
+    return protected <= maximumCacheBytes - estimate
+  }
+
   private func updateTimer() {
-    let retry = demands.contains { cache[$0.key]?.retry.isFinite == true }
+    let retry = demands.contains { demand in
+      guard let cached = cache[demand.key], cached.retry.isFinite else { return false }
+      return canReadmit(demand, cached: cached)
+    }
     if demands.isEmpty || work.isEmpty && !retry { timer?.invalidate(); timer = nil; return }
     guard timer == nil else { return }
     timer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
@@ -283,7 +326,7 @@ public final class ComposeImageController {
     if retryable, var cached = cache[demand.key], let asset = cached.state.asset {
       cached.state = .stale(asset, message); cached.retry = now() + refreshInterval; cached.used = clock
       cache[demand.key] = cached
-    } else {
+    } else if makeRoom(for: demand.key) {
       cache[demand.key] = .init(state: .failed(message), dimension: 0, used: clock, retry: now() + refreshInterval)
     }
     trimCache()

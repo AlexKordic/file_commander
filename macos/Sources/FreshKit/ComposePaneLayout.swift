@@ -288,6 +288,7 @@ public final class ComposePaneLayout {
     let message: String
     switch state {
     case .loading: message = "\(label): loading"
+    case .deferred: message = "\(label): preview memory limit reached"
     case .failed(let error): message = "\(label): \(error)"
     case .stale(_, let error): message = "\(label): showing the last preview; \(error)"
     case .ready: message = image.title.isEmpty ? label : "\(label): \(image.title)"
@@ -548,6 +549,7 @@ public final class ComposePaneLayout {
         context.setFillColor(foreground)
         let label: String
         if case .failed(let error) = state { label = "\(image.alt.isEmpty ? "Image" : image.alt): \(error)" }
+        else if case .deferred = state { label = "\(image.alt.isEmpty ? "Image" : image.alt): preview memory limit reached" }
         else { label = "Loading \(image.alt.isEmpty ? "image" : image.alt)…" }
         let line = CTLineCreateWithAttributedString(NSAttributedString(string: label, attributes: [
           NSAttributedString.Key(kCTFontAttributeName as String): body,

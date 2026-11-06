@@ -110,7 +110,7 @@ final class ComposeImageTests: XCTestCase {
     input.spans = [9, 10, 11].map { role in .with { $0.end = input.sourceEnd; $0.role = UInt32(role) } }
     let font = CTFontCreateWithName("Helvetica" as CFString, 16, nil)
     let asset = try ComposeImageAsset.decode(encode(bitmap(600, 300)))
-    for state: ComposeImageState in [.loading, .ready(asset), .failed("Unavailable")] {
+    for state: ComposeImageState in [.loading, .ready(asset), .deferred(originalSize: asset.originalSize), .failed("Unavailable")] {
       let layout = try XCTUnwrap(ComposePaneLayout(pane: input, body: font, monospace: font, width: 260,
         images: [annotation.start: state]))
       let placed = try XCTUnwrap(layout.text.attachments.first)
@@ -121,6 +121,31 @@ final class ComposeImageTests: XCTestCase {
       XCTAssertEqual(hit.source, Int(annotation.end))
       let caret = try XCTUnwrap(layout.text.caret(for: Int(annotation.end), affinity: .upstream))
       XCTAssertEqual(caret.minX, placed.rect.maxX, accuracy: 0.001)
+    }
+  }
+
+  func testEvictedPixelsKeepInlineAndBlockLayoutSelectionAndNavigationGeometry() throws {
+    let asset = try ComposeImageAsset.decode(encode(bitmap(600, 300)))
+    let font = CTFontCreateWithName("Helvetica" as CFString, 16, nil)
+    for block in [false, true] {
+      let source = block ? "![pic](x.png)\n\nAfter\n" : "Before ![pic](x.png) after."
+      var input = pane(source)
+      let annotation = image(source, "![pic](x.png)", block: block); input.images = [annotation]
+      for width: CGFloat in [180, 480] {
+        let ready = try XCTUnwrap(ComposePaneLayout(pane: input, body: font, monospace: font, width: width,
+          images: [annotation.start: .ready(asset)]))
+        let deferred = try XCTUnwrap(ComposePaneLayout(pane: input, body: font, monospace: font, width: width,
+          images: [annotation.start: .deferred(originalSize: asset.originalSize)]))
+        XCTAssertEqual(ready.text.size, deferred.text.size)
+        XCTAssertEqual(ready.text.attachments.map(\.rect), deferred.text.attachments.map(\.rect))
+        XCTAssertEqual(ready.text.selectionRects(for: 0..<source.utf8.count), deferred.text.selectionRects(for: 0..<source.utf8.count))
+        let after = Int(annotation.end)
+        XCTAssertEqual(ready.text.caret(for: after), deferred.text.caret(for: after))
+        let placed = try XCTUnwrap(deferred.text.attachments.first)
+        let point = CGPoint(x: placed.rect.maxX - 1, y: placed.rect.midY)
+        XCTAssertEqual(ready.text.hit(at: point)?.source, deferred.text.hit(at: point)?.source)
+        XCTAssertTrue(deferred.imageDescription(annotation).contains("preview memory limit reached"))
+      }
     }
   }
 
@@ -199,7 +224,7 @@ final class ComposeImageTests: XCTestCase {
     let font = CTFontCreateWithName("Helvetica" as CFString, 16, nil)
     let asset = try ComposeImageAsset.decode(encode(bitmap(600, 300)))
     let following = source[..<source.range(of: "Following")!.lowerBound].utf8.count
-    for state: ComposeImageState in [.loading, .ready(asset), .failed("Unavailable")] {
+    for state: ComposeImageState in [.loading, .ready(asset), .deferred(originalSize: asset.originalSize), .failed("Unavailable")] {
       let layout = try XCTUnwrap(ComposePaneLayout(pane: input, body: font, monospace: font, width: 200,
         images: [annotation.start: state]))
       let rect = try XCTUnwrap(layout.text.attachments.first?.rect)

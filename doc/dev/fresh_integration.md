@@ -1088,6 +1088,16 @@ Closing/hiding the last presentation or replacing its document/authority retires
 the decode. Source reads retain their stricter revision/range cancellation and
 retry behavior. The four outstanding slots, two decode workers, 64 MiB decoded
 cache and 128 cache entries remain unchanged.
+When the byte limit evicts an image, the bitmap-free entry retains its known
+dimensions, so wrapping, selections and caret geometry do not change merely
+because pixels left the cache. The placeholder explains the memory limit.
+Reordering demands, nearby images and temporary missing geometry do not restart
+that resource. It can retry after the normal backoff when competing visible
+pixels leave, a smaller requested thumbnail may fit, or the user explicitly
+reloads. Readmission uses known byte costs and checks actual decoded cost again;
+the size estimate is not a global memory guarantee. Deferred geometry, failures
+and ordinary previews share the same 128-entry metadata limit. Extra visible
+resources wait with an explained fallback until an offscreen entry can retire.
 These intervals and resource budgets still need interactive/performance
 qualification; full GUI/SSH qualification remains open.
 

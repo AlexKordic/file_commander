@@ -60,6 +60,9 @@ public enum ComposeImageState {
   /// A transient refresh failure retains the last valid preview and explains
   /// that it is stale. A confirmed missing/invalid resource uses .failed.
   case stale(ComposeImageAsset, String)
+  /// Pixels were evicted to respect the cache limit. Known source geometry
+  /// remains usable without retaining the bitmap or repeatedly reading it.
+  case deferred(originalSize: CGSize?)
   case failed(String)
 
   public var asset: ComposeImageAsset? {
@@ -72,9 +75,11 @@ public enum ComposeImageState {
   public func size(body: CGFloat, width: CGFloat, block: Bool) -> CGSize {
     let maxWidth = block ? width : min(width, body * 8)
     let maxHeight = block ? CGFloat(480) : body * 6
-    if let asset {
-      let scale = min(1, maxWidth / asset.originalSize.width, maxHeight / asset.originalSize.height)
-      return CGSize(width: max(1, asset.originalSize.width * scale), height: max(1, asset.originalSize.height * scale))
+    let originalSize: CGSize?
+    if case .deferred(let size) = self { originalSize = size } else { originalSize = asset?.originalSize }
+    if let size = originalSize, size.width.isFinite, size.height.isFinite, size.width > 0, size.height > 0 {
+      let scale = min(1, maxWidth / size.width, maxHeight / size.height)
+      return CGSize(width: max(1, size.width * scale), height: max(1, size.height * scale))
     } else {
       return CGSize(width: min(maxWidth, block ? 360 : body * 4), height: min(maxHeight, block ? 150 : body * 2))
     }
