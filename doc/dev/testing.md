@@ -600,6 +600,30 @@ text-service selection. The Release profiler reports cold and selection-only
 context preparation separately, using independently decoded message strings;
 these timings exclude input-to-paint latency.
 
+For interactive development qualification, prepare a separate app from the
+built Swift products and an explicitly supplied matching Fresh binary:
+
+```sh
+python3 macos/tools/qualify_compose.py prepare \
+  --products macos/.build/out/Products/Debug \
+  --fresh ../editor-fresh/target/debug/fresh
+```
+
+The helper prints a private `/tmp/fc-cq-*` directory with a verified ad hoc
+signed app, exact-byte Markdown/image fixtures, executable hashes, private
+profile/recovery/log directories and an
+[interactive checklist](../../macos/tools/compose_manual_checklist.md).
+It uses existing built products; source commit metadata does not attest to
+their build provenance. Preparation does not launch an app or contact SSH.
+From a normal macOS Terminal, run its `launch.command` for local checks or
+`launch-dev.command` for an owned remote `/tmp` fixture on `dev`. The installed
+app and its backend are separate. App quit retains the private backend for
+recovery checks; the checklist includes explicit checkpoint/stop and remote
+cleanup commands. Human results remain pending until recorded. Run
+`python3 macos/tools/test_qualify_compose.py` for fixture, environment, launch
+lock and remote ownership/cleanup contracts; these tests make no SSH connection
+and do not qualify GUI, actual input methods, VoiceOver or live remote editing.
+
 ## CI
 
 `.github/workflows/tests.yml` is the repository's only workflow. It runs on
