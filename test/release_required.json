@@ -22,7 +22,8 @@
     "fc.remote.transfers",
     "fc.remote.panels",
     "fc.extended.ssh_editor",
-    "fc.macos.explainers"
+    "fc.macos.explainers",
+    "fc.macos.compose_fixtures"
   ],
   "groups": {
     "recovery": [

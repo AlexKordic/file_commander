@@ -251,6 +251,9 @@ if(BUILD_TESTING)
   if(Python3_FOUND)
     add_test(NAME fc.macos.explainers COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/macos/tools/check_explainers.py")
     set_tests_properties(fc.macos.explainers PROPERTIES LABELS "unit;macos" TIMEOUT 30)
+    # Fixture/ownership contracts use no GUI or SSH and run on both supported OSes.
+    add_test(NAME fc.macos.compose_fixtures COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/macos/tools/test_qualify_compose.py")
+    set_tests_properties(fc.macos.compose_fixtures PROPERTIES LABELS "unit;macos" TIMEOUT 30)
   endif()
 endif()
 

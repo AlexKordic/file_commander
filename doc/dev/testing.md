@@ -621,7 +621,8 @@ app and its backend are separate. App quit retains the private backend for
 recovery checks; the checklist includes explicit checkpoint/stop and remote
 cleanup commands. Human results remain pending until recorded. Run
 `python3 macos/tools/test_qualify_compose.py` for fixture, environment, launch
-lock and remote ownership/cleanup contracts; these tests make no SSH connection
+lock and remote ownership/cleanup contracts, also registered as the required
+automatic CTest `fc.macos.compose_fixtures`. These tests make no SSH connection
 and do not qualify GUI, actual input methods, VoiceOver or live remote editing.
 
 ## CI
