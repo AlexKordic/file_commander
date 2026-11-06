@@ -494,6 +494,20 @@ large-table profile.
 The companion `many-tables-local.pb` removes only the complete font inputs,
 exercising cell measurement from delivered rows with the same source and styles.
 
+For the dense-image backend workflow, set `FC_COMPOSE_TEST_TIMING=1` together
+with `FC_COMPOSE_ARTIFACT_DIR` and select
+`ComposeBackendTests.testRealBackendDenseInlineImagesKeepMeasuredPagingResizeAndEditSaveUndo`.
+Use a matching optimized Fresh binary and Swift's Release configuration for
+performance conclusions. The workflow writes `dense-images.pb` for the native
+profiler and a private `dense-image-timing/editor-*.jsonl` recording. Run
+`python3 macos/tools/editor_telemetry.py RECORDING` to summarize its phases.
+The report distinguishes synchronous invocation, observation of the requested
+source state, Fresh rendering, native application and layout/terminal replies.
+Frame costs are grouped by native application time; server work may have begun
+before the phase, so these costs are not an exclusive breakdown of its latency.
+Missing observations remain explicitly incomplete. These offscreen observations
+do not measure physical keyboard input or a frame being painted.
+
 Use `--profile debug` for diagnosing algorithms; compare the same fixtures and
 configuration on the same machine. `--profile release` uses FC's `fc-release`
 Cargo profile at optimization level 3 and Swift's Release configuration,

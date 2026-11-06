@@ -175,6 +175,44 @@ def bench_reports(rows):
     return out
 
 
+def compose_reports(rows):
+    """Explicit native/backend phases measure invocation to observed source
+    state, not physical input or a frame being painted. Keep missing ends visible.
+    """
+    phases = []
+    active = {}
+    for row in rows:
+        if row['ev'] != 'compose_phase':
+            continue
+        name = row['name']
+        if row['phase'] == 'begin':
+            phase = dict(name=name, begin=row['t'])
+            phases.append(phase)
+            active[name] = phase
+        elif name in active:
+            active[name][row['phase']] = row['t']
+            if row['phase'] == 'observed':
+                del active[name]
+    reports = []
+    for phase in phases:
+        start, end = phase['begin'], phase.get('observed')
+        report = {'observation': 'source state only; no paint timing',
+                  'status': 'complete' if end is not None else 'incomplete: no observed state'}
+        if end is not None:
+            report['invoke -> observed state'] = f"{end - start:.2f} ms"
+        if 'invoked' in phase:
+            report['synchronous invocation'] = f"{phase['invoked'] - start:.2f} ms"
+        frames = [r for r in rows if r['ev'] == 'frame' and start <= r['applied'] <= (end if end is not None else float('inf'))]
+        report['frames / payload'] = f"{len(frames)} / {sum(r['bytes'] for r in frames) / 1024:.1f} KiB"
+        for label, key in [('Fresh render', 'render'), ('app apply', 'apply'), ('app parse', 'parse')]:
+            values = [r[key] for r in frames if key in r]
+            report[label] = f"total {sum(values):.2f}, max {max(values, default=0):.2f} ms"
+        replies = [r['compose_input'] for r in frames if 'compose_input' in r]
+        report['layout / accepted / cancelled'] = ' / '.join(str(sum(bool(r.get(k)) for r in replies)) for k in ('needs_layout', 'accepted', 'cancelled'))
+        reports.append(('Compose ' + phase['name'], report))
+    return reports
+
+
 def editor_report(mark, seg, rows_before):
     wheels = [r for r in seg if r['ev'] == 'wheel']
     sends = [r for r in seg if r['ev'] == 'send' and str(r.get('kind', '')).startswith('scroll')]
@@ -293,7 +331,7 @@ def main():
         index = int(sys.argv[sys.argv.index('--timeline') + 1])
         timeline(found[index][2])
         return
-    for name, report in bench_reports(rows):
+    for name, report in bench_reports(rows) + compose_reports(rows):
         print(name)
         for key, value in report.items():
             print(f"  {key:34} {value}")

@@ -419,6 +419,22 @@ final class NativeEditor: NSObject, CellGridDelegate {
       "apply": EditorTelemetry.ms(ProcessInfo.processInfo.systemUptime - started), "rows": message.gridRows.count,
       "copied": message.gridCopies.reduce(0) { $0 + $1.count }, "appcpu": EditorTelemetry.processCPU(),
     ]
+    if message.frame.hasInputReply {
+      let reply = message.frame.inputReply
+      fields["compose_input"] = ["id": reply.id, "accepted": reply.accepted, "cancelled": reply.cancelled,
+        "needs_layout": reply.needsLayout, "edit": reply.hasEdit, "result": reply.hasResult,
+        "need_region": reply.hasNeedRegion, "need_y": reply.hasNeedY] as [String: Any]
+    }
+    if message.frame.hasViewportReply {
+      fields["compose_viewport"] = ["id": message.frame.viewportReply.id, "accepted": message.frame.viewportReply.accepted] as [String: Any]
+    }
+    fields["compose_panes"] = store.panes.filter(\.hasCompose).map { pane -> [String: Any] in
+      let value = pane.compose
+      return ["leaf": pane.leaf, "buffer": pane.buffer, "revision": value.bufferRevision,
+        "projection": value.projectionRevision, "ready": value.ready, "current": value.currentProjection,
+        "source_start": value.sourceStart, "source_end": value.sourceEnd, "document_bytes": value.documentLen,
+        "projection_bytes": value.text.utf8.count, "images": value.images.count, "tables": value.tables.count]
+    }
     if let timing = message.timing {
       fields["ack"] = timing.ack
       fields["build"] = timing.buildMs

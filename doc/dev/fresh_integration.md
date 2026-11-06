@@ -428,6 +428,15 @@ Installing inline-image run delegates still creates a new final typesetter;
 otherwise the text layout can reuse the measurement typesetter. Sharing never
 uses cell-only strings, another pane's fonts or a prior source revision.
 
+Fresh's bundled Markdown grammar rejects impossible reference definitions
+before its original reference-link search. The precheck retains the original
+leftmost match and capture positions, including nested/escaped labels; it does
+not shorten lines or change Markdown source. This avoids a quadratic failed
+regex search on long lines containing many ordinary image links. Runtime and
+precompiled grammar sets use the same optimization, with their local context
+references rebound to the copied definition. User grammar overrides still load
+after the bundled definitions.
+
 Validated source/display maps use ordered coordinate queries, preserving both
 sides of hidden and inserted boundaries without scanning the entire map for
 each image, caret or span. Object substitution visits only intersecting map

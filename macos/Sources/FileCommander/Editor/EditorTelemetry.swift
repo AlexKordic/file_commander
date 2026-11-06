@@ -12,6 +12,8 @@ import Foundation
 /// - `frame`: a frame from Fresh: when the reader had it, parsing, when the main
 ///   thread applied it and for how long, the rows it changed, and Fresh's own
 ///   timing (`ack`, `build`, `diff`, `queued`, `owed`, `top`).
+///   Compose replies distinguish layout requests from accepted/cancelled input;
+///   pane counters record source bounds, revisions, text/image/table sizes.
 /// - `draw`: one redraw of the cells, its duration and rows, and the last
 ///   frame it shows.
 ///
