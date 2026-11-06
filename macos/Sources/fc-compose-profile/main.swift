@@ -29,6 +29,7 @@ func profile() throws {
   for file in files {
     let bytes = try Data(contentsOf: file), name = file.deletingPathExtension().lastPathComponent
     var decode: [Double] = [], cold: [Double] = [], retained: [Double] = [], multiple: [Double] = []
+    var resized: [Double] = [], returned: [Double] = []
     var baseline: ComposePaneLayout?
     for _ in 0..<3 {
       try autoreleasepool {
@@ -37,6 +38,13 @@ func profile() throws {
         guard let layout else { throw ProfileFailure.layout(name) }
         let (warm, retainedMS) = milliseconds { ComposePaneLayout(pane: pane, body: body, monospace: code, width: 960, reuse: layout) }
         guard warm?.text === layout.text else { throw ProfileFailure.layout("\(name): unchanged input did not reuse measured layout") }
+        let (narrow, resizedMS) = milliseconds { ComposePaneLayout(pane: pane, body: body, monospace: code, width: 640, reuse: layout) }
+        guard let narrow else { throw ProfileFailure.layout("\(name): resize failed") }
+        let (restored, returnedMS) = milliseconds { ComposePaneLayout(pane: pane, body: body, monospace: code, width: 960, reuse: narrow) }
+        guard let restored, restored.text.fragments.count == layout.text.fragments.count,
+              restored.text.tables.map(\.columns) == layout.text.tables.map(\.columns) else {
+          throw ProfileFailure.layout("\(name): returning to the same width changed the geometry")
+        }
         let (_, multipleMS) = try milliseconds {
           let panes = try [CGFloat(480), 640, 960, 480].map { width in
             guard let value = ComposePaneLayout(pane: pane, body: body, monospace: code, width: width) else { throw ProfileFailure.layout(name) }
@@ -47,6 +55,7 @@ func profile() throws {
           withExtendedLifetime(panes) {}
         }
         decode.append(decodeMS); cold.append(coldMS); retained.append(retainedMS); multiple.append(multipleMS)
+        resized.append(resizedMS); returned.append(returnedMS)
         baseline = layout
       }
     }
@@ -55,6 +64,7 @@ func profile() throws {
       "case": name, "pane_bytes": bytes.count, "projection_bytes": layout.text.projection.text.utf8.count,
       "fragments": layout.text.fragments.count, "attachments": layout.text.attachments.count, "tables": layout.text.tables.count,
       "decode_ms": decode, "cold_layout_ms": cold, "retained_layout_ms": retained, "four_panes_ms": multiple,
+      "resized_layout_ms": resized, "returned_layout_ms": returned,
       "process_peak_rss_bytes": peakRSS(),
     ])
   }

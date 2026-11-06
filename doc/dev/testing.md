@@ -448,6 +448,9 @@ Compose panes, then measures protobuf decoding and Core Text layout with the
 native consumer. Fixtures cover small and large prose, nested quotes/lists/code,
 an image-heavy paragraph, and a large table with unique cells. Each records
 three samples, unchanged-layout reuse and four simultaneous pane layouts.
+It also records a resize from 960 to 640 points and a return to 960, retaining
+the preceding pane so complete table measurements can be reused. Returning
+to the original width must restore its fragment count and table columns.
 Construction and first reuse are timed separately; reuse can also materialize
 lazy quote/code ornament geometry that the fresh layout has not requested yet.
 Artifacts include hardware/compiler/repository metadata, fixture SHA-256s,

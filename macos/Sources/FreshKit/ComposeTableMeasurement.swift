@@ -7,6 +7,16 @@ import CoreGraphics
 public final class ComposeTableMeasurement {
   public let id: UInt64
   let wire: WireComposeTableMeasurement
+  private struct FontMetrics {
+    let body, monospace: CTFont
+    let minimum, glyphMinimum, natural: [CGFloat]
+    let emptyWidth: CGFloat
+    let images: [Bool]
+  }
+  private let metricsLock = NSLock()
+  /// One immutable aggregate per measurement, with no shaped strings/lines
+  /// retained. A new font environment replaces this bounded cache entry.
+  private var cachedMetrics: FontMetrics?
 
   init?(id: UInt64, wire: WireComposeTableMeasurement, columns: Int) {
     guard id != 0, wire.columns.count == columns else { return nil }
@@ -27,7 +37,29 @@ public final class ComposeTableMeasurement {
   }
 
   func widths(body: CTFont, monospace: CTFont, available: CGFloat) -> [CGFloat] {
-    var constraints = ComposeColumnConstraints(count: wire.columns.count, font: body, available: available)
+    let metrics = fontMetrics(body: body, monospace: monospace)
+    guard !metrics.minimum.isEmpty else { return [] }
+    var constraints = ComposeColumnConstraints(count: metrics.minimum.count, emptyWidth: metrics.emptyWidth, available: available)
+    let share = max(metrics.emptyWidth, available / CGFloat(metrics.minimum.count) - ComposeMeasuredTable.padding * 2)
+    for column in metrics.minimum.indices {
+      constraints.minimum[column] = max(metrics.glyphMinimum[column], min(share, metrics.minimum[column]))
+      constraints.natural[column] = max(metrics.emptyWidth, max(min(available, metrics.natural[column]),
+        metrics.images[column] ? available * 0.35 : 0))
+    }
+    return constraints.widths
+  }
+
+  private func fontMetrics(body: CTFont, monospace: CTFont) -> FontMetrics {
+    metricsLock.lock()
+    if let cachedMetrics, CFEqual(cachedMetrics.body, body), CFEqual(cachedMetrics.monospace, monospace) {
+      metricsLock.unlock()
+      return cachedMetrics
+    }
+    metricsLock.unlock()
+    // Collect uncapped native preferences once. Resolving a narrower pane
+    // caps only the wrapping preference, never a complete shaped grapheme.
+    var constraints = ComposeColumnConstraints(count: wire.columns.count, font: body, available: .greatestFiniteMagnitude)
+    var images = Array(repeating: false, count: wire.columns.count)
     // Complete table inputs can contain thousands of distinct samples with
     // the same style. Fonts depend on this call's body/code faces and size,
     // not on the sample text or column; retain each variant for this pass.
@@ -63,23 +95,31 @@ public final class ComposeTableMeasurement {
             range: NSRange(location: start, length: length))
         }
         constraints.include(text, range: NSRange(location: 0, length: text.length), column: column,
-          preferred: !sample.minimumOnly, imageWidth: sample.image ? available * 0.35 : 0)
+          preferred: !sample.minimumOnly)
+        images[column] = images[column] || sample.image
       }
     }
-    return constraints.widths
+    let measured = FontMetrics(body: body, monospace: monospace, minimum: constraints.minimum,
+      glyphMinimum: constraints.glyphMinimum, natural: constraints.natural, emptyWidth: constraints.emptyWidth, images: images)
+    metricsLock.lock()
+    cachedMetrics = measured
+    metricsLock.unlock()
+    return measured
   }
 }
 
 struct ComposeColumnConstraints {
-  var minimum, natural: [CGFloat]
+  var minimum, glyphMinimum, natural: [CGFloat]
   let available, emptyWidth: CGFloat
-  private let breaks = ComposeLineBreaks()
+  private lazy var breaks = ComposeLineBreaks()
   init(count: Int, font: CTFont, available: CGFloat) {
-    self.available = available
     let blank = CTLineCreateWithAttributedString(NSAttributedString(string: " ",
       attributes: [NSAttributedString.Key(kCTFontAttributeName as String): font]))
-    emptyWidth = max(1, CGFloat(CTLineGetTypographicBounds(blank, nil, nil, nil)))
-    minimum = Array(repeating: emptyWidth, count: count); natural = minimum
+    self.init(count: count, emptyWidth: max(1, CGFloat(CTLineGetTypographicBounds(blank, nil, nil, nil))), available: available)
+  }
+  init(count: Int, emptyWidth: CGFloat, available: CGFloat) {
+    self.available = available; self.emptyWidth = emptyWidth
+    minimum = Array(repeating: emptyWidth, count: count); natural = minimum; glyphMinimum = minimum
   }
   mutating func include(_ text: NSAttributedString, range: NSRange, column: Int, preferred: Bool, imageWidth: CGFloat = 0, typesetter: CTTypesetter? = nil) {
     if preferred { natural[column] = max(natural[column], min(available, imageWidth)) }
@@ -98,16 +138,18 @@ struct ComposeColumnConstraints {
       guard at >= 0, at < edges.count else { return }
       edges[at].x = min(edges[at].x, offset); edges[at].y = max(edges[at].y, offset)
     }
-    var at = range.location
+    var at = range.location, glyph = glyphMinimum[column]
     while at < NSMaxRange(range) {
       let next = min(NSMaxRange(range), NSMaxRange(string.rangeOfComposedCharacterSequence(at: at)))
       var low = Double.infinity, high = -Double.infinity
       for index in (at - range.location)..<(next - range.location) {
         low = min(low, edges[index].x); high = max(high, edges[index].y)
       }
-      if low.isFinite, high.isFinite { minimum[column] = max(minimum[column], CGFloat(high - low)) }
+      if low.isFinite, high.isFinite { glyph = max(glyph, CGFloat(high - low)) }
       at = next
     }
+    glyphMinimum[column] = glyph
+    minimum[column] = max(minimum[column], glyph)
     guard preferred else { return }
     natural[column] = max(natural[column], min(available, CGFloat(CTLineGetTypographicBounds(line, nil, nil, nil))))
     let share = max(emptyWidth, available / CGFloat(natural.count) - ComposeMeasuredTable.padding * 2)

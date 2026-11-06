@@ -86,6 +86,55 @@ final class ComposeTableMeasurementTests: XCTestCase {
       "the row subsets exercise the original width drift")
   }
 
+  func testCachedMetricsMatchFreshGeometryThroughResizingFontChangesAndChangedInputs() throws {
+    var pane = try fixture()
+    pane.tables[0].measurement.columns[0].samples.append(.with {
+      $0.text = "one\u{00a0}two 東京都 אבג e\u{301} 👩🏽‍💻"
+    })
+    pane.tables[0].measurement.columns[1].samples.append(.with {
+      $0.text = "👩🏽‍💻 WWW"; $0.minimumOnly = true
+      $0.spans = [.with { $0.end = UInt64("👩🏽‍💻 WWW".utf8.count); $0.code = true; $0.flags = 3 }]
+    })
+    var previous = try XCTUnwrap(ComposePaneLayout(pane: pane, body: body, monospace: code, width: 320))
+    let faces = [(body, code), (CTFontCreateWithName("Helvetica-Oblique" as CFString, 26, nil), code),
+      (body, CTFontCreateWithName("Courier" as CFString, 18, nil)), (body, code)]
+    for (body, code) in faces {
+      for width: CGFloat in [90, 620, 180, 960, 320] {
+        let reused = try XCTUnwrap(ComposePaneLayout(pane: pane, body: body, monospace: code, width: width, reuse: previous))
+        let fresh = try XCTUnwrap(ComposePaneLayout(pane: pane, body: body, monospace: code, width: width))
+        XCTAssertEqual(reused.text.tables.map(\.columns), fresh.text.tables.map(\.columns))
+        XCTAssertEqual(reused.text.fragments.map(\.range), fresh.text.fragments.map(\.range))
+        XCTAssertEqual(reused.text.fragments.map(\.rect), fresh.text.fragments.map(\.rect))
+        previous = reused
+      }
+    }
+    // An ID alone never certifies cached content, even in the same pane.
+    pane.tables[0].measurement.columns[0].samples.append(.with { $0.text = String(repeating: "W", count: 200) })
+    let changed = try XCTUnwrap(ComposePaneLayout(pane: pane, body: body, monospace: code, width: 500, reuse: previous))
+    let fresh = try XCTUnwrap(ComposePaneLayout(pane: pane, body: body, monospace: code, width: 500))
+    let original = try XCTUnwrap(ComposePaneLayout(pane: previous.pane, body: body, monospace: code, width: 500))
+    XCTAssertEqual(changed.text.tables.map(\.columns), fresh.text.tables.map(\.columns))
+    XCTAssertNotEqual(changed.text.tables.map(\.columns), original.text.tables.map(\.columns))
+  }
+
+  func testCachedPreferencesWrapLongWordsWithoutClippingCompleteEmoji() throws {
+    let sample = WireComposeTableColumn.with {
+      $0.samples = [.with { $0.text = "👩🏽‍💻"; $0.minimumOnly = true },
+        .with { $0.text = String(repeating: "W", count: 100) }]
+    }
+    let wire = WireComposeTableMeasurement.with { $0.columns = [sample, sample] }
+    let measurement = try XCTUnwrap(ComposeTableMeasurement(id: 1, wire: wire, columns: 2))
+    let glyph = CTLineCreateWithAttributedString(NSAttributedString(string: "👩🏽‍💻",
+      attributes: [NSAttributedString.Key(kCTFontAttributeName as String): body]))
+    let minimum = CGFloat(CTLineGetTypographicBounds(glyph, nil, nil, nil)) + 16
+    for available: CGFloat in [2000, 1, 100, 200] {
+      let widths = measurement.widths(body: body, monospace: code, available: available)
+      XCTAssertTrue(widths.allSatisfy { $0 >= minimum - 0.01 }, "an available-width cap cannot split the emoji")
+      XCTAssertEqual(widths.reduce(0, +), max(available, minimum * 2), accuracy: 0.01,
+        "the long word is a wrapping preference, while complete graphemes may require horizontal overflow")
+    }
+  }
+
   func testReferencesRetainOnlyMatchingDocumentAndTableInputsAndRejectMalformedStyles() throws {
     let full = try fixture()
     var reference = try crop(full, row: full.tables[0].rows[4])

@@ -410,9 +410,14 @@ width or source still invalidates the appropriate layout. These are measured
 layout optimizations, independent of terminal columns.
 
 Complete table-input measurement reuses each derived body/code font variant
-within its pass, including bold and italic combinations. The cache belongs to
-that font environment; resizing, font changes and source changes retain the
-same existing column-constraint calculations and invalidation rules.
+within its pass, including bold and italic combinations. Each validated
+measurement retains one immutable aggregate for its current body/code font
+pair: glyph minima, uncapped wrapping and natural-width preferences, and image
+flags. Resolving another available width uses only column-count arithmetic;
+visible text still needs layout. Font or measurement-content changes rebuild
+the aggregate. It retains no shaped lines, attributed sample strings or
+tokenizers. Complete grapheme minima remain uncapped, allowing horizontal
+overflow when a pane is too narrow for a glyph.
 Preferred minimum widths follow native line-break units rather than linguistic
 dictionary words. A shared line-break tokenizer handles the pass, allowing CJK
 character breaks while keeping nonbreaking phrases together. Whitespace still
