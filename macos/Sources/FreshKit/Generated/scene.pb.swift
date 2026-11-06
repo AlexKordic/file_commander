@@ -3402,6 +3402,9 @@ public nonisolated struct WireClientHello: Sendable {
   /// Opt in to measured table cells; requires rich_compose.
   public var measuredTables: Bool = false
 
+  /// Accept offscreen prefix samples and complete paragraph windows.
+  public var paragraphWindows: Bool = false
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
@@ -9806,7 +9809,7 @@ nonisolated extension WireError: SwiftProtobuf.Message, SwiftProtobuf._MessageIm
 
 nonisolated extension WireClientHello: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".ClientHello"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}version\0\u{1}telemetry\0\u{3}rich_compose\0\u{3}measured_tables\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}version\0\u{1}telemetry\0\u{3}rich_compose\0\u{3}measured_tables\0\u{3}paragraph_windows\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -9818,6 +9821,7 @@ nonisolated extension WireClientHello: SwiftProtobuf.Message, SwiftProtobuf._Mes
       case 2: try { try decoder.decodeSingularBoolField(value: &self.telemetry) }()
       case 3: try { try decoder.decodeSingularBoolField(value: &self.richCompose) }()
       case 4: try { try decoder.decodeSingularBoolField(value: &self.measuredTables) }()
+      case 5: try { try decoder.decodeSingularBoolField(value: &self.paragraphWindows) }()
       default: break
       }
     }
@@ -9836,6 +9840,9 @@ nonisolated extension WireClientHello: SwiftProtobuf.Message, SwiftProtobuf._Mes
     if self.measuredTables != false {
       try visitor.visitSingularBoolField(value: self.measuredTables, fieldNumber: 4)
     }
+    if self.paragraphWindows != false {
+      try visitor.visitSingularBoolField(value: self.paragraphWindows, fieldNumber: 5)
+    }
     try unknownFields.traverse(visitor: &visitor)
   }
 
@@ -9844,6 +9851,7 @@ nonisolated extension WireClientHello: SwiftProtobuf.Message, SwiftProtobuf._Mes
     if lhs.telemetry != rhs.telemetry {return false}
     if lhs.richCompose != rhs.richCompose {return false}
     if lhs.measuredTables != rhs.measuredTables {return false}
+    if lhs.paragraphWindows != rhs.paragraphWindows {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }

@@ -290,12 +290,109 @@ final class ComposeBackendTests: XCTestCase {
   }
 
   @MainActor
+  func testRealBackendLooseListWindowsKeepOffscreenMarkersThroughResizeSaveAndUndo() async throws {
+    let backend = try backend(); defer {
+      backend.captureDiagnostics("paragraph-windows")
+      backend.stop()
+    }
+    let editor = editor(BackendPasteboard()); defer { editor.detachAll() }
+    let header = "| A | B |\r\n|---|---|\r\n| one | two |\r\n\r\n# Paragraph windows\r\n\r\n100) **Opening** café 👩🏽‍💻\r\n\r\n"
+    let paragraphs = (0..<1600).map { "     Paragraph \($0) café 東京 👩🏽‍💻 with **prose** and `code` that wrap across the available native measure.\r\n\r\n" }.joined()
+    let original = header + paragraphs + "Tail\r\n"
+    let tail = original.utf8.count - "Tail\r\n".utf8.count
+    let bodyEnd = tail - "\r\n\r\n".utf8.count
+    let file = backend.root.appendingPathComponent("paragraph-windows.md")
+    try Data(original.utf8).write(to: file)
+    try await attach(backend, file: file, editor: editor)
+    let grid = try XCTUnwrap(editor.grid), initial = try XCTUnwrap(grid.focusedCompose)
+    let item = try XCTUnwrap(initial.pane.compose.spans.first { $0.role == 13 && $0.hasContentStart })
+    let hangingX = try XCTUnwrap(initial.layout.text.caret(for: Int(item.contentStart))).minX
+    XCTAssertGreaterThan(original.utf8.count, 128 << 10)
+    editor.send(.action(name: "move_document_end", argsJson: ""))
+    try await eventually(editor, "loose-list document end") { grid.focusedCompose?.cursor?.position == UInt64(original.utf8.count) }
+    for _ in 0..<8 {
+      let before = try XCTUnwrap(grid.focusedCompose?.cursor?.position)
+      if before < bodyEnd { break }
+      editor.send(.action(name: "move_up", argsJson: ""))
+      try await eventually(editor, "measured Up into a distant loose-list paragraph") {
+        guard let position = grid.focusedCompose?.cursor?.position else { return false }
+        return position < before
+      }
+    }
+    var position = try XCTUnwrap(grid.focusedCompose?.cursor?.position)
+    XCTAssertGreaterThan(position, UInt64(original.utf8.count / 2)); XCTAssertLessThan(position, UInt64(bodyEnd))
+    // Up may correctly land before source-owned indentation on a physical
+    // line. Walk those real spaces before comparing the first prose caret.
+    let bytes = Array(original.utf8)
+    while position < UInt64(bytes.count) && bytes[Int(position)] == 32 {
+      let before = position
+      editor.send(.action(name: "move_right", argsJson: ""))
+      try await eventually(editor, "Right can address source indentation in the clipped window") {
+        (grid.focusedCompose?.cursor?.position ?? before) > before
+      }
+      position = try XCTUnwrap(grid.focusedCompose?.cursor?.position)
+    }
+    var pane = try XCTUnwrap(grid.focusedCompose)
+    XCTAssertGreaterThan(pane.pane.compose.sourceStart, item.contentStart)
+    XCTAssertLessThan(pane.pane.compose.sourceEnd - pane.pane.compose.sourceStart, 128 << 10,
+      "this fixture's window must omit the unrelated earlier paragraphs")
+    XCTAssertTrue(pane.pane.compose.hangingContexts.contains { $0.itemStart == item.start && $0.text == "100) O" })
+    XCTAssertEqual(try XCTUnwrap(pane.layout.text.caret(for: Int(position))).minX, hangingX, accuracy: 0.001)
+    let edge = pane.pane.compose.sourceStart
+    var pageCount = 0
+    for _ in 0..<128 {
+      if position < edge { break }
+      let before = position
+      pageCount += 1
+      editor.send(.action(name: "move_page_up", argsJson: ""))
+      try await eventually(editor, "Page Up continues across loose-list source windows") {
+        (grid.focusedCompose?.cursor?.position ?? before) < before
+      }
+      position = try XCTUnwrap(grid.focusedCompose?.cursor?.position)
+    }
+    XCTAssertLessThan(position, edge, "paging must actually cross the original source-window boundary")
+    pane = try XCTUnwrap(grid.focusedCompose)
+    XCTAssertLessThan(pane.pane.compose.sourceEnd - pane.pane.compose.sourceStart, 128 << 10,
+      "the continuation must keep omitting unrelated paragraphs after crossing its original window")
+    XCTAssertEqual(try XCTUnwrap(pane.layout.text.caret(for: Int(position))).minX, hangingX, accuracy: 0.001)
+    let prefix = Data(original.utf8.prefix(Int(position))), suffix = Data(original.utf8.dropFirst(Int(position)))
+    XCTAssertEqual(grid.selectedRange(), NSRange(location: String(decoding: prefix, as: UTF8.self).utf16.count, length: 0))
+    let width = pane.layout.width
+    grid.setFrameSize(CGSize(width: 460, height: 420))
+    try await eventually(editor, "resize keeps the distant paragraph caret") {
+      grid.focusedCompose?.cursor?.position == position && (grid.focusedCompose?.layout.width ?? width) < width
+    }
+    let insertion = "追加👩🏽‍💻"
+    grid.insertText(insertion, replacementRange: NSRange(location: NSNotFound, length: 0))
+    editor.send(.action(name: "save", argsJson: ""))
+    try await eventually(editor, "save exact CRLF source through a clipped list window") {
+      (try? Data(contentsOf: file)) == prefix + Data(insertion.utf8) + suffix
+    }
+    editor.send(.action(name: "undo", argsJson: "")); editor.send(.action(name: "save", argsJson: ""))
+    try await eventually(editor, "undo one clipped-window insertion") { (try? Data(contentsOf: file)) == Data(original.utf8) }
+    XCTAssertTrue(editor.uninsertedText.isEmpty); XCTAssertTrue(backend.server.isRunning)
+    let report: [String: Any] = ["document_bytes": original.utf8.count,
+      "marker_source": item.start, "marker_body_source": item.contentStart,
+      "window_start_before_pages": edge, "cursor_after_pages": position,
+      "window_start_after_pages": pane.pane.compose.sourceStart,
+      "window_end_after_pages": pane.pane.compose.sourceEnd,
+      "page_up_count": pageCount, "body_caret_x": Double(hangingX)]
+    try JSONSerialization.data(withJSONObject: report, options: [.sortedKeys]).write(to: backend.root.appendingPathComponent("paragraph-window-report.json"))
+  }
+
+  @MainActor
   func testRealBackendLongWrappedListKeepsMeasuredInputThroughResizeSaveAndUndo() async throws {
     let backend = try backend(); defer {
       backend.captureDiagnostics("long-paragraph")
       backend.stop()
     }
     let editor = editor(BackendPasteboard()); defer { editor.detachAll() }
+    defer {
+      if ProcessInfo.processInfo.environment["FC_COMPOSE_ARTIFACT_DIR"] != nil,
+         let pane = editor.store.panes.first(where: { $0.hasCompose }) {
+        try? pane.compose.serializedData().write(to: backend.root.appendingPathComponent("long-paragraph-final-pane.pb"))
+      }
+    }
     let header = "| A | B |\n|---|---|\n| one | two |\n\n# Long paragraph\n\n1) "
     let body = String(repeating: "Measured **prose** café 👩🏽‍💻 東京 with words that continue in one physical paragraph. ", count: 2000)
     let original = header + body + "\n\nTail\n"
@@ -324,7 +421,9 @@ final class ComposeBackendTests: XCTestCase {
     let position = try XCTUnwrap(grid.focusedCompose?.cursor?.position)
     XCTAssertGreaterThan(position, bodyStart + UInt64(body.utf8.count / 2))
     XCTAssertLessThan(position, bodyEnd)
-    XCTAssertEqual(try XCTUnwrap(grid.focusedCompose?.layout.text.caret(for: Int(position))).minX,
+    let measured = try XCTUnwrap(grid.focusedCompose)
+    XCTAssertEqual(try XCTUnwrap(measured.layout.text.caret(for: Int(position)),
+      "cursor=\(position) projection=\(measured.layout.text.projection.source) wire=\(measured.pane.compose.sourceStart)..<\(measured.pane.compose.sourceEnd) displayed=\(String(describing: measured.layout.text.projection.displayPosition(for: Int(position))))").minX,
       hangingX, accuracy: 0.001, "a continuation window must retain its offscreen list marker's measured inset")
     let prefix = Data(original.utf8.prefix(Int(position))), suffix = Data(original.utf8.dropFirst(Int(position)))
     XCTAssertEqual(grid.selectedRange(), NSRange(location: String(decoding: prefix, as: UTF8.self).utf16.count, length: 0))

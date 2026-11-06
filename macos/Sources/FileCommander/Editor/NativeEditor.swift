@@ -182,7 +182,7 @@ final class NativeEditor: NSObject, CellGridDelegate {
     applyTheme()
     Task.detached {
       do {
-        try socket.open(telemetry: EditorTelemetry.shared.isOn, richCompose: self.richCompose, measuredTables: self.measuredTables)
+        try socket.open(telemetry: EditorTelemetry.shared.isOn, richCompose: self.richCompose, measuredTables: self.measuredTables, paragraphWindows: self.richCompose)
         await MainActor.run { [weak self] in
           Trace.write("editor: connected")
           guard let self, self.socket === socket else { return }
