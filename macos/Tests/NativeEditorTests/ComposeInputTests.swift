@@ -2217,7 +2217,9 @@ final class ComposeInputTests: XCTestCase {
     pending.compose.ready = true
     peer.show(pending)
     try await eventually { peer.viewports.count == 1 }
-    XCTAssertEqual(peer.viewports[0].position, pending.compose.sourceEnd)
+    XCTAssertEqual(peer.viewports[0].position, pending.compose.viewport.position)
+    XCTAssertEqual(peer.viewports[0].offset, pending.compose.viewport.offset)
+    XCTAssertEqual(peer.viewports[0].region, pending.compose.sourceEnd)
   }
 
   @MainActor

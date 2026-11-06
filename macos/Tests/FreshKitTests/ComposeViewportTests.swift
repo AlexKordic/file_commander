@@ -14,6 +14,18 @@ final class ComposeViewportTests: XCTestCase {
     return try XCTUnwrap(ComposeTextLayout(projection: projection, font: font, width: width))
   }
 
+  func testAutomaticContinuationDoesNotReplaceTheVisibleSourceAnchor() throws {
+    let text = try layout("first\nsecond\n", start: 1000)
+    let view = ComposeViewport(text: text, documentLength: 10_000, height: 180)
+    let anchor = WireComposeViewport.with { $0.position = 1000; $0.offset = -3.25; $0.horizontalOffset = 17; $0.epoch = 7 }
+    let next = try XCTUnwrap(view.continuation(anchor))
+    XCTAssertEqual(next.position, anchor.position)
+    XCTAssertEqual(next.affinity, anchor.affinity)
+    XCTAssertEqual(next.offset, anchor.offset)
+    XCTAssertTrue(next.hasRegion); XCTAssertEqual(next.region, 1013)
+    XCTAssertEqual(try XCTUnwrap(view.requestedTop(next)), try XCTUnwrap(view.requestedTop(anchor)), accuracy: 0.001)
+  }
+
   func testPointScrollingUsesMeasuredMixedHeightLinesAndWrapAffinity() throws {
     let value = "A large heading that wraps across several lines\n" + String(repeating: "Prose café 👩🏽‍💻 with several words.\n", count: 30)
     let base = try layout(value, width: 180)
@@ -73,7 +85,8 @@ final class ComposeViewportTests: XCTestCase {
     let view = ComposeViewport(text: text, documentLength: 10_000, height: 180)
     let anchor = WireComposeViewport.with { $0.position = 1388; $0.offset = -5; $0.epoch = 7 }
     let pending = try XCTUnwrap(view.continuation(anchor))
-    XCTAssertEqual(pending.position, 1400)
+    XCTAssertEqual(pending.position, anchor.position)
+    XCTAssertEqual(pending.region, 1400)
     XCTAssertEqual(try XCTUnwrap(view.requestedTop(pending)), try XCTUnwrap(view.requestedTop(anchor)), accuracy: 0.001)
     XCTAssertLessThanOrEqual(view.displayedTop(pending) + view.height, text.size.height + 0.001, "draw available text while requesting the adjacent window")
     let expanded = try layout(String(repeating: "row\n", count: 100), start: 1200)
@@ -82,7 +95,8 @@ final class ComposeViewportTests: XCTestCase {
     XCTAssertEqual(caret.minY - next.displayedTop(pending), -5, accuracy: 0.001)
     XCTAssertNil(next.continuation(pending))
     let upward = try XCTUnwrap(next.moved(pending, by: -3000))
-    XCTAssertEqual(upward.position, 1200)
+    XCTAssertEqual(upward.position, pending.position)
+    XCTAssertEqual(upward.region, 1199)
     XCTAssertGreaterThan(upward.offset, 0, "negative top is retained as an edge intent, not rounded to a terminal row")
     XCTAssertEqual(next.displayedTop(upward), 0)
   }
@@ -176,6 +190,34 @@ final class ComposeViewportTests: XCTestCase {
 
   private func scope(_ leaf: UInt64 = 2, buffer: UInt64 = 3) -> WireComposeScope {
     .with { $0.windowID = 1; $0.leaf = leaf; $0.buffer = buffer; $0.bufferRevision = 4 }
+  }
+
+  @MainActor
+  func testRegionOnlyRequestsCoalesceAndCannotChangeAnotherClientsVisibleAnchor() throws {
+    var sent: [WireComposeViewportRequest] = []
+    let controller = ComposeViewportController { sent.append($0) }
+    let owner = scope(), other = scope(8, buffer: 9)
+    let anchor = WireComposeViewport.with { $0.position = 14; $0.offset = -3.5; $0.horizontalOffset = 17; $0.epoch = 7 }
+    var requested = anchor; requested.region = 1000
+    XCTAssertTrue(controller.move(scope: owner, from: anchor, to: requested, user: false))
+    XCTAssertEqual(sent.count, 1); XCTAssertEqual(sent[0].position, 14); XCTAssertEqual(sent[0].region, 1000)
+    XCTAssertFalse(controller.move(scope: owner, from: requested, to: requested, user: false))
+    var latest = requested; latest.region = 2000
+    XCTAssertTrue(controller.move(scope: owner, from: requested, to: latest, user: false))
+    XCTAssertEqual(controller.value(scope: owner, remote: anchor).region, 2000)
+    XCTAssertEqual(controller.value(scope: other, remote: anchor), anchor)
+    XCTAssertEqual(controller.userScrollGeneration, 0)
+    let payload = SceneInput.composeViewport(sent[0]).payload()
+    XCTAssertEqual(try WireComposeViewportRequest(serializedBytes: payload).region, 1000)
+    var echoed = requested; echoed.sequence = 1
+    controller.observe(window: 1, panes: [pane(owner, anchor: echoed)], reply: .with { $0.id = 1; $0.accepted = true })
+    XCTAssertEqual(sent.map(\.region), [1000, 2000])
+    var edited = owner; edited.bufferRevision += 1
+    var fresh = anchor; fresh.position = 16
+    XCTAssertEqual(controller.value(scope: edited, remote: fresh), fresh, "unrebased probes cannot be drawn against edited source")
+    var invalid = latest; invalid.region = UInt64.max
+    XCTAssertFalse(controller.move(scope: owner, from: latest, to: invalid, user: false))
+    controller.reset(); XCTAssertEqual(controller.value(scope: owner, remote: anchor), anchor)
   }
   private func pane(_ scope: WireComposeScope, anchor: WireComposeViewport) -> WirePane {
     .with {

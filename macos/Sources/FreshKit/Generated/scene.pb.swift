@@ -148,9 +148,20 @@ public nonisolated struct WireComposeViewport: Sendable {
 
   public var horizontalOffset: Double = 0
 
+  public var region: UInt64 {
+    get {_region ?? 0}
+    set {_region = newValue}
+  }
+  /// Returns true if `region` has been explicitly set.
+  public var hasRegion: Bool {self._region != nil}
+  /// Clears the value of `region`. Subsequent reads from it will return its default value.
+  public mutating func clearRegion() {self._region = nil}
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
+
+  fileprivate var _region: UInt64? = nil
 }
 
 public nonisolated struct WireComposeViewportReply: Sendable {
@@ -3756,11 +3767,22 @@ public nonisolated struct WireComposeViewportRequest: Sendable {
 
   public var horizontalOffset: Double = 0
 
+  /// Optional adjacent source probe. Retain context at position while loading it.
+  public var region: UInt64 {
+    get {_region ?? 0}
+    set {_region = newValue}
+  }
+  /// Returns true if `region` has been explicitly set.
+  public var hasRegion: Bool {self._region != nil}
+  /// Clears the value of `region`. Subsequent reads from it will return its default value.
+  public mutating func clearRegion() {self._region = nil}
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
 
   fileprivate var _scope: WireComposeScope? = nil
+  fileprivate var _region: UInt64? = nil
 }
 
 /// Measured geometry belongs to this client. Reused by id until source,
@@ -4149,7 +4171,7 @@ nonisolated extension WireMouseButton: SwiftProtobuf._ProtoNameProviding {
 
 nonisolated extension WireComposeViewport: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".ComposeViewport"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}position\0\u{1}affinity\0\u{1}offset\0\u{1}sequence\0\u{1}epoch\0\u{3}horizontal_offset\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}position\0\u{1}affinity\0\u{1}offset\0\u{1}sequence\0\u{1}epoch\0\u{3}horizontal_offset\0\u{1}region\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -4163,12 +4185,17 @@ nonisolated extension WireComposeViewport: SwiftProtobuf.Message, SwiftProtobuf.
       case 4: try { try decoder.decodeSingularUInt64Field(value: &self.sequence) }()
       case 5: try { try decoder.decodeSingularUInt64Field(value: &self.epoch) }()
       case 6: try { try decoder.decodeSingularDoubleField(value: &self.horizontalOffset) }()
+      case 7: try { try decoder.decodeSingularUInt64Field(value: &self._region) }()
       default: break
       }
     }
   }
 
   public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
     if self.position != 0 {
       try visitor.visitSingularUInt64Field(value: self.position, fieldNumber: 1)
     }
@@ -4187,6 +4214,9 @@ nonisolated extension WireComposeViewport: SwiftProtobuf.Message, SwiftProtobuf.
     if self.horizontalOffset.bitPattern != 0 {
       try visitor.visitSingularDoubleField(value: self.horizontalOffset, fieldNumber: 6)
     }
+    try { if let v = self._region {
+      try visitor.visitSingularUInt64Field(value: v, fieldNumber: 7)
+    } }()
     try unknownFields.traverse(visitor: &visitor)
   }
 
@@ -4197,6 +4227,7 @@ nonisolated extension WireComposeViewport: SwiftProtobuf.Message, SwiftProtobuf.
     if lhs.sequence != rhs.sequence {return false}
     if lhs.epoch != rhs.epoch {return false}
     if lhs.horizontalOffset != rhs.horizontalOffset {return false}
+    if lhs._region != rhs._region {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
@@ -10291,7 +10322,7 @@ nonisolated extension WireComposeAssetRequest: SwiftProtobuf.Message, SwiftProto
 
 nonisolated extension WireComposeViewportRequest: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".ComposeViewportRequest"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}id\0\u{1}scope\0\u{1}position\0\u{1}affinity\0\u{1}offset\0\u{1}epoch\0\u{3}horizontal_offset\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}id\0\u{1}scope\0\u{1}position\0\u{1}affinity\0\u{1}offset\0\u{1}epoch\0\u{3}horizontal_offset\0\u{1}region\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -10306,6 +10337,7 @@ nonisolated extension WireComposeViewportRequest: SwiftProtobuf.Message, SwiftPr
       case 5: try { try decoder.decodeSingularDoubleField(value: &self.offset) }()
       case 6: try { try decoder.decodeSingularUInt64Field(value: &self.epoch) }()
       case 7: try { try decoder.decodeSingularDoubleField(value: &self.horizontalOffset) }()
+      case 8: try { try decoder.decodeSingularUInt64Field(value: &self._region) }()
       default: break
       }
     }
@@ -10337,6 +10369,9 @@ nonisolated extension WireComposeViewportRequest: SwiftProtobuf.Message, SwiftPr
     if self.horizontalOffset.bitPattern != 0 {
       try visitor.visitSingularDoubleField(value: self.horizontalOffset, fieldNumber: 7)
     }
+    try { if let v = self._region {
+      try visitor.visitSingularUInt64Field(value: v, fieldNumber: 8)
+    } }()
     try unknownFields.traverse(visitor: &visitor)
   }
 
@@ -10348,6 +10383,7 @@ nonisolated extension WireComposeViewportRequest: SwiftProtobuf.Message, SwiftPr
     if lhs.offset != rhs.offset {return false}
     if lhs.epoch != rhs.epoch {return false}
     if lhs.horizontalOffset != rhs.horizontalOffset {return false}
+    if lhs._region != rhs._region {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }

@@ -30,6 +30,7 @@ public final class ComposeViewportController {
     return .with {
       $0.position = pending.position; $0.affinity = pending.affinity
       $0.offset = pending.offset; $0.horizontalOffset = pending.horizontalOffset; $0.epoch = pending.epoch; $0.sequence = pending.id
+      if pending.hasRegion { $0.region = pending.region }
     }
   }
 
@@ -37,17 +38,20 @@ public final class ComposeViewportController {
   public func move(scope: WireComposeScope, from current: WireComposeViewport, to desired: WireComposeViewport, user: Bool) -> Bool {
     guard desired.epoch == current.epoch, desired.affinity <= 1, desired.offset.isFinite,
           abs(desired.offset) <= 100_000, desired.horizontalOffset.isFinite,
-          (0...100_000_000).contains(desired.horizontalOffset) else { return false }
+          (0...100_000_000).contains(desired.horizontalOffset),
+          !desired.hasRegion || Int(exactly: desired.region) != nil else { return false }
     // A physical scroll also wins over a queued key's later caret reveal when
     // it reaches a document boundary and does not actually move the viewport.
     if user { userScrollGeneration &+= 1 }
     guard desired.position != current.position || desired.affinity != current.affinity || abs(desired.offset - current.offset) > 0.01
-      || abs(desired.horizontalOffset - current.horizontalOffset) > 0.01 else { return false }
+      || abs(desired.horizontalOffset - current.horizontalOffset) > 0.01
+      || desired.hasRegion != current.hasRegion || desired.region != current.region else { return false }
     nextID += 1
     let request = WireComposeViewportRequest.with {
       $0.id = nextID; $0.scope = scope; $0.position = desired.position
       $0.affinity = desired.affinity; $0.offset = desired.offset; $0.epoch = desired.epoch
       $0.horizontalOffset = desired.horizontalOffset
+      if desired.hasRegion { $0.region = desired.region }
     }
     latest[Target(scope)] = request
     pump()

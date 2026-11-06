@@ -621,6 +621,13 @@ fixed-width formatting do not constrain native layout.
 - Type 29, `ComposeViewportRequest`, updates a per-client source marker and
   vertical pixel offset plus a horizontal translation in points. Its acknowledgments and coalescing are independent of the text
   input queue. It changes neither the source cursor nor the terminal viewport.
+  An optional `region` probes adjacent source without replacing the visible
+  anchor. Fresh retains complete context around that anchor while gathering
+  the requested region. Both points use owned markers and rebase through edits;
+  a region probe within a UTF-8 scalar selects its containing scalar. Missing
+  `region` keeps the ordinary scroll policy. All requested coordinates validate
+  before applying the anchor/probe update. User scrolling or caret
+  reveal can retire the probe when choosing a new measured anchor.
   Geometry needed outside the visible region travels in a separate Compose
   projection in the input reply, so measuring a pending command does not move
   the reading position.

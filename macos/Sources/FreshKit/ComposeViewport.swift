@@ -47,24 +47,24 @@ public struct ComposeViewport {
     return result
   }
 
-  /// Request the source beyond a loaded edge while retaining the same pixel
-  /// top. Measuring an edge caret is enough; no document-height guess is used.
+  /// Fetch an adjacent source region without replacing the visible anchor.
+  /// The backend retains the anchor's shaping context while loading the probe.
   public func continuation(_ anchor: WireComposeViewport) -> WireComposeViewport? {
     guard let top = requestedTop(anchor) else { return nil }
+    var result = anchor
     if top < 0, text.projection.source.lowerBound > 0 {
-      return edge(text.projection.source.lowerBound, top: top, from: anchor, affinity: 0)
-    }
-    if top + height > text.size.height, UInt64(text.projection.source.upperBound) < documentLength {
-      return edge(text.projection.source.upperBound, top: top, from: anchor, affinity: 1)
-    }
-    return nil
+      result.region = UInt64(text.projection.source.lowerBound - 1)
+    } else if top + height > text.size.height, UInt64(text.projection.source.upperBound) < documentLength {
+      result.region = UInt64(text.projection.source.upperBound)
+    } else { return nil }
+    return result
   }
 
   public func revealing(_ position: UInt64, affinity: UInt32, from anchor: WireComposeViewport) -> WireComposeViewport? {
     guard let source = Int(exactly: position),
           let caret = text.caret(for: source, affinity: affinity == 1 ? .upstream : .downstream) else {
       guard position <= documentLength else { return nil }
-      var result = anchor; result.position = position; result.affinity = affinity; result.offset = 0
+      var result = anchor; result.position = position; result.affinity = affinity; result.offset = 0; result.clearRegion()
       return result
     }
     return revealing(caret: caret, from: anchor)
@@ -112,9 +112,14 @@ public struct ComposeViewport {
   }
 
   private func edge(_ position: Int, top: CGFloat, from anchor: WireComposeViewport, affinity: UInt32) -> WireComposeViewport? {
-    guard let caret = text.caret(for: position, affinity: affinity == 1 ? .upstream : .downstream) else { return nil }
+    var result = anchor
+    let original = Int(exactly: anchor.position).flatMap { text.caret(for: $0, affinity: anchor.affinity == 1 ? .upstream : .downstream) }
+    guard let caret = original ?? text.caret(for: position, affinity: affinity == 1 ? .upstream : .downstream) else { return nil }
+    if original == nil { result.position = UInt64(position); result.affinity = affinity }
     let offset = Double(caret.minY - top)
     guard offset.isFinite, abs(offset) <= 100_000 else { return nil }
-    return .with { $0.position = UInt64(position); $0.affinity = affinity; $0.offset = offset; $0.epoch = anchor.epoch; $0.horizontalOffset = anchor.horizontalOffset }
+    result.offset = offset
+    result.region = UInt64(affinity == 0 && position > 0 ? position - 1 : position)
+    return result
   }
 }

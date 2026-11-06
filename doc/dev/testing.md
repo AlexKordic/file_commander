@@ -597,6 +597,15 @@ typing/save/undo workflows; they do not qualify actual input methods.
 A raw-context regression changes canonically equivalent source of equal byte
 length, checking literal substrings, grapheme ranges and both directions of
 the current UTF-16/source mapping.
+Viewport regressions keep the durable source/pixel anchor separate from an
+adjacent-region probe. Wire checks cover explicit byte-zero presence, invalid
+types/ranges, marker rebasing beyond retained coordinate history, opaque resets,
+client ownership and cleanup. The socket fixture loads forward and backward
+around a table with a 90 KB image destination while retaining its visible
+context. The native workflow waits for the filled initial view, selects pages
+until it crosses that captured source window, replaces once, undoes and saves
+the exact original bytes. Changing the loaded region cannot move the reading
+anchor or lose its table.
 Selection-only context checks compare fresh and reused maps at every UTF-16
 position and source byte across emoji, combining text, CJK and CRLF. Relocated
 contexts and changed document lengths must acquire current coordinates and

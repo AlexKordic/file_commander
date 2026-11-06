@@ -793,20 +793,56 @@ final class ComposeBackendTests: XCTestCase {
       editor.detachAll()
     }
     let original = "| Head | Image |\n|---|---|\n| tiny | ![p](" + String(repeating: "x", count: 90_000)
-      + ".png) |\n\n" + (0..<500).map { "Paragraph \($0) with measured words and café 👩🏽‍💻.\n\n" }.joined()
+      + ".png) |\n\n" + (0..<1000).map { "Paragraph \($0) with measured words and café 👩🏽‍💻.\n\n" }.joined()
     let file = backend.root.appendingPathComponent("page.md")
     try Data(original.utf8).write(to: file)
     try await attach(backend, file: file, editor: editor)
+    let paragraph = try XCTUnwrap(original.range(of: "Paragraph 0"))
+    let tableEnd = UInt64(original[..<paragraph.lowerBound].utf8.count)
+    try await eventually(editor, "automatic filling retains the first table and its visible anchor") {
+      guard let pane = editor.grid?.focusedCompose else { return false }
+      return pane.pane.compose.sourceEnd > tableEnd && pane.pane.compose.sourceStart == 0
+        && !pane.layout.text.tables.isEmpty && pane.viewport.position == 0 && pane.viewport.offset == 0
+    }
     let grid = try XCTUnwrap(editor.grid), initial = try XCTUnwrap(grid.focusedCompose)
     let origin = UInt64(2), edge = initial.pane.compose.sourceEnd
     XCTAssertLessThan(edge, initial.pane.compose.documentLen)
+    if let directory = ProcessInfo.processInfo.environment["FC_COMPOSE_ARTIFACT_DIR"] {
+      let output = URL(fileURLWithPath: directory)
+      try FileManager.default.createDirectory(at: output, withIntermediateDirectories: true)
+      let record: [String: Any] = ["source_start": initial.pane.compose.sourceStart, "source_end": edge,
+        "cursor": initial.cursor?.position ?? 0, "viewport_position": initial.viewport.position,
+        "viewport_offset": initial.viewport.offset, "probe": initial.viewport.region, "tables": initial.layout.text.tables.count]
+      try JSONSerialization.data(withJSONObject: record, options: [.prettyPrinted, .sortedKeys])
+        .write(to: output.appendingPathComponent("page-initial-window.json"))
+      let width = Int(ceil(initial.bounds.maxX)), height = Int(ceil(initial.bounds.maxY))
+      let context = try XCTUnwrap(CGContext(data: nil, width: width, height: height, bitsPerComponent: 8,
+        bytesPerRow: width * 4, space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
+      context.setFillColor(NSColor.white.cgColor); context.fill(CGRect(x: 0, y: 0, width: width, height: height))
+      context.translateBy(x: 0, y: CGFloat(height)); context.scaleBy(x: 1, y: -1)
+      initial.draw(in: context, dirty: initial.bounds, foreground: .black, background: .white, selection: .blue)
+      let png = try XCTUnwrap(CGImageDestinationCreateWithURL(output.appendingPathComponent("page-initial-window.png") as CFURL, "public.png" as CFString, 1, nil))
+      CGImageDestinationAddImage(png, try XCTUnwrap(context.makeImage()), nil); XCTAssertTrue(CGImageDestinationFinalize(png))
+    }
     try await click(origin, editor: editor)
-    editor.send(.action(name: "select_page_down", argsJson: ""))
-    try await eventually(editor, "Page Down continued beyond source window", timeout: 20) {
-      guard let cursor = grid.focusedCompose?.cursor else { return false }
-      return cursor.position >= edge && cursor.anchor == origin
+    // The stable initial view already includes its measured fill region.
+    // Keep selecting pages until crossing that actual captured source window.
+    var pages = 0
+    while (grid.focusedCompose?.cursor?.position ?? 0) < edge && pages < 128 {
+      let before = try XCTUnwrap(grid.focusedCompose?.cursor).position
+      editor.send(.action(name: "select_page_down", argsJson: "")); pages += 1
+      try await eventually(editor, "Page Down advances the captured selection") {
+        guard let cursor = grid.focusedCompose?.cursor else { return false }
+        return cursor.position > before && cursor.anchor == origin
+      }
     }
     let end = try XCTUnwrap(grid.focusedCompose?.cursor).position
+    XCTAssertGreaterThanOrEqual(end, edge, "the selection must cross the initially loaded window")
+    if let directory = ProcessInfo.processInfo.environment["FC_COMPOSE_ARTIFACT_DIR"] {
+      let record: [String: Any] = ["pages": pages, "initial_source_end": edge, "selection_start": origin, "selection_end": end]
+      try JSONSerialization.data(withJSONObject: record, options: [.prettyPrinted, .sortedKeys])
+        .write(to: URL(fileURLWithPath: directory).appendingPathComponent("page-selection.json"))
+    }
     XCTAssertEqual(try Data(contentsOf: file), Data(original.utf8))
     grid.insertText("PAGED", replacementRange: NSRange(location: NSNotFound, length: 0))
     let expected = Data(original.utf8.prefix(Int(origin))) + Data("PAGED".utf8) + Data(original.utf8.dropFirst(Int(end)))
