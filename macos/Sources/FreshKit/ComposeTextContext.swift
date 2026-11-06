@@ -7,7 +7,7 @@ public struct ComposeTextContext {
   public let source: Range<Int>
   public let range: NSRange
   public private(set) var selection: NSRange
-  private let documentLength: Int
+  let documentLength: Int
   private let utf16ToSource: [Int: Int]
   private let sourceToUTF16: [Int: Int]
 

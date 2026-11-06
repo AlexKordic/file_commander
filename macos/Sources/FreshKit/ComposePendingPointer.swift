@@ -21,6 +21,23 @@ public struct ComposePendingPointer {
     self.caretOffset = caretOffset; self.offset = offset; self.affinity = affinity; self.extend = extend; self.count = count
   }
 
+  /// Evaluate the same captured point in the current provisional document.
+  /// An earlier prefix may already have become real source; relative owner
+  /// placement and exact intervening text keep this independent of screen reflow.
+  public func preview(in prefix: ComposeComposition, selections: ComposeVirtualSelections) -> ComposeVirtualSelections? {
+    guard let owner = prefix.values[cursor] else { return nil }
+    let caret = prefix.virtualStart(for: cursor) + NSMaxRange(owner.selected)
+    let delta = offset - caretOffset
+    let (point, overflow) = caret.addingReportingOverflow(delta)
+    guard !overflow, point >= 0 else { return nil }
+    let low = min(caret, point), length = abs(caret - point)
+    let expectedStart = min(caretOffset, offset)
+    let expected = (text as NSString).substring(with: NSRange(location: expectedStart, length: length))
+    guard let actual = selections.substring(for: NSRange(location: low, length: length)),
+          actual.string.utf16.elementsEqual(expected.utf16) else { return nil }
+    return selections.movingPrimary(to: point, extend: extend)
+  }
+
   public func resolved(_ receipt: WireComposeEditReceipt) -> ComposePointer? {
     guard receipt.matches(scope, epoch: epoch),
           receipt.cursors.contains(cursor) || receipt.preservedCursors.contains(cursor),

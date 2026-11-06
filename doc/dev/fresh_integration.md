@@ -607,6 +607,18 @@ Navigation measurement uses the actual source snapshot independently of
 the provisional drawing overlay, so a key awaiting geometry can finish while
 a following conversion is marked.
 
+The experimental presentation model separates actual caret IDs from the draft
+regions that own provisional text. `ComposeVirtualSelections` keeps bounded,
+immutable attributed contexts and directional UTF-16 selections, preserving
+secondary carets when the primary moves into another draft. Conflicting
+contexts and unknown gaps cannot supply text. `ComposeVirtualInsertion` folds
+a broadcast conversion back into disjoint real source regions, merging drafts
+when several carets affect one region. Its real source map and per-caret display
+ranges use the existing measured text layout; synthetic region IDs remain
+inside FreshKit. This model is preparatory: native input/drawing integration
+and the complete marked-text update lifecycle are still in progress. It
+introduces neither a Markdown parser nor a second editable buffer.
+
 `ComposePane.native_newline` (field 23) declares Fresh's insertion separator:
 0 unknown, 1 LF, 2 CRLF. CR disk files use LF internally. The native preview
 normalizes committed phrases using that policy, including surrogate characters
