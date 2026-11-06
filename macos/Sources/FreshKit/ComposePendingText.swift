@@ -8,6 +8,8 @@ public struct ComposePendingText {
   public private(set) var presentation: ComposeComposition
   private let baseline: ComposeComposition?
   private let active: Set<UInt64>
+  private var newlyIncluded: [UInt64: ComposeMarkedText] = [:]
+  public private(set) var observedCursors: [WireComposeCursorAnchor]
   private var committedEdits: [UInt64: Edit]?
 
   private struct Edit {
@@ -16,6 +18,8 @@ public struct ComposePendingText {
     var inserted: NSAttributedString
     var marked, selected: NSRange
     var display: NSRange
+    var selectionLength: Int? = nil
+    var leading = "", trailing = ""
   }
 
   public var markedRange: NSRange { presentation.markedRange }
@@ -31,6 +35,7 @@ public struct ComposePendingText {
   public init?(pane: WireComposePane, text: NSAttributedString, selected: NSRange, replacement: NSRange) {
     guard let value = ComposeComposition(pane: pane, text: text, selected: selected, replacement: replacement) else { return nil }
     presentation = value; baseline = nil; active = Set(value.ordered)
+    observedCursors = Self.anchors(pane)
   }
 
   public init?(following previous: ComposePendingText, pane: WireComposePane,
@@ -39,10 +44,18 @@ public struct ComposePendingText {
     let base = previous.presentation
     let broadcast = replacement.location == NSNotFound
     let targets = broadcast ? Set(pane.cursors.map(\.id)) : [base.primaryID]
-    // A different caret group requires a fresh authoritative context. Never
-    // invent ownership for a cursor not included in the predecessor preview.
-    guard !targets.isEmpty, targets.isSubset(of: Set(base.ordered)) else { return nil }
+    guard !targets.isEmpty else { return nil }
     var values = base.values
+    let missing = targets.subtracting(Set(base.ordered))
+    var added: [UInt64: ComposeMarkedText] = [:]
+    if !missing.isEmpty {
+      guard broadcast, let raw = ComposeComposition(pane: pane, text: text, selected: selected, replacement: replacement) else { return nil }
+      for id in missing {
+        guard let value = raw.values[id] else { return nil }
+        // The receipt must later prove this original cursor/range was retained.
+        values[id] = value; added[id] = value
+      }
+    }
     let (relative, overflow) = broadcast ? (0, false) : replacement.location.subtractingReportingOverflow(base.selectedRange.location)
     guard !overflow else { return nil }
     for id in base.ordered where targets.contains(id) {
@@ -54,6 +67,7 @@ public struct ComposePendingText {
     }
     guard let value = ComposeComposition(primary: base.primaryID, values: values) else { return nil }
     presentation = value; baseline = base; active = targets
+    newlyIncluded = added; observedCursors = previous.observedCursors
   }
 
   @discardableResult
@@ -126,43 +140,77 @@ public struct ComposePendingText {
   /// Only real, receipt-bound ranges can become wire replacements.
   public func replacement(scope: WireComposeScope, epoch: UInt64) -> ComposeReplacement? {
     guard baseline == nil else { return nil }
-    return ComposeReplacement(scope: scope, epoch: epoch, composition: presentation)
+    return ComposeReplacement(scope: scope, epoch: epoch, composition: presentation, observedCursors: observedCursors)
   }
 
-  public func resolved(pane: WireComposePane, edited: [UInt64]) -> ComposePendingText? {
-    guard baseline != nil, Set(edited).count == edited.count, active.isSubset(of: Set(edited)) else { return nil }
+  public func resolved(pane: WireComposePane, edited: [UInt64], preserved: [UInt64] = []) -> ComposePendingText? {
+    guard Set(edited).count == edited.count, Set(preserved).count == preserved.count else { return nil }
+    let edited = Set(edited), preserved = Set(preserved)
+    guard baseline != nil, active.isSubset(of: edited.union(preserved)) else { return nil }
+    // A later receipt must not silently renew a cursor that an earlier
+    // transaction could not prove. Keep provenance through the whole chain.
+    let observed = Self.anchors(pane).filter { edited.contains($0.id) || preserved.contains($0.id) }
     var pane = pane
     pane.cursors = pane.cursors.filter { active.contains($0.id) }
-    guard pane.cursors.count == active.count, pane.cursors.allSatisfy({
-      (!$0.hasAnchor || $0.anchor == $0.position) && $0.hasUtf16Position
-    }) else { return nil }
+    guard pane.cursors.count == active.count, pane.cursors.allSatisfy({ $0.hasUtf16Position }) else { return nil }
     for index in pane.cursors.indices { pane.cursors[index].primary = pane.cursors[index].id == presentation.primaryID }
     guard let fresh = ComposeComposition(pane: pane, text: NSAttributedString(string: ""),
       selected: NSRange(location: 0, length: 0), replacement: NSRange(location: NSNotFound, length: 0)) else { return nil }
+    // `fresh` validated unique IDs. Keep receipt lookup linear in caret count.
+    let cursors = Dictionary(uniqueKeysWithValues: pane.cursors.map { ($0.id, $0) })
     var values: [UInt64: ComposeMarkedText] = [:]
     for id in ordered {
-      guard let edit = committedEdits?[id] ?? edit(for: id), let target = fresh.values[id] else { return nil }
-      let (position, overflow) = target.originalRange.location.addingReportingOverflow(edit.offset)
-      guard !overflow, position >= 0 else { return nil }
-      let range = NSRange(location: position, length: edit.removed.utf16.count)
-      guard target.context.sourceRange(forUTF16: target.originalRange) == target.source,
-            let raw = target.context.exactText(for: range), Array(raw.utf16) == Array(edit.removed.utf16),
-            let source = target.context.sourceRange(forUTF16: range),
-            let value = ComposeMarkedText(context: target.context, range: range, source: source,
-              text: edit.inserted, selected: edit.selected, marked: edit.marked) else { return nil }
+      guard let edit = committedEdits?[id] ?? edit(for: id), let target = fresh.values[id],
+            let cursor = cursors[id],
+            let byte = Int(exactly: cursor.position), let unit = Int(exactly: cursor.utf16Position),
+            target.context.utf16Position(for: byte) == unit else { return nil }
+      let range: NSRange, source: Range<Int>
+      if let length = edit.selectionLength {
+        guard preserved.contains(id), !edited.contains(id), target.originalRange.length == length,
+              let expanded = Self.range(at: target.originalRange.location, offset: -edit.leading.utf16.count,
+                length: length + edit.leading.utf16.count + edit.trailing.utf16.count),
+              edit.leading.isEmpty || Self.exact(target.context.exactText(for: NSRange(location: expanded.location, length: edit.leading.utf16.count)), edit.leading),
+              edit.trailing.isEmpty || Self.exact(target.context.exactText(for: NSRange(location: NSMaxRange(target.originalRange), length: edit.trailing.utf16.count)), edit.trailing),
+              target.source.lowerBound >= edit.leading.utf8.count,
+              edit.trailing.utf8.count <= Int(pane.documentLen) - target.source.upperBound else { return nil }
+        range = expanded
+        source = (target.source.lowerBound - edit.leading.utf8.count)..<(target.source.upperBound + edit.trailing.utf8.count)
+      } else {
+        let (position, overflow) = target.originalRange.location.addingReportingOverflow(edit.offset)
+        guard !overflow, position >= 0, target.originalRange.length == 0 else { return nil }
+        range = NSRange(location: position, length: edit.removed.utf16.count)
+        guard target.context.sourceRange(forUTF16: target.originalRange) == target.source,
+              let raw = target.context.exactText(for: range), Array(raw.utf16) == Array(edit.removed.utf16),
+              let captured = target.context.sourceRange(forUTF16: range) else { return nil }
+        source = captured
+      }
+      guard let value = ComposeMarkedText(context: target.context, range: range, source: source,
+        text: edit.inserted, selected: edit.selected, marked: edit.marked) else { return nil }
       values[id] = value
     }
     guard let composition = ComposeComposition(primary: presentation.primaryID, values: values) else { return nil }
-    return ComposePendingText(presentation: composition, committed: committedEdits != nil)
+    return ComposePendingText(presentation: composition, committed: committedEdits != nil, observedCursors: observed)
   }
 
-  private init(presentation: ComposeComposition, committed: Bool) {
+  private init(presentation: ComposeComposition, committed: Bool, observedCursors: [WireComposeCursorAnchor]) {
     self.presentation = presentation; baseline = nil; active = Set(presentation.ordered)
+    self.observedCursors = observedCursors
     committedEdits = committed ? [:] : nil
   }
 
   private func edit(for id: UInt64) -> Edit? {
-    guard let before = baseline?.values[id], let after = presentation.values[id] else { return nil }
+    guard let after = presentation.values[id] else { return nil }
+    if let original = newlyIncluded[id] {
+      let left = original.originalRange.location - after.originalRange.location
+      let right = NSMaxRange(after.originalRange) - NSMaxRange(original.originalRange)
+      guard left >= 0, right >= 0,
+            let leading = left == 0 ? "" : after.context.exactText(for: NSRange(location: after.originalRange.location, length: left)),
+            let trailing = right == 0 ? "" : after.context.exactText(for: NSRange(location: NSMaxRange(original.originalRange), length: right)) else { return nil }
+      return Edit(offset: 0, removed: "", inserted: after.draft, marked: after.marked, selected: after.selected,
+        display: NSRange(location: 0, length: after.draft.length), selectionLength: original.originalRange.length,
+        leading: leading, trailing: trailing)
+    }
+    guard let before = baseline?.values[id] else { return nil }
     let left = before.originalRange.location - after.originalRange.location
     let right = NSMaxRange(after.originalRange) - NSMaxRange(before.originalRange)
     guard left >= 0, right >= 0,
@@ -185,6 +233,17 @@ public struct ComposePendingText {
       inserted: after.draft.attributedSubstring(from: display),
       marked: NSRange(location: after.marked.location - start, length: after.marked.length),
       selected: NSRange(location: after.selected.location - start, length: after.selected.length), display: display)
+  }
+
+  private static func anchors(_ pane: WireComposePane) -> [WireComposeCursorAnchor] {
+    pane.cursors.map { cursor in .with {
+      $0.id = cursor.id; $0.position = cursor.position
+      if cursor.hasAnchor { $0.anchor = cursor.anchor }
+    } }
+  }
+
+  private static func exact(_ value: String?, _ expected: String) -> Bool {
+    value.map { Array($0.utf16) == Array(expected.utf16) } ?? false
   }
 
   private static func boundary(_ units: [UInt16], _ index: Int) -> Bool {

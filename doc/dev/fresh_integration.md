@@ -516,6 +516,21 @@ Invalid lifetime, retired/foreign carets, conflicting context or a missing
 receipt recovers the dependent text without partially inserting its group.
 Rejecting a predecessor recovers queued and still-marked descendants as well.
 
+An explicit primary-only edit can be followed immediately by a default
+conversion at every original caret. `ComposeInput.observed_cursors` (field 21)
+captures source positions and selection anchors with the input's source
+revision, or its scope revision for ordinary text input. Fresh maps each
+unchanged range through retained edit history and compares both ends and
+selection direction to the live cursor before applying the transaction.
+The immutable receipt lists matching IDs in `preserved_cursors` (field 7),
+separately from its actually edited `cursors`. A later composition can use
+those proven unchanged selections, including selections outside the bounded
+text-context chunk. Merely appearing in a receipt pane is insufficient.
+Rebinding carries only proven owners forward; a later scene cannot silently
+renew a previously failed witness. Missing proof rejects the entire following
+group into recovery. Expansion outside a preserved selection still requires
+exact surrounding source and consistent source-byte/UTF-16 caret coordinates.
+
 `ComposePendingText` keeps committed prefixes visible before their replies.
 Drawing, selected ranges, substring queries and hit/candidate geometry use the
 same provisional document. A committed prefix is unmarked; a following draft
@@ -581,8 +596,9 @@ disconnection. Failure never overwrites the system clipboard, and copying
 does not erase the retained text. This is not a persistent crash checkpoint.
 Dependent active and queued conversions now use accepted source receipts.
 Immediate presentation and explicit initial replacements during consecutive
-queued text edits have automated coverage. A different caret group still
-requires a fresh authoritative context. Opaque queued navigation, clipboard
+queued text edits have automated coverage. Existing unchanged carets may join
+through captured source witnesses; newly created carets still require a fresh
+authoritative context. Opaque queued navigation, clipboard
 paste and other actions form a boundary for local prediction; arbitrary
 interleavings, interactive input-method behavior and full recovery qualification
 remain open. This development implementation does not establish full IME

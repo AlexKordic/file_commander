@@ -458,6 +458,49 @@ final class ComposeInputTests: XCTestCase {
   }
 
   @MainActor
+  func testBroadcastAfterPrimaryOnlyCommitRequiresTheSecondarysSourceWitness() async throws {
+    for witnessed in [true, false] {
+      let unspecified = NSRange(location: NSNotFound, length: 0)
+      var source = pane("cat dog")
+      source.compose.cursors.append(.with { $0.id = 2; $0.position = 7; $0.anchor = 4; $0.utf16Position = 7; $0.utf16Anchor = 4 })
+      let peer = try ScenePeer(pane: source); defer { peer.close() }
+      let editor = richEditor(); defer { editor.detachAll() }
+      editor.attach(socketPath: peer.path, app: nil)
+      try await eventually { editor.grid?.focusedCompose != nil }
+      let grid = try XCTUnwrap(editor.grid)
+      grid.insertText("日", replacementRange: NSRange(location: 0, length: 3))
+      grid.insertText("本", replacementRange: unspecified)
+      XCTAssertEqual(grid.attributedSubstring(forProposedRange: NSRange(location: 0, length: 100), actualRange: nil)?.string, "日本 本")
+      try await eventually { peer.inputs.count == 1 }
+      XCTAssertEqual(peer.inputs[0].observedCursors.map(\.id), [1, 2])
+      XCTAssertEqual(peer.inputs[0].observedCursors[1].anchor, 4)
+      var current = pane("日 dog", revision: 5)
+      current.compose.cursors = [.with { $0.id = 1; $0.primary = true; $0.position = 3; $0.utf16Position = 1 },
+        .with { $0.id = 2; $0.position = 7; $0.anchor = 4; $0.utf16Position = 5; $0.utf16Anchor = 2 }]
+      current.compose.textContext.selectionStart = 1; current.compose.textContext.selectionEnd = 1
+      let receipt = WireComposeEditReceipt.with {
+        $0.window = 1; $0.leaf = 2; $0.buffer = 3; $0.epoch = 7; $0.cursors = [1]
+        $0.preservedCursors = witnessed ? [1, 2] : [1]; $0.pane = current.compose
+      }
+      peer.reply(.with { $0.id = 1; $0.accepted = true; $0.edit = receipt }, pane: current)
+      if witnessed {
+        try await eventually { peer.inputs.count == 2 }
+        XCTAssertEqual(peer.inputs[1].replacementStart, 3); XCTAssertEqual(peer.inputs[1].replacementEnd, 3)
+        XCTAssertEqual(peer.inputs[1].replacements.count, 1)
+        XCTAssertEqual(peer.inputs[1].replacements[0].cursor, 2)
+        XCTAssertEqual(peer.inputs[1].replacements[0].start, 4); XCTAssertEqual(peer.inputs[1].replacements[0].end, 7)
+        XCTAssertEqual(peer.inputs[1].observedCursors.map(\.id), [1, 2])
+        XCTAssertEqual(try WirePaste(serializedBytes: peer.inputs[1].payload).text, "本")
+        XCTAssertTrue(editor.uninsertedText.isEmpty)
+        peer.reply(.with { $0.id = 2; $0.accepted = true })
+      } else {
+        try await eventually { editor.uninsertedText == ["本"] }
+        XCTAssertEqual(peer.inputs.count, 1, "the primary must not be edited as a subset of the failed broadcast")
+      }
+    }
+  }
+
+  @MainActor
   func testRejectingAPredecessorRecoversQueuedAndStillMarkedDependentPhrasesOnce() async throws {
     let peer = try ScenePeer(pane: pane("alpha Tail")); defer { peer.close() }
     let editor = richEditor(); defer { editor.detachAll() }

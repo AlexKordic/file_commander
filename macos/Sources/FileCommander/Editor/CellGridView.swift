@@ -679,7 +679,7 @@ final class CellGridView: NSView, @preconcurrency NSTextInputClient {
           UInt64(store.windowID) == receipt.window,
           store.panes.contains(where: { $0.leaf == receipt.leaf && $0.buffer == receipt.buffer && $0.hasCompose
             && $0.compose.viewport.epoch == receipt.epoch }),
-          let text = current.text.resolved(pane: receipt.pane, edited: receipt.cursors) else {
+          let text = current.text.resolved(pane: receipt.pane, edited: receipt.cursors, preserved: receipt.preservedCursors) else {
       cancelComposition(recover: true); return
     }
     var pane = target.pane; pane.compose = receipt.pane

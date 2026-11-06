@@ -611,7 +611,7 @@ final class NativeEditor: NSObject, CellGridDelegate {
       if let chain = queued.chain, chain.predecessor == first.token || failed.contains(chain.predecessor) {
         if let receipt = valid, chain.predecessor == first.token, let target = queued.target,
            receipt.matches(target.scope, epoch: target.epoch),
-           let text = chain.text.resolved(pane: receipt.pane, edited: receipt.cursors),
+           let text = chain.text.resolved(pane: receipt.pane, edited: receipt.cursors, preserved: receipt.preservedCursors),
            let replacement = text.replacement(scope: receipt.scope, epoch: receipt.epoch),
            let original = queued.previewTarget {
           var pane = original.pane; pane.compose = receipt.pane
@@ -766,7 +766,10 @@ final class NativeEditor: NSObject, CellGridDelegate {
     case .message(let message):
       input.kind = UInt32(message.kind.rawValue)
       input.payload = Data(message.payload())
-      if case .text = message { input.textInput = true }
+      if case .text = message {
+        input.textInput = true
+        input.observedCursors = queued.preview?.observedCursors ?? []
+      }
       if let identity = pendingComposePane {
         input.bufferEpoch = queued.target?.epoch ?? 0
         guard let visible = grid?.composePanes[identity.leaf], visible.identity == identity else {
@@ -816,6 +819,7 @@ final class NativeEditor: NSObject, CellGridDelegate {
         pendingComposeBefore = (pane.pane.compose.bufferRevision, pane.pane.compose.cursors)
       }
     }
+    if input.textInput, queued.preview != nil, let scope = queued.target?.scope { input.scope = scope }
     composeInFlight = true
     socket.send(.composeInput(input))
   }

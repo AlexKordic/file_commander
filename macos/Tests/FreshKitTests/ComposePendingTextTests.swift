@@ -139,4 +139,73 @@ final class ComposePendingTextTests: XCTestCase {
     XCTAssertEqual(resolved.presentation.primary.source, 5..<5)
     XCTAssertEqual(resolved.presentation.primary.draft.string, "next")
   }
+
+  func testExplicitPrimaryEditThenBroadcastIncludesOnlyProvenUnchangedSecondarySelections() throws {
+    let source = pane("cat dog", [NSRange(location: 0, length: 3), NSRange(location: 4, length: 3)])
+    let initial = try XCTUnwrap(ComposePendingText(pane: source, text: NSAttributedString(string: "日"),
+      selected: NSRange(location: 1, length: 0), replacement: NSRange(location: 4, length: 3)))
+    let first = try XCTUnwrap(initial.committed(nativeNewline: 1))
+    let next = try following(first, pane: source, text: "本")
+    XCTAssertEqual(next.substring(for: NSRange(location: 0, length: 100))?.text.string, "本 日本")
+    XCTAssertEqual(next.selectedRange, NSRange(location: 4, length: 0))
+    let receipt = pane("cat 日", [NSRange(location: 0, length: 3), NSRange(location: 5, length: 0)])
+    XCTAssertNil(next.resolved(pane: receipt, edited: [2]), "a live but unproven ID is insufficient")
+    XCTAssertNil(next.resolved(pane: receipt, edited: [2], preserved: [1, 1]))
+    var malformed = receipt
+    malformed.cursors[0].utf16Position = 4; malformed.cursors[0].utf16Anchor = 1
+    XCTAssertNil(next.resolved(pane: malformed, edited: [2], preserved: [1]), "source bytes and UTF-16 anchors must describe the same caret")
+    let resolved = try XCTUnwrap(next.resolved(pane: receipt, edited: [2], preserved: [1]))
+    XCTAssertEqual(resolved.presentation.values[1]?.source, 0..<3)
+    XCTAssertEqual(resolved.presentation.values[2]?.source, 7..<7)
+    let committed = try XCTUnwrap(resolved.committed(nativeNewline: 1))
+    let replacement = try XCTUnwrap(committed.replacement(scope: .init(), epoch: 7)).input(id: 2)
+    XCTAssertEqual(replacement.replacementStart, 7); XCTAssertEqual(replacement.replacements.first?.end, 3)
+    XCTAssertEqual(replacement.observedCursors.map(\.id), [1, 2])
+    XCTAssertEqual(try WirePaste(serializedBytes: replacement.payload).text, "本")
+  }
+
+  func testProvenanceSurvivesAChainWithoutRenewingAFailedCursorFromALaterPane() throws {
+    let source = pane("cat dog", [NSRange(location: 0, length: 3), NSRange(location: 4, length: 3)])
+    let initial = try XCTUnwrap(ComposePendingText(pane: source, text: NSAttributedString(string: "日"),
+      selected: NSRange(location: 1, length: 0), replacement: NSRange(location: 4, length: 3)))
+    let first = try XCTUnwrap(initial.committed(nativeNewline: 1))
+    let second = try following(first, pane: source, text: "本", range: NSRange(location: 5, length: 0))
+    let receipt = pane("cat 日", [NSRange(location: 0, length: 3), NSRange(location: 5, length: 0)])
+    let resolved = try XCTUnwrap(second.resolved(pane: receipt, edited: [2]))
+    XCTAssertEqual(resolved.observedCursors.map(\.id), [2], "the pane's unrelated secondary cannot renew a missing witness")
+  }
+
+  func testUneditedLargeSelectionCanJoinBroadcastUsingBoundedContextAndItsProvenReceipt() throws {
+    let text = String(repeating: "x", count: 20_000) + " dog"
+    var source = pane(text, [NSRange(location: 0, length: 20_000), NSRange(location: 20_001, length: 3)])
+    source.textContext.text = " dog"; source.textContext.sourceStart = 20_000; source.textContext.utf16Start = 20_000
+    source.textChunks = [.with { $0.text = "xxx "; $0.sourceStart = 19_997; $0.utf16Start = 19_997 }]
+    let initial = try XCTUnwrap(ComposePendingText(pane: source, text: NSAttributedString(string: "日"),
+      selected: NSRange(location: 1, length: 0), replacement: NSRange(location: 20_001, length: 3)))
+    let first = try XCTUnwrap(initial.committed(nativeNewline: 1))
+    let next = try following(first, pane: source, text: "!")
+    let receiptText = String(repeating: "x", count: 20_000) + " 日"
+    var receipt = pane(receiptText, [NSRange(location: 0, length: 20_000), NSRange(location: 20_002, length: 0)])
+    receipt.textContext.text = " 日"; receipt.textContext.sourceStart = 20_000; receipt.textContext.utf16Start = 20_000
+    receipt.textChunks = source.textChunks
+    let resolved = try XCTUnwrap(next.resolved(pane: receipt, edited: [2], preserved: [1]))
+    XCTAssertEqual(resolved.presentation.values[1]?.source, 0..<20_000)
+    XCTAssertEqual(resolved.presentation.values[1]?.draft.string, "!")
+    XCTAssertEqual(resolved.presentation.values[2]?.source, 20_004..<20_004)
+    XCTAssertEqual(resolved.presentation.values[2]?.draft.string, "!")
+  }
+
+  func testExpansionAroundAnUnchangedSelectionRequiresExactUnicodeSource() throws {
+    let source = pane("Åcat dog", [NSRange(location: 1, length: 3), NSRange(location: 5, length: 3)])
+    let initial = try XCTUnwrap(ComposePendingText(pane: source, text: NSAttributedString(string: "日"),
+      selected: NSRange(location: 1, length: 0), replacement: NSRange(location: 5, length: 3)))
+    let first = try XCTUnwrap(initial.committed(nativeNewline: 1))
+    var next = try following(first, pane: source, text: "本")
+    XCTAssertTrue(next.update(NSAttributedString(string: "X"), selected: NSRange(location: 1, length: 0),
+      replacement: NSRange(location: next.markedRange.location - 1, length: 1)))
+    XCTAssertEqual(next.substring(for: NSRange(location: 0, length: 100))?.text.string, "X本 X本")
+    XCTAssertNotNil(next.resolved(pane: pane("Åcat 日", [NSRange(location: 1, length: 3), NSRange(location: 6, length: 0)]), edited: [2], preserved: [1]))
+    XCTAssertNil(next.resolved(pane: pane("Åcat 日", [NSRange(location: 1, length: 3), NSRange(location: 6, length: 0)]), edited: [2], preserved: [1]),
+      "canonical equivalence cannot authorize deleting different surrounding source bytes")
+  }
 }

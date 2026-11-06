@@ -453,4 +453,40 @@ final class ComposeBackendTests: XCTestCase {
     XCTAssertTrue(editor.uninsertedText.isEmpty)
   }
 
+  @MainActor
+  func testExplicitPrimaryThenImmediateBroadcastKeepsEveryOriginalCaretAndUndoBoundary() async throws {
+    let backend = try backend(); defer { backend.stop() }
+    let editor = editor(BackendPasteboard()); defer { editor.detachAll() }
+    let original = "| A | B |\n|---|---|\n| cell | value |\n\nalpha one\nalpha two\n"
+    let file = backend.root.appendingPathComponent("mixed-caret-conversions.md")
+    try Data(original.utf8).write(to: file)
+    try await attach(backend, file: file, editor: editor)
+    let grid = try XCTUnwrap(editor.grid), first = try XCTUnwrap(original.range(of: "alpha"))
+    try await click(UInt64(original[..<first.lowerBound].utf8.count), editor: editor)
+    editor.send(.action(name: "add_cursor_below", argsJson: ""))
+    try await eventually(editor, "two original carets before the explicit primary edit") { grid.focusedCompose?.pane.compose.cursors.count == 2 }
+    let pane = try XCTUnwrap(grid.focusedCompose), primary = try XCTUnwrap(pane.cursor)
+    let secondary = try XCTUnwrap(pane.pane.compose.cursors.first { !$0.primary })
+    let ids = Set(pane.pane.compose.cursors.map(\.id))
+    var expected = Data(original.utf8)
+    let replacements = [(Int(primary.position)..<(Int(primary.position) + 5), Data("日本語".utf8)),
+      (Int(secondary.position)..<Int(secondary.position), Data("語".utf8))]
+    for (range, text) in replacements.sorted(by: { $0.0.lowerBound > $1.0.lowerBound }) { expected.replaceSubrange(range, with: text) }
+    grid.insertText("日本", replacementRange: NSRange(location: Int(primary.position), length: 5))
+    grid.insertText("語", replacementRange: NSRange(location: NSNotFound, length: 0))
+    XCTAssertEqual(grid.attributedSubstring(forProposedRange: NSRange(location: 0, length: 10_000), actualRange: nil)?.string,
+      String(decoding: expected, as: UTF8.self), "the unacknowledged document includes both caret operations")
+    try await eventually(editor, "mixed explicit/broadcast batch acknowledged") { grid.focusedCompose?.pane.compose.documentLen == UInt64(expected.count) }
+    XCTAssertEqual(Set(try XCTUnwrap(grid.focusedCompose).pane.compose.cursors.map(\.id)), ids)
+    editor.send(.action(name: "save", argsJson: ""))
+    try await eventually(editor, "save primary replacement and broadcast at both carets") { (try? Data(contentsOf: file)) == expected }
+    editor.send(.action(name: "undo", argsJson: ""))
+    try await eventually(editor, "one undo removes only the broadcast from both carets") { grid.focusedCompose?.pane.compose.documentLen == UInt64(original.utf8.count + 1) }
+    editor.send(.action(name: "undo", argsJson: ""))
+    try await eventually(editor, "second undo restores the primary word") { grid.focusedCompose?.pane.compose.documentLen == UInt64(original.utf8.count) }
+    editor.send(.action(name: "save", argsJson: ""))
+    try await eventually(editor, "save exact original after both mixed transactions") { (try? Data(contentsOf: file)) == Data(original.utf8) }
+    XCTAssertTrue(editor.uninsertedText.isEmpty)
+  }
+
 }

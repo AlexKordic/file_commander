@@ -11,7 +11,7 @@ public struct ComposeReplacement {
     return ([text] + captured.replacements.compactMap { $0.hasText ? $0.text : nil }).filter { seen.insert($0).inserted }
   }
 
-  public init?(scope: WireComposeScope, epoch: UInt64, composition: ComposeComposition) {
+  public init?(scope: WireComposeScope, epoch: UInt64, composition: ComposeComposition, observedCursors: [WireComposeCursorAnchor] = []) {
     let primary = composition.primary
     guard let value = ComposeReplacement(scope: scope, epoch: epoch, source: primary.source, cursor: composition.primaryID, text: primary.draft.string) else { return nil }
     var input = value.captured
@@ -22,6 +22,7 @@ public struct ComposeReplacement {
         if value.draft.string != primary.draft.string { $0.text = value.draft.string }
       }
     }
+    input.observedCursors = observedCursors
     captured = input
   }
 

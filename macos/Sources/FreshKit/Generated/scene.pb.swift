@@ -1945,6 +1945,8 @@ public nonisolated struct WireComposeEditReceipt: Sendable {
 
   public var cursors: [UInt64] = []
 
+  public var preservedCursors: [UInt64] = []
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
@@ -3518,11 +3520,60 @@ public nonisolated struct WireComposeInput: @unchecked Sendable {
     set {_uniqueStorage()._replacements = newValue}
   }
 
+  public var observedCursors: [WireComposeCursorAnchor] {
+    get {_storage._observedCursors}
+    set {_uniqueStorage()._observedCursors = newValue}
+  }
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
 
   fileprivate var _storage = _StorageClass.defaultInstance
+}
+
+/// Source carets captured with the input's source_revision (or scope revision).
+/// A receipt reports only IDs whose unchanged mapped ranges match the live
+/// caret and selection immediately before the native transaction.
+public nonisolated struct WireComposeCursorAnchor: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var id: UInt64 {
+    get {_id ?? 0}
+    set {_id = newValue}
+  }
+  /// Returns true if `id` has been explicitly set.
+  public var hasID: Bool {self._id != nil}
+  /// Clears the value of `id`. Subsequent reads from it will return its default value.
+  public mutating func clearID() {self._id = nil}
+
+  public var position: UInt64 {
+    get {_position ?? 0}
+    set {_position = newValue}
+  }
+  /// Returns true if `position` has been explicitly set.
+  public var hasPosition: Bool {self._position != nil}
+  /// Clears the value of `position`. Subsequent reads from it will return its default value.
+  public mutating func clearPosition() {self._position = nil}
+
+  public var anchor: UInt64 {
+    get {_anchor ?? 0}
+    set {_anchor = newValue}
+  }
+  /// Returns true if `anchor` has been explicitly set.
+  public var hasAnchor: Bool {self._anchor != nil}
+  /// Clears the value of `anchor`. Subsequent reads from it will return its default value.
+  public mutating func clearAnchor() {self._anchor = nil}
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+
+  fileprivate var _id: UInt64? = nil
+  fileprivate var _position: UInt64? = nil
+  fileprivate var _anchor: UInt64? = nil
 }
 
 /// Additional captured carets in the same atomic source transaction. An omitted
@@ -7238,7 +7289,7 @@ nonisolated extension WireInputReply: SwiftProtobuf.Message, SwiftProtobuf._Mess
 
 nonisolated extension WireComposeEditReceipt: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".ComposeEditReceipt"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}window\0\u{1}leaf\0\u{1}buffer\0\u{1}epoch\0\u{1}pane\0\u{1}cursors\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}window\0\u{1}leaf\0\u{1}buffer\0\u{1}epoch\0\u{1}pane\0\u{1}cursors\0\u{3}preserved_cursors\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -7252,6 +7303,7 @@ nonisolated extension WireComposeEditReceipt: SwiftProtobuf.Message, SwiftProtob
       case 4: try { try decoder.decodeSingularUInt64Field(value: &self.epoch) }()
       case 5: try { try decoder.decodeSingularMessageField(value: &self._pane) }()
       case 6: try { try decoder.decodeRepeatedUInt64Field(value: &self.cursors) }()
+      case 7: try { try decoder.decodeRepeatedUInt64Field(value: &self.preservedCursors) }()
       default: break
       }
     }
@@ -7280,6 +7332,9 @@ nonisolated extension WireComposeEditReceipt: SwiftProtobuf.Message, SwiftProtob
     if !self.cursors.isEmpty {
       try visitor.visitPackedUInt64Field(value: self.cursors, fieldNumber: 6)
     }
+    if !self.preservedCursors.isEmpty {
+      try visitor.visitPackedUInt64Field(value: self.preservedCursors, fieldNumber: 7)
+    }
     try unknownFields.traverse(visitor: &visitor)
   }
 
@@ -7290,6 +7345,7 @@ nonisolated extension WireComposeEditReceipt: SwiftProtobuf.Message, SwiftProtob
     if lhs.epoch != rhs.epoch {return false}
     if lhs._pane != rhs._pane {return false}
     if lhs.cursors != rhs.cursors {return false}
+    if lhs.preservedCursors != rhs.preservedCursors {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
@@ -9663,7 +9719,7 @@ nonisolated extension WireComposeScope: SwiftProtobuf.Message, SwiftProtobuf._Me
 
 nonisolated extension WireComposeInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".ComposeInput"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}id\0\u{1}scope\0\u{1}kind\0\u{1}payload\0\u{1}position\0\u{1}extend\0\u{3}click_count\0\u{1}layout\0\u{3}layout_id\0\u{1}affinity\0\u{1}region\0\u{3}attachment_start\0\u{3}source_revision\0\u{3}buffer_epoch\0\u{1}cancel\0\u{3}replacement_start\0\u{3}replacement_end\0\u{3}text_input\0\u{3}replacement_cursor\0\u{1}replacements\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}id\0\u{1}scope\0\u{1}kind\0\u{1}payload\0\u{1}position\0\u{1}extend\0\u{3}click_count\0\u{1}layout\0\u{3}layout_id\0\u{1}affinity\0\u{1}region\0\u{3}attachment_start\0\u{3}source_revision\0\u{3}buffer_epoch\0\u{1}cancel\0\u{3}replacement_start\0\u{3}replacement_end\0\u{3}text_input\0\u{3}replacement_cursor\0\u{1}replacements\0\u{3}observed_cursors\0")
 
   fileprivate class _StorageClass {
     var _id: UInt64 = 0
@@ -9686,6 +9742,7 @@ nonisolated extension WireComposeInput: SwiftProtobuf.Message, SwiftProtobuf._Me
     var _textInput: Bool = false
     var _replacementCursor: UInt64? = nil
     var _replacements: [WireComposeReplacementTarget] = []
+    var _observedCursors: [WireComposeCursorAnchor] = []
 
       // This property is used as the initial default value for new instances of the type.
       // The type itself is protecting the reference to its storage via CoW semantics.
@@ -9716,6 +9773,7 @@ nonisolated extension WireComposeInput: SwiftProtobuf.Message, SwiftProtobuf._Me
       _textInput = source._textInput
       _replacementCursor = source._replacementCursor
       _replacements = source._replacements
+      _observedCursors = source._observedCursors
     }
   }
 
@@ -9754,6 +9812,7 @@ nonisolated extension WireComposeInput: SwiftProtobuf.Message, SwiftProtobuf._Me
         case 18: try { try decoder.decodeSingularBoolField(value: &_storage._textInput) }()
         case 19: try { try decoder.decodeSingularUInt64Field(value: &_storage._replacementCursor) }()
         case 20: try { try decoder.decodeRepeatedMessageField(value: &_storage._replacements) }()
+        case 21: try { try decoder.decodeRepeatedMessageField(value: &_storage._observedCursors) }()
         default: break
         }
       }
@@ -9826,6 +9885,9 @@ nonisolated extension WireComposeInput: SwiftProtobuf.Message, SwiftProtobuf._Me
       if !_storage._replacements.isEmpty {
         try visitor.visitRepeatedMessageField(value: _storage._replacements, fieldNumber: 20)
       }
+      if !_storage._observedCursors.isEmpty {
+        try visitor.visitRepeatedMessageField(value: _storage._observedCursors, fieldNumber: 21)
+      }
     }
     try unknownFields.traverse(visitor: &visitor)
   }
@@ -9855,10 +9917,55 @@ nonisolated extension WireComposeInput: SwiftProtobuf.Message, SwiftProtobuf._Me
         if _storage._textInput != rhs_storage._textInput {return false}
         if _storage._replacementCursor != rhs_storage._replacementCursor {return false}
         if _storage._replacements != rhs_storage._replacements {return false}
+        if _storage._observedCursors != rhs_storage._observedCursors {return false}
         return true
       }
       if !storagesAreEqual {return false}
     }
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension WireComposeCursorAnchor: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".ComposeCursorAnchor"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}id\0\u{1}position\0\u{1}anchor\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularUInt64Field(value: &self._id) }()
+      case 2: try { try decoder.decodeSingularUInt64Field(value: &self._position) }()
+      case 3: try { try decoder.decodeSingularUInt64Field(value: &self._anchor) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
+    try { if let v = self._id {
+      try visitor.visitSingularUInt64Field(value: v, fieldNumber: 1)
+    } }()
+    try { if let v = self._position {
+      try visitor.visitSingularUInt64Field(value: v, fieldNumber: 2)
+    } }()
+    try { if let v = self._anchor {
+      try visitor.visitSingularUInt64Field(value: v, fieldNumber: 3)
+    } }()
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: WireComposeCursorAnchor, rhs: WireComposeCursorAnchor) -> Bool {
+    if lhs._id != rhs._id {return false}
+    if lhs._position != rhs._position {return false}
+    if lhs._anchor != rhs._anchor {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
