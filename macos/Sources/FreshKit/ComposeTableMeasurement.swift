@@ -73,6 +73,7 @@ public final class ComposeTableMeasurement {
 struct ComposeColumnConstraints {
   var minimum, natural: [CGFloat]
   let available, emptyWidth: CGFloat
+  private let breaks = ComposeLineBreaks()
   init(count: Int, font: CTFont, available: CGFloat) {
     self.available = available
     let blank = CTLineCreateWithAttributedString(NSAttributedString(string: " ",
@@ -111,10 +112,10 @@ struct ComposeColumnConstraints {
     natural[column] = max(natural[column], min(available, CGFloat(CTLineGetTypographicBounds(line, nil, nil, nil))))
     let share = max(emptyWidth, available / CGFloat(natural.count) - ComposeMeasuredTable.padding * 2)
     var wordMinimum = minimum[column]
-    if wordMinimum < share { string.enumerateSubstrings(in: range, options: [.byWords, .substringNotRequired]) { _, word, _, stop in
+    if wordMinimum < share { breaks.forEach(in: string, range: range) { word in
       let line = CTTypesetterCreateLine(typesetter, CFRange(location: word.location, length: word.length))
       wordMinimum = max(wordMinimum, min(share, ceil(CGFloat(CTLineGetTypographicBounds(line, nil, nil, nil))) + 0.5))
-      if wordMinimum >= share { stop.pointee = true }
+      return wordMinimum < share
     } }
     minimum[column] = wordMinimum
   }

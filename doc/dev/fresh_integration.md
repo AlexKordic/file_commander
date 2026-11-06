@@ -413,6 +413,11 @@ Complete table-input measurement reuses each derived body/code font variant
 within its pass, including bold and italic combinations. The cache belongs to
 that font environment; resizing, font changes and source changes retain the
 same existing column-constraint calculations and invalidation rules.
+Preferred minimum widths follow native line-break units rather than linguistic
+dictionary words. A shared line-break tokenizer handles the pass, allowing CJK
+character breaks while keeping nonbreaking phrases together. Whitespace still
+draws and retains its source positions; trimming it from a minimum preference
+does not change the document or the displayed text.
 
 The [resource profile](testing.md#rich-compose-resource-profiles) records real
 parser-generated panes, native construction/reuse costs, payload sizes and

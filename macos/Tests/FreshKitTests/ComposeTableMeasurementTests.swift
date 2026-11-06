@@ -6,6 +6,30 @@ import ImageIO
 final class ComposeTableMeasurementTests: XCTestCase {
   private let body = CTFontCreateWithName("Helvetica" as CFString, 18, nil)
   private let code = CTFontCreateWithName("Menlo" as CFString, 18, nil)
+  func testCJKPreferredMinimumUsesNativeLineBreaksRatherThanDictionaryWords() {
+    let text = NSAttributedString(string: "東京都", attributes: [NSAttributedString.Key(kCTFontAttributeName as String): body])
+    let glyph = CTLineCreateWithAttributedString(NSAttributedString(string: "東",
+      attributes: [NSAttributedString.Key(kCTFontAttributeName as String): body]))
+    let advance = CGFloat(CTLineGetTypographicBounds(glyph, nil, nil, nil))
+    var constraints = ComposeColumnConstraints(count: 2, font: body, available: 240)
+    constraints.include(text, range: NSRange(location: 0, length: text.length), column: 0, preferred: true)
+    XCTAssertGreaterThanOrEqual(constraints.minimum[0], advance)
+    XCTAssertLessThan(constraints.minimum[0], advance * 2,
+      "native CJK wrapping can break between these characters without keeping a dictionary word together")
+    let typesetter = CTTypesetterCreateWithAttributedString(text)
+    XCTAssertEqual(CTTypesetterSuggestLineBreak(typesetter, 0, Double(constraints.minimum[0])), 1)
+  }
+
+  func testNonbreakingPhraseContributesItsWholeMeasuredPreferredMinimum() {
+    let text = NSAttributedString(string: "one\u{00a0}two", attributes: [NSAttributedString.Key(kCTFontAttributeName as String): body])
+    let line = CTLineCreateWithAttributedString(text)
+    let width = CGFloat(CTLineGetTypographicBounds(line, nil, nil, nil))
+    var constraints = ComposeColumnConstraints(count: 1, font: body, available: 400)
+    constraints.include(text, range: NSRange(location: 0, length: text.length), column: 0, preferred: true)
+    XCTAssertEqual(constraints.minimum[0], ceil(width) + 0.5, accuracy: 0.01,
+      "a nonbreaking space retains one native break unit rather than separate linguistic words")
+  }
+
   private func fixture() throws -> WireComposePane {
     let url = try XCTUnwrap(Bundle.module.url(forResource: "compose-tables", withExtension: "pb", subdirectory: "Fixtures"))
     return try WireComposePane(serializedBytes: Data(contentsOf: url))
