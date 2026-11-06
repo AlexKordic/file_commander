@@ -1857,6 +1857,8 @@ public nonisolated struct WireComposeSegment: Sendable {
 /// flags: bold 1, italic 2, underline 4, strikethrough 8, link 16.
 /// Link destinations are parsed metadata, including empty self-links;
 /// receiving them never authorizes fetching or opening a destination.
+/// Oversize/budgeted destinations omit link_target and send their full
+/// UTF-8 byte count plus an optional incomplete tooltip-only preview.
 public nonisolated struct WireComposeSpan: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
@@ -1888,12 +1890,32 @@ public nonisolated struct WireComposeSpan: Sendable {
   /// Clears the value of `linkTarget`. Subsequent reads from it will return its default value.
   public mutating func clearLinkTarget() {self._linkTarget = nil}
 
+  public var linkTargetBytes: UInt64 {
+    get {_linkTargetBytes ?? 0}
+    set {_linkTargetBytes = newValue}
+  }
+  /// Returns true if `linkTargetBytes` has been explicitly set.
+  public var hasLinkTargetBytes: Bool {self._linkTargetBytes != nil}
+  /// Clears the value of `linkTargetBytes`. Subsequent reads from it will return its default value.
+  public mutating func clearLinkTargetBytes() {self._linkTargetBytes = nil}
+
+  public var linkTargetPreview: String {
+    get {_linkTargetPreview ?? String()}
+    set {_linkTargetPreview = newValue}
+  }
+  /// Returns true if `linkTargetPreview` has been explicitly set.
+  public var hasLinkTargetPreview: Bool {self._linkTargetPreview != nil}
+  /// Clears the value of `linkTargetPreview`. Subsequent reads from it will return its default value.
+  public mutating func clearLinkTargetPreview() {self._linkTargetPreview = nil}
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
 
   fileprivate var _contentStart: UInt64? = nil
   fileprivate var _linkTarget: String? = nil
+  fileprivate var _linkTargetBytes: UInt64? = nil
+  fileprivate var _linkTargetPreview: String? = nil
 }
 
 public nonisolated struct WireComposeImage: Sendable {
@@ -7461,7 +7483,7 @@ nonisolated extension WireComposeSegment: SwiftProtobuf.Message, SwiftProtobuf._
 
 nonisolated extension WireComposeSpan: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".ComposeSpan"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}start\0\u{1}end\0\u{1}role\0\u{1}flags\0\u{3}content_start\0\u{3}link_target\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}start\0\u{1}end\0\u{1}role\0\u{1}flags\0\u{3}content_start\0\u{3}link_target\0\u{3}link_target_bytes\0\u{3}link_target_preview\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -7475,6 +7497,8 @@ nonisolated extension WireComposeSpan: SwiftProtobuf.Message, SwiftProtobuf._Mes
       case 4: try { try decoder.decodeSingularUInt32Field(value: &self.flags) }()
       case 5: try { try decoder.decodeSingularUInt64Field(value: &self._contentStart) }()
       case 6: try { try decoder.decodeSingularStringField(value: &self._linkTarget) }()
+      case 7: try { try decoder.decodeSingularUInt64Field(value: &self._linkTargetBytes) }()
+      case 8: try { try decoder.decodeSingularStringField(value: &self._linkTargetPreview) }()
       default: break
       }
     }
@@ -7503,6 +7527,12 @@ nonisolated extension WireComposeSpan: SwiftProtobuf.Message, SwiftProtobuf._Mes
     try { if let v = self._linkTarget {
       try visitor.visitSingularStringField(value: v, fieldNumber: 6)
     } }()
+    try { if let v = self._linkTargetBytes {
+      try visitor.visitSingularUInt64Field(value: v, fieldNumber: 7)
+    } }()
+    try { if let v = self._linkTargetPreview {
+      try visitor.visitSingularStringField(value: v, fieldNumber: 8)
+    } }()
     try unknownFields.traverse(visitor: &visitor)
   }
 
@@ -7513,6 +7543,8 @@ nonisolated extension WireComposeSpan: SwiftProtobuf.Message, SwiftProtobuf._Mes
     if lhs.flags != rhs.flags {return false}
     if lhs._contentStart != rhs._contentStart {return false}
     if lhs._linkTarget != rhs._linkTarget {return false}
+    if lhs._linkTargetBytes != rhs._linkTargetBytes {return false}
+    if lhs._linkTargetPreview != rhs._linkTargetPreview {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }

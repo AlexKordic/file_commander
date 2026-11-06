@@ -467,6 +467,16 @@ they do not build selection rectangles for every link. A provisional edit
 inside a link suppresses its old destination while unrelated links remain
 available. Metadata updates survive reuse of unchanged glyph geometry.
 Receiving or inspecting a destination never follows it or fetches a resource.
+Tooltip metadata is limited to 2 KiB per destination and 64 KiB across a scene's
+panes and input replies. A destination exceeding either budget omits the
+complete target and supplies its full UTF-8 byte size (`link_target_bytes`,
+field 7), plus an optional incomplete prefix (`link_target_preview`, field 8).
+Native tooltips clearly distinguish that preview and direct the user to edit
+the link to inspect its full destination. A preview never populates
+`ComposeLink.target` or authorizes opening a shortened URI. Fresh retains the
+complete parsed destination and all Markdown source bytes, independently of
+these tooltip limits. Native scene queues allow two protocol-sized frames;
+they do not inherit the browser bridge's smaller queue limit.
 Semantic accessibility navigation remains a separate unfinished requirement.
 
 Native text, list-prefix, table-sample and presentation-label shaping first

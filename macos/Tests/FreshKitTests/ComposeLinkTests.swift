@@ -72,7 +72,7 @@ final class ComposeLinkTests: XCTestCase {
     let second = try layout(value, reuse: first)
     XCTAssertTrue(second.text === first.text, "destination metadata does not require reshaping unchanged glyphs")
     XCTAssertNotEqual(second.links, first.links, "a literal path is not Unicode-normalized")
-    XCTAssertTrue(second.links[0].target.utf8.elementsEqual(value.spans[0].linkTarget.utf8))
+    XCTAssertTrue(try XCTUnwrap(second.links[0].target).utf8.elementsEqual(value.spans[0].linkTarget.utf8))
   }
 
   func testChangingOnlyTheDestinationDoesNotReshapeUnchangedDisplayText() throws {
@@ -101,5 +101,33 @@ final class ComposeLinkTests: XCTestCase {
     XCTAssertTrue(shown.text.projection.text.contains("changed.md"))
     XCTAssertEqual(shown.links.map(\.target), ["second.md"])
     XCTAssertEqual(shown.links[0].range.location, 18, "unrelated links follow provisional reflow")
+  }
+
+  func testDeferredDestinationsAreExplicitPreviewsAndNeverCompleteTargets() throws {
+    var value = pane("label")
+    value.spans = [link(0..<5, target: nil)]
+    value.spans[0].linkTargetBytes = 5_242_904
+    value.spans[0].linkTargetPreview = "https://example.invalid/café"
+    let first = try layout(value), item = try XCTUnwrap(first.links.first)
+    XCTAssertNil(item.target)
+    XCTAssertEqual(item.targetBytes, 5_242_904)
+    XCTAssertEqual(item.preview, "https://example.invalid/café")
+    XCTAssertTrue(item.tooltip.contains("…"))
+    XCTAssertTrue(item.tooltip.contains("full destination (5242904 bytes)"))
+    value.spans[0].clearLinkTargetPreview()
+    let second = try layout(value, reuse: first)
+    XCTAssertTrue(second.text === first.text)
+    XCTAssertNil(second.links.first?.target)
+    XCTAssertNil(second.links.first?.preview)
+    XCTAssertTrue(try XCTUnwrap(second.links.first).tooltip.contains("Edit the link"))
+    value.spans[0].linkTarget = "ambiguous"
+    XCTAssertTrue(try layout(value).links.isEmpty)
+    value.spans[0].clearLinkTarget()
+    value.spans[0].linkTargetBytes = 0
+    XCTAssertTrue(try layout(value).links.isEmpty)
+    value.spans[0].linkTargetBytes = 3; value.spans[0].linkTargetPreview = "abc"
+    XCTAssertTrue(try layout(value).links.isEmpty, "a preview must be explicitly incomplete")
+    value.spans[0].clearLinkTargetBytes()
+    XCTAssertTrue(try layout(value).links.isEmpty, "a preview alone cannot certify a destination")
   }
 }

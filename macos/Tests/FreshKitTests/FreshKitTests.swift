@@ -75,6 +75,12 @@ final class SceneWireTests: XCTestCase {
     XCTAssertTrue(span.hasLinkTarget); XCTAssertEqual(span.linkTarget, "")
     span = try WireComposeSpan(serializedBytes: [])
     XCTAssertFalse(span.hasLinkTarget)
+    // Independent field tags: full byte count 5000, incomplete Unicode preview.
+    span = try WireComposeSpan(serializedBytes: [0x38, 0x88, 0x27, 0x42, 13] + Array("docs/café.md".utf8))
+    XCTAssertFalse(span.hasLinkTarget)
+    XCTAssertEqual(span.linkTargetBytes, 5000)
+    XCTAssertTrue(span.hasLinkTargetPreview)
+    XCTAssertEqual(span.linkTargetPreview, "docs/café.md")
   }
 
   /// Fresh's hand encoder and protoc independently produce these bytes. The

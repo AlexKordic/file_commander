@@ -208,6 +208,15 @@ final class ComposeInputTests: XCTestCase {
     peer.show(scene)
     try await eventually { grid.focusedCompose?.pane.compose.bufferRevision == 5 }
     XCTAssertTrue(try XCTUnwrap(grid.composeLinkDescription(at: point)).utf8.elementsEqual("docs/cafe\u{301}.md".utf8))
+    scene.compose.bufferRevision = 6
+    scene.compose.spans[0].clearLinkTarget()
+    scene.compose.spans[0].linkTargetBytes = 5_242_904
+    scene.compose.spans[0].linkTargetPreview = "https://example.invalid/café"
+    peer.show(scene)
+    try await eventually { grid.focusedCompose?.pane.compose.bufferRevision == 6 }
+    XCTAssertEqual(grid.composeLinkDescription(at: point),
+      "https://example.invalid/café…\nEdit the link to inspect its full destination (5242904 bytes).")
+    XCTAssertNil(grid.focusedCompose?.layout.links.first?.target, "a preview is never an actionable target")
     XCTAssertTrue(peer.inputs.isEmpty, "reading a destination never follows it or moves a cursor")
     editor.detachAll()
     XCTAssertNil(grid.composeLinkDescription(at: point))

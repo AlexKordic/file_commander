@@ -278,7 +278,7 @@ final class CellGridView: NSView, @preconcurrency NSTextInputClient {
     let character = ComposeAccessibilityText(pane: pane).character(at: local)
     guard character.location != NSNotFound, character.length > 0,
           let link = pane.layout.link(atUTF16: character.location) else { return nil }
-    return link.target.isEmpty ? "Current document" : link.target
+    return link.tooltip
   }
 
   @objc func view(_ view: NSView, stringForToolTip tag: NSView.ToolTipTag, point: NSPoint,
