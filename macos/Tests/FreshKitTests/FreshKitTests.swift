@@ -53,6 +53,43 @@ final class SceneWireTests: XCTestCase {
     XCTAssertEqual(hex(SceneInput.applied(seq: 300).payload()), "08ac02")
     XCTAssertEqual(SceneInput.mouse(wheel).telemetryName.kind, "scrolldown")
   }
+
+  /// Fresh's hand encoder and protoc independently produce these bytes. The
+  /// matching Rust fixture lives in webui/popup_wire_tests.rs.
+  func testPopupSourceOwnershipDecodesWithoutLosingCellFallbackOrRowIdentity() throws {
+    let fixture = "0a0a636f6d706c6574696f6e120b53756767657374696f6e7322080802100318142008"
+      + "2a08080310041812200630013a2f0a2d0a130a0a73616d65206c6162656c2a056669727374"
+      + "0a140a0a73616d65206c6162656c2a067365636f6e6410014029482a521008041005180620072808301e38194002"
+    var bytes: [UInt8] = []
+    var index = fixture.startIndex
+    while index < fixture.endIndex {
+      let next = fixture.index(index, offsetBy: 2)
+      bytes.append(try XCTUnwrap(UInt8(fixture[index..<next], radix: 16)))
+      index = next
+    }
+    let popup = try WireScenePopup(serializedBytes: bytes)
+    XCTAssertEqual(popup.instance, 41)
+    XCTAssertEqual(popup.version, 42)
+    XCTAssertEqual(popup.rect.y, 3)
+    XCTAssertEqual(popup.contentRect.y, 4)
+    XCTAssertEqual(popup.scrollOffset, 1)
+    XCTAssertTrue(popup.hasSourceAnchor)
+    let anchor = popup.sourceAnchor
+    XCTAssertEqual([anchor.windowID, anchor.leaf, anchor.buffer, anchor.bufferEpoch, anchor.bufferRevision], [4, 5, 6, 7, 8])
+    XCTAssertEqual([anchor.caret, anchor.horizontal], [30, 25])
+    XCTAssertEqual(anchor.placement, 2)
+    guard case .list(let list) = popup.content.content else { return XCTFail("Expected a popup list") }
+    XCTAssertEqual(list.selected, 1)
+    XCTAssertEqual(list.items.map(\.id), ["first", "second"])
+    XCTAssertEqual(list.items.map(\.text), ["same label", "same label"])
+
+    // A grid-era producer has no source anchor. Decoding must retain that
+    // absence; native placement must never guess an owner from zero IDs.
+    let legacy = try WireScenePopup(serializedBytes: [0x0a, 0x05] + Array("hover".utf8))
+    XCTAssertFalse(legacy.hasSourceAnchor)
+    XCTAssertEqual(legacy.instance, 0)
+    XCTAssertEqual(legacy.version, 0)
+  }
 }
 
 final class SceneTests: XCTestCase {

@@ -402,6 +402,28 @@ the native consumer measures text and images with Core Text. Source coordinates
 are UTF-8 bytes, and native layout feedback is scoped to a window, split,
 buffer, source revision, projection revision, and selection revision.
 
+Development popup scenes also carry a lifetime (`instance`), an event-time
+`version`, stable list-row IDs, and an optional `source_anchor`. The anchor
+names the exact window, split, buffer lifetime and source revision. It carries
+the caret byte for vertical placement and line height, a horizontal source
+byte (the completion word start where applicable), and an explicit over,
+below-with-flip, or above placement rule. Fixed, centered and status popups
+retain their cell placement. Replacing or reshowing a popup starts a new
+lifetime; owner, content, scroll and action-payload changes invalidate its
+version. A byte fixture is independently checked by Fresh's encoder, the
+generated Rust decoder, `protoc`, and FC's `SceneWireTests`.
+The version also fingerprints the retained picture: a component can scroll
+without updating the popup model's legacy offset. A real renderer/wheel
+regression checks that unchanged frames keep their version and that this
+retained scroll invalidates it.
+
+The annotations are available in the development schema; FC currently draws
+popups at the cell rectangles. Native relocation, matching pointer dispatch,
+omission of the old painted/hit region and capability negotiation remain a
+single integration gate. Moving only the picture leaves an invisible popup
+over another source row or pane. Fresh's scoped pointer-subtree exclusion is
+implemented and tested, but does not by itself change application routing.
+
 The semantic spans distinguish heading levels, inline and fenced code,
 tables, quotes, lists, items, and paragraphs. Overlapping spans retain nested
 structure, emphasis, link, underline, and strikethrough information; the

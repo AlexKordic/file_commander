@@ -605,6 +605,8 @@ public nonisolated struct WirePopupItemView: Sendable {
 
   public var disabled: Bool = false
 
+  public var id: String = String()
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
@@ -655,69 +657,117 @@ public nonisolated struct WirePopupSpanView: Sendable {
   fileprivate var _bg: UInt32? = nil
 }
 
-public nonisolated struct WireScenePopup: Sendable {
+/// Exact Compose source owner and placement, independent of terminal wrapping.
+public nonisolated struct WirePopupSourceAnchor: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
 
-  public var kind: String = String()
+  public var windowID: UInt64 = 0
+
+  public var leaf: UInt64 = 0
+
+  public var buffer: UInt64 = 0
+
+  public var bufferEpoch: UInt64 = 0
+
+  public var bufferRevision: UInt64 = 0
+
+  public var caret: UInt64 = 0
+
+  public var horizontal: UInt64 = 0
+
+  public var placement: UInt32 = 0
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
+public nonisolated struct WireScenePopup: @unchecked Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var kind: String {
+    get {_storage._kind}
+    set {_uniqueStorage()._kind = newValue}
+  }
 
   public var title: String {
-    get {_title ?? String()}
-    set {_title = newValue}
+    get {_storage._title ?? String()}
+    set {_uniqueStorage()._title = newValue}
   }
   /// Returns true if `title` has been explicitly set.
-  public var hasTitle: Bool {self._title != nil}
+  public var hasTitle: Bool {_storage._title != nil}
   /// Clears the value of `title`. Subsequent reads from it will return its default value.
-  public mutating func clearTitle() {self._title = nil}
+  public mutating func clearTitle() {_uniqueStorage()._title = nil}
 
   public var description_p: String {
-    get {_description_p ?? String()}
-    set {_description_p = newValue}
+    get {_storage._description_p ?? String()}
+    set {_uniqueStorage()._description_p = newValue}
   }
   /// Returns true if `description_p` has been explicitly set.
-  public var hasDescription_p: Bool {self._description_p != nil}
+  public var hasDescription_p: Bool {_storage._description_p != nil}
   /// Clears the value of `description_p`. Subsequent reads from it will return its default value.
-  public mutating func clearDescription_p() {self._description_p = nil}
+  public mutating func clearDescription_p() {_uniqueStorage()._description_p = nil}
 
   public var rect: WireRect {
-    get {_rect ?? WireRect()}
-    set {_rect = newValue}
+    get {_storage._rect ?? WireRect()}
+    set {_uniqueStorage()._rect = newValue}
   }
   /// Returns true if `rect` has been explicitly set.
-  public var hasRect: Bool {self._rect != nil}
+  public var hasRect: Bool {_storage._rect != nil}
   /// Clears the value of `rect`. Subsequent reads from it will return its default value.
-  public mutating func clearRect() {self._rect = nil}
+  public mutating func clearRect() {_uniqueStorage()._rect = nil}
 
   public var contentRect: WireRect {
-    get {_contentRect ?? WireRect()}
-    set {_contentRect = newValue}
+    get {_storage._contentRect ?? WireRect()}
+    set {_uniqueStorage()._contentRect = newValue}
   }
   /// Returns true if `contentRect` has been explicitly set.
-  public var hasContentRect: Bool {self._contentRect != nil}
+  public var hasContentRect: Bool {_storage._contentRect != nil}
   /// Clears the value of `contentRect`. Subsequent reads from it will return its default value.
-  public mutating func clearContentRect() {self._contentRect = nil}
+  public mutating func clearContentRect() {_uniqueStorage()._contentRect = nil}
 
-  public var scrollOffset: UInt64 = 0
+  public var scrollOffset: UInt64 {
+    get {_storage._scrollOffset}
+    set {_uniqueStorage()._scrollOffset = newValue}
+  }
 
   public var content: WirePopupContent {
-    get {_content ?? WirePopupContent()}
-    set {_content = newValue}
+    get {_storage._content ?? WirePopupContent()}
+    set {_uniqueStorage()._content = newValue}
   }
   /// Returns true if `content` has been explicitly set.
-  public var hasContent: Bool {self._content != nil}
+  public var hasContent: Bool {_storage._content != nil}
   /// Clears the value of `content`. Subsequent reads from it will return its default value.
-  public mutating func clearContent() {self._content = nil}
+  public mutating func clearContent() {_uniqueStorage()._content = nil}
+
+  public var instance: UInt64 {
+    get {_storage._instance}
+    set {_uniqueStorage()._instance = newValue}
+  }
+
+  public var version: UInt64 {
+    get {_storage._version}
+    set {_uniqueStorage()._version = newValue}
+  }
+
+  public var sourceAnchor: WirePopupSourceAnchor {
+    get {_storage._sourceAnchor ?? WirePopupSourceAnchor()}
+    set {_uniqueStorage()._sourceAnchor = newValue}
+  }
+  /// Returns true if `sourceAnchor` has been explicitly set.
+  public var hasSourceAnchor: Bool {_storage._sourceAnchor != nil}
+  /// Clears the value of `sourceAnchor`. Subsequent reads from it will return its default value.
+  public mutating func clearSourceAnchor() {_uniqueStorage()._sourceAnchor = nil}
 
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
 
-  fileprivate var _title: String? = nil
-  fileprivate var _description_p: String? = nil
-  fileprivate var _rect: WireRect? = nil
-  fileprivate var _contentRect: WireRect? = nil
-  fileprivate var _content: WirePopupContent? = nil
+  fileprivate var _storage = _StorageClass.defaultInstance
 }
 
 public nonisolated struct WireFileRow: Sendable {
@@ -4954,7 +5004,7 @@ nonisolated extension WirePaletteView: SwiftProtobuf.Message, SwiftProtobuf._Mes
 
 nonisolated extension WirePopupItemView: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".PopupItemView"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}text\0\u{1}detail\0\u{1}icon\0\u{1}disabled\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}text\0\u{1}detail\0\u{1}icon\0\u{1}disabled\0\u{1}id\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -4966,6 +5016,7 @@ nonisolated extension WirePopupItemView: SwiftProtobuf.Message, SwiftProtobuf._M
       case 2: try { try decoder.decodeSingularStringField(value: &self._detail) }()
       case 3: try { try decoder.decodeSingularStringField(value: &self._icon) }()
       case 4: try { try decoder.decodeSingularBoolField(value: &self.disabled) }()
+      case 5: try { try decoder.decodeSingularStringField(value: &self.id) }()
       default: break
       }
     }
@@ -4988,6 +5039,9 @@ nonisolated extension WirePopupItemView: SwiftProtobuf.Message, SwiftProtobuf._M
     if self.disabled != false {
       try visitor.visitSingularBoolField(value: self.disabled, fieldNumber: 4)
     }
+    if !self.id.isEmpty {
+      try visitor.visitSingularStringField(value: self.id, fieldNumber: 5)
+    }
     try unknownFields.traverse(visitor: &visitor)
   }
 
@@ -4996,6 +5050,7 @@ nonisolated extension WirePopupItemView: SwiftProtobuf.Message, SwiftProtobuf._M
     if lhs._detail != rhs._detail {return false}
     if lhs._icon != rhs._icon {return false}
     if lhs.disabled != rhs.disabled {return false}
+    if lhs.id != rhs.id {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
@@ -5065,9 +5120,9 @@ nonisolated extension WirePopupSpanView: SwiftProtobuf.Message, SwiftProtobuf._M
   }
 }
 
-nonisolated extension WireScenePopup: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
-  public static let protoMessageName: String = _protobuf_package + ".ScenePopup"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}kind\0\u{1}title\0\u{1}description\0\u{1}rect\0\u{3}content_rect\0\u{3}scroll_offset\0\u{1}content\0")
+nonisolated extension WirePopupSourceAnchor: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".PopupSourceAnchor"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}window_id\0\u{1}leaf\0\u{1}buffer\0\u{3}buffer_epoch\0\u{3}buffer_revision\0\u{1}caret\0\u{1}horizontal\0\u{1}placement\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -5075,55 +5130,189 @@ nonisolated extension WireScenePopup: SwiftProtobuf.Message, SwiftProtobuf._Mess
       // allocates stack space for every case branch when no optimizations are
       // enabled. https://github.com/apple/swift-protobuf/issues/1034
       switch fieldNumber {
-      case 1: try { try decoder.decodeSingularStringField(value: &self.kind) }()
-      case 2: try { try decoder.decodeSingularStringField(value: &self._title) }()
-      case 3: try { try decoder.decodeSingularStringField(value: &self._description_p) }()
-      case 4: try { try decoder.decodeSingularMessageField(value: &self._rect) }()
-      case 5: try { try decoder.decodeSingularMessageField(value: &self._contentRect) }()
-      case 6: try { try decoder.decodeSingularUInt64Field(value: &self.scrollOffset) }()
-      case 7: try { try decoder.decodeSingularMessageField(value: &self._content) }()
+      case 1: try { try decoder.decodeSingularUInt64Field(value: &self.windowID) }()
+      case 2: try { try decoder.decodeSingularUInt64Field(value: &self.leaf) }()
+      case 3: try { try decoder.decodeSingularUInt64Field(value: &self.buffer) }()
+      case 4: try { try decoder.decodeSingularUInt64Field(value: &self.bufferEpoch) }()
+      case 5: try { try decoder.decodeSingularUInt64Field(value: &self.bufferRevision) }()
+      case 6: try { try decoder.decodeSingularUInt64Field(value: &self.caret) }()
+      case 7: try { try decoder.decodeSingularUInt64Field(value: &self.horizontal) }()
+      case 8: try { try decoder.decodeSingularUInt32Field(value: &self.placement) }()
       default: break
       }
     }
   }
 
   public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
-    // The use of inline closures is to circumvent an issue where the compiler
-    // allocates stack space for every if/case branch local when no optimizations
-    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
-    // https://github.com/apple/swift-protobuf/issues/1182
-    if !self.kind.isEmpty {
-      try visitor.visitSingularStringField(value: self.kind, fieldNumber: 1)
+    if self.windowID != 0 {
+      try visitor.visitSingularUInt64Field(value: self.windowID, fieldNumber: 1)
     }
-    try { if let v = self._title {
-      try visitor.visitSingularStringField(value: v, fieldNumber: 2)
-    } }()
-    try { if let v = self._description_p {
-      try visitor.visitSingularStringField(value: v, fieldNumber: 3)
-    } }()
-    try { if let v = self._rect {
-      try visitor.visitSingularMessageField(value: v, fieldNumber: 4)
-    } }()
-    try { if let v = self._contentRect {
-      try visitor.visitSingularMessageField(value: v, fieldNumber: 5)
-    } }()
-    if self.scrollOffset != 0 {
-      try visitor.visitSingularUInt64Field(value: self.scrollOffset, fieldNumber: 6)
+    if self.leaf != 0 {
+      try visitor.visitSingularUInt64Field(value: self.leaf, fieldNumber: 2)
     }
-    try { if let v = self._content {
-      try visitor.visitSingularMessageField(value: v, fieldNumber: 7)
-    } }()
+    if self.buffer != 0 {
+      try visitor.visitSingularUInt64Field(value: self.buffer, fieldNumber: 3)
+    }
+    if self.bufferEpoch != 0 {
+      try visitor.visitSingularUInt64Field(value: self.bufferEpoch, fieldNumber: 4)
+    }
+    if self.bufferRevision != 0 {
+      try visitor.visitSingularUInt64Field(value: self.bufferRevision, fieldNumber: 5)
+    }
+    if self.caret != 0 {
+      try visitor.visitSingularUInt64Field(value: self.caret, fieldNumber: 6)
+    }
+    if self.horizontal != 0 {
+      try visitor.visitSingularUInt64Field(value: self.horizontal, fieldNumber: 7)
+    }
+    if self.placement != 0 {
+      try visitor.visitSingularUInt32Field(value: self.placement, fieldNumber: 8)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: WirePopupSourceAnchor, rhs: WirePopupSourceAnchor) -> Bool {
+    if lhs.windowID != rhs.windowID {return false}
+    if lhs.leaf != rhs.leaf {return false}
+    if lhs.buffer != rhs.buffer {return false}
+    if lhs.bufferEpoch != rhs.bufferEpoch {return false}
+    if lhs.bufferRevision != rhs.bufferRevision {return false}
+    if lhs.caret != rhs.caret {return false}
+    if lhs.horizontal != rhs.horizontal {return false}
+    if lhs.placement != rhs.placement {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension WireScenePopup: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".ScenePopup"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}kind\0\u{1}title\0\u{1}description\0\u{1}rect\0\u{3}content_rect\0\u{3}scroll_offset\0\u{1}content\0\u{1}instance\0\u{1}version\0\u{3}source_anchor\0")
+
+  fileprivate class _StorageClass {
+    var _kind: String = String()
+    var _title: String? = nil
+    var _description_p: String? = nil
+    var _rect: WireRect? = nil
+    var _contentRect: WireRect? = nil
+    var _scrollOffset: UInt64 = 0
+    var _content: WirePopupContent? = nil
+    var _instance: UInt64 = 0
+    var _version: UInt64 = 0
+    var _sourceAnchor: WirePopupSourceAnchor? = nil
+
+      // This property is used as the initial default value for new instances of the type.
+      // The type itself is protecting the reference to its storage via CoW semantics.
+      // This will force a copy to be made of this reference when the first mutation occurs;
+      // hence, it is safe to mark this as `nonisolated(unsafe)`.
+      static nonisolated(unsafe) let defaultInstance = _StorageClass()
+
+    private init() {}
+
+    init(copying source: _StorageClass) {
+      _kind = source._kind
+      _title = source._title
+      _description_p = source._description_p
+      _rect = source._rect
+      _contentRect = source._contentRect
+      _scrollOffset = source._scrollOffset
+      _content = source._content
+      _instance = source._instance
+      _version = source._version
+      _sourceAnchor = source._sourceAnchor
+    }
+  }
+
+  fileprivate mutating func _uniqueStorage() -> _StorageClass {
+    if !isKnownUniquelyReferenced(&_storage) {
+      _storage = _StorageClass(copying: _storage)
+    }
+    return _storage
+  }
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    _ = _uniqueStorage()
+    try withExtendedLifetime(_storage) { (_storage: _StorageClass) in
+      while let fieldNumber = try decoder.nextFieldNumber() {
+        // The use of inline closures is to circumvent an issue where the compiler
+        // allocates stack space for every case branch when no optimizations are
+        // enabled. https://github.com/apple/swift-protobuf/issues/1034
+        switch fieldNumber {
+        case 1: try { try decoder.decodeSingularStringField(value: &_storage._kind) }()
+        case 2: try { try decoder.decodeSingularStringField(value: &_storage._title) }()
+        case 3: try { try decoder.decodeSingularStringField(value: &_storage._description_p) }()
+        case 4: try { try decoder.decodeSingularMessageField(value: &_storage._rect) }()
+        case 5: try { try decoder.decodeSingularMessageField(value: &_storage._contentRect) }()
+        case 6: try { try decoder.decodeSingularUInt64Field(value: &_storage._scrollOffset) }()
+        case 7: try { try decoder.decodeSingularMessageField(value: &_storage._content) }()
+        case 8: try { try decoder.decodeSingularUInt64Field(value: &_storage._instance) }()
+        case 9: try { try decoder.decodeSingularUInt64Field(value: &_storage._version) }()
+        case 10: try { try decoder.decodeSingularMessageField(value: &_storage._sourceAnchor) }()
+        default: break
+        }
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    try withExtendedLifetime(_storage) { (_storage: _StorageClass) in
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every if/case branch local when no optimizations
+      // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+      // https://github.com/apple/swift-protobuf/issues/1182
+      if !_storage._kind.isEmpty {
+        try visitor.visitSingularStringField(value: _storage._kind, fieldNumber: 1)
+      }
+      try { if let v = _storage._title {
+        try visitor.visitSingularStringField(value: v, fieldNumber: 2)
+      } }()
+      try { if let v = _storage._description_p {
+        try visitor.visitSingularStringField(value: v, fieldNumber: 3)
+      } }()
+      try { if let v = _storage._rect {
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 4)
+      } }()
+      try { if let v = _storage._contentRect {
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 5)
+      } }()
+      if _storage._scrollOffset != 0 {
+        try visitor.visitSingularUInt64Field(value: _storage._scrollOffset, fieldNumber: 6)
+      }
+      try { if let v = _storage._content {
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 7)
+      } }()
+      if _storage._instance != 0 {
+        try visitor.visitSingularUInt64Field(value: _storage._instance, fieldNumber: 8)
+      }
+      if _storage._version != 0 {
+        try visitor.visitSingularUInt64Field(value: _storage._version, fieldNumber: 9)
+      }
+      try { if let v = _storage._sourceAnchor {
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 10)
+      } }()
+    }
     try unknownFields.traverse(visitor: &visitor)
   }
 
   public static func ==(lhs: WireScenePopup, rhs: WireScenePopup) -> Bool {
-    if lhs.kind != rhs.kind {return false}
-    if lhs._title != rhs._title {return false}
-    if lhs._description_p != rhs._description_p {return false}
-    if lhs._rect != rhs._rect {return false}
-    if lhs._contentRect != rhs._contentRect {return false}
-    if lhs.scrollOffset != rhs.scrollOffset {return false}
-    if lhs._content != rhs._content {return false}
+    if lhs._storage !== rhs._storage {
+      let storagesAreEqual: Bool = withExtendedLifetime((lhs._storage, rhs._storage)) { (_args: (_StorageClass, _StorageClass)) in
+        let _storage = _args.0
+        let rhs_storage = _args.1
+        if _storage._kind != rhs_storage._kind {return false}
+        if _storage._title != rhs_storage._title {return false}
+        if _storage._description_p != rhs_storage._description_p {return false}
+        if _storage._rect != rhs_storage._rect {return false}
+        if _storage._contentRect != rhs_storage._contentRect {return false}
+        if _storage._scrollOffset != rhs_storage._scrollOffset {return false}
+        if _storage._content != rhs_storage._content {return false}
+        if _storage._instance != rhs_storage._instance {return false}
+        if _storage._version != rhs_storage._version {return false}
+        if _storage._sourceAnchor != rhs_storage._sourceAnchor {return false}
+        return true
+      }
+      if !storagesAreEqual {return false}
+    }
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
