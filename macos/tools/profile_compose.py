@@ -61,7 +61,11 @@ def main():
 
     cargo = ["cargo", "test", "--locked", "-p", "fresh-editor", "--features", "web", "--lib"]
     if args.profile == "release":
-        cargo.append("--release")
+        # Match CMakeLists.txt's bundled backend, which overrides Fresh's
+        # size-optimized upstream release profile with opt-level 3.
+        cargo += ["--profile", "fc-release",
+                  "--config", 'profile.fc-release.inherits="release"',
+                  "--config", "profile.fc-release.opt-level=3"]
     cargo += ["profile_rich_compose_document_workloads", "--", "--ignored", "--nocapture"]
     run(cargo, "backend.log", cwd=fresh, env=dict(os.environ, FC_COMPOSE_PROFILE_OUTPUT=str(output)))
     metadata["fixture_sha256"] = {path.name: hashlib.sha256(path.read_bytes()).hexdigest() for path in sorted(output.glob("*.pb"))}

@@ -455,10 +455,16 @@ source/window/payload sizes, timings and process peak RSS. RSS is a cumulative
 process high-water mark, not the allocation cost of an individual case.
 
 Use `--profile debug` for diagnosing algorithms; compare the same fixtures and
-configuration on the same machine. Backend results separate source-snapshot
-and UTF-16-index preparation from semantic parsing and report the 64 KiB
-background-worker threshold. These profiles exclude engine file IO, plugin
-formatting, image reads/decode, painting and typing-to-paint latency. They
+configuration on the same machine. `--profile release` uses FC's `fc-release`
+Cargo profile at optimization level 3 and Swift's Release configuration,
+matching the bundled backend rather than Fresh's size-optimized upstream
+Release profile. The environment artifact records the exact build arguments.
+Backend results separate source-snapshot and UTF-16-index preparation from
+semantic parsing of that prepared snapshot, and report the 64 KiB background
+worker threshold. Pane encoding is timed separately. Older results without
+`parse_scope` also included index construction in `parse_ms`; do not compare
+those timings as a semantic-parser speedup. These profiles exclude engine file
+IO, plugin formatting, image reads/decode, painting and typing-to-paint latency. They
 neither create a backend session nor qualify GUI/SSH/recovery behavior.
 Exporting a pane alone does not qualify the asynchronous cache path. The
 private native/backend suite separately opens a document above 2 MiB, checks
