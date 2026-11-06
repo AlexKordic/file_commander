@@ -241,6 +241,30 @@ final class ComposeTests: XCTestCase {
     }
   }
 
+  func testRightToLeftListBodyDoesNotBecomePartOfTheHangingIndent() throws {
+    let bodyFont = font(18)
+    for prefix in ["1) ", "- ", "  - ", "> 12. [ ] "] {
+      let marker = CTLineCreateWithAttributedString(NSAttributedString(string: prefix,
+        attributes: [NSAttributedString.Key(kCTFontAttributeName as String): bodyFont]))
+      let expected = CGFloat(CTLineGetTypographicBounds(marker, nil, nil, nil))
+      for body in ["אבג שלום ", "العربية نص طويل للتجربة ", "123 אבג "] {
+        for repetitions in [8, 40] {
+          let source = prefix + String(repeating: body, count: repetitions) + "\n"
+          let projection = try copied(source)
+          let layout = try XCTUnwrap(ComposeTextLayout(projection: projection, font: bodyFont, width: 260,
+            hanging: [.init(display: 0..<source.utf8.count, contentStart: prefix.utf8.count, indent: 0)]))
+          let following = layout.fragments.dropFirst().filter { $0.range.length > 0 }
+          XCTAssertGreaterThan(following.count, 1)
+          for fragment in following {
+            XCTAssertEqual(fragment.rect.minX, expected, accuracy: 0.001,
+              "the marker's width must not include its reordered body: \(prefix)\(body), \(repetitions)")
+          }
+          XCTAssertEqual(layout.projection.text, source)
+        }
+      }
+    }
+  }
+
   func testRealFreshListSceneKeepsWrappedBodiesAndInlineImagesWithinTheMeasure() throws {
     let url = try XCTUnwrap(Bundle.module.url(forResource: "Fixtures/compose-lists", withExtension: "pb"))
     let pane = try WireComposePane(serializedBytes: Data(contentsOf: url))

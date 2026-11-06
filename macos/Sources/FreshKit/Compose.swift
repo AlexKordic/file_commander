@@ -243,6 +243,33 @@ public final class ComposeTextLayout {
     init(_ size: CGSize) { self.size = size }
   }
   static let attachmentKey = NSAttributedString.Key("fc.compose.attachment")
+
+  private static func hangingPrefixWidth(_ line: CTLine, start: Int, content: Int) -> CGFloat {
+    guard start < content else { return 0 }
+    let runs = (CTLineGetGlyphRuns(line) as! [CTRun]).filter { run in
+      let range = CTRunGetStringRange(run)
+      return range.location < content && range.location + range.length > start
+    }
+    // The body caret is a visual coordinate. In a reordered prefix it can
+    // include most of the RTL body, so measure the marker's logical glyphs.
+    // Keep the contextual caret for LTR markers, including body-side kerning.
+    guard runs.contains(where: { CTRunGetStatus($0).contains(.rightToLeft) }) else {
+      return CTLineGetOffsetForStringIndex(line, content, nil)
+    }
+    var width: CGFloat = 0
+    for run in runs {
+      let count = CTRunGetGlyphCount(run)
+      guard count > 0 else { continue }
+      var indices = Array(repeating: CFIndex(0), count: count)
+      var advances = Array(repeating: CGSize.zero, count: count)
+      CTRunGetStringIndices(run, CFRange(location: 0, length: 0), &indices)
+      CTRunGetAdvances(run, CFRange(location: 0, length: 0), &advances)
+      for glyph in 0..<count where indices[glyph] >= start && indices[glyph] < content {
+        width += advances[glyph].width
+      }
+    }
+    return width
+  }
   static let roleKey = NSAttributedString.Key("fc.compose.role")
   static let flagsKey = NSAttributedString.Key("fc.compose.flags")
   public struct FontRun {
@@ -349,7 +376,7 @@ public final class ComposeTextLayout {
       // Shape in context: cutting after the marker changes kerning at the
       // first body character (for example "1) An"), moving its actual caret.
       let prefix = CTLineCreateWithAttributedString(attributed.attributedSubstring(from: NSRange(location: start, length: contextEnd - start)))
-      let measured = CTLineGetOffsetForStringIndex(prefix, content - start, nil)
+      let measured = Self.hangingPrefixWidth(prefix, start: 0, content: content - start)
       guard measured.isFinite, measured >= 0 else { return nil }
       hangs.append((NSRange(location: start, length: end - start), content, measured, item.indent))
     }

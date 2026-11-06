@@ -814,6 +814,13 @@ measured-table development switch is enabled; product opt-in awaits workflow
 qualification. The native default
 uses all available pane width; a reading limit is optional and measured in points.
 
+List continuation indentation is measured from the displayed marker with its
+actual fonts. A left-to-right marker uses the shaped body caret so contextual
+kerning is retained. When bidirectional layout reorders the marker, its own
+logical glyph advances determine the inset; the visual caret can include the
+right-to-left body and must not be used as marker width. This fixes excessive
+hanging indentation without claiming full right-to-left paragraph alignment.
+
 For native code blocks, Fresh records the source ranges owned by the Markdown
 parser's code-text events. Gaps identify fences and container prefixes; these
 hide while reading and reveal on the edited source line. Hidden delimiter
