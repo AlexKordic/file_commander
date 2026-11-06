@@ -167,6 +167,39 @@ private final class ScenePeer: @unchecked Sendable {
 
 final class ComposeInputTests: XCTestCase {
   @MainActor
+  func testReceiptBoundTypingDoesNotWaitForBackgroundSemanticGeometry() async throws {
+    let peer = try ScenePeer(pane: pane("alpha Tail\n")); defer { peer.close() }
+    let editor = richEditor(); defer { editor.detachAll() }
+    editor.attach(socketPath: peer.path, app: nil)
+    try await eventually { editor.grid?.focusedCompose != nil }
+    let grid = try XCTUnwrap(editor.grid), unspecified = NSRange(location: NSNotFound, length: 0)
+    grid.insertText("日", replacementRange: unspecified)
+    grid.insertText("本", replacementRange: unspecified)
+    try await eventually { peer.inputs.count == 1 }
+    var raw = pane("日alpha Tail\n", revision: 5)
+    raw.compose.ready = false; raw.compose.currentProjection = false
+    raw.compose.cursors[0].position = 3; raw.compose.cursors[0].utf16Position = 1
+    raw.compose.textContext.selectionStart = 1; raw.compose.textContext.selectionEnd = 1
+    let edit = WireComposeEditReceipt.with {
+      $0.window = 1; $0.leaf = 2; $0.buffer = 3; $0.epoch = 7; $0.cursors = [1]; $0.pane = raw.compose
+    }
+    peer.reply(.with { $0.id = 1; $0.accepted = true; $0.edit = edit }, pane: raw)
+    try await eventually { peer.inputs.count == 2 }
+    XCTAssertEqual(peer.inputs[1].sourceRevision, 5)
+    XCTAssertEqual(peer.inputs[1].replacementStart, 3); XCTAssertEqual(peer.inputs[1].replacementEnd, 3)
+    XCTAssertEqual(try WirePaste(serializedBytes: peer.inputs[1].payload).text, "本")
+    XCTAssertEqual(grid.focusedCompose?.layout.text.projection.text, "日本alpha Tail\n")
+    raw = pane("日本alpha Tail\n", revision: 6); raw.compose.ready = false; raw.compose.currentProjection = false
+    raw.compose.cursors[0].position = 6; raw.compose.cursors[0].utf16Position = 2
+    raw.compose.textContext.selectionStart = 2; raw.compose.textContext.selectionEnd = 2
+    var next = edit; next.pane = raw.compose
+    let sequence = peer.reply(.with { $0.id = 2; $0.accepted = true; $0.edit = next }, pane: raw)
+    try await eventually { peer.lastApplied >= sequence }
+    XCTAssertEqual(grid.selectedRange(), NSRange(location: 2, length: 0))
+    XCTAssertTrue(editor.uninsertedText.isEmpty)
+  }
+
+  @MainActor
   func testRichAccessibilityUsesMeasuredLinesGraphemesAndScreenGeometry() async throws {
     let source = "Title\n\nProportional café 👩🏽‍💻 office affinity אבג words wrap across several measured lines.\nTail\n"
     var scene = pane(source, width: 24)
@@ -1765,7 +1798,7 @@ final class ComposeInputTests: XCTestCase {
   }
 
   @MainActor
-  func testFurtherTypingUsesAcceptedSourceAndWaitsForItsFormattingBeforeDispatch() async throws {
+  func testFurtherTypingUsesAcceptedSourceWhileMeasuredNavigationWaitsForFormatting() async throws {
     let peer = try ScenePeer(pane: pane("alpha Tail")); defer { peer.close() }
     let editor = richEditor(); defer { editor.detachAll() }
     editor.attach(socketPath: peer.path, app: nil)
@@ -1774,7 +1807,8 @@ final class ComposeInputTests: XCTestCase {
     grid.insertText("日本", replacementRange: unspecified)
     try await eventually { peer.inputs.count == 1 }
     var current = pane("日本alpha Tail", revision: 5)
-    current.compose.ready = false; current.compose.cursors[0].position = 6; current.compose.cursors[0].utf16Position = 2
+    current.compose.ready = false; current.compose.currentProjection = false
+    current.compose.cursors[0].position = 6; current.compose.cursors[0].utf16Position = 2
     current.compose.textContext.selectionStart = 2; current.compose.textContext.selectionEnd = 2
     let receipt = WireComposeEditReceipt.with {
       $0.window = 1; $0.leaf = 2; $0.buffer = 3; $0.epoch = 7; $0.cursors = [1]; $0.pane = current.compose
@@ -1784,13 +1818,25 @@ final class ComposeInputTests: XCTestCase {
     grid.insertText("語", replacementRange: unspecified)
     XCTAssertEqual(grid.attributedSubstring(forProposedRange: NSRange(location: 0, length: 100), actualRange: nil)?.string, "日本語alpha Tail")
     XCTAssertEqual(grid.selectedRange().location, 3)
-    XCTAssertEqual(peer.inputs.count, 1, "accepted raw source is not ready navigation/dispatch geometry")
-    current.compose.ready = true; peer.show(current)
     try await eventually { peer.inputs.count == 2 }
     XCTAssertEqual(peer.inputs[1].scope.bufferRevision, 5)
     XCTAssertTrue(peer.inputs[1].textInput)
     XCTAssertEqual(try WirePaste(serializedBytes: peer.inputs[1].payload).text, "語")
-    peer.reply(.with { $0.id = 2; $0.accepted = true })
+    editor.send(.key(.with { $0.key = "ArrowRight" }))
+    current = pane("日本語alpha Tail", revision: 6)
+    current.compose.ready = false; current.compose.currentProjection = false
+    current.compose.cursors[0].position = 9; current.compose.cursors[0].utf16Position = 3
+    current.compose.textContext.selectionStart = 3; current.compose.textContext.selectionEnd = 3
+    var next = receipt; next.pane = current.compose
+    let nextAccepted = peer.reply(.with { $0.id = 2; $0.accepted = true; $0.edit = next }, pane: current)
+    try await eventually { peer.lastApplied >= nextAccepted }
+    XCTAssertEqual(peer.inputs.count, 2, "measured navigation still needs a usable current projection")
+    current.compose.ready = true; peer.show(current)
+    try await eventually { peer.inputs.count == 3 }
+    XCTAssertEqual(peer.inputs[2].scope.bufferRevision, 6)
+    XCTAssertFalse(peer.inputs[2].textInput)
+    XCTAssertEqual(try WireKey(serializedBytes: peer.inputs[2].payload).key, "ArrowRight")
+    peer.reply(.with { $0.id = 3; $0.accepted = true })
   }
 
   @MainActor

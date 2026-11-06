@@ -455,11 +455,17 @@ source/window/payload sizes, timings and process peak RSS. RSS is a cumulative
 process high-water mark, not the allocation cost of an individual case.
 
 Use `--profile debug` for diagnosing algorithms; compare the same fixtures and
-configuration on the same machine. These profiles exclude plugin formatting,
-image reads/decode, painting and typing-to-paint latency. They neither create
-a backend session nor qualify GUI/SSH/recovery behavior. Source sizes beyond
-the current native cache limit are measured directly and explicitly reported
-as unavailable through that cache; exporting a pane does not remove the limit.
+configuration on the same machine. Backend results separate source-snapshot
+and UTF-16-index preparation from semantic parsing and report the 64 KiB
+background-worker threshold. These profiles exclude engine file IO, plugin
+formatting, image reads/decode, painting and typing-to-paint latency. They
+neither create a backend session nor qualify GUI/SSH/recovery behavior.
+Exporting a pane alone does not qualify the asynchronous cache path. The
+private native/backend suite separately opens a document above 2 MiB, checks
+proportional text, headings and decoded images, and verifies exact source
+selection, Unicode insertion, save and undo beyond the old cutoff. Controlled
+scene-peer checks require receipt-bound typing to proceed during parsing while
+measured navigation waits for usable geometry.
 
 ## CI
 

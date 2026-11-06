@@ -874,7 +874,13 @@ final class NativeEditor: NSObject, CellGridDelegate {
       pendingComposeID = nextComposeID
       pendingComposePane = queued.target?.identity
     }
-    if let identity = pendingComposePane,
+    let needsGeometry: Bool
+    switch queued.input {
+    case .replacement: needsGeometry = false // Real source ranges already belong to a captured receipt.
+    case .message(.text): needsGeometry = false
+    default: needsGeometry = true
+    }
+    if needsGeometry, let identity = pendingComposePane,
        let current = store.panes.first(where: { $0.leaf == identity.leaf && $0.hasBuffer && $0.buffer == identity.buffer && $0.hasCompose }) {
       guard current.compose.projectionUsable else { return }
       if let projection = pendingComposeProjection {

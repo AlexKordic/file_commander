@@ -411,11 +411,31 @@ layout optimizations, independent of terminal columns.
 
 The [resource profile](testing.md#rich-compose-resource-profiles) records real
 parser-generated panes, native construction/reuse costs, payload sizes and
-process peak memory. It does not qualify interactive latency. The current
-native cache accepts UTF-8 sources up to 2 MiB; larger documents retain grid
-Compose. Its 64 KiB source-window target can expand for line/block context.
-Whole-document parsing, that cutoff and complete-table measurement budgets
-remain experimental limitations pending the remaining release work.
+process peak memory. It does not qualify interactive latency. Sources above
+64 KiB use one semantic parser worker with at most one additional queued job;
+there is no longer a 2 MiB native-source cutoff. Jobs own immutable source and
+UTF-16-index snapshots. Edits coalesce to the newest wanted snapshot and cancel
+obsolete work. Acceptance checks the source revision, buffer lifetime,
+filesystem authority and snapshot identity. Closing the last rich client
+cancels work and releases the cache.
+
+While semantics are pending, the backend supplies current raw source with
+proportional presentation, exact source context and accepted edit receipts;
+both `ready` and `current_projection` are false. Source-bound committed text
+can continue from those receipts. Measured navigation waits for a usable
+projection. A completed parse replaces this temporary presentation, and a
+request captured against its obsolete projection explicitly requests fresh
+layout. Image clicks validate surviving source ranges before waiting for
+metadata, so deleting an image still cancels its queued click. Transient image
+discovery errors remain retryable.
+
+Source extraction, flattening, UTF-16 indexing and decoration reconciliation
+still run on the editor thread. The worker still parses a whole document;
+moving that parse does not make all input work asynchronous. The cache retains
+up to eight documents by count, without a qualified total byte budget. Its
+64 KiB source-window target can expand for line/block context. Large-block
+payload bounds, complete-table measurement costs, incremental style continuity
+and interactive latency remain experimental release work.
 
 `ComposePane.ready` reports formatter completion. Readiness correlates the
 source revision, window, buffer lifetime, and a host-assigned token for each
@@ -435,11 +455,13 @@ or buffer replacement discards them. Cursor activation is evaluated afresh.
 The existing Markdown parser supplies current heading, code, table and image
 structure; the native client has no second parser or editable source buffer.
 
-`ComposePane.current_projection` (field 24) identifies this current-source
-projection. It remains usable for measured input, headings and images even
-when `ready` is false. The native client uses its current source map rather
-than drawing a previous revision. An older peer without this field retains
-the previous coherent presentation while formatting completes, subject to
+`ComposePane.current_projection` (field 24) identifies this certified
+current-source rich projection. Once semantics are available, it remains
+usable for measured input, headings and images even when formatting has not
+completed and `ready` is false. It does not certify the temporary raw source
+shown during semantic parsing. The native client uses its current source map
+rather than drawing a previous revision. An older peer without this field
+retains the previous coherent presentation while formatting completes, subject to
 accepted source/cursor bounds. Automatic viewport continuation waits for
 completed formatting, because replacing retained decorations can change the
 measured height. A physical scroll still takes precedence over an accepted

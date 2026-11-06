@@ -224,6 +224,56 @@ final class ComposeBackendTests: XCTestCase {
   }
 
   @MainActor
+  func testRealBackendRichComposeBeyondTwoMiBKeepsGlobalInputCoordinatesAndExactSaveUndo() async throws {
+    let backend = try backend(); defer { backend.stop() }
+    let pasteboard = BackendPasteboard(), editor = editor(pasteboard)
+    defer { editor.detachAll() }
+    let original = "| A | B |\n|---|---|\n| one | two |\n\n# Large heading\n\nProse ![tiny](tiny.png) after.\n\n"
+      + String(repeating: "Paragraph café 東京 👩🏽‍💻 with proportional words.\n\n", count: 45000) + "Tail\n"
+    XCTAssertGreaterThan(original.utf8.count, 2 << 20)
+    let file = backend.root.appendingPathComponent("large.md")
+    try Data(original.utf8).write(to: file)
+    let bitmap = try XCTUnwrap(CGContext(data: nil, width: 40, height: 20, bitsPerComponent: 8, bytesPerRow: 160,
+      space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
+    let png = NSMutableData(), image = try XCTUnwrap(bitmap.makeImage())
+    let output = try XCTUnwrap(CGImageDestinationCreateWithData(png, "public.png" as CFString, 1, nil))
+    CGImageDestinationAddImage(output, image, nil); XCTAssertTrue(CGImageDestinationFinalize(output))
+    try (png as Data).write(to: backend.root.appendingPathComponent("tiny.png"))
+    try await attach(backend, file: file, editor: editor)
+    let grid = try XCTUnwrap(editor.grid), initial = try XCTUnwrap(grid.focusedCompose)
+    XCTAssertEqual(initial.pane.compose.documentLen, UInt64(original.utf8.count))
+    XCTAssertFalse(CTFontGetSymbolicTraits(initial.body).contains(.traitMonoSpace))
+    XCTAssertTrue(initial.pane.compose.spans.contains { $0.role == 1 })
+    try await eventually(editor, "large document inline image loaded") {
+      grid.focusedCompose?.layout.text.attachments.first?.rect.width == 40
+    }
+    let annotation = try XCTUnwrap(grid.focusedCompose?.pane.compose.images.first)
+    grid.insertText("X", replacementRange: NSRange(location: NSNotFound, length: 0))
+    let pending = try XCTUnwrap(grid.focusedCompose), placed = try XCTUnwrap(pending.layout.text.attachments.first)
+    editor.grid(grid, point: CGPoint(x: pending.origin.x + placed.rect.midX, y: pending.origin.y + placed.rect.midY),
+      in: pending, extend: false, count: 1)
+    try await eventually(editor, "image click waits for the new semantic snapshot instead of being cancelled") {
+      guard let cursor = grid.focusedCompose?.cursor else { return false }
+      return cursor.position == annotation.end + 1 && cursor.hasAnchor && cursor.anchor == annotation.start + 1
+    }
+    editor.send(.action(name: "undo", argsJson: "")); editor.send(.action(name: "save", argsJson: ""))
+    try await eventually(editor, "undo the pending prefix without losing the image action") { (try? Data(contentsOf: file)) == Data(original.utf8) }
+    editor.send(.action(name: "move_document_end", argsJson: ""))
+    try await eventually(editor, "native navigation reaches a source window beyond the former cutoff") {
+      guard let pane = grid.focusedCompose else { return false }
+      return pane.cursor?.position == UInt64(original.utf8.count) && pane.pane.compose.sourceStart > 2 << 20
+    }
+    XCTAssertEqual(grid.selectedRange(), NSRange(location: original.utf16.count, length: 0))
+    grid.insertText("追加", replacementRange: NSRange(location: NSNotFound, length: 0))
+    editor.send(.action(name: "save", argsJson: ""))
+    let expected = Data((original + "追加").utf8)
+    try await eventually(editor, "exact save after an edit in the large document") { (try? Data(contentsOf: file)) == expected }
+    editor.send(.action(name: "undo", argsJson: "")); editor.send(.action(name: "save", argsJson: ""))
+    try await eventually(editor, "large-document undo remains one source transaction") { (try? Data(contentsOf: file)) == Data(original.utf8) }
+    XCTAssertTrue(editor.uninsertedText.isEmpty); XCTAssertTrue(backend.server.isRunning)
+  }
+
+  @MainActor
   func testRealBackendSourceClickPreviewsAndCommitsFollowingCompositionBeforeAcknowledgment() async throws {
     let backend = try backend(); defer { backend.stop() }
     let pasteboard = BackendPasteboard(), editor = editor(pasteboard)

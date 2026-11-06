@@ -314,6 +314,13 @@ conflict cancellation and the atomic edit/undo operation. Committed phrases
 use `SceneInput.text`; clipboard paste retains its separate column-paste
 semantics.
 
+Large documents can temporarily show proportional raw source while Fresh's
+bounded semantic parser worker runs. Accepted source/cursor receipts still
+allow typing to continue; measured navigation waits for a usable current
+projection. This path has no 2 MiB source cutoff. Source snapshot/index work,
+large-block payload bounds and full interactive latency remain release
+qualification work; see [the integration contract](fresh_integration.md).
+
 `ComposeComposition` coordinates `ComposeMarkedText` snapshots at the captured
 carets. Default composition broadcasts to all original carets; an explicit
 initial replacement range addresses only the primary. It supports partial
