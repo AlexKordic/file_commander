@@ -1019,6 +1019,23 @@ These are direct AppKit and private-backend contracts. Actual VoiceOver,
 macOS 14 runtime behavior, accessibility actions across provisional
 composition and a complete document text model remain unqualified.
 
+The native text-model foundation is `ComposeAccessibleDocument`. It accepts
+only a complete source-owned projection, retaining source/selection lifetime
+and document-wide displayed UTF-16 coordinates without measuring a whole
+document in Core Text. It can certify the global range of a drawing crop only
+when both literal UTF-8 content and conceal/replacement ownership agree.
+Partial atomic replacements, canonically equal but differently spelled text,
+changed source owners and changed selection/reveal revisions are refused.
+Primary selections retain their full ranges rather than clipping to a crop.
+This model is not yet the public AX value: complete projection delivery,
+measured line/geometry integration and provisional actions remain required.
+
+Projection boundary validation and this model share a sparse UTF-8/UTF-16
+index with checkpoints about every 1,024 bytes. It retains literal bytes and
+rejects surrogate/UTF-8 interiors without a hash entry for every scalar.
+Drawing keeps its existing direct geometry indices; source-range semantics
+are shared with the document model. This changes neither source nor wrapping.
+
 Native rich Compose keeps marked text as a provisional replacement over that
 immutable source snapshot. Partial updates, marked/selected subranges and
 context queries use provisional document UTF-16 positions. The same measured

@@ -11,7 +11,7 @@ extension WireComposePane {
 }
 
 /// Fresh's source-preserving Compose projection. Coordinates in this contract
-/// are UTF-8 bytes. Core Text's UTF-16 indices stay inside ComposeTextLayout.
+/// are UTF-8 bytes. Text APIs translate displayed UTF-16 through this same map.
 public struct ComposeProjection {
   public enum Affinity { case upstream, downstream }
   public enum Kind { case copy, hidden, replacement, insertion }
@@ -31,26 +31,21 @@ public struct ComposeProjection {
   public let source: Range<Int>
   public let text: String
   public let segments: [Segment]
-  private let boundaries: Set<Int>
+  let textIndex: ComposeTextIndex
 
   /// Refuse incomplete or ambiguous maps before they can address the buffer.
   /// The server supplies the original source; this object never serializes it.
   public init?(source: Range<Int>, text: String, segments: [Segment]) {
     guard source.lowerBound >= 0 else { return nil }
-    var boundaries: Set<Int> = [0]
-    var byte = 0
-    for scalar in text.unicodeScalars {
-      byte += scalar.utf8.count
-      boundaries.insert(byte)
-    }
+    let index = ComposeTextIndex(text)
     var sourceEnd = source.lowerBound
     var displayEnd = 0
     for segment in segments {
       guard segment.source.lowerBound == sourceEnd,
             segment.source.upperBound <= source.upperBound,
             segment.display.lowerBound == displayEnd,
-            boundaries.contains(segment.display.lowerBound),
-            boundaries.contains(segment.display.upperBound) else { return nil }
+            index.contains(byte: segment.display.lowerBound),
+            index.contains(byte: segment.display.upperBound) else { return nil }
       switch segment.kind {
       case .copy:
         guard !segment.source.isEmpty, segment.source.count == segment.display.count else { return nil }
@@ -64,11 +59,11 @@ public struct ComposeProjection {
       sourceEnd = segment.source.upperBound
       displayEnd = segment.display.upperBound
     }
-    guard sourceEnd == source.upperBound, displayEnd == byte else { return nil }
+    guard sourceEnd == source.upperBound, displayEnd == index.byteCount else { return nil }
     self.source = source
     self.text = text
     self.segments = segments
-    self.boundaries = boundaries
+    textIndex = index
   }
 
   /// Validate the server's map before using it for graphical input. Unknown
@@ -93,7 +88,7 @@ public struct ComposeProjection {
   }
 
   public func sourcePosition(at display: Int, affinity: Affinity = .downstream) -> Int? {
-    guard boundaries.contains(display) else { return nil }
+    guard textIndex.contains(byte: display) else { return nil }
     if segments.isEmpty { return display == 0 ? source.lowerBound : nil }
     let index = affinity == .upstream ? firstSegment { $0.display.upperBound >= display }
       : firstSegment { $0.display.lowerBound > display } - 1
@@ -125,7 +120,7 @@ public struct ComposeProjection {
       else if source == segment.source.upperBound { display = segment.display.upperBound }
       else { display = affinity == .upstream ? segment.display.lowerBound : segment.display.upperBound }
     }
-    return boundaries.contains(display) ? display : nil
+    return textIndex.contains(byte: display) ? display : nil
   }
 
   /// Validation guarantees both coordinate spaces are monotonic. Inclusive
@@ -158,7 +153,7 @@ public struct ComposeProjection {
     let bytes = Array(text.utf8)
     var result = "", mapped: [Segment] = [], objects: [Object] = []
     func append(_ source: Range<Int>, _ display: Range<Int>, _ kind: Kind) -> Bool {
-      guard boundaries.contains(display.lowerBound), boundaries.contains(display.upperBound) else { return false }
+      guard textIndex.contains(byte: display.lowerBound), textIndex.contains(byte: display.upperBound) else { return false }
       let start = result.utf8.count
       result += String(decoding: bytes[display], as: UTF8.self)
       mapped.append(.init(source: source, display: start..<result.utf8.count, kind: kind))
@@ -210,6 +205,25 @@ public struct ComposeProjection {
     }
     guard gap(from..<source.upperBound), let projection = Self(source: source, text: result, segments: mapped) else { return nil }
     return (projection, objects)
+  }
+
+  /// Displayed UTF-16 and authoritative UTF-8 share this implementation for
+  /// both drawing windows and complete accessible document snapshots.
+  public func utf16Position(for source: Int, affinity: Affinity = .downstream) -> Int? {
+    displayPosition(for: source, affinity: affinity).flatMap { textIndex.unit(forByte: $0) }
+  }
+
+  public func sourceRange(forUTF16 range: NSRange, insertion: Int? = nil) -> Range<Int>? {
+    guard let bytes = textIndex.bytes(for: range) else { return nil }
+    return sourceRange(forDisplayBytes: bytes, insertion: insertion)
+  }
+
+  func sourceRange(forDisplayBytes bytes: Range<Int>, insertion: Int? = nil) -> Range<Int>? {
+    if bytes.isEmpty, let insertion, displayPosition(for: insertion) == bytes.lowerBound { return insertion..<insertion }
+    guard let start = sourcePosition(at: bytes.lowerBound, affinity: .downstream) else { return nil }
+    if bytes.isEmpty { return start..<start }
+    guard let end = sourcePosition(at: bytes.upperBound, affinity: .upstream), start <= end else { return nil }
+    return start..<end
   }
 }
 
@@ -771,11 +785,7 @@ public final class ComposeTextLayout {
     guard range.location >= 0, range.location <= string.length, range.length >= 0,
           range.length <= string.length - range.location,
           let a = utf16ToByte[range.location], let b = utf16ToByte[NSMaxRange(range)] else { return nil }
-    if range.length == 0, let insertion, utf16Position(for: insertion) == range.location { return insertion..<insertion }
-    guard let start = projection.sourcePosition(at: a, affinity: .downstream) else { return nil }
-    if range.length == 0 { return start..<start }
-    guard let end = projection.sourcePosition(at: b, affinity: .upstream), start <= end else { return nil }
-    return start..<end
+    return projection.sourceRange(forDisplayBytes: a..<b, insertion: insertion)
   }
 
   public func caret(atUTF16 position: Int, affinity: ComposeProjection.Affinity = .downstream) -> CGRect? {

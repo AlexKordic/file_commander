@@ -120,6 +120,37 @@ private final class ComposeBackend {
 
 final class ComposeBackendTests: XCTestCase {
   @MainActor
+  func testCompleteAccessibleTextUsesTheRealFreshProjectionAndExpiresOnSelectionReveal() async throws {
+    let backend = try backend(); defer { backend.captureDiagnostics("accessible-document"); backend.stop() }
+    let editor = editor(BackendPasteboard()); defer { editor.detachAll() }
+    let original = "# Accessible\r\n\r\nCafé 👩🏽‍💻 **bold** and [link](target.md).\r\n\r\n"
+      + "![picture](missing.png)\r\n\r\n| Key | Value |\r\n| --- | --- |\r\n| one | two |\r\n\r\nEnd\r\n"
+    let file = backend.root.appendingPathComponent("complete-accessible.md")
+    try Data(original.utf8).write(to: file)
+    try await attach(backend, file: file, editor: editor)
+    let grid = try XCTUnwrap(editor.grid), pane = try XCTUnwrap(grid.focusedCompose)
+    XCTAssertEqual(pane.pane.compose.sourceStart, 0)
+    XCTAssertEqual(pane.pane.compose.sourceEnd, UInt64(original.utf8.count))
+    let model = try XCTUnwrap(ComposeAccessibleDocument(window: UInt64(editor.store.windowID), pane: pane.pane))
+    XCTAssertEqual(Array(model.text.utf8), Array(try XCTUnwrap(grid.accessibilityValue() as? String).utf8))
+    XCTAssertEqual(model.characterCount, grid.accessibilityNumberOfCharacters())
+    XCTAssertEqual(model.range(of: UInt64(editor.store.windowID), pane: pane.pane), NSRange(location: 0, length: model.characterCount))
+    XCTAssertEqual(model.selectedRanges(window: UInt64(editor.store.windowID), pane: pane.pane), grid.accessibilitySelectedTextRanges()?.map(\.rangeValue))
+    let image = (model.text as NSString).range(of: "\u{fffc}")
+    XCTAssertNotEqual(image.location, NSNotFound)
+    let source = try XCTUnwrap(model.sourceRange(for: image))
+    XCTAssertEqual(String(decoding: Array(original.utf8)[source], as: UTF8.self), "![picture](missing.png)")
+    grid.setAccessibilitySelectedTextRange(image)
+    try await eventually(editor, "source selection changes the captured projection owner") {
+      editor.store.panes.first?.compose.selectionRevision != model.selectionRevision
+    }
+    let selected = try XCTUnwrap(grid.focusedCompose)
+    XCTAssertFalse(model.owns(window: UInt64(editor.store.windowID), pane: selected.pane))
+    XCTAssertNil(model.range(of: UInt64(editor.store.windowID), pane: selected.pane))
+    XCTAssertEqual(try Data(contentsOf: file), Data(original.utf8))
+  }
+
+  @MainActor
   func testDocumentRotorsRevealOffscreenSourceAndKeepFreshEditingAndUndoOwnership() async throws {
     let backend = try backend(); defer { backend.captureDiagnostics("semantic-navigation"); backend.stop() }
     let editor = editor(BackendPasteboard()); defer { editor.detachAll() }
