@@ -559,6 +559,16 @@ recovery. A 160-resource fixture checks that bitmap-free metadata stays at
 once the old entries are offscreen. These are decoded-cache bounds, not total
 process-memory or interactive latency qualification.
 
+Dense-image break checks compare every resulting break with Core Text's native
+suggestion through changes in font, image widths and very narrow measures,
+including ligatures, accents and emoji. They require the measured-advance path
+to run and reuse one index across different typesetters; reordered/RTL runs
+must retain the native contextual path. A private real-backend workflow keeps
+4,000 inline PNG attachments in a complete 175 KB paragraph, pages both ways,
+resizes, checks document-wide text-service coordinates, inserts Unicode, saves
+exact CRLF source and undoes once. This does not establish a latency budget for
+the complete workflow or qualify arbitrary soft-wrap clipping.
+
 ## CI
 
 `.github/workflows/tests.yml` is the repository's only workflow. It runs on

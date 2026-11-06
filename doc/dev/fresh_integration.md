@@ -1101,6 +1101,16 @@ resources wait with an explained fallback until an offscreen entry can retire.
 These intervals and resource budgets still need interactive/performance
 qualification; full GUI/SSH qualification remains open.
 
+Dense inline-image paragraphs reuse advances from one complete Core Text
+paragraph while choosing native Unicode break opportunities. This avoids
+copying the remaining image delegate runs for each line-break query. The
+optimization requires monotonic, untransformed left-to-right glyph runs;
+bidirectional/reordered runs and unsupported positions retain native contextual
+breaking. Font or image-metric changes create a new typesetter and invalidate
+the temporary advances. Only the last measured paragraph is retained during
+construction. No source context is clipped, and neither a character count nor
+terminal columns determine the wrapping measure.
+
 These additive prototype messages retain the current scene version during
 development. Audit the final protocol version and update the dependency pin,
 bundle, consumer, and recovery qualification together before enabling the

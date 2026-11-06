@@ -4,7 +4,7 @@ import CoreText
 /// Reuse native Unicode break opportunities in long physical paragraphs.
 /// Core Text still supplies every width, glyph cluster and shaped line. The
 /// threshold selects an optimization; it never limits content or pane width.
-struct ComposeWrappingBreaks {
+final class ComposeWrappingBreaks {
   private struct Unit {
     let end, trimmed: Int
     let complex: Bool
@@ -12,9 +12,60 @@ struct ComposeWrappingBreaks {
   private struct Paragraph {
     let range: NSRange
     let units: [Unit]
+    let manyObjects: Bool
+  }
+  private struct Advances {
+    let indices: [Int], offsets: [CGFloat]
+
+    init?(_ typesetter: CTTypesetter, range: NSRange) {
+      let line = CTTypesetterCreateLine(typesetter, CFRange(location: range.location, length: range.length))
+      var indices: [Int] = [], offsets: [CGFloat] = []
+      for run in CTLineGetGlyphRuns(line) as! [CTRun] {
+        let status = CTRunGetStatus(run)
+        guard !status.contains(.rightToLeft), !status.contains(.nonMonotonic), !status.contains(.hasNonIdentityMatrix) else { return nil }
+        let count = CTRunGetGlyphCount(run)
+        var positions = [CGPoint](repeating: .zero, count: count)
+        var sources = [CFIndex](repeating: 0, count: count)
+        CTRunGetPositions(run, CFRange(location: 0, length: 0), &positions)
+        CTRunGetStringIndices(run, CFRange(location: 0, length: 0), &sources)
+        for i in 0..<count {
+          let source = sources[i], x = positions[i].x
+          guard range.location <= source, source < NSMaxRange(range), x.isFinite else { return nil }
+          if source == indices.last { continue }
+          guard source > (indices.last ?? -1), x >= (offsets.last ?? -CGFloat.infinity) else { return nil }
+          indices.append(source); offsets.append(x)
+        }
+      }
+      let width = CGFloat(CTLineGetTypographicBounds(line, nil, nil, nil))
+      guard indices.first == range.location, width.isFinite, width >= (offsets.last ?? 0) else { return nil }
+      indices.append(NSMaxRange(range)); offsets.append(width)
+      self.indices = indices; self.offsets = offsets
+    }
+
+    func clusterBreak(from: Int, width: Double) -> Int? {
+      var low = 0, high = indices.count
+      while low < high {
+        let mid = low + (high - low) / 2
+        if indices[mid] < from { low = mid + 1 } else { high = mid }
+      }
+      guard low < indices.count, indices[low] == from else { return nil }
+      let origin = low, limit = offsets[low] + CGFloat(width)
+      high = offsets.count
+      while low < high {
+        let mid = low + (high - low) / 2
+        if offsets[mid] <= limit { low = mid + 1 } else { high = mid }
+      }
+      return indices[max(origin, low - 1)] - from
+    }
   }
   private let string: NSString
   private let paragraphs: [Paragraph]
+  private var measuredTypesetter: CTTypesetter?
+  private var measuredParagraph: Int?
+  // Only the most recently queried paragraph is retained. These advances are
+  // temporary construction data, not another document-wide layout cache.
+  private var advances: Advances?
+  private(set) var measuredBreakCount = 0
   static let minimumLength = 4096
 
   init?(_ string: NSString) {
@@ -34,7 +85,9 @@ struct ComposeWrappingBreaks {
       // Preserve Core Text's handling of tabs, nonbreaking whitespace and
       // explicit formatting controls. ZWJ remains available for emoji; a
       // forced break inside an unbroken word also uses Core Text below.
+      var objects = 0
       let eligible = !string.substring(with: range).unicodeScalars.contains { scalar in
+        if scalar.value == 0xfffc { objects += 1 }
         if [0x20, 0x0a, 0x0d, 0x200d].contains(scalar.value) { return false }
         return [.control, .format, .spaceSeparator, .lineSeparator, .paragraphSeparator]
           .contains(scalar.properties.generalCategory)
@@ -59,7 +112,7 @@ struct ComposeWrappingBreaks {
           trimmed: last.location == NSNotFound ? unit.location : NSMaxRange(last), complex: complex))
       }
       guard units.last?.end == end else { continue }
-      paragraphs.append(Paragraph(range: range, units: units))
+      paragraphs.append(Paragraph(range: range, units: units, manyObjects: objects >= 32))
     }
     guard !paragraphs.isEmpty else { return nil }
     self.string = string; self.paragraphs = paragraphs
@@ -70,7 +123,17 @@ struct ComposeWrappingBreaks {
     let index = first(paragraphs) { NSMaxRange($0.range) > from }
     guard index < paragraphs.count, paragraphs[index].range.location <= from else { return native() }
     let paragraph = paragraphs[index]
-    let count = CTTypesetterSuggestClusterBreak(typesetter, from, width)
+    // Core Text's cluster suggestion clones the remaining delegate runs on
+    // each line of a dense image paragraph. Measure that complete paragraph
+    // once, preserving shaping context, and reuse its monotonic LTR advances.
+    // Bidi, reordered glyphs and transformed runs keep the native path.
+    if paragraph.manyObjects && (measuredParagraph != index || measuredTypesetter !== typesetter) {
+      measuredTypesetter = typesetter; measuredParagraph = index
+      advances = Advances(typesetter, range: paragraph.range)
+    }
+    let measured = paragraph.manyObjects ? advances?.clusterBreak(from: from, width: width) : nil
+    if measured != nil { measuredBreakCount += 1 }
+    let count = measured ?? CTTypesetterSuggestClusterBreak(typesetter, from, width)
     guard count > string.rangeOfComposedCharacterSequence(at: from).length else { return native() }
     let fit = from + count
     if NSMaxRange(paragraph.range) <= fit { return NSMaxRange(paragraph.range) - from }

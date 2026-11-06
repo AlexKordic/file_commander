@@ -180,6 +180,71 @@ final class ComposeBackendTests: XCTestCase {
   }
 
   @MainActor
+  func testRealBackendDenseInlineImagesKeepMeasuredPagingResizeAndEditSaveUndo() async throws {
+    let backend = try backend(); defer {
+      backend.captureDiagnostics("dense-inline-images")
+      backend.stop()
+    }
+    let editor = editor(BackendPasteboard()); defer { editor.detachAll() }
+    let pixels = try XCTUnwrap(CGContext(data: nil, width: 80, height: 20, bitsPerComponent: 8,
+      bytesPerRow: 320, space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
+    pixels.setFillColor(CGColor(red: 0.1, green: 0.65, blue: 0.35, alpha: 1)); pixels.fill(CGRect(x: 0, y: 0, width: 80, height: 20))
+    let image = backend.root.appendingPathComponent("tiny.png")
+    let png = try XCTUnwrap(CGImageDestinationCreateWithURL(image as CFURL, "public.png" as CFString, 1, nil))
+    CGImageDestinationAddImage(png, try XCTUnwrap(pixels.makeImage()), nil); XCTAssertTrue(CGImageDestinationFinalize(png))
+    let header = "| A | B |\r\n|---|---|\r\n| one | two |\r\n\r\n# Dense images\r\n\r\n"
+    let body = (0..<4000).map { "word\($0) café ![tiny](tiny.png) more text. " }.joined()
+    let original = header + body + "\r\n\r\nTail\r\n"
+    let file = backend.root.appendingPathComponent("dense-images.md")
+    try Data(original.utf8).write(to: file)
+    try await attach(backend, file: file, editor: editor)
+    let grid = try XCTUnwrap(editor.grid)
+    try await eventually(editor, "complete dense paragraph and shared inline image pixels") {
+      guard let pane = grid.focusedCompose, let first = pane.pane.compose.images.first else { return false }
+      return pane.layout.text.attachments.count == 4000 && pane.layout.imageDescription(first) == "tiny"
+        && pane.layout.text.attachments.first?.rect.width == 80
+    }
+    let initial = try XCTUnwrap(grid.focusedCompose)
+    XCTAssertGreaterThan(original.utf8.count, 128 << 10)
+    XCTAssertLessThanOrEqual(initial.pane.compose.sourceStart, UInt64(header.utf8.count))
+    XCTAssertGreaterThanOrEqual(initial.pane.compose.sourceEnd, UInt64(header.utf8.count + body.utf8.count))
+    var positions: [UInt64] = []
+    for action in ["move_page_down", "move_page_down", "move_page_down", "move_page_up"] {
+      let before = try XCTUnwrap(grid.focusedCompose?.cursor?.position)
+      editor.send(.action(name: action, argsJson: ""))
+      try await eventually(editor, "measured \(action) within the complete dense paragraph") {
+        guard let after = grid.focusedCompose?.cursor?.position else { return false }
+        return action == "move_page_up" ? after < before : after > before
+      }
+      positions.append(try XCTUnwrap(grid.focusedCompose?.cursor?.position))
+    }
+    let position = try XCTUnwrap(positions.last), width = try XCTUnwrap(grid.focusedCompose?.layout.width)
+    XCTAssertGreaterThan(position, UInt64(header.utf8.count))
+    grid.setFrameSize(CGSize(width: 460, height: 420))
+    try await eventually(editor, "resize keeps the dense paragraph's source caret") {
+      grid.focusedCompose?.cursor?.position == position && (grid.focusedCompose?.layout.width ?? width) < width
+    }
+    let prefix = Data(original.utf8.prefix(Int(position))), suffix = Data(original.utf8.dropFirst(Int(position)))
+    XCTAssertEqual(grid.selectedRange(), NSRange(location: String(decoding: prefix, as: UTF8.self).utf16.count, length: 0))
+    let insertion = "追加👩🏽‍💻"
+    grid.insertText(insertion, replacementRange: NSRange(location: NSNotFound, length: 0))
+    editor.send(.action(name: "save", argsJson: ""))
+    try await eventually(editor, "dense inline-image source saves exact Unicode and CRLF bytes") { (try? Data(contentsOf: file)) == prefix + Data(insertion.utf8) + suffix }
+    editor.send(.action(name: "undo", argsJson: "")); editor.send(.action(name: "save", argsJson: ""))
+    try await eventually(editor, "one undo restores every dense image reference") { (try? Data(contentsOf: file)) == Data(original.utf8) }
+    editor.send(.action(name: "move_document_start", argsJson: ""))
+    try await eventually(editor, "all image attachments return after source editing and undo") {
+      guard let pane = grid.focusedCompose else { return false }
+      return pane.cursor?.position == 0 && pane.layout.text.attachments.count == 4000
+        && pane.layout.text.attachments.first?.rect.width == 80
+    }
+    XCTAssertTrue(editor.uninsertedText.isEmpty); XCTAssertTrue(backend.server.isRunning)
+    let report: [String: Any] = ["source_bytes": original.utf8.count, "attachments": 4000, "page_positions": positions,
+      "initial_width": Double(width), "resized_width": Double(try XCTUnwrap(grid.focusedCompose?.layout.width))]
+    try JSONSerialization.data(withJSONObject: report, options: [.sortedKeys]).write(to: backend.root.appendingPathComponent("dense-image-report.json"))
+  }
+
+  @MainActor
   func testRealBackendTypingRetainsReceivedInlineImageThroughSourceRevisionsAndSaveUndo() async throws {
     let backend = try backend(); defer {
       backend.captureDiagnostics("image-decode-lifetime")
