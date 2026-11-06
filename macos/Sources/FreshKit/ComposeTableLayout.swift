@@ -61,14 +61,13 @@ struct ComposeMeasuredTable {
   let indent: CGFloat
   var width: CGFloat { columns.reduce(0, +) }
 
-  init?(run: ComposeTextLayout.TableRun, attributed: NSAttributedString, font: CTFont,
+  init?(run: ComposeTextLayout.TableRun, attributed: NSAttributedString, typesetter: CTTypesetter?, font: CTFont,
         width: CGFloat, indices: [Int: Int], attachments: [ComposeTextLayout.Attachment]) {
     guard [run.indent, run.before, run.after].allSatisfy({ $0.isFinite && $0 >= 0 }),
           !run.table.alignments.isEmpty else { return nil }
     self.run = run
     indent = min(run.indent, width * 0.6)
     let available = max(1, width - indent)
-    guard let typesetter = ComposeShaping.typesetter(attributed) else { return nil }
     var constraints = ComposeColumnConstraints(count: run.table.alignments.count, font: font, available: available)
     if let columns = run.columns {
       guard columns.count == run.table.alignments.count, columns.allSatisfy({ $0.isFinite && $0 > Self.padding * 2 }) else { return nil }
@@ -88,7 +87,7 @@ struct ComposeMeasuredTable {
         cells.append(span)
         if !row.raw, run.columns == nil || run.adaptiveMinimum {
           let imageWidth = attachments.filter { $0.display.overlaps(display) }.map { min($0.size.width, available * 0.35) }.max() ?? 0
-          guard constraints.include(attributed, range: span, column: column, preferred: run.columns == nil,
+          guard let typesetter, constraints.include(attributed, range: span, column: column, preferred: run.columns == nil,
             imageWidth: imageWidth, typesetter: typesetter) else { return nil }
         }
       }

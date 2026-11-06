@@ -385,9 +385,11 @@ public final class ComposeTextLayout {
             start < end, [paragraph.indent, paragraph.trailing, paragraph.before, paragraph.after].allSatisfy({ $0.isFinite && $0 >= 0 }) else { return nil }
       blocks.append((NSRange(location: start, length: end - start), paragraph))
     }
-    // One attributed typesetter supplies contextual marker shaping and, when
-    // attachments do not modify its attributes below, the final text layout.
-    let prefixTypesetter = hanging.contains { $0.measuredPrefix == nil } ? ComposeShaping.typesetter(attributed) : nil
+    // Markers and cells share the same fonts and complete projection before
+    // image delegates are installed. Fixed column inputs need no extra shaper.
+    let measuresText = hanging.contains { $0.measuredPrefix == nil }
+      || tables.contains { $0.columns == nil || $0.adaptiveMinimum }
+    let measurementTypesetter = measuresText ? ComposeShaping.typesetter(attributed) : nil
     var hangs: [(range: NSRange, content: Int, prefix: CGFloat, indent: CGFloat, physicalStart: Bool)] = []
     for item in hanging {
       guard let start = byteToUTF16[item.display.lowerBound], let end = byteToUTF16[item.display.upperBound],
@@ -399,19 +401,19 @@ public final class ComposeTextLayout {
         hangs.append((NSRange(location: start, length: end - start), content, measured, item.indent, item.physicalStart))
         continue
       }
-      guard let prefixTypesetter else { return nil }
+      guard let measurementTypesetter else { return nil }
       // Shape the first visual line, not a copy of the whole joined paragraph.
       // Include at least the first complete body grapheme: cutting at the
       // marker changes kerning ("1) An"), even when a narrow pane wraps there.
       let measure = max(1, width - min(item.indent, width * 0.6))
-      let count = suggest(prefixTypesetter, from: start, width: Double(measure))
+      let count = suggest(measurementTypesetter, from: start, width: Double(measure))
       let bodyEnd = NSMaxRange(string.rangeOfComposedCharacterSequence(at: content))
       var contextEnd = min(end, max(start + max(0, count), bodyEnd))
       if contextEnd < end {
         let cluster = string.rangeOfComposedCharacterSequence(at: contextEnd)
         if cluster.location < contextEnd { contextEnd = min(end, NSMaxRange(cluster)) }
       }
-      let prefix = CTTypesetterCreateLine(prefixTypesetter, CFRange(location: start, length: contextEnd - start))
+      let prefix = CTTypesetterCreateLine(measurementTypesetter, CFRange(location: start, length: contextEnd - start))
       let measured = Self.hangingPrefixWidth(prefix, start: start, content: content)
       guard measured.isFinite, measured >= 0 else { return nil }
       hangs.append((NSRange(location: start, length: end - start), content, measured, item.indent, false))
@@ -429,7 +431,7 @@ public final class ComposeTextLayout {
     var tableRows: [(table: Int, row: Int, range: NSRange)] = []
     var previousRowEnd = 0
     for run in tables {
-      guard let measured = ComposeMeasuredTable(run: run, attributed: attributed, font: font, width: width,
+      guard let measured = ComposeMeasuredTable(run: run, attributed: attributed, typesetter: measurementTypesetter, font: font, width: width,
         indices: byteToUTF16, attachments: attachments), !measured.rows.isEmpty else { return nil }
       for (row, value) in measured.rows.enumerated() {
         guard value.range.location >= previousRowEnd else { return nil }
@@ -486,11 +488,11 @@ public final class ComposeTextLayout {
         NSAttributedString.Key(kCTForegroundColorAttributeName as String): CGColor(gray: 0, alpha: 0),
       ], range: NSRange(location: start, length: 1))
     }
-    // Non-preview images added run delegates after marker measurement. Their
+    // Non-preview images added run delegates after marker/cell measurement. Their
     // final typesetter must see those new attributes instead of reusing it.
     guard let typesetter = (attachments.contains(where: { !$0.preview })
       ? ComposeShaping.typesetter(attributed)
-      : (prefixTypesetter ?? ComposeShaping.typesetter(attributed))) else { return nil }
+      : (measurementTypesetter ?? ComposeShaping.typesetter(attributed))) else { return nil }
     var lines: [Fragment] = []
     var from = 0
     var top: CGFloat = 0

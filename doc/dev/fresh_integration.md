@@ -421,6 +421,13 @@ work beyond Core Text's default limit. Long-document CPU, memory and
 input-to-paint budgets still require qualification before enabling the feature
 by default.
 
+Within one layout, hanging markers and table cells share a typesetter for
+the complete projection and its current font runs. Tables with complete fixed
+column inputs skip that measurement unless a draft needs adaptive minima.
+Installing inline-image run delegates still creates a new final typesetter;
+otherwise the text layout can reuse the measurement typesetter. Sharing never
+uses cell-only strings, another pane's fonts or a prior source revision.
+
 Validated source/display maps use ordered coordinate queries, preserving both
 sides of hidden and inserted boundaries without scanning the entire map for
 each image, caret or span. Object substitution visits only intersecting map

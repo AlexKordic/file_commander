@@ -180,6 +180,90 @@ final class ComposeBackendTests: XCTestCase {
   }
 
   @MainActor
+  func testManySeparateTablesKeepUnicodeImageAndSourceGeometryThroughReflowAndUndoSave() async throws {
+    let backend = try backend(); defer {
+      backend.captureDiagnostics("many-tables")
+      backend.stop()
+    }
+    let editor = editor(BackendPasteboard()); defer { editor.detachAll() }
+    let pixels = try XCTUnwrap(CGContext(data: nil, width: 80, height: 24, bitsPerComponent: 8,
+      bytesPerRow: 320, space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
+    pixels.setFillColor(CGColor(red: 0.1, green: 0.6, blue: 0.3, alpha: 1)); pixels.fill(CGRect(x: 0, y: 0, width: 80, height: 24))
+    let png = try XCTUnwrap(CGImageDestinationCreateWithURL(backend.root.appendingPathComponent("tiny.png") as CFURL, "public.png" as CFString, 1, nil))
+    CGImageDestinationAddImage(png, try XCTUnwrap(pixels.makeImage()), nil); XCTAssertTrue(CGImageDestinationFinalize(png))
+    let count = 128
+    var original = "1) An image ![tiny](tiny.png) and a measured hanging marker.\r\n\r\n"
+    original += String(repeating: "Proportional café 👩🏽‍💻 and שלום before the tables.\r\n\r\n", count: 256)
+    for index in 0..<count {
+      original += "## Section \(index)\r\n\r\n| Name | Detail |\r\n|:---|---:|\r\n| **café-\(index) 👩🏽‍💻** | `value-\(index)` 東京 שלום |\r\n\r\n"
+    }
+    let file = backend.root.appendingPathComponent("many-tables.md")
+    try Data(original.utf8).write(to: file)
+    try await attach(backend, file: file, editor: editor)
+    let grid = try XCTUnwrap(editor.grid)
+    try await eventually(editor, "all separate tables and native image metrics") {
+      guard let pane = grid.focusedCompose else { return false }
+      return pane.layout.text.tables.count == count && pane.layout.text.attachments.first?.rect.width == 80
+        && pane.layout.text.attachments.first?.rect.height == 24
+    }
+    let initial = try XCTUnwrap(grid.focusedCompose)
+    var local = initial.pane.compose
+    for index in local.tables.indices {
+      local.tables[index].measurementID = 0; local.tables[index].clearMeasurement()
+    }
+    if let path = ProcessInfo.processInfo.environment["FC_COMPOSE_ARTIFACT_DIR"] {
+      let output = URL(fileURLWithPath: path)
+      try FileManager.default.createDirectory(at: output, withIntermediateDirectories: true)
+      try initial.pane.compose.serializedData().write(to: output.appendingPathComponent("many-tables.pb"))
+      try local.serializedData().write(to: output.appendingPathComponent("many-tables-local.pb"))
+    }
+    func verify(_ layout: ComposeTextLayout) throws {
+      XCTAssertEqual(layout.tables.count, count)
+      for index in [0, count / 2, count - 1] {
+        let word = "café-\(index) ", token = word + "👩🏽‍💻"
+        let range = try XCTUnwrap(original.range(of: token))
+        let start = original[..<range.lowerBound].utf8.count + word.utf8.count
+        let unit = try XCTUnwrap(layout.utf16Position(for: start))
+        XCTAssertEqual(layout.sourceRange(forUTF16: NSRange(location: unit, length: "👩🏽‍💻".utf16.count)), start..<(start + "👩🏽‍💻".utf8.count))
+        let caret = try XCTUnwrap(layout.caret(for: start))
+        let hit = try XCTUnwrap(layout.hit(at: CGPoint(x: caret.minX + 0.01, y: caret.midY)))
+        XCTAssertEqual(hit.source, start)
+        XCTAssertTrue(layout.tables[index].rect.insetBy(dx: -1, dy: -1).contains(caret))
+        XCTAssertNotEqual(layout.tables[index].columns[0], layout.tables[index].columns[1])
+      }
+      let image = try XCTUnwrap(layout.attachments.first)
+      let imageIndex = try XCTUnwrap(layout.utf16Position(for: image.attachment.source.lowerBound))
+      let fragment = try XCTUnwrap(layout.fragments.first { $0.range.contains(imageIndex) })
+      XCTAssertGreaterThanOrEqual(fragment.rect.height, image.rect.height,
+        "final shaping must include image run delegates added after table measurement")
+    }
+    try verify(initial.layout.text)
+    let image = try XCTUnwrap(local.images.first)
+    let asset = try ComposeImageAsset.decode(Data(contentsOf: backend.root.appendingPathComponent("tiny.png")), maximumDimension: 1024)
+    let localLayout = try XCTUnwrap(ComposePaneLayout(pane: local, body: CTFontCreateWithName("Helvetica" as CFString, 18, nil),
+      monospace: CTFontCreateWithName("Menlo" as CFString, 18, nil), width: 620, images: [image.start: .ready(asset)]))
+    try verify(localLayout.text)
+    var preferences = ComposePreferences(); preferences.bodySize = 22
+    grid.setComposePreferences(preferences, zoom: 1)
+    grid.setFrameSize(CGSize(width: 480, height: 420))
+    try await eventually(editor, "font and width change preserves every table") {
+      guard let pane = grid.focusedCompose else { return false }
+      return pane.layout.text.tables.count == count && pane.layout.text.size.height != initial.layout.text.size.height
+    }
+    try verify(try XCTUnwrap(grid.focusedCompose).layout.text)
+    editor.send(.text("Prefix "))
+    let changed = Data("Prefix ".utf8) + Data(original.utf8)
+    try await eventually(editor, "prefix insertion") { grid.focusedCompose?.pane.compose.documentLen == UInt64(changed.count) }
+    editor.send(.action(name: "save", argsJson: ""))
+    try await eventually(editor, "save changed exact CRLF source") { (try? Data(contentsOf: file)) == changed }
+    editor.send(.action(name: "undo", argsJson: ""))
+    try await eventually(editor, "undo insertion") { grid.focusedCompose?.pane.compose.documentLen == UInt64(original.utf8.count) }
+    editor.send(.action(name: "save", argsJson: ""))
+    try await eventually(editor, "save original exact CRLF source") { (try? Data(contentsOf: file)) == Data(original.utf8) }
+    XCTAssertTrue(editor.uninsertedText.isEmpty)
+  }
+
+  @MainActor
   func testRealBackendDenseInlineImagesKeepMeasuredPagingResizeAndEditSaveUndo() async throws {
     let backend = try backend(); defer {
       backend.captureDiagnostics("dense-inline-images")

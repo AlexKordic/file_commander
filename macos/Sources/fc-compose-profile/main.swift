@@ -2,6 +2,7 @@ import Foundation
 import CoreText
 import Darwin
 import FreshKit
+import CryptoKit
 
 func milliseconds<T>(_ work: () throws -> T) rethrows -> (T, Double) {
   let start = ProcessInfo.processInfo.systemUptime
@@ -15,6 +16,55 @@ func peakRSS() -> Int64 {
 }
 
 enum ProfileFailure: Error { case arguments, layout(String), noFixtures }
+
+/// An opt-in comparison artifact, outside all layout timing regions. Includes
+/// glyphs and global indices so a faster run cannot silently change shaping.
+func geometry(_ layout: ComposePaneLayout) throws -> Data {
+  func rect(_ value: CGRect) -> [Double] {
+    [Double(value.minX), Double(value.minY), Double(value.width), Double(value.height)]
+  }
+  let fragments: [[String: Any]] = layout.text.fragments.map { fragment in
+    let runs: [[String: Any]] = (CTLineGetGlyphRuns(fragment.line) as! [CTRun]).map { run in
+      let count = CTRunGetGlyphCount(run)
+      var indices = [CFIndex](repeating: 0, count: count), glyphs = [CGGlyph](repeating: 0, count: count)
+      var positions = [CGPoint](repeating: .zero, count: count)
+      CTRunGetStringIndices(run, CFRange(), &indices); CTRunGetGlyphs(run, CFRange(), &glyphs)
+      CTRunGetPositions(run, CFRange(), &positions)
+      let font = (CTRunGetAttributes(run) as NSDictionary)[kCTFontAttributeName] as! CTFont
+      return ["font": CTFontCopyPostScriptName(font) as String, "font_size": CTFontGetSize(font),
+        "traits": CTFontGetSymbolicTraits(font).rawValue, "indices": indices, "glyphs": glyphs,
+        "positions": positions.map { [Double($0.x), Double($0.y)] }]
+    }
+    var value: [String: Any] = ["range": [fragment.range.location, fragment.range.length], "rect": rect(fragment.rect),
+      "baseline": fragment.baseline, "content_end": fragment.contentEnd, "runs": runs]
+    if let table = fragment.table {
+      value["table"] = [table.table, table.row.lowerBound, table.row.upperBound, table.column ?? -1,
+        table.source.lowerBound, table.source.upperBound]
+    }
+    return value
+  }
+  let tables: [[String: Any]] = layout.text.tables.map { table in
+    ["source": [table.source.lowerBound, table.source.upperBound], "rect": rect(table.rect), "columns": table.columns,
+      "rows": table.rows.map { row -> [String: Any] in
+        ["source": [row.source.lowerBound, row.source.upperBound], "content_end": row.contentEnd, "rect": rect(row.rect),
+          "header": row.header, "raw": row.raw, "cells": row.cells.map { cell -> [String: Any] in
+            var value: [String: Any] = ["rect": rect(cell.rect), "content": rect(cell.content), "column": cell.column]
+            if let source = cell.source { value["source"] = [source.lowerBound, source.upperBound] }
+            if let display = cell.display { value["display"] = [display.location, display.length] }
+            return value
+          }]
+      }]
+  }
+  let attachments: [[String: Any]] = layout.text.attachments.map { placed in
+    ["source": [placed.attachment.source.lowerBound, placed.attachment.source.upperBound],
+      "display": [placed.attachment.display.lowerBound, placed.attachment.display.upperBound],
+      "preview": placed.attachment.preview, "rect": rect(placed.rect)]
+  }
+  return try JSONSerialization.data(withJSONObject: ["text": layout.text.projection.text,
+    "source": [layout.text.projection.source.lowerBound, layout.text.projection.source.upperBound],
+    "size": [Double(layout.text.size.width), Double(layout.text.size.height)],
+    "fragments": fragments, "tables": tables, "attachments": attachments], options: [.sortedKeys])
+}
 
 func profile() throws {
   let args = CommandLine.arguments
@@ -107,15 +157,24 @@ func profile() throws {
       }
     }
     let layout = baseline!
-    records.append([
+    let rss = peakRSS()
+    var record: [String: Any] = [
       "case": name, "pane_bytes": bytes.count, "projection_bytes": layout.text.projection.text.utf8.count,
       "fragments": layout.text.fragments.count, "attachments": layout.text.attachments.count, "tables": layout.text.tables.count,
       "decode_ms": decode, "cold_layout_ms": cold, "retained_layout_ms": retained, "four_panes_ms": multiple,
       "resized_layout_ms": resized, "returned_layout_ms": returned,
       "shared_four_panes_ms": sharedMultiple,
       "raw_context_bytes": contextBytes, "fresh_text_context_ms": freshContextMS, "reselected_text_context_ms": selectedContextMS,
-      "process_peak_rss_bytes": peakRSS(),
-    ])
+      "process_peak_rss_bytes": rss,
+    ]
+    if ProcessInfo.processInfo.environment["FC_COMPOSE_PROFILE_GEOMETRY"] == "1" {
+      let data = try geometry(layout)
+      let artifact = output.deletingPathExtension().lastPathComponent + "-" + name + ".geometry.json"
+      try data.write(to: output.deletingLastPathComponent().appendingPathComponent(artifact), options: .atomic)
+      record["geometry_artifact"] = artifact
+      record["geometry_sha256"] = SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+    }
+    records.append(record)
   }
   #if DEBUG
   let configuration = "debug"

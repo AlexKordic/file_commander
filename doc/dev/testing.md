@@ -476,6 +476,24 @@ the JSON and image artifacts, allowing the exact input to be replayed by
 `fc-compose-profile`. These correctness checks do not qualify the resource
 cost of complete shaping when Core Text refuses its default bounded policy.
 
+Set `FC_COMPOSE_PROFILE_GEOMETRY=1` when running `fc-compose-profile` to export
+each final layout beside the report as `REPORT-CASE.geometry.json`. Its hash
+is recorded in the case result. The artifact includes projection text, source bounds,
+fragment and cell ranges, glyph IDs, positions and fonts, table geometry and
+attachments. Export happens after timing and RSS capture. Compare artifacts
+from the same binary pane and font environment before and after a layout
+optimization; faster construction must preserve that geometry. This option
+does not measure drawing or image decoding.
+
+The private backend's many-table regression exports `many-tables.pb` for the
+same profiler. It opens 128 separate tables with Unicode, emphasis, code,
+an image and a hanging marker; checks first/middle/last table source hits and
+caret geometry through a font/width change; and verifies insertion, undo and
+exact CRLF saves. This exercises per-table work separately from the single
+large-table profile.
+The companion `many-tables-local.pb` removes only the complete font inputs,
+exercising cell measurement from delivered rows with the same source and styles.
+
 Use `--profile debug` for diagnosing algorithms; compare the same fixtures and
 configuration on the same machine. `--profile release` uses FC's `fc-release`
 Cargo profile at optimization level 3 and Swift's Release configuration,
