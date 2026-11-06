@@ -53,7 +53,7 @@ final class NativeEditor: NSObject, CellGridDelegate {
   private var observers: [NSObjectProtocol] = []
   // Development gate until measured navigation, images and recovery pass the
   // plan's end-to-end checks. The shipped path remains the existing grid.
-  private let richCompose = ProcessInfo.processInfo.environment["FC_NATIVE_RICH_COMPOSE"] == "1"
+  private let richCompose, measuredTables: Bool
   private enum PendingInput {
     case message(SceneInput)
     case pointer(ComposePointer)
@@ -111,8 +111,10 @@ final class NativeEditor: NSObject, CellGridDelegate {
 
   override convenience init() { self.init(pasteboard: NSPasteboard.general) }
 
-  init(pasteboard: any EditorPasteboard) {
+  init(pasteboard: any EditorPasteboard, environment: [String: String] = ProcessInfo.processInfo.environment) {
     self.pasteboard = pasteboard
+    richCompose = environment["FC_NATIVE_RICH_COMPOSE"] == "1"
+    measuredTables = richCompose && environment["FC_NATIVE_MEASURED_TABLES"] == "1"
     super.init()
     composeImages.onChange = { [weak self] in
       self?.grid?.refreshComposeImages(geometryChanged: true)
@@ -166,7 +168,7 @@ final class NativeEditor: NSObject, CellGridDelegate {
     applyTheme()
     Task.detached {
       do {
-        try socket.open(telemetry: EditorTelemetry.shared.isOn, richCompose: self.richCompose)
+        try socket.open(telemetry: EditorTelemetry.shared.isOn, richCompose: self.richCompose, measuredTables: self.measuredTables)
         await MainActor.run { [weak self] in
           Trace.write("editor: connected")
           guard let self, self.socket === socket else { return }

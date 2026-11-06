@@ -355,6 +355,34 @@ The native development path can request rich Compose with
 `FC_NATIVE_RICH_COMPOSE=1`. It requires a matching development backend and
 consumer; the packaged Fresh pin has not been advanced for this experiment.
 Grid Compose remains the default. Terminal clients keep their cell layout.
+Measured native table cells have a separate development switch:
+`FC_NATIVE_MEASURED_TABLES=1`. It takes effect only alongside
+`FC_NATIVE_RICH_COMPOSE=1`; a rich client without it keeps editable table
+source. The two switches are captured when the native editor is created.
+Neither switch changes terminal Markdown formatting or forces native columns.
+
+The production native controller has an opt-in backend contract. From the FC
+checkout, with the matching Fresh development binary built with `web`, run:
+
+```sh
+FC_COMPOSE_TEST_FRESH="$PWD/../editor-fresh/target/debug/fresh" \
+  swift test --package-path macos --filter ComposeBackendTests
+```
+
+It starts foreground Fresh processes with private HOME/config/data/runtime
+folders and source fixtures, uses an in-memory native clipboard and disables
+Fresh's system clipboard. It covers measured-cell editing, local image reads
+and decode, nested code, resize, undo/redo, exact CRLF saves, editor switching,
+missing-cell source reveal through a font change and page selection/replacement
+across a large source window. Without the variable these backend checks skip;
+ordinary native unit/scene-peer checks still run.
+
+One strict expected-failure regression records the consecutive-composition
+snapshot bug: after Fresh accepts a phrase, a second marked draft keeps the
+older displayed source and UTF-16 location. The test still requires both
+commits to save in order, and does not waive any source-preservation check.
+That display/coordinate failure must be fixed before release; these tests
+are not full system input-method, SSH or interactive qualification.
 
 The experimental client hello opts into source-preserving Compose projections.
 Fresh owns source buffers, selections, undo, saving, and filesystem authority;
@@ -518,8 +546,9 @@ Terminal Markdown column counts, padded or truncated table replacements and
 character-sized frames are not a native layout contract. Parsed tables
 currently bypass those terminal conceals, retaining editable source, semantic
 fonts and image overrides. Native list prefixes also bypass terminal indent
-expansion. The native client keeps this source fallback until the measured-table
-workflow is qualified. The native default
+expansion. The native client keeps this source fallback unless its separate
+measured-table development switch is enabled; product opt-in awaits workflow
+qualification. The native default
 uses all available pane width; a reading limit is optional and measured in points.
 
 For native code blocks, Fresh records the source ranges owned by the Markdown
@@ -570,7 +599,8 @@ style ranges and column counts and reuses validated inputs and measured widths
 through source-window changes. These complete inputs still need large-table,
 multiple-pane payload and latency qualification before enabling the capability.
 
-The native editor has not opted into table cells yet. `ComposeTableModel`
+The native editor opts out of table cells by default. Its separate development
+switch enables qualification against a matching backend. `ComposeTableModel`
 validates the new data and resolves its source/display ranges, including
 Unicode and malformed-input checks. The shared Core Text renderer now measures
 column constraints from fonts/content and available pixel width, wraps complete

@@ -20,12 +20,14 @@ private final class ScenePeer: @unchecked Sendable {
   private var listener: Int32 = -1
   private var client: Int32 = -1
   private var received: [WireComposeInput] = []
+  private var receivedHellos: [WireClientHello] = []
   private var receivedKeys: [WireKey] = []
   private var receivedViewports: [WireComposeViewportRequest] = []
   private var receivedAssets: [WireComposeAssetRequest] = []
   private var sequence: UInt64 = 0
   private var applied: UInt64 = 0
 
+  var hellos: [WireClientHello] { lock.lock(); defer { lock.unlock() }; return receivedHellos }
   var inputs: [WireComposeInput] { lock.lock(); defer { lock.unlock() }; return received }
   var keys: [WireKey] { lock.lock(); defer { lock.unlock() }; return receivedKeys }
   var viewports: [WireComposeViewportRequest] { lock.lock(); defer { lock.unlock() }; return receivedViewports }
@@ -62,6 +64,9 @@ private final class ScenePeer: @unchecked Sendable {
       while let kind = Self.varint(fd), let size = Self.varint(fd), size <= UInt64(SceneWire.maxPayload),
             let payload = Self.read(fd, count: Int(size)) {
         if kind == SceneWire.Kind.clientHello.rawValue {
+          if let hello = try? WireClientHello(serializedBytes: payload) {
+            lock.lock(); receivedHellos.append(hello); lock.unlock()
+          }
           send(.serverHello, WireServerHello.with { $0.version = SceneWire.version; $0.scene = self.frame(pane: pane) })
         } else if kind == SceneWire.Kind.composeInput.rawValue, let input = try? WireComposeInput(serializedBytes: payload) {
           lock.lock(); received.append(input); lock.unlock()
@@ -161,6 +166,27 @@ private final class ScenePeer: @unchecked Sendable {
 }
 
 final class ComposeInputTests: XCTestCase {
+  @MainActor
+  func testMeasuredTableCapabilityRequiresBothDevelopmentSwitches() async throws {
+    _ = NSApplication.shared; NSApp.setActivationPolicy(.prohibited)
+    for (environment, rich, tables) in [
+      ([:], false, false),
+      (["FC_NATIVE_MEASURED_TABLES": "1"], false, false),
+      (["FC_NATIVE_RICH_COMPOSE": "1"], true, false),
+      (["FC_NATIVE_RICH_COMPOSE": "1", "FC_NATIVE_MEASURED_TABLES": "1"], true, true),
+    ] {
+      let peer = try ScenePeer(pane: pane("Capability check\n"))
+      defer { peer.close() }
+      let editor = NativeEditor(pasteboard: MemoryPasteboard(), environment: environment)
+      defer { editor.detachAll() }
+      editor.attach(socketPath: peer.path, app: nil)
+      try await eventually { editor.connected && !peer.hellos.isEmpty }
+      XCTAssertEqual(peer.hellos.count, 1)
+      XCTAssertEqual(peer.hellos[0].richCompose, rich)
+      XCTAssertEqual(peer.hellos[0].measuredTables, tables)
+    }
+  }
+
   @MainActor
   func testMarkedTextCapturesAllOriginalCaretsThroughReflowAndCommitsOneBatch() async throws {
     let source = "café and Tail\n"
