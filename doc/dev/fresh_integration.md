@@ -876,6 +876,10 @@ at every known caret. An offscreen primary is unavailable rather than replaced
 by a visible secondary. Raw-source text-service indices are a separate space.
 Inline image characters carry an accessibility attachment pointing to a stable
 image element with its alt text, loading/error description and measured bounds.
+Each immutable native presentation indexes image metadata and placements by
+source, so refreshing or querying all image elements does not repeatedly scan
+the complete image list. Every attachment retains its accessibility element;
+the indices do not replace source or connection ownership checks.
 Source-edit previews remain ordinary source text and expose a separate image
 element without adding a character. Pressing an image selects its exact Markdown
 source through the normal captured pointer queue; it does not copy or edit by

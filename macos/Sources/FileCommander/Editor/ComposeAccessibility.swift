@@ -142,8 +142,8 @@ final class ComposeAccessibilityImage: NSAccessibilityElement {
 
   private var current: (pane: ComposePresentation, image: WireComposeImage, rect: CGRect)? {
     guard let grid, grid.isCurrentAccessibilityImage(self), let pane = grid.focusedCompose,
-          let placed = pane.layout.text.attachments.first(where: { ID(pane, source: $0.attachment.source) == id }),
-          let image = pane.pane.compose.images.first(where: { $0.start == id.start && $0.end == id.end }) else { return nil }
+          let placed = pane.attachment(start: id.start, end: id.end), ID(pane, source: placed.attachment.source) == id,
+          let image = pane.image(start: id.start, end: id.end) else { return nil }
     return (pane, image, placed.rect.offsetBy(dx: pane.origin.x, dy: pane.origin.y))
   }
 

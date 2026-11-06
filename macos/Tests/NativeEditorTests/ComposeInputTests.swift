@@ -421,6 +421,54 @@ final class ComposeInputTests: XCTestCase {
   }
 
   @MainActor
+  func testRichImageDescriptionsAndActionsFollowSourceAcrossMetadataReordering() async throws {
+    let names = ["one", "two", "three"]
+    let source = "Before ![one](one.png) gap ![two](two.png) tail ![three](three.png).\n"
+    let images = names.map { name in
+      let range = (source as NSString).range(of: "![\(name)](\(name).png)")
+      return WireComposeImage.with {
+        $0.start = UInt64(range.location); $0.end = UInt64(NSMaxRange(range))
+        $0.target = "\(name).png"; $0.alt = name; $0.rendered = true
+      }
+    }
+    var scene = pane(source)
+    scene.compose.assetAuthority = 5; scene.compose.assetDocument = 7
+    scene.compose.images = [images[2], images[0], images[1]]
+    let peer = try ScenePeer(pane: scene); defer { peer.close() }
+    let editor = richEditor(); defer { editor.detachAll() }
+    editor.attach(socketPath: peer.path, app: nil)
+    try await eventually { editor.grid?.focusedCompose?.layout.text.attachments.count == 3 }
+    let window = NSWindow(contentRect: CGRect(x: 90, y: 110, width: 1040, height: 700),
+      styleMask: .borderless, backing: .buffered, defer: false)
+    window.isReleasedWhenClosed = false; window.contentView = try XCTUnwrap(editor.view)
+    defer { window.contentView = nil; window.close() }
+    let grid = try XCTUnwrap(editor.grid), presentation = try XCTUnwrap(grid.focusedCompose)
+    let children = try XCTUnwrap(grid.accessibilityChildren() as? [NSAccessibilityElement])
+    XCTAssertEqual(children.count, 3)
+    XCTAssertEqual(children.compactMap { $0.accessibilityLabel() }, names.map { "\($0): loading" })
+    XCTAssertEqual(grid.accessibilityVisibleChildren()?.count, 3)
+    for (index, placed) in presentation.layout.text.attachments.enumerated() {
+      let frame = children[index].accessibilityFrame()
+      XCTAssertGreaterThan(frame.width, 1); XCTAssertGreaterThan(frame.height, 1)
+      XCTAssertTrue((grid.accessibilityHitTest(CGPoint(x: frame.midX, y: frame.midY)) as? NSAccessibilityElement) === children[index])
+      XCTAssertEqual(grid.composeImageDescription(at: CGPoint(x: placed.rect.midX + presentation.origin.x,
+        y: placed.rect.midY + presentation.origin.y)), "\(names[index]): loading")
+    }
+    scene.compose.images = [images[1], images[2], images[0]]
+    scene.compose.images[0].alt = "two updated"
+    let before = peer.lastApplied; peer.show(scene)
+    try await eventually { peer.lastApplied > before }
+    let updated = try XCTUnwrap(grid.accessibilityChildren() as? [NSAccessibilityElement])
+    XCTAssertTrue(zip(children, updated).allSatisfy { $0 === $1 })
+    XCTAssertEqual(updated.compactMap { $0.accessibilityLabel() }, ["one: loading", "two updated: loading", "three: loading"])
+    XCTAssertTrue(updated[2].accessibilityPerformPress())
+    try await eventually { peer.inputs.count == 1 }
+    XCTAssertEqual(peer.inputs[0].attachmentStart, images[2].start)
+    XCTAssertEqual(peer.inputs[0].position, images[2].end)
+    XCTAssertEqual(peer.inputs[0].scope.buffer, 3)
+  }
+
+  @MainActor
   func testMeasuredTableCapabilityRequiresBothDevelopmentSwitches() async throws {
     _ = NSApplication.shared; NSApp.setActivationPolicy(.prohibited)
     for (environment, rich, tables) in [

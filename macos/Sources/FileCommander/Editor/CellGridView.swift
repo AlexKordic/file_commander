@@ -245,7 +245,7 @@ final class CellGridView: NSView, @preconcurrency NSTextInputClient {
       for placed in pane.layout.text.attachments {
         let rect = placed.rect.offsetBy(dx: pane.origin.x, dy: pane.origin.y).intersection(pane.bounds)
         guard !rect.isEmpty, !rect.isNull,
-              let image = pane.pane.compose.images.first(where: { $0.start == UInt64(placed.attachment.source.lowerBound) }) else { continue }
+              let image = pane.image(start: UInt64(placed.attachment.source.lowerBound)) else { continue }
         tips.append(ImageTip(rect: rect, text: pane.layout.imageDescription(image)))
       }
     }
@@ -362,7 +362,7 @@ final class CellGridView: NSView, @preconcurrency NSTextInputClient {
       let near = pane.bounds.insetBy(dx: 0, dy: -pane.bounds.height / 2)
       return pane.layout.text.attachments.compactMap { placed -> (CGFloat, ComposeImageController.Demand)? in
         let rect = placed.rect.offsetBy(dx: pane.origin.x, dy: pane.origin.y)
-        guard rect.intersects(near), let image = pane.pane.compose.images.first(where: { $0.start == UInt64(placed.attachment.source.lowerBound) }) else { return nil }
+        guard rect.intersects(near), let image = pane.image(start: UInt64(placed.attachment.source.lowerBound)) else { return nil }
         let maximum = image.sourcePreview ? max(rect.width, rect.height)
           : image.block ? max(pane.layout.text.size.width, 480) : CTFontGetSize(pane.body) * 8
         return (abs(rect.midY - pane.bounds.midY), .init(scope: pane.scope, image: image,
@@ -698,7 +698,7 @@ final class CellGridView: NSView, @preconcurrency NSTextInputClient {
       for placed in pane.layout.text.attachments {
         let id = ComposeAccessibilityImage.ID(pane, source: placed.attachment.source)
         next[id] = accessibleImages[id] ?? ComposeAccessibilityImage(id: id, grid: self)
-        if let image = pane.pane.compose.images.first(where: { $0.start == id.start && $0.end == id.end }) {
+        if let image = pane.image(start: id.start, end: id.end) {
           labels[id] = pane.layout.imageDescription(image)
         }
       }

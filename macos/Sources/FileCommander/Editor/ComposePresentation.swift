@@ -22,6 +22,10 @@ final class ComposePresentation {
   let pendingSelection: Bool
   let virtualSelections: ComposeVirtualSelections?
   private let caretStates: [UInt64: WireComposeCaret]
+  private struct ImageSource: Hashable { let start, end: UInt64 }
+  private let imageStarts: [UInt64: Int]
+  private let imageSources: [ImageSource: Int]
+  private let attachmentSources: [ImageSource: Int]
   private(set) var navigation: WireComposeLayout?
   private let monospace: CTFont
   private let styleRevision: UInt64
@@ -50,6 +54,21 @@ final class ComposePresentation {
       sharingMeasurementsWith: peers.map(\.layout), preedit: preedit, composition: composition, virtualInsertion: virtualInsertion) else { return nil }
     self.pane = pane; self.pendingSelection = pendingSelection; self.virtualSelections = virtualSelections
     self.layout = layout
+    // Each snapshot owns its indices. Keep the first match, as the prior
+    // linear searches did, without rescanning all images for every AX child.
+    var starts: [UInt64: Int] = [:], sources: [ImageSource: Int] = [:], attachments: [ImageSource: Int] = [:]
+    starts.reserveCapacity(pane.compose.images.count); sources.reserveCapacity(pane.compose.images.count)
+    attachments.reserveCapacity(layout.text.attachments.count)
+    for (index, image) in pane.compose.images.enumerated() {
+      let source = ImageSource(start: image.start, end: image.end)
+      if starts[image.start] == nil { starts[image.start] = index }
+      if sources[source] == nil { sources[source] = index }
+    }
+    for (index, placed) in layout.text.attachments.enumerated() {
+      let source = ImageSource(start: UInt64(placed.attachment.source.lowerBound), end: UInt64(placed.attachment.source.upperBound))
+      if attachments[source] == nil { attachments[source] = index }
+    }
+    imageStarts = starts; imageSources = sources; attachmentSources = attachments
     self.bounds = bounds
     self.body = body as CTFont
     self.monospace = monospace as CTFont
@@ -102,6 +121,17 @@ final class ComposePresentation {
       y = bounds.minY + 12 - scrolling.displayedTop(self.viewport, fallback: fallback)
     }
     origin = CGPoint(x: bounds.midX - width / 2 - scrolling.displayedLeft(self.viewport), y: y)
+  }
+
+  func image(start: UInt64, end: UInt64? = nil) -> WireComposeImage? {
+    let index: Int?
+    if let end { index = imageSources[ImageSource(start: start, end: end)] }
+    else { index = imageStarts[start] }
+    return index.map { pane.compose.images[$0] }
+  }
+
+  func attachment(start: UInt64, end: UInt64) -> ComposeTextLayout.PlacedAttachment? {
+    attachmentSources[ImageSource(start: start, end: end)].map { layout.text.attachments[$0] }
   }
 
   var scope: WireComposeScope {

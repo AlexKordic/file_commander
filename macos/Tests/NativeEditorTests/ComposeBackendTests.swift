@@ -360,6 +360,9 @@ final class ComposeBackendTests: XCTestCase {
     let report: [String: Any] = ["source_bytes": original.utf8.count, "attachments": 4000, "page_positions": positions,
       "initial_width": Double(width), "resized_width": Double(try XCTUnwrap(grid.focusedCompose?.layout.width))]
     try JSONSerialization.data(withJSONObject: report, options: [.sortedKeys]).write(to: backend.root.appendingPathComponent("dense-image-report.json"))
+    let accessible = try XCTUnwrap(grid.accessibilityChildren() as? [NSAccessibilityElement])
+    XCTAssertEqual(accessible.count, 4000, "every attachment remains available to accessibility")
+    XCTAssertEqual(accessible.compactMap { $0.accessibilityLabel() }, Array(repeating: "tiny", count: 4000))
   }
 
   @MainActor
