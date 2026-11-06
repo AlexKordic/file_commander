@@ -951,7 +951,7 @@ final class NativeEditor: NSObject, CellGridDelegate {
           break
         }
         if visible.layout.composition != nil || visible.pendingSelection, let actual = store.panes.first(where: { $0.leaf == identity.leaf && $0.hasBuffer && $0.buffer == identity.buffer }),
-           let measured = grid?.composeInputSnapshot(actual) { visible = measured }
+           let measured = grid?.composeInputSnapshot(actual, measuredBase: queued.snapshot) { visible = measured }
         let pane = pendingComposeProjection.flatMap { grid?.composeMeasurement(identity: identity, projection: $0) } ?? visible
         pendingComposeBefore = (visible.pane.compose.bufferRevision, visible.pane.compose.cursors)
         if pane.pane.compose.keyboard {

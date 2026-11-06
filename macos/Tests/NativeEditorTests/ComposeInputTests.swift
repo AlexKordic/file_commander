@@ -220,6 +220,57 @@ final class ComposeInputTests: XCTestCase {
   }
 
   @MainActor
+  func testInputMeasurementReusesItsCapturedBaseAndRevalidatesCurrentInputs() async throws {
+    let source = "# Heading\n\nUnicode café 👩🏽‍💻 before ![pic](x.png) tail.\r\n"
+    let markup = try XCTUnwrap(source.range(of: "![pic](x.png)"))
+    var scene = pane(source)
+    scene.compose.spans = [.with { $0.start = 0; $0.end = 10; $0.role = 1 }]
+    scene.compose.assetAuthority = 5; scene.compose.assetDocument = 7
+    scene.compose.images = [.with {
+      $0.start = UInt64(source[..<markup.lowerBound].utf8.count); $0.end = UInt64(source[..<markup.upperBound].utf8.count)
+      $0.target = "x.png"; $0.alt = "Picture"; $0.rendered = true
+    }]
+    let peer = try ScenePeer(pane: scene); defer { peer.close() }
+    let editor = richEditor(); defer { editor.detachAll() }
+    editor.attach(socketPath: peer.path, app: nil)
+    try await eventually { editor.grid?.focusedCompose?.layout.text.attachments.count == 1 }
+    let grid = try XCTUnwrap(editor.grid), captured = try XCTUnwrap(grid.focusedCompose)
+    grid.insertText("追加", replacementRange: NSRange(location: NSNotFound, length: 0))
+    let preview = try XCTUnwrap(grid.focusedCompose)
+    XCTAssertTrue(preview.layout.text.projection.text.hasPrefix("追加"))
+    let measured = try XCTUnwrap(grid.composeInputSnapshot(scene, measuredBase: captured))
+    XCTAssertNil(measured.layout.composition)
+    XCTAssertTrue(measured.layout.text === captured.layout.text, "measuring the real input basis must retain its complete already measured geometry")
+    XCTAssertTrue(grid.focusedCompose === preview, "input measurement must not replace the visible pending text")
+    XCTAssertEqual(measured.pane.compose.text, source); XCTAssertEqual(measured.scope, captured.scope)
+    var foreignScene = scene; foreignScene.leaf = 99
+    let foreign = try XCTUnwrap(grid.composeSnapshot(foreignScene))
+    let independent = try XCTUnwrap(grid.composeInputSnapshot(scene, measuredBase: foreign))
+    XCTAssertFalse(independent.layout.text === foreign.layout.text, "a different pane cannot supply a captured input basis")
+    try await eventually { peer.inputs.count == 1 }
+    XCTAssertTrue(peer.inputs[0].textInput); XCTAssertEqual(peer.inputs[0].scope, captured.scope)
+    var preferences = ComposePreferences()
+    preferences.bodySize = 22; preferences.pageWidth = 320
+    grid.setComposePreferences(preferences, zoom: 1)
+    let resized = try XCTUnwrap(grid.composeInputSnapshot(scene, measuredBase: captured))
+    XCTAssertFalse(resized.layout.text === captured.layout.text)
+    XCTAssertEqual(resized.layout.width, 320); XCTAssertEqual(CTFontGetSize(resized.body), 22)
+    XCTAssertNil(resized.layout.composition); XCTAssertEqual(resized.pane.compose.text, source)
+    let changedSource = source + "Updated source\n"
+    var changed = pane(changedSource, revision: 5)
+    changed.compose.spans = scene.compose.spans; changed.compose.images = scene.compose.images
+    changed.compose.assetAuthority = 5; changed.compose.assetDocument = 7
+    let before = peer.lastApplied; peer.show(changed)
+    try await eventually { peer.lastApplied > before }
+    let current = try XCTUnwrap(grid.composeInputSnapshot(changed, measuredBase: captured))
+    XCTAssertFalse(current.layout.text === captured.layout.text)
+    XCTAssertEqual(current.scope.bufferRevision, 5); XCTAssertEqual(current.pane.compose.text, changedSource)
+    XCTAssertEqual(current.layout.text.projection.source.upperBound, changedSource.utf8.count)
+    XCTAssertTrue(current.layout.text.projection.text.hasSuffix("Updated source\n"))
+    XCTAssertNil(current.layout.composition)
+  }
+
+  @MainActor
   func testReceiptBoundTypingDoesNotWaitForBackgroundSemanticGeometry() async throws {
     let peer = try ScenePeer(pane: pane("alpha Tail\n")); defer { peer.close() }
     let editor = richEditor(); defer { editor.detachAll() }

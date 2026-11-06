@@ -267,7 +267,8 @@ final class CellGridView: NSView, @preconcurrency NSTextInputClient {
   func composeSnapshot(_ pane: WirePane) -> ComposePresentation? { presentation(pane, includePending: false) }
 
   private func presentation(_ input: WirePane, reuse: ComposePresentation? = nil,
-                            sharingMeasurementsWith peers: [ComposePresentation]? = nil, includePending: Bool = true) -> ComposePresentation? {
+                            sharingMeasurementsWith peers: [ComposePresentation]? = nil,
+                            measuredBase: ComposePresentation? = nil, includePending: Bool = true) -> ComposePresentation? {
     var pane = input
     let pending = includePending ? delegate?.grid(self, pendingTextFor: input) : nil
     let selection = pending?.selection
@@ -330,6 +331,7 @@ final class CellGridView: NSView, @preconcurrency NSTextInputClient {
       cell: CGSize(width: cellWidth, height: cellHeight), body: bodyFont, monospace: monoFont,
       typography: composePreferences.typography(zoom: composeZoom), pageWidth: composePreferences.pageWidth * composeZoom,
       reuse: reuse, sharingMeasurementsWith: peers ?? Array(composePanes.values),
+      measuredBase: measuredBase,
       caretStates: caretStates, images: images, viewport: viewport, composition: preedit,
       pendingSelection: selection != nil || virtualSelection != nil,
       virtualInsertion: virtualInsertion, virtualSelections: virtualSelection,
@@ -347,8 +349,14 @@ final class CellGridView: NSView, @preconcurrency NSTextInputClient {
     return presentation(pane, reuse: composePanes[pane.leaf], includePending: false)
   }
 
-  func composeInputSnapshot(_ pane: WirePane) -> ComposePresentation? {
-    presentation(pane, reuse: composePanes[pane.leaf], includePending: false)
+  func composeInputSnapshot(_ pane: WirePane, measuredBase: ComposePresentation? = nil) -> ComposePresentation? {
+    // The captured base supplies only an immutable layout candidate. Current
+    // presentation state still owns held-source fallback, scope and viewport.
+    let identity = ComposePresentation.Identity(window: UInt64(store.windowID), leaf: pane.leaf, buffer: pane.buffer)
+    let base = measuredBase.flatMap {
+      $0.identity == identity && $0.pane.compose.viewport.epoch == pane.compose.viewport.epoch ? $0 : nil
+    }
+    return presentation(pane, reuse: composePanes[pane.leaf], measuredBase: base, includePending: false)
   }
 
   func refreshComposeImages(geometryChanged: Bool = false) {

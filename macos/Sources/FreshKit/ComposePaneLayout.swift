@@ -28,6 +28,7 @@ public final class ComposePaneLayout {
                typography: ComposeTypography = .init(),
                images: [UInt64: ComposeImageState] = [:], reuse: ComposePaneLayout? = nil,
                sharingMeasurementsWith peers: [ComposePaneLayout] = [],
+               measuredBase: ComposePaneLayout? = nil,
                preedit: ComposeMarkedText? = nil, composition: ComposeComposition? = nil, virtualInsertion: ComposeVirtualInsertion? = nil) {
     guard typography.isValid, width.isFinite, width > 0,
           let sourceStart = Int(exactly: pane.sourceStart), let sourceEnd = Int(exactly: pane.sourceEnd), sourceStart <= sourceEnd else { return nil }
@@ -61,17 +62,20 @@ public final class ComposePaneLayout {
     }
     self.pane = pane; self.body = body; self.monospace = monospace
     self.width = width; self.typography = typography; self.images = images; self.imageSizes = sizes
-    let sameComposition: Bool
-    switch (composition, reuse?.composition) {
-    case (nil, nil): sameComposition = true
-    case (.some(let a), .some(let b)): sameComposition = a.hasSameLayout(as: b)
-    default: sameComposition = false
-    }
     // Geometry depends on literal content and measured inputs, not scene
-    // revisions or caret/marked-clause selection. A matching prior snapshot
-    // already validated this exact map; skip rebuilding its indices and model.
+    // revisions or caret/marked-clause selection. A queued event can retain
+    // its measured base while the visible pane already shows a draft. Check
+    // that explicit base with the same complete validation. Split peers share
+    // table measurements, but retain their own complete text layouts.
     // Virtual insertion has additional placement maps and uses the full path.
-    if let reuse, sameComposition, virtualInsertion == nil, reuse.virtualInsertion == nil,
+    for reuse in (reuse.map { [$0] } ?? []) + (measuredBase.map { [$0] } ?? []) {
+      let sameComposition: Bool
+      switch (composition, reuse.composition) {
+      case (nil, nil): sameComposition = true
+      case (.some(let a), .some(let b)): sameComposition = a.hasSameLayout(as: b)
+      default: sameComposition = false
+      }
+      guard sameComposition, virtualInsertion == nil, reuse.virtualInsertion == nil,
        pane.sourceStart == reuse.pane.sourceStart, pane.sourceEnd == reuse.pane.sourceEnd,
        pane.documentLen == reuse.pane.documentLen,
        pane.assetAuthority == reuse.pane.assetAuthority, pane.assetDocument == reuse.pane.assetDocument,
@@ -79,7 +83,7 @@ public final class ComposePaneLayout {
        pane.spans == reuse.pane.spans, pane.images == reuse.pane.images, pane.tables == reuse.pane.tables,
        pane.hangingContexts == reuse.pane.hangingContexts, sizes == reuse.imageSizes,
        width == reuse.width, typography == reuse.typography,
-       CFEqual(body, reuse.body), CFEqual(monospace, reuse.monospace) {
+       CFEqual(body, reuse.body), CFEqual(monospace, reuse.monospace) else { continue }
       tableModel = reuse.tableModel; text = reuse.text
       contextDisplayRanges = reuse.contextDisplayRanges; draftDisplayRanges = reuse.draftDisplayRanges
       draftDisplayRange = reuse.draftDisplayRange

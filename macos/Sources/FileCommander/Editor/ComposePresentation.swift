@@ -35,6 +35,7 @@ final class ComposePresentation {
   init?(pane: WirePane, window: UInt64, cell: CGSize, body: NSFont, monospace: NSFont,
         typography: ComposeTypography = .init(), pageWidth: CGFloat = 0, reuse: ComposePresentation? = nil,
         sharingMeasurementsWith peers: [ComposePresentation] = [],
+        measuredBase: ComposePresentation? = nil,
         caretStates: [UInt64: WireComposeCaret] = [:], images: [UInt64: ComposeImageState] = [:], viewport: WireComposeViewport? = nil,
         preedit: ComposeMarkedText? = nil, composition: ComposeComposition? = nil, pendingSelection: Bool = false,
         virtualInsertion: ComposeVirtualInsertion? = nil, virtualSelections: ComposeVirtualSelections? = nil,
@@ -51,7 +52,8 @@ final class ComposePresentation {
     let width = pageWidth > 0 ? min(pageWidth, available) : available
     guard width > 0, let layout = ComposePaneLayout(pane: pane.compose, body: body as CTFont,
       monospace: monospace as CTFont, width: width, typography: typography, images: images, reuse: reuse?.layout,
-      sharingMeasurementsWith: peers.map(\.layout), preedit: preedit, composition: composition, virtualInsertion: virtualInsertion) else { return nil }
+      sharingMeasurementsWith: peers.map(\.layout), measuredBase: measuredBase?.layout,
+      preedit: preedit, composition: composition, virtualInsertion: virtualInsertion) else { return nil }
     self.pane = pane; self.pendingSelection = pendingSelection; self.virtualSelections = virtualSelections
     self.layout = layout
     // Each snapshot owns its indices. Keep the first match, as the prior

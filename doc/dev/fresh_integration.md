@@ -437,6 +437,14 @@ precompiled grammar sets use the same optimization, with their local context
 references rebound to the copied definition. User grammar overrides still load
 after the bundled definitions.
 
+A queued native event can retain its already measured source layout while the
+visible pane shows pending text. Input measurement may reuse that pane's immutable
+geometry only when complete source/projection inputs, fonts, width, typography,
+image sizes and composition agree, within the same pane identity and lifetime.
+Split panes keep separate text layouts. The current scene and presentation still
+govern input ownership, held-source fallback and viewport state; a retained
+layout never makes old source coordinates current.
+
 Validated source/display maps use ordered coordinate queries, preserving both
 sides of hidden and inserted boundaries without scanning the entire map for
 each image, caret or span. Object substitution visits only intersecting map
