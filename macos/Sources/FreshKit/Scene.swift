@@ -166,6 +166,10 @@ public struct FrameTiming: Sendable {
 /// whole scene or a `Frame`, with its grid rows already turned into runs.
 public struct SceneMessage: @unchecked Sendable {
   public let isHello: Bool
+  /// Present only in the server's initial hello.
+  public let protocolVersion: UInt32?
+  /// Advertised by the initial hello; false for frames and older backends.
+  public let composeRegionProbes: Bool
   public let sequence: Int
   /// What changed (everything, for a hello).
   public let frame: WireFrame
@@ -192,10 +196,14 @@ public struct SceneMessage: @unchecked Sendable {
     case .serverHello:
       guard let hello = try? WireServerHello(serializedBytes: Array(payload)) else { return nil }
       isHello = true
+      protocolVersion = hello.version
+      composeRegionProbes = hello.composeRegionProbes
       frame = hello.scene
     case .frame:
       guard let decoded = try? WireFrame(serializedBytes: Array(payload)) else { return nil }
       isHello = false
+      protocolVersion = nil
+      composeRegionProbes = false
       frame = decoded
     default:
       return nil

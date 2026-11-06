@@ -85,7 +85,7 @@ public final class SceneSocket: @unchecked Sendable {
     setsockopt(fd, SOL_SOCKET, SO_SNDBUF, &size, socklen_t(MemoryLayout<Int32>.size))
     self.fd = fd
     send(.hello(telemetry: telemetry, richCompose: richCompose, measuredTables: measuredTables, paragraphWindows: paragraphWindows))
-    let thread = Thread { [weak self] in self?.readLoop() }
+    let thread = Thread { [weak self] in self?.readLoop(requireRegionProbes: richCompose) }
     thread.name = "fc.scene.read"
     thread.qualityOfService = .userInteractive
     thread.start()
@@ -131,10 +131,11 @@ public final class SceneSocket: @unchecked Sendable {
 
   // MARK: Reading
 
-  private func readLoop() {
+  private func readLoop(requireRegionProbes: Bool) {
     var buffer = [UInt8]()
     var chunk = [UInt8](repeating: 0, count: 262_144)
     var reason: String?
+    var greeted = false
     loop: while true {
       // One read can bring many messages; what they used is dropped once, after.
       var start = 0
@@ -149,6 +150,24 @@ public final class SceneSocket: @unchecked Sendable {
           let started = ProcessInfo.processInfo.systemUptime
           guard var message = SceneMessage(kind: kind, payload: buffer[payload]) else {
             reason = "the editor sent a message the app can't read (type \(kind))"
+            break loop
+          }
+          if !greeted {
+            guard message.isHello else {
+              reason = "the editor sent a frame before its hello"
+              break loop
+            }
+            guard message.protocolVersion == SceneWire.version else {
+              reason = "the editor uses an incompatible scene protocol"
+              break loop
+            }
+            guard !requireRegionProbes || message.composeRegionProbes else {
+              reason = "This editor backend is too old for native Compose. Use Restart editor backend in the command palette to upgrade it."
+              break loop
+            }
+            greeted = true
+          } else if message.isHello {
+            reason = "the editor sent more than one hello"
             break loop
           }
           message.receivedAt = started
@@ -178,6 +197,7 @@ public final class SceneSocket: @unchecked Sendable {
     state.lock()
     closed = true
     state.unlock()
+    shutdown(fd, SHUT_RDWR)
     DispatchQueue.main.async { [weak self] in
       MainActor.assumeIsolated { self?.onClose?(reason) }
     }

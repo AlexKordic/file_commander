@@ -3377,6 +3377,9 @@ public nonisolated struct WireServerHello: Sendable {
   /// Clears the value of `scene`. Subsequent reads from it will return its default value.
   public mutating func clearScene() {self._scene = nil}
 
+  /// Supports independent source-region probes without moving the reading anchor.
+  public var composeRegionProbes: Bool = false
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
@@ -9771,7 +9774,7 @@ nonisolated extension WireFrame: SwiftProtobuf.Message, SwiftProtobuf._MessageIm
 
 nonisolated extension WireServerHello: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".ServerHello"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}version\0\u{1}scene\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}version\0\u{1}scene\0\u{3}compose_region_probes\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -9781,6 +9784,7 @@ nonisolated extension WireServerHello: SwiftProtobuf.Message, SwiftProtobuf._Mes
       switch fieldNumber {
       case 1: try { try decoder.decodeSingularUInt32Field(value: &self.version) }()
       case 2: try { try decoder.decodeSingularMessageField(value: &self._scene) }()
+      case 3: try { try decoder.decodeSingularBoolField(value: &self.composeRegionProbes) }()
       default: break
       }
     }
@@ -9797,12 +9801,16 @@ nonisolated extension WireServerHello: SwiftProtobuf.Message, SwiftProtobuf._Mes
     try { if let v = self._scene {
       try visitor.visitSingularMessageField(value: v, fieldNumber: 2)
     } }()
+    if self.composeRegionProbes != false {
+      try visitor.visitSingularBoolField(value: self.composeRegionProbes, fieldNumber: 3)
+    }
     try unknownFields.traverse(visitor: &visitor)
   }
 
   public static func ==(lhs: WireServerHello, rhs: WireServerHello) -> Bool {
     if lhs.version != rhs.version {return false}
     if lhs._scene != rhs._scene {return false}
+    if lhs.composeRegionProbes != rhs.composeRegionProbes {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }

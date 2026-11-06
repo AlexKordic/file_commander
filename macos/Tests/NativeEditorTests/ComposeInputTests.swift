@@ -14,6 +14,7 @@ private final class MemoryPasteboard: EditorPasteboard {
 /// A private scene peer controls acknowledgment timing. The production editor,
 /// socket, scene store, AppKit pane and input queue run unchanged.
 private final class ScenePeer: @unchecked Sendable {
+  enum Greeting { case normal, frame, duplicate }
   let directory = URL(fileURLWithPath: "/tmp").appendingPathComponent("fc-compose-input-\(UUID().uuidString)")
   var path: String { directory.appendingPathComponent("scene.sock").path }
   private let lock = NSLock()
@@ -34,7 +35,8 @@ private final class ScenePeer: @unchecked Sendable {
   var assets: [WireComposeAssetRequest] { lock.lock(); defer { lock.unlock() }; return receivedAssets }
   var lastApplied: UInt64 { lock.lock(); defer { lock.unlock() }; return applied }
 
-  init(pane: WirePane) throws {
+  init(pane: WirePane, version: UInt32 = SceneWire.version, regionProbes: Bool = true,
+       greeting: Greeting = .normal) throws {
     try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
     listener = Darwin.socket(AF_UNIX, SOCK_STREAM, 0)
     var started = false
@@ -67,7 +69,12 @@ private final class ScenePeer: @unchecked Sendable {
           if let hello = try? WireClientHello(serializedBytes: payload) {
             lock.lock(); receivedHellos.append(hello); lock.unlock()
           }
-          send(.serverHello, WireServerHello.with { $0.version = SceneWire.version; $0.scene = self.frame(pane: pane) })
+          if greeting == .frame { send(.frame, self.frame(pane: pane)) }
+          let hello = WireServerHello.with {
+            $0.version = version; $0.composeRegionProbes = regionProbes; $0.scene = self.frame(pane: pane)
+          }
+          send(.serverHello, hello)
+          if greeting == .duplicate { send(.serverHello, hello) }
         } else if kind == SceneWire.Kind.composeInput.rawValue, let input = try? WireComposeInput(serializedBytes: payload) {
           lock.lock(); received.append(input); lock.unlock()
         } else if kind == SceneWire.Kind.applied.rawValue, let ack = try? WireApplied(serializedBytes: payload) {
@@ -166,6 +173,52 @@ private final class ScenePeer: @unchecked Sendable {
 }
 
 final class ComposeInputTests: XCTestCase {
+  @MainActor
+  func testRichConnectionRefusesOldBackendBeforeDeliveringItsSceneWhileGridRemainsCompatible() async throws {
+    for (rich, supported, accepted) in [(true, false, false), (false, false, true), (true, true, true)] {
+      let peer = try ScenePeer(pane: pane("Untouched backend\n"), regionProbes: supported)
+      defer { peer.close() }
+      let socket = SceneSocket(path: peer.path); defer { socket.close() }
+      let ended = expectation(description: "connection completes its capability decision")
+      var messages: [SceneMessage] = [], reason: String?
+      socket.onMessage = { [weak socket] message in messages.append(message); socket?.close() }
+      socket.onClose = { value in reason = value; ended.fulfill() }
+      try socket.open(telemetry: false, richCompose: rich, paragraphWindows: rich)
+      await fulfillment(of: [ended], timeout: 3)
+      XCTAssertEqual(messages.count, accepted ? 1 : 0)
+      XCTAssertFalse(socket.isOpen)
+      XCTAssertEqual(peer.hellos.count, 1)
+      XCTAssertTrue(peer.inputs.isEmpty); XCTAssertTrue(peer.viewports.isEmpty); XCTAssertTrue(peer.assets.isEmpty)
+      if accepted {
+        XCTAssertTrue(try XCTUnwrap(messages.first).isHello); XCTAssertNil(reason)
+      } else {
+        XCTAssertTrue(reason?.contains("Restart editor backend") == true)
+      }
+    }
+  }
+
+  @MainActor
+  func testSceneHandshakeRefusesWrongProtocolEarlyFramesAndDuplicateHellos() async throws {
+    for (version, greeting, delivered, error) in [
+      (UInt32(99), ScenePeer.Greeting.normal, 0, "incompatible scene protocol"),
+      (SceneWire.version, .frame, 0, "frame before its hello"),
+      (SceneWire.version, .duplicate, 1, "more than one hello"),
+    ] {
+      let peer = try ScenePeer(pane: pane("Untouched backend\n"), version: version, greeting: greeting)
+      defer { peer.close() }
+      let socket = SceneSocket(path: peer.path); defer { socket.close() }
+      let ended = expectation(description: error)
+      var messages: [SceneMessage] = [], reason: String?
+      socket.onMessage = { messages.append($0) }
+      socket.onClose = { reason = $0; ended.fulfill() }
+      try socket.open(telemetry: false)
+      await fulfillment(of: [ended], timeout: 3)
+      XCTAssertFalse(socket.isOpen); XCTAssertEqual(messages.count, delivered)
+      XCTAssertTrue(reason?.contains(error) == true)
+      XCTAssertTrue(peer.inputs.isEmpty); XCTAssertTrue(peer.viewports.isEmpty)
+    }
+  }
+
   @MainActor
   func testReceiptBoundTypingDoesNotWaitForBackgroundSemanticGeometry() async throws {
     let peer = try ScenePeer(pane: pane("alpha Tail\n")); defer { peer.close() }

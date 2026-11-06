@@ -269,14 +269,19 @@ final class NativeEditor: NSObject, CellGridDelegate {
   }
 
   private func connectionEnded(_ reason: String?) {
+    let failedToAttach = !receivedHello && pendingShow
     recoverPendingText()
     composeImages.reset()
     composeViewports.reset()
     socket = nil
     receivedHello = false
+    pendingShow = false
     grid?.invalidateAccessibleImages()
     hide()
-    if let reason { Trace.write("editor connection ended: \(reason)") }
+    if let reason {
+      Trace.write("editor connection ended: \(reason)")
+      if failedToAttach { app?.engine.reportError("Can't connect to the editor: \(reason)") }
+    }
   }
 
   // MARK: View

@@ -390,6 +390,13 @@ separately and follow Fresh's CRLF normalization. These tests are not full
 system input-method, SSH or interactive qualification.
 
 The experimental client hello opts into source-preserving Compose projections.
+The server hello advertises `compose_region_probes`. Native rich Compose
+requires that capability before accepting any scene. An older running backend
+is disconnected with an explanation directing the user to Restart editor
+backend; its process, tabs and checkpoint remain under the existing restart
+workflow. Grid clients retain scene protocol version 1 and can still use
+servers without the new capability. Wrong protocol versions, frames preceding
+the initial hello and repeated hellos terminate the connection explicitly.
 Fresh owns source buffers, selections, undo, saving, and filesystem authority;
 the native consumer measures text and images with Core Text. Source coordinates
 are UTF-8 bytes, and native layout feedback is scoped to a window, split,
