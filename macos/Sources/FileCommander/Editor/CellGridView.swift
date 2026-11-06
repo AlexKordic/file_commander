@@ -83,6 +83,9 @@ final class CellGridView: NSView, @preconcurrency NSTextInputClient {
   weak var composeImageController: ComposeImageController?
   weak var composeViewportController: ComposeViewportController?
   private var composeGeometryRevision: UInt64 = 0
+  var richPopupProjection = false
+  var popupCapture: UInt64?
+  var popupHover: UInt64?
   private var composeDrag: UInt64?
   private var composeCaretIdentity: ComposePresentation.Identity?
   private var composeCaretRevision: UInt64 = 0
@@ -179,6 +182,7 @@ final class CellGridView: NSView, @preconcurrency NSTextInputClient {
 
   /// Redraws what a scene message changed.
   func apply(_ change: SceneChange) {
+    if change.isHello { popupCapture = nil; popupHover = nil }
     if change.isHello || change.sizeChanged || change.themeChanged || change.regions.contains("panes") {
       rebuildCompose()
       needsDisplay = true
@@ -400,8 +404,7 @@ final class CellGridView: NSView, @preconcurrency NSTextInputClient {
 
   private func compose(at point: CGPoint) -> ComposePresentation? {
     guard composeInputAllowed else { return nil }
-    let cell = cell(at: point)
-    if store.popups.contains(where: { CellRect($0.rect).contains(column: cell.column, row: cell.row) }) { return nil }
+    if popup(at: point) != nil { return nil }
     return composePanes.values.first { $0.bounds.contains(point) }
   }
 
@@ -998,6 +1001,7 @@ final class CellGridView: NSView, @preconcurrency NSTextInputClient {
   }
 
   private func sendMouse(_ kind: WireMouseKind, _ event: NSEvent, button: WireMouseButton = .left, count: Int = 1, steps: Int = 1) {
+    if sendPopupMouse(kind, point: point(of: event), flags: event.modifierFlags, button: button, count: count, steps: steps) { return }
     let (column, row) = cell(at: point(of: event))
     let flags = event.modifierFlags
     delegate?.grid(self, send: .mouse(WireMouse.with {
@@ -1024,6 +1028,8 @@ final class CellGridView: NSView, @preconcurrency NSTextInputClient {
     window?.makeFirstResponder(self)
     lastDragCell = nil
     let point = point(of: event)
+    popupCapture = nil
+    if sendPopupMouse(.down, point: point, flags: event.modifierFlags, count: event.clickCount) { return }
     let captured = compose(at: point)
     if composition != nil {
       if inputContext?.handleEvent(event) == true { return }
@@ -1039,6 +1045,7 @@ final class CellGridView: NSView, @preconcurrency NSTextInputClient {
   }
 
   override func mouseDragged(with event: NSEvent) {
+    if sendPopupMouse(.drag, point: point(of: event), flags: event.modifierFlags) { return }
     if compositionDragAnchor != nil, composition != nil { _ = selectComposition(at: point(of: event), extend: true); return }
     if let leaf = composeDrag, let pane = composePanes[leaf] {
       delegate?.grid(self, point: point(of: event), in: pane, extend: true, count: 1)
@@ -1051,6 +1058,7 @@ final class CellGridView: NSView, @preconcurrency NSTextInputClient {
   }
 
   override func mouseUp(with event: NSEvent) {
+    if sendPopupMouse(.up, point: point(of: event), flags: event.modifierFlags) { return }
     if compositionDragAnchor != nil { compositionDragAnchor = nil; return }
     if composeDrag != nil { composeDrag = nil; return }
     sendMouse(.up, event)
@@ -1058,13 +1066,23 @@ final class CellGridView: NSView, @preconcurrency NSTextInputClient {
   override func rightMouseDown(with event: NSEvent) {
     finishComposition()
     window?.makeFirstResponder(self)
-    sendMouse(.down, event, button: .right)
+    if !sendPopupMouse(.down, point: point(of: event), flags: event.modifierFlags, button: .right) {
+      sendMouse(.down, event, button: .right)
+    }
   }
-  override func rightMouseUp(with event: NSEvent) { sendMouse(.up, event, button: .right) }
-  override func otherMouseDown(with event: NSEvent) { finishComposition(); sendMouse(.down, event, button: .middle) }
-  override func otherMouseUp(with event: NSEvent) { sendMouse(.up, event, button: .middle) }
+  override func rightMouseUp(with event: NSEvent) {
+    if !sendPopupMouse(.up, point: point(of: event), flags: event.modifierFlags, button: .right) { sendMouse(.up, event, button: .right) }
+  }
+  override func otherMouseDown(with event: NSEvent) {
+    finishComposition()
+    if !sendPopupMouse(.down, point: point(of: event), flags: event.modifierFlags, button: .middle) { sendMouse(.down, event, button: .middle) }
+  }
+  override func otherMouseUp(with event: NSEvent) {
+    if !sendPopupMouse(.up, point: point(of: event), flags: event.modifierFlags, button: .middle) { sendMouse(.up, event, button: .middle) }
+  }
 
   override func mouseMoved(with event: NSEvent) {
+    if sendPopupMouse(.moved, point: point(of: event), flags: event.modifierFlags) { return }
     if compose(at: point(of: event)) != nil { return }
     let cell = cell(at: convert(event.locationInWindow, from: nil))
     guard lastHoverCell.map({ $0 != cell }) ?? true else { return }
@@ -1075,7 +1093,7 @@ final class CellGridView: NSView, @preconcurrency NSTextInputClient {
   /// A trackpad moves three rows per scroll step, as one wheel notch does in
   /// Fresh; a wheel sends a step per notch.
   override func scrollWheel(with event: NSEvent) {
-    if let pane = compose(at: point(of: event)), pane.pane.compose.hasViewport {
+    if popup(at: point(of: event)) == nil, let pane = compose(at: point(of: event)), pane.pane.compose.hasViewport {
       let scale = event.hasPreciseScrollingDeltas ? 1 : CTFontGetSize(pane.body) * 3
       let delta = CGPoint(x: -event.scrollingDeltaX * scale, y: -event.scrollingDeltaY * scale)
       if delta != .zero { delegate?.grid(self, scroll: delta, in: pane) }

@@ -3,10 +3,10 @@ import FreshKit
 
 /// Fresh's chrome drawn natively: tab bars, the status bar, split dividers,
 /// scrollbars, the file explorer, the command palette, popups, context menus
-/// and the trust dialog. Each surface covers exactly the cells Fresh laid it
-/// out on, so the cell grid underneath stays the source of truth: clicks pass
-/// through this view to the grid, which sends them to Fresh at those cells, and
-/// Fresh's own hit-testing answers them. Anything not drawn here shows as cells.
+/// and the trust dialog. Most surfaces use Fresh's cell geometry. Rich Compose
+/// popups share measured source placement with the grid's pointer routing;
+/// Fresh's retained handlers still own their behavior. Clicks pass through
+/// this view to the grid. Anything not drawn here shows as cells.
 @MainActor
 final class ChromeView: NSView {
   let store: SceneStore
@@ -272,6 +272,12 @@ final class ChromeView: NSView {
 
   private func drawPopups(_ context: CGContext) {
     for popup in store.popups {
+      guard let presentation = grid.popupPresentation(popup) else { continue }
+      if popup.hasGrid {
+        drawPopupPicture(presentation, context)
+        covered.append(presentation.placement.clip)
+        continue
+      }
       let cells = CellRect(popup.rect)
       let rect = box(cells)
       drawPanel(rect)
@@ -324,6 +330,34 @@ final class ChromeView: NSView {
         break
       }
       covered.append(rect)
+    }
+  }
+
+  private func drawPopupPicture(_ presentation: ComposePopupPresentation, _ context: CGContext) {
+    let placement = presentation.placement
+    context.saveGState()
+    defer { context.restoreGState() }
+    context.clip(to: placement.clip)
+    context.translateBy(x: placement.translation.x, y: placement.translation.y)
+    context.textMatrix = CGAffineTransform(scaleX: 1, y: -1)
+    let cells = CellRect(presentation.popup.rect)
+    panelBackground.setFill()
+    placement.original.fill()
+    for row in presentation.popup.grid.rows {
+      guard Int(row.index) < cells.height else { continue }
+      let y = cells.y + Int(row.index)
+      var column = cells.x
+      for run in CellRun.runs(row) {
+        let (fg, bg) = grid.colors(run)
+        if let bg { bg.setFill(); grid.rect(column: column, row: y, count: run.cells).fill() }
+        grid.drawText(run, column: column, row: y, color: fg ?? panelText, context: context)
+        if run.underline {
+          (fg ?? panelText).setFill()
+          NSRect(x: CGFloat(column) * grid.cellWidth, y: CGFloat(y + 1) * grid.cellHeight - 2,
+                 width: CGFloat(run.cells) * grid.cellWidth, height: 1).fill()
+        }
+        column += run.cells
+      }
     }
   }
 

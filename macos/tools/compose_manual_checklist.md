@@ -52,6 +52,14 @@ interactive latency or VoiceOver behavior from an offscreen test result.
    Source in the other. Navigate, select, edit and scroll independently. Open
    menus/dialogs during marked input; queued text must not enter another buffer
    or a modal field. Switch to the panels and back while text is marked.
+   Open a completion or hover after several large headings and wrapped prose.
+   Its visible box must follow the measured caret, flip above when needed and
+   remain usable near window edges. Click a completion and immediately type;
+   the word and following text must appear once. Scroll a long popup, select
+   wrapped documentation with emoji, and check the copied logical text. Drag
+   outside its bounds and release; the document caret must not move. Dismiss
+   it and click its former cell position to verify there is no invisible hit
+   region. Repeat with splits showing the same buffer at different carets.
 7. **Accessibility.** Turn on VoiceOver and inspect reading order, current
    selection, image alt/error descriptions, scrolling and caret reveal. Record
    limitations, including heading/link navigation and editable text setters;

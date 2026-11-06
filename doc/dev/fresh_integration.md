@@ -412,17 +412,38 @@ retain their cell placement. Replacing or reshowing a popup starts a new
 lifetime; owner, content, scroll and action-payload changes invalidate its
 version. A byte fixture is independently checked by Fresh's encoder, the
 generated Rust decoder, `protoc`, and FC's `SceneWireTests`.
-The version also fingerprints the retained picture: a component can scroll
-without updating the popup model's legacy offset. A real renderer/wheel
-regression checks that unchanged frames keep their version and that this
-retained scroll invalidates it.
+The version fingerprints retained geometry and actual scroll offsets: a
+component can scroll without updating the popup model's legacy offset.
+Hover and selection colors alone leave the target usable. `ScenePopup.grid`
+carries the retained popup picture, including wrapped rows, styles, selection,
+scrollbars and close affordances. Native scenes omit popup cells from their
+underlying grid; ordinary terminal rendering still paints them.
 
-The annotations are available in the development schema; FC currently draws
-popups at the cell rectangles. Native relocation, matching pointer dispatch,
-omission of the old painted/hit region and capability negotiation remain a
-single integration gate. Moving only the picture leaves an invisible popup
-over another source row or pane. Fresh's scoped pointer-subtree exclusion is
-implemented and tested, but does not by itself change application routing.
+On the development branches, rich clients negotiate `native_popup_projection`
+in `ClientHello` (field 6) and require its `ServerHello` capability (field 4).
+`ComposePopupPlacement` supplies one measured placement and clip for both
+native painting and pointer routing. Source ownership and caret visibility
+must match before a source-relative popup is displayed. Popup contents keep
+their retained cell sizes; the anchor follows proportional text and heading
+line height. Fixed, centered and status popups retain cell placement.
+
+Translated `PopupPointer` input (message 30) names the issued popup lifetime
+and version, with signed local coordinates for captured motion outside its
+bounds. Fresh validates the target and routes it only to that retained
+subtree; it never falls through into a document click. Ordinary native mouse
+input excludes moved popup regions at their old coordinates. Keyboard focus,
+disabled rows, scrolling, links, selection and modal ownership remain with
+Fresh. Popup text selection uses logical byte offsets from actual wrapping,
+so copying soft-wrapped text preserves its source and combined emoji.
+Capture binds the original source owner. A changed owner, closed popup or
+disconnected client retires its retained capture, scrollbar grab and drag
+state without sending a synthetic release or drop into another surface.
+
+Popup gestures use the ordered `ComposeInput` path. An accepted action returns
+its captured source result; following text waits for that result. A cancelled
+action retains dependent text in Uninserted Text recovery without writing the
+clipboard. These development changes require a matching Fresh build; the
+packaged pin and default rich-Compose gate remain unchanged.
 
 The semantic spans distinguish heading levels, inline and fenced code,
 tables, quotes, lists, items, and paragraphs. Overlapping spans retain nested

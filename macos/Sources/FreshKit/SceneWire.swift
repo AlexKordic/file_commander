@@ -28,6 +28,7 @@ public enum SceneWire {
     case composeInput = 27
     case composeAsset = 28
     case composeViewport = 29
+    case popupPointer = 30
   }
 
   /// The protocol version the app speaks; Fresh refuses another.
@@ -101,9 +102,10 @@ public enum SceneWire {
 
 /// A message the app sends.
 public enum SceneInput: Sendable {
-  case hello(telemetry: Bool, richCompose: Bool = false, measuredTables: Bool = false, paragraphWindows: Bool = false)
+  case hello(telemetry: Bool, richCompose: Bool = false, measuredTables: Bool = false, paragraphWindows: Bool = false, nativePopupProjection: Bool = false)
   case key(WireKey)
   case mouse(WireMouse)
+  case popupPointer(WirePopupPointer)
   case resize(cols: Int, rows: Int)
   case paste(String)
   /// A committed input-method phrase. Rich input inserts it at every caret
@@ -126,6 +128,7 @@ public enum SceneInput: Sendable {
     case .hello: return .clientHello
     case .key: return .key
     case .mouse: return .mouse
+    case .popupPointer: return .popupPointer
     case .resize: return .resize
     case .paste, .text: return .paste
     case .action: return .action
@@ -144,16 +147,18 @@ public enum SceneInput: Sendable {
   public func payload() -> [UInt8] {
     let message: any SwiftProtobuf.Message
     switch self {
-    case .hello(let telemetry, let richCompose, let measuredTables, let paragraphWindows):
+    case .hello(let telemetry, let richCompose, let measuredTables, let paragraphWindows, let nativePopupProjection):
       message = WireClientHello.with {
         $0.version = SceneWire.version
         $0.telemetry = telemetry
         $0.richCompose = richCompose
         $0.measuredTables = measuredTables
         $0.paragraphWindows = paragraphWindows
+        $0.nativePopupProjection = nativePopupProjection
       }
     case .key(let key): message = key
     case .mouse(let mouse): message = mouse
+    case .popupPointer(let pointer): message = pointer
     case .resize(let cols, let rows):
       message = WireResize.with {
         $0.cols = UInt32(clamping: cols)
@@ -188,6 +193,7 @@ public enum SceneInput: Sendable {
     case .hello: return ("hello", nil)
     case .key: return ("key", nil)
     case .mouse(let mouse): return ("mouse", SceneInput.mouseKindName(mouse.kind))
+    case .popupPointer(let pointer): return ("popupPointer", SceneInput.mouseKindName(pointer.mouse.kind))
     case .resize: return ("resize", nil)
     case .paste: return ("paste", nil)
     case .text: return ("text", nil)

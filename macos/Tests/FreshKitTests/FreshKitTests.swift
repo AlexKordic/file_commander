@@ -44,6 +44,7 @@ final class SceneWireTests: XCTestCase {
     XCTAssertEqual(hex(SceneInput.hello(telemetry: false, richCompose: true).payload()), "08011801")
     XCTAssertEqual(hex(SceneInput.hello(telemetry: false, richCompose: true, measuredTables: true).payload()), "080118012001")
     XCTAssertEqual(hex(SceneInput.hello(telemetry: false, richCompose: true, paragraphWindows: true).payload()), "080118012801")
+    XCTAssertEqual(hex(SceneInput.hello(telemetry: false, richCompose: true, nativePopupProjection: true).payload()), "080118013001")
     XCTAssertEqual(hex(SceneInput.key(WireKey.with { $0.key = "x"; $0.ctrl = true; $0.shift = true }).payload()), "0a017818013001")
     let wheel = WireMouse.with { $0.kind = .scrollDown; $0.col = 10; $0.row = 5; $0.n = 1 }
     XCTAssertEqual(hex(SceneInput.mouse(wheel).payload()), "0806180a20052801")
@@ -52,6 +53,17 @@ final class SceneWireTests: XCTestCase {
                    "0a096d656e755f6f70656e120f7b226e616d65223a2246696c65227d")
     XCTAssertEqual(hex(SceneInput.applied(seq: 300).payload()), "08ac02")
     XCTAssertEqual(SceneInput.mouse(wheel).telemetryName.kind, "scrolldown")
+  }
+
+  func testPopupPointerKeepsSignedCapturedCoordinatesAndItsIssuedTarget() throws {
+    let pointer = WirePopupPointer.with {
+      $0.instance = 41; $0.version = 42; $0.column = -3; $0.row = -4
+      $0.mouse = .with { $0.kind = .drag; $0.n = 1 }
+    }
+    let input = SceneInput.popupPointer(pointer)
+    XCTAssertEqual(input.kind, .popupPointer)
+    XCTAssertEqual(hex(input.payload()), "0829102a1a040803280120052807")
+    XCTAssertEqual(try WirePopupPointer(serializedBytes: input.payload()), pointer)
   }
 
   /// Fresh's hand encoder and protoc independently produce these bytes. The

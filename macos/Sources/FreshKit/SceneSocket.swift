@@ -84,7 +84,7 @@ public final class SceneSocket: @unchecked Sendable {
     setsockopt(fd, SOL_SOCKET, SO_RCVBUF, &size, socklen_t(MemoryLayout<Int32>.size))
     setsockopt(fd, SOL_SOCKET, SO_SNDBUF, &size, socklen_t(MemoryLayout<Int32>.size))
     self.fd = fd
-    send(.hello(telemetry: telemetry, richCompose: richCompose, measuredTables: measuredTables, paragraphWindows: paragraphWindows))
+    send(.hello(telemetry: telemetry, richCompose: richCompose, measuredTables: measuredTables, paragraphWindows: paragraphWindows, nativePopupProjection: richCompose))
     let thread = Thread { [weak self] in self?.readLoop(requireRegionProbes: richCompose) }
     thread.name = "fc.scene.read"
     thread.qualityOfService = .userInteractive
@@ -163,6 +163,10 @@ public final class SceneSocket: @unchecked Sendable {
             }
             guard !requireRegionProbes || message.composeRegionProbes else {
               reason = "This editor backend is too old for native Compose. Use Restart editor backend in the command palette to upgrade it."
+              break loop
+            }
+            guard !requireRegionProbes || message.nativePopupProjection else {
+              reason = "This editor backend is too old for native Compose popups. Use Restart editor backend in the command palette to upgrade it."
               break loop
             }
             greeted = true

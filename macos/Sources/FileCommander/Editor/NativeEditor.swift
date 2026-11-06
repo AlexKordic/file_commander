@@ -291,6 +291,7 @@ final class NativeEditor: NSObject, CellGridDelegate {
     if let view { return view }
     let view = EditorHostView(store: store) { [weak self] input in self?.sendFromPanel(input) }
     view.grid.delegate = self
+    view.grid.richPopupProjection = richCompose
     view.grid.composeImageController = composeImages
     view.grid.composeViewportController = composeViewports
     self.view = view
@@ -832,14 +833,18 @@ final class NativeEditor: NSObject, CellGridDelegate {
   func send(_ input: SceneInput) {
     if case .action = input { grid?.finishComposition() }
     switch input {
-    case .key, .mouse, .paste, .text, .action, .widget, .settingsClick, .kbEditClick:
+    case .key, .mouse, .popupPointer, .paste, .text, .action, .widget, .settingsClick, .kbEditClick:
       guard receivedHello else { return }
     default: break
     }
     guard richCompose else { socket?.send(input); return }
     // A modal that appeared while navigation awaited geometry must remain
     // usable. Its ordinary input does not replace the deferred document action.
-    if !composeQueue.isEmpty, let identity = pendingComposePane {
+    let popupGesturePending = composeQueue.contains { queued in
+      if case .message(.popupPointer) = queued.input { return true }
+      return false
+    }
+    if !composeQueue.isEmpty, !popupGesturePending, let identity = pendingComposePane {
       let pane = grid?.composePanes[identity.leaf]
       if pane?.identity != identity || pane?.pane.compose.keyboard != true {
         socket?.send(input)
@@ -847,10 +852,23 @@ final class NativeEditor: NSObject, CellGridDelegate {
       }
     }
     switch input {
-    case .key, .mouse, .paste, .text, .action, .widget, .settingsClick, .kbEditClick:
+    case .key, .mouse, .popupPointer, .paste, .text, .action, .widget, .settingsClick, .kbEditClick:
       let target: ComposePresentation?
       switch input {
-      case .key, .paste, .text, .action: target = grid?.focusedCompose
+      case .text, .paste:
+        if let focused = grid?.focusedCompose { target = focused }
+        else if let last = composeQueue.last, case .message(.popupPointer(let pointer)) = last.input,
+                pointer.mouse.kind == .up, let identity = last.target?.identity,
+                let pane = grid?.composePanes[identity.leaf], pane.identity == identity {
+          // A click accepting a completion can still be awaiting its reply
+          // while the popup has the keyboard. Following text belongs to that
+          // captured action's result, including its cancellation/recovery.
+          target = pane
+        } else { target = nil }
+      case .key, .action: target = grid?.focusedCompose
+      case .popupPointer(let pointer):
+        target = store.popups.first { $0.instance == pointer.instance && $0.version == pointer.version }
+          .flatMap { $0.hasSourceAnchor ? grid?.composePanes[$0.sourceAnchor.leaf] : nil }
       default: target = nil
       }
       if case .text(let text) = input, let target {
@@ -1014,6 +1032,12 @@ final class NativeEditor: NSObject, CellGridDelegate {
 
   /// The screen rectangle around a native surface, for explainer highlights.
   func surfaceRect(_ surface: String) -> CGRect? {
+    if surface == "popup", let grid, let window = grid.window {
+      let rectangles = store.popups.compactMap { grid.popupPresentation($0)?.placement.clip }
+        .map { window.convertToScreen(grid.convert($0, to: nil)) }
+      guard let first = rectangles.first else { return nil }
+      return rectangles.dropFirst().reduce(first) { $0.union($1) }
+    }
     let rects = surfaceCells(surface).compactMap { cells -> CGRect? in
       guard let row = screenRect(row: cells.y, col: cells.x, count: cells.width) else { return nil }
       let height = row.height * CGFloat(cells.height)

@@ -763,6 +763,15 @@ public nonisolated struct WireScenePopup: @unchecked Sendable {
   /// Clears the value of `sourceAnchor`. Subsequent reads from it will return its default value.
   public mutating func clearSourceAnchor() {_uniqueStorage()._sourceAnchor = nil}
 
+  public var grid: WirePopupGrid {
+    get {_storage._grid ?? WirePopupGrid()}
+    set {_uniqueStorage()._grid = newValue}
+  }
+  /// Returns true if `grid` has been explicitly set.
+  public var hasGrid: Bool {_storage._grid != nil}
+  /// Clears the value of `grid`. Subsequent reads from it will return its default value.
+  public mutating func clearGrid() {_uniqueStorage()._grid = nil}
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
@@ -2972,6 +2981,19 @@ public nonisolated struct WireGridRow: Sendable {
   public init() {}
 }
 
+/// A popup's own retained cells, before overlap with other surfaces.
+public nonisolated struct WirePopupGrid: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var rows: [WireGridRow] = []
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
 public nonisolated struct WirePaneUpdate: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
@@ -3430,6 +3452,9 @@ public nonisolated struct WireServerHello: Sendable {
   /// Supports independent source-region probes without moving the reading anchor.
   public var composeRegionProbes: Bool = false
 
+  /// Separate retained popup pictures and owner-scoped projected pointer input.
+  public var nativePopupProjection: Bool = false
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
@@ -3469,9 +3494,42 @@ public nonisolated struct WireClientHello: Sendable {
   /// Accept offscreen prefix samples and complete paragraph windows.
   public var paragraphWindows: Bool = false
 
+  /// Use explicit source anchors for popup placement; requires rich_compose.
+  public var nativePopupProjection: Bool = false
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
+}
+
+/// Type 30: a pointer in a projected popup's local cells. Never document input.
+public nonisolated struct WirePopupPointer: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var instance: UInt64 = 0
+
+  public var version: UInt64 = 0
+
+  public var mouse: WireMouse {
+    get {_mouse ?? WireMouse()}
+    set {_mouse = newValue}
+  }
+  /// Returns true if `mouse` has been explicitly set.
+  public var hasMouse: Bool {self._mouse != nil}
+  /// Clears the value of `mouse`. Subsequent reads from it will return its default value.
+  public mutating func clearMouse() {self._mouse = nil}
+
+  public var column: Int32 = 0
+
+  public var row: Int32 = 0
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+
+  fileprivate var _mouse: WireMouse? = nil
 }
 
 /// A pane identity and the exact source/projection the client interacted with.
@@ -5187,7 +5245,7 @@ nonisolated extension WirePopupSourceAnchor: SwiftProtobuf.Message, SwiftProtobu
 
 nonisolated extension WireScenePopup: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".ScenePopup"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}kind\0\u{1}title\0\u{1}description\0\u{1}rect\0\u{3}content_rect\0\u{3}scroll_offset\0\u{1}content\0\u{1}instance\0\u{1}version\0\u{3}source_anchor\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}kind\0\u{1}title\0\u{1}description\0\u{1}rect\0\u{3}content_rect\0\u{3}scroll_offset\0\u{1}content\0\u{1}instance\0\u{1}version\0\u{3}source_anchor\0\u{1}grid\0")
 
   fileprivate class _StorageClass {
     var _kind: String = String()
@@ -5200,6 +5258,7 @@ nonisolated extension WireScenePopup: SwiftProtobuf.Message, SwiftProtobuf._Mess
     var _instance: UInt64 = 0
     var _version: UInt64 = 0
     var _sourceAnchor: WirePopupSourceAnchor? = nil
+    var _grid: WirePopupGrid? = nil
 
       // This property is used as the initial default value for new instances of the type.
       // The type itself is protecting the reference to its storage via CoW semantics.
@@ -5220,6 +5279,7 @@ nonisolated extension WireScenePopup: SwiftProtobuf.Message, SwiftProtobuf._Mess
       _instance = source._instance
       _version = source._version
       _sourceAnchor = source._sourceAnchor
+      _grid = source._grid
     }
   }
 
@@ -5248,6 +5308,7 @@ nonisolated extension WireScenePopup: SwiftProtobuf.Message, SwiftProtobuf._Mess
         case 8: try { try decoder.decodeSingularUInt64Field(value: &_storage._instance) }()
         case 9: try { try decoder.decodeSingularUInt64Field(value: &_storage._version) }()
         case 10: try { try decoder.decodeSingularMessageField(value: &_storage._sourceAnchor) }()
+        case 11: try { try decoder.decodeSingularMessageField(value: &_storage._grid) }()
         default: break
         }
       }
@@ -5290,6 +5351,9 @@ nonisolated extension WireScenePopup: SwiftProtobuf.Message, SwiftProtobuf._Mess
       try { if let v = _storage._sourceAnchor {
         try visitor.visitSingularMessageField(value: v, fieldNumber: 10)
       } }()
+      try { if let v = _storage._grid {
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 11)
+      } }()
     }
     try unknownFields.traverse(visitor: &visitor)
   }
@@ -5309,6 +5373,7 @@ nonisolated extension WireScenePopup: SwiftProtobuf.Message, SwiftProtobuf._Mess
         if _storage._instance != rhs_storage._instance {return false}
         if _storage._version != rhs_storage._version {return false}
         if _storage._sourceAnchor != rhs_storage._sourceAnchor {return false}
+        if _storage._grid != rhs_storage._grid {return false}
         return true
       }
       if !storagesAreEqual {return false}
@@ -9349,6 +9414,36 @@ nonisolated extension WireGridRow: SwiftProtobuf.Message, SwiftProtobuf._Message
   }
 }
 
+nonisolated extension WirePopupGrid: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".PopupGrid"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}rows\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeRepeatedMessageField(value: &self.rows) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if !self.rows.isEmpty {
+      try visitor.visitRepeatedMessageField(value: self.rows, fieldNumber: 1)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: WirePopupGrid, rhs: WirePopupGrid) -> Bool {
+    if lhs.rows != rhs.rows {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
 nonisolated extension WirePaneUpdate: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".PaneUpdate"
   public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}index\0\u{1}pane\0")
@@ -9963,7 +10058,7 @@ nonisolated extension WireFrame: SwiftProtobuf.Message, SwiftProtobuf._MessageIm
 
 nonisolated extension WireServerHello: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".ServerHello"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}version\0\u{1}scene\0\u{3}compose_region_probes\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}version\0\u{1}scene\0\u{3}compose_region_probes\0\u{3}native_popup_projection\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -9974,6 +10069,7 @@ nonisolated extension WireServerHello: SwiftProtobuf.Message, SwiftProtobuf._Mes
       case 1: try { try decoder.decodeSingularUInt32Field(value: &self.version) }()
       case 2: try { try decoder.decodeSingularMessageField(value: &self._scene) }()
       case 3: try { try decoder.decodeSingularBoolField(value: &self.composeRegionProbes) }()
+      case 4: try { try decoder.decodeSingularBoolField(value: &self.nativePopupProjection) }()
       default: break
       }
     }
@@ -9993,6 +10089,9 @@ nonisolated extension WireServerHello: SwiftProtobuf.Message, SwiftProtobuf._Mes
     if self.composeRegionProbes != false {
       try visitor.visitSingularBoolField(value: self.composeRegionProbes, fieldNumber: 3)
     }
+    if self.nativePopupProjection != false {
+      try visitor.visitSingularBoolField(value: self.nativePopupProjection, fieldNumber: 4)
+    }
     try unknownFields.traverse(visitor: &visitor)
   }
 
@@ -10000,6 +10099,7 @@ nonisolated extension WireServerHello: SwiftProtobuf.Message, SwiftProtobuf._Mes
     if lhs.version != rhs.version {return false}
     if lhs._scene != rhs._scene {return false}
     if lhs.composeRegionProbes != rhs.composeRegionProbes {return false}
+    if lhs.nativePopupProjection != rhs.nativePopupProjection {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
@@ -10037,7 +10137,7 @@ nonisolated extension WireError: SwiftProtobuf.Message, SwiftProtobuf._MessageIm
 
 nonisolated extension WireClientHello: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".ClientHello"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}version\0\u{1}telemetry\0\u{3}rich_compose\0\u{3}measured_tables\0\u{3}paragraph_windows\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}version\0\u{1}telemetry\0\u{3}rich_compose\0\u{3}measured_tables\0\u{3}paragraph_windows\0\u{3}native_popup_projection\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -10050,6 +10150,7 @@ nonisolated extension WireClientHello: SwiftProtobuf.Message, SwiftProtobuf._Mes
       case 3: try { try decoder.decodeSingularBoolField(value: &self.richCompose) }()
       case 4: try { try decoder.decodeSingularBoolField(value: &self.measuredTables) }()
       case 5: try { try decoder.decodeSingularBoolField(value: &self.paragraphWindows) }()
+      case 6: try { try decoder.decodeSingularBoolField(value: &self.nativePopupProjection) }()
       default: break
       }
     }
@@ -10071,6 +10172,9 @@ nonisolated extension WireClientHello: SwiftProtobuf.Message, SwiftProtobuf._Mes
     if self.paragraphWindows != false {
       try visitor.visitSingularBoolField(value: self.paragraphWindows, fieldNumber: 5)
     }
+    if self.nativePopupProjection != false {
+      try visitor.visitSingularBoolField(value: self.nativePopupProjection, fieldNumber: 6)
+    }
     try unknownFields.traverse(visitor: &visitor)
   }
 
@@ -10080,6 +10184,61 @@ nonisolated extension WireClientHello: SwiftProtobuf.Message, SwiftProtobuf._Mes
     if lhs.richCompose != rhs.richCompose {return false}
     if lhs.measuredTables != rhs.measuredTables {return false}
     if lhs.paragraphWindows != rhs.paragraphWindows {return false}
+    if lhs.nativePopupProjection != rhs.nativePopupProjection {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension WirePopupPointer: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".PopupPointer"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}instance\0\u{1}version\0\u{1}mouse\0\u{1}column\0\u{1}row\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularUInt64Field(value: &self.instance) }()
+      case 2: try { try decoder.decodeSingularUInt64Field(value: &self.version) }()
+      case 3: try { try decoder.decodeSingularMessageField(value: &self._mouse) }()
+      case 4: try { try decoder.decodeSingularSInt32Field(value: &self.column) }()
+      case 5: try { try decoder.decodeSingularSInt32Field(value: &self.row) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
+    if self.instance != 0 {
+      try visitor.visitSingularUInt64Field(value: self.instance, fieldNumber: 1)
+    }
+    if self.version != 0 {
+      try visitor.visitSingularUInt64Field(value: self.version, fieldNumber: 2)
+    }
+    try { if let v = self._mouse {
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 3)
+    } }()
+    if self.column != 0 {
+      try visitor.visitSingularSInt32Field(value: self.column, fieldNumber: 4)
+    }
+    if self.row != 0 {
+      try visitor.visitSingularSInt32Field(value: self.row, fieldNumber: 5)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: WirePopupPointer, rhs: WirePopupPointer) -> Bool {
+    if lhs.instance != rhs.instance {return false}
+    if lhs.version != rhs.version {return false}
+    if lhs._mouse != rhs._mouse {return false}
+    if lhs.column != rhs.column {return false}
+    if lhs.row != rhs.row {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }

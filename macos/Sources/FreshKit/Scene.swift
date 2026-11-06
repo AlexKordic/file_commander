@@ -170,6 +170,7 @@ public struct SceneMessage: @unchecked Sendable {
   public let protocolVersion: UInt32?
   /// Advertised by the initial hello; false for frames and older backends.
   public let composeRegionProbes: Bool
+  public let nativePopupProjection: Bool
   public let sequence: Int
   /// What changed (everything, for a hello).
   public let frame: WireFrame
@@ -198,12 +199,14 @@ public struct SceneMessage: @unchecked Sendable {
       isHello = true
       protocolVersion = hello.version
       composeRegionProbes = hello.composeRegionProbes
+      nativePopupProjection = hello.nativePopupProjection
       frame = hello.scene
     case .frame:
       guard let decoded = try? WireFrame(serializedBytes: Array(payload)) else { return nil }
       isHello = false
       protocolVersion = nil
       composeRegionProbes = false
+      nativePopupProjection = false
       frame = decoded
     default:
       return nil
@@ -257,6 +260,7 @@ public final class SceneStore {
   @ObservationIgnored public private(set) var fileExplorer: WireFileExplorerView?
   @ObservationIgnored public private(set) var separators: [WireSeparator] = []
   @ObservationIgnored public private(set) var popups: [WireScenePopup] = []
+  @ObservationIgnored public private(set) var nativePopupProjection = false
   @ObservationIgnored public private(set) var palette: WirePaletteView?
   @ObservationIgnored public private(set) var trustDialog: WireTrustDialogView?
   @ObservationIgnored public private(set) var contextMenu: WireContextMenuView?
@@ -272,7 +276,7 @@ public final class SceneStore {
 
   public func apply(_ message: SceneMessage, acceptedCompose: WireComposeEditReceipt? = nil) {
     let frame = message.frame
-    if message.isHello { composeAcceptances.removeAll() }
+    if message.isHello { composeAcceptances.removeAll(); nativePopupProjection = message.nativePopupProjection }
     let previousWindow = windowID
     var change = SceneChange()
     change.isHello = message.isHello

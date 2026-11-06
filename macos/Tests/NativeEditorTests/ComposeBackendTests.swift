@@ -180,6 +180,76 @@ final class ComposeBackendTests: XCTestCase {
   }
 
   @MainActor
+  func testRealCompletionPopupUsesMeasuredHeadingCaretAndRetainedRowsAndSavesQueuedText() async throws {
+    let backend = try backend(); defer { backend.captureDiagnostics("native-popup"); backend.stop() }
+    let editor = editor(BackendPasteboard()); defer { editor.detachAll() }
+    let original = "# Large heading\r\n\r\n## Second heading\r\n\r\n### Third heading\r\n\r\n"
+      + "#### Fourth heading\r\n\r\n##### Fifth heading\r\n\r\n###### Sixth heading\r\n\r\n"
+      + "| Key | Value |\r\n| --- | --- |\r\n| café | 東京 |\r\n\r\n"
+      + "alphabet alpine\r\n\r\nalp"
+    let file = backend.root.appendingPathComponent("popup.md")
+    try Data(original.utf8).write(to: file)
+    try await attach(backend, file: file, editor: editor)
+    try await click(UInt64(original.utf8.count), editor: editor)
+    let grid = try XCTUnwrap(editor.grid)
+    editor.send(.action(name: "lsp_completion", argsJson: ""))
+    try await eventually(editor, "real source-anchored completion popup") {
+      guard let popup = editor.store.popups.last else { return false }
+      return popup.kind == "completion" && popup.hasSourceAnchor && popup.hasGrid
+        && grid.popupPresentation(popup)?.relocated == true
+    }
+    let popup = try XCTUnwrap(editor.store.popups.last)
+    let shown = try XCTUnwrap(grid.popupPresentation(popup))
+    let pane = try XCTUnwrap(grid.composePanes[popup.sourceAnchor.leaf])
+    let caret = try XCTUnwrap(pane.caret)
+    XCTAssertEqual(popup.sourceAnchor.caret, UInt64(original.utf8.count))
+    XCTAssertTrue(shown.placement.frame.minY == caret.maxY || shown.placement.frame.maxY == caret.minY,
+      "below or flipped above the measured fragment")
+    XCTAssertGreaterThan(abs(shown.placement.frame.minY - shown.placement.original.minY), grid.cellHeight)
+    XCTAssertTrue(popup.grid.rows.contains { $0.text.contains("alphabet") || $0.text.contains("alpine") })
+    if let path = ProcessInfo.processInfo.environment["FC_COMPOSE_ARTIFACT_DIR"] {
+      let output = URL(fileURLWithPath: path)
+      try FileManager.default.createDirectory(at: output, withIntermediateDirectories: true)
+      let host = try XCTUnwrap(editor.view)
+      let window = NSWindow(contentRect: host.bounds, styleMask: .borderless, backing: .buffered, defer: false)
+      window.isReleasedWhenClosed = false; window.contentView = host
+      defer { window.contentView = nil; window.close() }
+      let bitmap = try XCTUnwrap(host.bitmapImageRepForCachingDisplay(in: host.bounds))
+      host.cacheDisplay(in: host.bounds, to: bitmap)
+      try XCTUnwrap(bitmap.representation(using: .png, properties: [:])).write(to: output.appendingPathComponent("real-popup.png"))
+      func rect(_ value: CGRect) -> [Double] { [value.minX, value.minY, value.width, value.height].map(Double.init) }
+      let report: [String: Any] = ["native_caret": rect(caret), "original_popup": rect(shown.placement.original),
+        "native_popup": rect(shown.placement.frame), "retained_rows": popup.grid.rows.map(\.text),
+        "scope": "Real private Fresh backend, Markdown parser, native layout and offscreen Chrome drawing"]
+      try JSONSerialization.data(withJSONObject: report, options: [.prettyPrinted, .sortedKeys])
+        .write(to: output.appendingPathComponent("real-popup.json"))
+    }
+    guard case .list(let content) = popup.content.content else { return XCTFail("Expected completion rows") }
+    let expectedWord = try XCTUnwrap(content.items.first).text
+    XCTAssertTrue(["alphabet", "alpine"].contains(expectedWord))
+    let x = CGFloat(popup.contentRect.x - popup.rect.x) + 2.5
+    let y = CGFloat(popup.contentRect.y - popup.rect.y) + 0.5
+    let point = CGPoint(x: shown.placement.frame.minX + x * grid.cellWidth,
+                        y: shown.placement.frame.minY + y * grid.cellHeight)
+    XCTAssertTrue(grid.sendPopupMouse(.down, point: point, flags: []))
+    XCTAssertTrue(grid.sendPopupMouse(.up, point: point, flags: []))
+    editor.send(.text("!")) // Arrives while Fresh still owns the completion keyboard.
+    let completed = String(original.dropLast(3)) + expectedWord
+    let expected = completed + "!"
+    try await eventually(editor, "completion accepted through scoped popup input") {
+      editor.store.popups.isEmpty && grid.focusedCompose?.pane.compose.documentLen == UInt64(expected.utf8.count)
+    }
+    editor.send(.action(name: "save", argsJson: ""))
+    try await eventually(editor, "exact completion source saved") { (try? Data(contentsOf: file)) == Data(expected.utf8) }
+    editor.send(.action(name: "undo", argsJson: ""))
+    editor.send(.action(name: "save", argsJson: ""))
+    try await eventually(editor, "queued text undo preserves accepted completion") { (try? Data(contentsOf: file)) == Data(completed.utf8) }
+    editor.send(.action(name: "undo", argsJson: ""))
+    editor.send(.action(name: "save", argsJson: ""))
+    try await eventually(editor, "completion undo restores original CRLF source") { (try? Data(contentsOf: file)) == Data(original.utf8) }
+  }
+
+  @MainActor
   func testManySeparateTablesKeepUnicodeImageAndSourceGeometryThroughReflowAndUndoSave() async throws {
     let backend = try backend(); defer {
       backend.captureDiagnostics("many-tables")

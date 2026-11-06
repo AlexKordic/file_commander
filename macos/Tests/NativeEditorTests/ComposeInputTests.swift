@@ -35,7 +35,7 @@ private final class ScenePeer: @unchecked Sendable {
   var assets: [WireComposeAssetRequest] { lock.lock(); defer { lock.unlock() }; return receivedAssets }
   var lastApplied: UInt64 { lock.lock(); defer { lock.unlock() }; return applied }
 
-  init(pane: WirePane, version: UInt32 = SceneWire.version, regionProbes: Bool = true,
+  init(pane: WirePane, version: UInt32 = SceneWire.version, regionProbes: Bool = true, nativePopups: Bool = true,
        greeting: Greeting = .normal) throws {
     try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
     listener = Darwin.socket(AF_UNIX, SOCK_STREAM, 0)
@@ -71,7 +71,7 @@ private final class ScenePeer: @unchecked Sendable {
           }
           if greeting == .frame { send(.frame, self.frame(pane: pane)) }
           let hello = WireServerHello.with {
-            $0.version = version; $0.composeRegionProbes = regionProbes; $0.scene = self.frame(pane: pane)
+            $0.version = version; $0.composeRegionProbes = regionProbes; $0.nativePopupProjection = nativePopups; $0.scene = self.frame(pane: pane)
           }
           send(.serverHello, hello)
           if greeting == .duplicate { send(.serverHello, hello) }
@@ -135,12 +135,19 @@ private final class ScenePeer: @unchecked Sendable {
   }
 
   @discardableResult
-  func reply(_ reply: WireInputReply, pane: WirePane? = nil) -> UInt64 {
-    var frame = frame(pane: pane); frame.inputReply = reply; send(.frame, frame)
+  func reply(_ reply: WireInputReply, pane: WirePane? = nil, clearPopups: Bool = false) -> UInt64 {
+    var frame = frame(pane: pane); frame.inputReply = reply
+    if clearPopups { frame.popups = .init() }
+    send(.frame, frame)
     return frame.seq
   }
 
   func show(_ pane: WirePane) { send(.frame, frame(pane: pane)) }
+
+  func showPopup(_ pane: WirePane, popup: WireScenePopup) {
+    var frame = frame(pane: pane); frame.popups = .with { $0.popups = [popup] }
+    send(.frame, frame)
+  }
 
   func acknowledgeScroll(_ request: WireComposeViewportRequest, pane: WirePane) {
     var frame = frame(pane: pane)
@@ -174,9 +181,75 @@ private final class ScenePeer: @unchecked Sendable {
 
 final class ComposeInputTests: XCTestCase {
   @MainActor
+  func testPopupClickSerializesItsReleaseAndFollowingTextUsesTheAcceptedResultOrRecovers() async throws {
+    for accept in [true, false] {
+      var source = pane("alp")
+      source.compose.cursors[0].position = 3; source.compose.cursors[0].utf16Position = 3
+      source.compose.textContext.selectionStart = 3; source.compose.textContext.selectionEnd = 3
+      let peer = try ScenePeer(pane: source); defer { peer.close() }
+      let pasteboard = MemoryPasteboard()
+      let editor = richEditor(pasteboard: pasteboard); defer { editor.detachAll() }
+      editor.attach(socketPath: peer.path, app: nil)
+      try await eventually { editor.grid?.focusedCompose != nil }
+      let grid = try XCTUnwrap(editor.grid)
+      let popup = WireScenePopup.with {
+        $0.instance = 41; $0.version = 42; $0.kind = "completion"
+        $0.rect = .with { $0.x = 3; $0.y = 6; $0.w = 24; $0.h = 5 }
+        $0.contentRect = .with { $0.x = 4; $0.y = 7; $0.w = 22; $0.h = 3 }
+        $0.sourceAnchor = .with {
+          $0.windowID = 1; $0.leaf = 2; $0.buffer = 3; $0.bufferEpoch = 7; $0.bufferRevision = 4
+          $0.caret = 3; $0.placement = 2
+        }
+        $0.content.list.items = [.with { $0.text = "alphabet"; $0.id = "word" }]
+        $0.grid.rows = [.with { $0.index = 1; $0.text = " alphabet "; $0.runBytes = [10]; $0.runStyles = [0] }]
+      }
+      var blocked = source; blocked.compose.keyboard = false
+      peer.showPopup(blocked, popup: popup)
+      try await eventually { editor.store.popups.count == 1 && grid.focusedCompose == nil }
+      let shown = try XCTUnwrap(grid.popupPresentation(popup))
+      let point = CGPoint(x: shown.placement.frame.minX + grid.cellWidth * 2.5,
+                          y: shown.placement.frame.minY + grid.cellHeight * 1.5)
+      XCTAssertTrue(grid.sendPopupMouse(.down, point: point, flags: []))
+      XCTAssertTrue(grid.sendPopupMouse(.up, point: point, flags: []))
+      editor.send(.text("!"))
+      try await eventually { peer.inputs.count == 1 }
+      XCTAssertEqual(peer.inputs[0].kind, UInt32(SceneWire.Kind.popupPointer.rawValue))
+      XCTAssertEqual(try WirePopupPointer(serializedBytes: peer.inputs[0].payload).mouse.kind, .down)
+      let press = WireComposeEditReceipt.with {
+        $0.window = 1; $0.leaf = 2; $0.buffer = 3; $0.epoch = 7; $0.pane = blocked.compose
+      }
+      peer.reply(.with { $0.id = 1; $0.accepted = true; $0.result = press }, pane: blocked)
+      try await eventually { peer.inputs.count == 2 }
+      XCTAssertEqual(try WirePopupPointer(serializedBytes: peer.inputs[1].payload).mouse.kind, .up)
+      var current = accept ? pane("alphabet", revision: 5) : source
+      let end: UInt64 = accept ? 8 : 3
+      current.compose.cursors[0].position = end; current.compose.cursors[0].utf16Position = end
+      current.compose.textContext.selectionStart = end; current.compose.textContext.selectionEnd = end
+      let result = WireComposeEditReceipt.with {
+        $0.window = 1; $0.leaf = 2; $0.buffer = 3; $0.epoch = 7; $0.pane = current.compose
+      }
+      let sequence = peer.reply(.with {
+        $0.id = 2; $0.accepted = accept
+        if accept { $0.result = result } else { $0.cancelled = true; $0.error = "Popup target changed" }
+      }, pane: current, clearPopups: true)
+      if accept {
+        try await eventually { peer.inputs.count == 3 }
+        XCTAssertEqual(peer.inputs[2].sourceRevision, 5)
+        XCTAssertEqual(peer.inputs[2].replacementStart, 8); XCTAssertEqual(peer.inputs[2].replacementEnd, 8)
+        XCTAssertEqual(try WirePaste(serializedBytes: peer.inputs[2].payload).text, "!")
+        XCTAssertTrue(editor.uninsertedText.isEmpty)
+      } else {
+        try await eventually { peer.lastApplied >= sequence && editor.uninsertedText == ["!"] }
+        XCTAssertEqual(peer.inputs.count, 2, "cancelled completion must not redirect queued text")
+      }
+      XCTAssertNil(pasteboard.editorText, "recovery never writes the clipboard automatically")
+    }
+  }
+
+  @MainActor
   func testRichConnectionRefusesOldBackendBeforeDeliveringItsSceneWhileGridRemainsCompatible() async throws {
-    for (rich, supported, accepted) in [(true, false, false), (false, false, true), (true, true, true)] {
-      let peer = try ScenePeer(pane: pane("Untouched backend\n"), regionProbes: supported)
+    for (rich, supported, popups, accepted) in [(true, false, true, false), (false, false, false, true), (true, true, false, false), (true, true, true, true)] {
+      let peer = try ScenePeer(pane: pane("Untouched backend\n"), regionProbes: supported, nativePopups: popups)
       defer { peer.close() }
       let socket = SceneSocket(path: peer.path); defer { socket.close() }
       let ended = expectation(description: "connection completes its capability decision")
