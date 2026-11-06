@@ -499,6 +499,15 @@ and geometry reuse after prefix-font changes. The real-plugin/socket contract
 checks parser-owned prefix samples for nested, task and quoted lists. These
 checks do not qualify clipping a whole bidi paragraph or soft-wrap paging.
 
+The paragraph-window socket contract starts near EOF before an opening marker
+has been requested by a native client. It requires that marker's certified
+sample, verifies the smaller window and keeps an older client on its original
+window policy. The private native backend workflow checks source indentation,
+cross-window Page Up, document-wide UTF-16 positions, resize, Unicode editing,
+exact CRLF save and undo in a large loose list. Whole parsed paragraphs and
+atomic marker resources must remain complete; these are fixture-specific
+window checks, not a global byte or latency budget.
+
 ## CI
 
 `.github/workflows/tests.yml` is the repository's only workflow. It runs on

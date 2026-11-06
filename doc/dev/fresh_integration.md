@@ -446,11 +446,25 @@ outside a supplied source slice. It charges physical continuation whitespace
 only once and invalidates reused geometry when the sample changes. Sample
 text contributes neither editable characters nor caret stops.
 
-This is a prerequisite for bounded windows. The current producer extracts
-samples from complete marker-bearing projections; the window planner still
-retains whole paragraph/list context. A future clipped producer must assemble
-and retain its prefix sample before clipping. Paragraph shaping context and
-repeatable soft-wrap anchors remain separate requirements.
+The experimental native client also announces
+`ClientHello.paragraph_windows` (field 5), which requires `rich_compose`.
+Complete parser-owned paragraphs then define window boundaries. A loose list
+can omit earlier paragraphs in its item while retaining source-owned leading
+whitespace and blank-line navigation pivots. Its offscreen opening line is
+requested separately through the same grammar/plugin formatter. The backend
+prepares a current projected prefix after that line's completion receipt; it
+does not certify measured input while this required context is pending.
+Rendering, deferred navigation
+and editing receipts use the same negotiated policy. Clients omitting the
+capability keep the previous marker-bearing window policy.
+
+The 64 KiB window size remains a target, not a content limit. A complete parsed
+paragraph or atomic replacement can extend it. Tight lists and blank
+boundaries of single-paragraph items retain their existing context until
+their flow and soft-wrap continuation contract is qualified. Preparing a
+marker can also require a whole initial physical line
+or a multiline image. Long-paragraph shaping, repeatable soft-wrap anchors
+and general hard resource bounds remain separate requirements.
 
 These changes bound the continuation reader's requests, not whole-window
 payloads, retained logical batches or subsequent grammar/formatter work. A long
