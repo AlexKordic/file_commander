@@ -31,6 +31,13 @@ public final class ComposePaneLayout {
                preedit: ComposeMarkedText? = nil, composition: ComposeComposition? = nil, virtualInsertion: ComposeVirtualInsertion? = nil) {
     guard let baseProjection = ComposeProjection(pane), typography.isValid, width.isFinite, width > 0 else { return nil }
     guard pane.images.allSatisfy({ !($0.rendered && $0.sourcePreview) }) else { return nil }
+    let items = Dictionary(grouping: pane.spans.filter { $0.role == 13 }, by: \.start)
+    var hangingContexts: [UInt64: ComposeHangingContext] = [:]
+    for wire in pane.hangingContexts {
+      guard hangingContexts[wire.itemStart] == nil, let owners = items[wire.itemStart], owners.count == 1,
+            let context = ComposeHangingContext(wire, item: owners[0]) else { return nil }
+      hangingContexts[wire.itemStart] = context
+    }
     let composition = composition ?? preedit.flatMap { ComposeComposition(primary: 0, values: [0: $0]) }
     let preedit = composition?.primary
     self.composition = composition; self.preedit = preedit; self.virtualInsertion = virtualInsertion
@@ -114,6 +121,7 @@ public final class ComposePaneLayout {
     if preedit == nil, let reuse, reuse.preedit == nil, pane.projectionRevision == reuse.pane.projectionRevision,
        pane.text == reuse.pane.text, pane.segments == reuse.pane.segments,
        pane.spans == reuse.pane.spans, pane.images == reuse.pane.images, pane.tables == reuse.pane.tables, sizes == reuse.imageSizes,
+       pane.hangingContexts == reuse.pane.hangingContexts,
        width == reuse.width, typography == reuse.typography,
        CFEqual(body, reuse.body), CFEqual(monospace, reuse.monospace) {
       text = reuse.text
@@ -169,6 +177,21 @@ public final class ComposePaneLayout {
       let role: UInt32 = heading ?? (active.contains { $0.role == 12 } ? 12 : mono ? 7 : active.contains { $0.role == 9 } ? 9 : 0)
       return .init(display: range, font: font, role: role, flags: flags)
     }
+    func prefixWidth(_ context: ComposeHangingContext) -> CGFloat {
+      let wire = context.wire, bytes = Array(context.wire.text.utf8)
+      let value = NSMutableAttributedString(string: wire.text,
+        attributes: [NSAttributedString.Key(kCTFontAttributeName as String): body])
+      let styles = wire.spans.map { Span(source: 0..<0, range: Int($0.start)..<Int($0.end), role: $0.role, flags: $0.flags) }
+      let edges = Set([0, bytes.count] + styles.flatMap { [$0.range.lowerBound, $0.range.upperBound] }).sorted()
+      for (a, b) in zip(edges, edges.dropFirst()) where a < b {
+        let font = fontRun(styles.filter { $0.range.contains(a) }, a..<b).font
+        let from = String(decoding: bytes[..<a], as: UTF8.self).utf16.count
+        let count = String(decoding: bytes[a..<b], as: UTF8.self).utf16.count
+        value.addAttribute(NSAttributedString.Key(kCTFontAttributeName as String), value: font,
+          range: NSRange(location: from, length: count))
+      }
+      return ComposeTextLayout.hangingPrefixWidth(CTLineCreateWithAttributedString(value), start: 0, content: context.prefixUTF16)
+    }
     for (start, end) in zip(boundaries, boundaries.dropFirst()) where start < end {
       fonts.append(fontRun(styleIndex.matches(at: start).map { spans[$0] }, start..<end))
     }
@@ -211,9 +234,16 @@ public final class ComposePaneLayout {
     var hanging: [ComposeTextLayout.HangingRun] = []
     for item in pane.spans where item.role == 13 && item.hasContentStart {
       guard item.start <= item.contentStart, item.contentStart < item.end else { return nil }
-      // A clipped source window may not contain this item's marker. The full
-      // block-context/performance qualification handles those windows; never
-      // measure a partial prefix as if it were the complete marker.
+      if item.contentStart <= pane.sourceStart, item.start < pane.sourceStart,
+         let context = hangingContexts[item.start],
+         let end = projection.displayPosition(for: min(Int(item.end), projection.source.upperBound), affinity: .upstream), end > 0 {
+        let containers = pane.spans.filter { ($0.role == 9 || $0.role == 10) && $0.start <= item.contentStart && item.contentStart < $0.end }.count
+        hanging.append(.init(display: 0..<end, contentStart: 0, indent: CGFloat(containers) * typography.indent,
+          measuredPrefix: prefixWidth(context), physicalStart: context.wire.sourceLineStart))
+        continue
+      }
+      // Older producers omit offscreen marker samples. Preserve that behavior
+      // rather than measuring a partial prefix as a complete list marker.
       guard item.start >= pane.sourceStart, item.contentStart >= pane.sourceStart,
             item.contentStart < pane.sourceEnd,
             let source = Int(exactly: item.start), let content = Int(exactly: item.contentStart),

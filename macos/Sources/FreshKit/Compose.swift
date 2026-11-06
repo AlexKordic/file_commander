@@ -244,7 +244,7 @@ public final class ComposeTextLayout {
   }
   static let attachmentKey = NSAttributedString.Key("fc.compose.attachment")
 
-  private static func hangingPrefixWidth(_ line: CTLine, start: Int, content: Int) -> CGFloat {
+  static func hangingPrefixWidth(_ line: CTLine, start: Int, content: Int) -> CGFloat {
     guard start < content else { return 0 }
     let runs = (CTLineGetGlyphRuns(line) as! [CTRun]).filter { run in
       let range = CTRunGetStringRange(run)
@@ -307,9 +307,16 @@ public final class ComposeTextLayout {
     public var display: Range<Int>
     public var contentStart: Int
     public var indent: CGFloat
+    /// An offscreen marker measured in this client's current fonts. Such a
+    /// continuation starts at contentStart; its prefix is never inserted text.
+    public var measuredPrefix: CGFloat?
+    /// The clipped run begins at a source-owned physical line boundary.
+    public var physicalStart: Bool
 
-    public init(display: Range<Int>, contentStart: Int, indent: CGFloat) {
+    public init(display: Range<Int>, contentStart: Int, indent: CGFloat,
+                measuredPrefix: CGFloat? = nil, physicalStart: Bool = false) {
       self.display = display; self.contentStart = contentStart; self.indent = indent
+      self.measuredPrefix = measuredPrefix; self.physicalStart = physicalStart
     }
   }
 
@@ -380,13 +387,19 @@ public final class ComposeTextLayout {
     }
     // One attributed typesetter supplies contextual marker shaping and, when
     // attachments do not modify its attributes below, the final text layout.
-    let prefixTypesetter = hanging.isEmpty ? nil : CTTypesetterCreateWithAttributedString(attributed)
-    var hangs: [(range: NSRange, content: Int, prefix: CGFloat, indent: CGFloat)] = []
+    let prefixTypesetter = hanging.contains { $0.measuredPrefix == nil } ? CTTypesetterCreateWithAttributedString(attributed) : nil
+    var hangs: [(range: NSRange, content: Int, prefix: CGFloat, indent: CGFloat, physicalStart: Bool)] = []
     for item in hanging {
       guard let start = byteToUTF16[item.display.lowerBound], let end = byteToUTF16[item.display.upperBound],
             let content = byteToUTF16[item.contentStart], start <= content, content < end,
-            item.indent.isFinite, item.indent >= 0, let prefixTypesetter,
+            item.indent.isFinite, item.indent >= 0,
             string.rangeOfCharacter(from: .newlines, range: NSRange(location: start, length: content - start)).location == NSNotFound else { return nil }
+      if let measured = item.measuredPrefix {
+        guard measured.isFinite, measured >= 0, start == content else { return nil }
+        hangs.append((NSRange(location: start, length: end - start), content, measured, item.indent, item.physicalStart))
+        continue
+      }
+      guard let prefixTypesetter else { return nil }
       // Shape the first visual line, not a copy of the whole joined paragraph.
       // Include at least the first complete body grapheme: cutting at the
       // marker changes kerning ("1) An"), even when a narrow pane wraps there.
@@ -401,10 +414,10 @@ public final class ComposeTextLayout {
       let prefix = CTTypesetterCreateLine(prefixTypesetter, CFRange(location: start, length: contextEnd - start))
       let measured = Self.hangingPrefixWidth(prefix, start: start, content: content)
       guard measured.isFinite, measured >= 0 else { return nil }
-      hangs.append((NSRange(location: start, length: end - start), content, measured, item.indent))
+      hangs.append((NSRange(location: start, length: end - start), content, measured, item.indent, false))
     }
     let hangingIndex = ComposeIntervalIndex(hangs.map { $0.range.location..<NSMaxRange($0.range) })
-    func hangingItem(at position: Int) -> (range: NSRange, content: Int, prefix: CGFloat, indent: CGFloat)? {
+    func hangingItem(at position: Int) -> (range: NSRange, content: Int, prefix: CGFloat, indent: CGFloat, physicalStart: Bool)? {
       hangingIndex.matches(at: position).min { a, b in
         if hangs[a].range.length != hangs[b].range.length { return hangs[a].range.length < hangs[b].range.length }
         if hangs[a].content != hangs[b].content { return hangs[a].content > hangs[b].content }
@@ -618,7 +631,8 @@ public final class ComposeTextLayout {
           // Source indentation on a physical continuation line is already
           // drawn. Charge only the missing part of the measured prefix.
           var whitespace = from
-          if from > 0 && [10, 13].contains(string.character(at: from - 1)) {
+          if from > 0 && [10, 13].contains(string.character(at: from - 1))
+              || from == item.range.location && item.physicalStart {
             while whitespace < string.length && [9, 32].contains(string.character(at: whitespace)) { whitespace += 1 }
           }
           var existing: CGFloat = 0
