@@ -28,6 +28,11 @@ public final class ComposeTableMeasurement {
 
   func widths(body: CTFont, monospace: CTFont, available: CGFloat) -> [CGFloat] {
     var constraints = ComposeColumnConstraints(count: wire.columns.count, font: body, available: available)
+    // Complete table inputs can contain thousands of distinct samples with
+    // the same style. Fonts depend on this call's body/code faces and size,
+    // not on the sample text or column; retain each variant for this pass.
+    struct FontKey: Hashable { let code: Bool; let flags: UInt32 }
+    var fonts: [FontKey: CTFont] = [:]
     for (column, value) in wire.columns.enumerated() {
       for sample in value.samples {
         let text = NSMutableAttributedString(string: sample.text,
@@ -42,12 +47,18 @@ public final class ComposeTableMeasurement {
         }
         for span in sample.spans {
           let start = offsets[Int(span.start)]!, length = offsets[Int(span.end)]! - start
-          var traits: CTFontSymbolicTraits = []
-          if span.flags & 1 != 0 { traits.insert(.traitBold) }
-          if span.flags & 2 != 0 { traits.insert(.traitItalic) }
-          let size = CTFontGetSize(body)
-          let base = CTFontCreateCopyWithAttributes(span.code ? monospace : body, size, nil, nil)
-          let font = CTFontCreateCopyWithSymbolicTraits(base, size, nil, traits, [.traitBold, .traitItalic]) ?? base
+          let key = FontKey(code: span.code, flags: span.flags)
+          let font: CTFont
+          if let cached = fonts[key] { font = cached }
+          else {
+            var traits: CTFontSymbolicTraits = []
+            if span.flags & 1 != 0 { traits.insert(.traitBold) }
+            if span.flags & 2 != 0 { traits.insert(.traitItalic) }
+            let size = CTFontGetSize(body)
+            let base = CTFontCreateCopyWithAttributes(span.code ? monospace : body, size, nil, nil)
+            font = CTFontCreateCopyWithSymbolicTraits(base, size, nil, traits, [.traitBold, .traitItalic]) ?? base
+            fonts[key] = font
+          }
           text.addAttribute(NSAttributedString.Key(kCTFontAttributeName as String), value: font,
             range: NSRange(location: start, length: length))
         }

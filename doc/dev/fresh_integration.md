@@ -409,6 +409,11 @@ are reused within one layout by face, point size and traits; a changed font,
 width or source still invalidates the appropriate layout. These are measured
 layout optimizations, independent of terminal columns.
 
+Complete table-input measurement reuses each derived body/code font variant
+within its pass, including bold and italic combinations. The cache belongs to
+that font environment; resizing, font changes and source changes retain the
+same existing column-constraint calculations and invalidation rules.
+
 The [resource profile](testing.md#rich-compose-resource-profiles) records real
 parser-generated panes, native construction/reuse costs, payload sizes and
 process peak memory. It does not qualify interactive latency. Sources above
