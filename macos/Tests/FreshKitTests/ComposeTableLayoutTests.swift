@@ -213,10 +213,32 @@ final class ComposeTableLayoutTests: XCTestCase {
     let rects = value.text.selectionRects(for: source)
     XCTAssertFalse(rects.isEmpty)
     XCTAssertTrue(rects.allSatisfy { cell.content.insetBy(dx: -1, dy: -1).contains($0) })
+    let fragments = value.text.fragments.filter { $0.table?.row == value.text.tables[0].rows[1].source && $0.table?.column == 2 }
+    XCTAssertEqual(fragments.reduce(0) { $0 + $1.range.length }, try XCTUnwrap(cell.display).length,
+      "wrapping carries trailing spaces without dropping any source markup")
+    let end = try XCTUnwrap(value.text.caret(for: source.upperBound, affinity: .upstream))
+    XCTAssertTrue(cell.content.insetBy(dx: -1, dy: -1).contains(end))
     let hit = try XCTUnwrap(value.text.hit(at: CGPoint(x: image.rect.minX + 1, y: image.rect.midY)))
     XCTAssertEqual(hit.attachment, image.attachment.source)
     XCTAssertEqual(value.pane.text, pane.text)
     try render(value, environment: "FC_COMPOSE_TABLE_SOURCE_PREVIEW_FILE")
+  }
+
+  func testWrappedSpacesRemainAddressableInsideTheirCell() throws {
+    let source = "aaaa aaaa ", end = UInt64(source.utf8.count)
+    let pane = WireComposePane.with {
+      $0.text = source; $0.sourceEnd = end; $0.documentLen = end
+      $0.segments = [.with { $0.sourceEnd = end; $0.displayEnd = end }]
+      $0.tables = [.with { $0.end = end; $0.alignments = [0]
+        $0.rows = [.with { $0.end = end; $0.contentEnd = end; $0.cells = [.with { $0.end = end }] }] }]
+    }
+    let value = try layout(pane, width: 60), cell = value.text.tables[0].rows[0].cells[0]
+    let bounds = cell.content.insetBy(dx: -0.001, dy: -0.001)
+    XCTAssertTrue(value.text.selectionRects(for: 0..<Int(end)).allSatisfy { bounds.contains($0) })
+    for source in 0...Int(end) {
+      XCTAssertTrue(bounds.contains(try XCTUnwrap(value.text.caret(for: source))))
+    }
+    XCTAssertEqual(value.text.fragments.filter { $0.table != nil }.reduce(0) { $0 + $1.range.length }, source.utf16.count)
   }
 
   func testDraftAtARowBoundaryHasOneOwnerAndAnEOFInsertionStaysInItsCell() throws {

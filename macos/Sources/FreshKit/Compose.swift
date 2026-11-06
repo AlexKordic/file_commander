@@ -463,6 +463,16 @@ public final class ComposeTextLayout {
           let cluster = string.rangeOfComposedCharacterSequence(at: at + count)
           if cluster.location < at + count { count = NSMaxRange(cluster) - at }
         }
+        // A suggested word break can consume trailing whitespace whose
+        // advance extends beyond the measure. Carry it onto the next line;
+        // every source character and its caret still belongs to this cell.
+        while count > 0 {
+          let line = CTTypesetterCreateLine(typesetter, CFRange(location: at, length: count))
+          guard CGFloat(CTLineGetTypographicBounds(line, nil, nil, nil)) > measure + 0.001 else { break }
+          let last = string.rangeOfComposedCharacterSequence(at: at + count - 1)
+          guard last.location > at else { break }
+          count = last.location - at
+        }
         guard count > 0, count <= NSMaxRange(range) - at else { return false }
         append(NSRange(location: at, length: count), block: nil, indent: indent, measure: measure, table: table, alignment: alignment)
         at += count
