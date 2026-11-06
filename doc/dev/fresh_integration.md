@@ -448,12 +448,17 @@ text contributes neither editable characters nor caret stops.
 
 The experimental native client also announces
 `ClientHello.paragraph_windows` (field 5), which requires `rich_compose`.
-Complete parser-owned paragraphs then define window boundaries. A loose list
-can omit earlier paragraphs in its item while retaining source-owned leading
-whitespace and blank-line navigation pivots. Its offscreen opening line is
+Complete parser-owned paragraphs then define window boundaries. Direct inline
+flows in tight list items are tracked from the same parser's block tree, which
+omits explicit Paragraph tags there. Nested tight lists can therefore omit
+preceding siblings without slicing a joined paragraph. Lists retain
+source-owned leading whitespace and blank-line navigation pivots. An offscreen opening line is
 requested separately through the same grammar/plugin formatter. The backend
 prepares a current projected prefix after that line's completion receipt; it
 does not certify measured input while this required context is pending.
+If a visible body finishes before its required marker, the interim pane uses
+complete source text with image/table presentation disabled. It cannot expose
+a partially certified rich map while claiming that its projection is unavailable.
 Rendering, deferred navigation
 and editing receipts use the same negotiated policy. Clients omitting the
 capability keep the previous marker-bearing window policy.
@@ -471,9 +476,9 @@ memory. It retains neither whole projections nor native font geometry, and
 the current pane's physical-line-start flag is recomputed on every request.
 
 The 64 KiB window size remains a target, not a content limit. A complete parsed
-paragraph or atomic replacement can extend it. Tight lists and blank
-boundaries of single-paragraph items retain their existing context until
-their flow and soft-wrap continuation contract is qualified. Preparing a
+paragraph or atomic replacement can extend it. Structural bytes outside known
+paragraphs and blank boundaries of single-paragraph items retain their existing
+item context. Arbitrary soft-wrap clipping is not a paragraph boundary. Preparing a
 marker can also require a whole initial physical line
 or a multiline image. Long-paragraph shaping, repeatable soft-wrap anchors
 and general hard resource bounds remain separate requirements.

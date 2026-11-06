@@ -504,7 +504,13 @@ has been requested by a native client. It requires that marker's certified
 sample, verifies the smaller window and keeps an older client on its original
 window policy. The private native backend workflow checks source indentation,
 cross-window Page Up, document-wide UTF-16 positions, resize, Unicode editing,
-exact CRLF save and undo in a large loose list. Whole parsed paragraphs and
+exact CRLF save and undo in large loose and nested tight lists. Tight-flow tests
+include task markers, joined physical lines, hard breaks, Unicode/bidi text and
+atomic inline images, and exclude headings, code, quotes and tables from direct
+item prose. The native nested-list workflow checks the item's measured body
+origin after paging; entering a link can reveal its source and reshape the
+caret's line. A controlled readiness regression holds an offscreen marker
+pending after the visible body completes, then certifies it. Whole parsed paragraphs and
 atomic marker resources must remain complete; these are fixture-specific
 window checks, not a global byte or latency budget.
 
@@ -527,6 +533,12 @@ cargo test --locked -p fresh-editor --features web --lib --profile fc-release \
 This measures prefix preparation with supplied completed decorations. It
 excludes parser/plugin work, scene traffic, native shaping and input latency;
 its retained-allocation count is not a total memory budget.
+
+Virtual-line ownership tests compare indexed range clears against live marker
+positions after insertions/deletions, preserving half-open bounds, other
+namespaces, inline texts and foreign markers. All removal paths must retire
+their index entries. The dense tight-list socket fixture also requires the
+older client's full-item formatter to complete under the existing deadline.
 
 ## CI
 

@@ -290,6 +290,89 @@ final class ComposeBackendTests: XCTestCase {
   }
 
   @MainActor
+  func testRealBackendTightNestedListWindowsKeepParentIndentThroughPagingResizeSaveAndUndo() async throws {
+    let backend = try backend(); defer {
+      backend.captureDiagnostics("tight-windows")
+      backend.stop()
+    }
+    let editor = editor(BackendPasteboard()); defer { editor.detachAll() }
+    let header = "| A | B |\r\n|---|---|\r\n| one | two |\r\n\r\n# Tight windows\r\n\r\n100) **Parent** café 👩🏽‍💻\r\n"
+    let children = (0..<2000).map { "     - [ ] Child \($0) café 東京 👩🏽‍💻 with **prose** and `code` that wrap across the available native measure.\r\n       continued with [link](target.md) and more words for the same complete paragraph.\r\n" }.joined()
+    let original = header + children + "\r\nTail\r\n"
+    let bodyEnd = original.utf8.count - "\r\nTail\r\n".utf8.count
+    let file = backend.root.appendingPathComponent("tight-windows.md")
+    try Data(original.utf8).write(to: file)
+    try await attach(backend, file: file, editor: editor)
+    let grid = try XCTUnwrap(editor.grid), initial = try XCTUnwrap(grid.focusedCompose)
+    let items = initial.pane.compose.spans.filter { $0.role == 13 && $0.hasContentStart }
+    let parent = try XCTUnwrap(items.first), child = try XCTUnwrap(items.dropFirst().first)
+    let hangingX = try XCTUnwrap(initial.layout.text.caret(for: Int(child.contentStart))).minX
+    XCTAssertGreaterThan(original.utf8.count, 256 << 10)
+    editor.send(.action(name: "move_document_end", argsJson: ""))
+    try await eventually(editor, "tight-list document end") { grid.focusedCompose?.cursor?.position == UInt64(original.utf8.count) }
+    for _ in 0..<10 {
+      let before = try XCTUnwrap(grid.focusedCompose?.cursor?.position)
+      if before < bodyEnd { break }
+      editor.send(.action(name: "move_up", argsJson: ""))
+      try await eventually(editor, "Up enters a distant tight child paragraph") { (grid.focusedCompose?.cursor?.position ?? before) < before }
+    }
+    var position = try XCTUnwrap(grid.focusedCompose?.cursor?.position)
+    XCTAssertGreaterThan(position, UInt64(original.utf8.count / 2)); XCTAssertLessThan(position, UInt64(bodyEnd))
+    editor.send(.action(name: "move_line_start", argsJson: ""))
+    try await eventually(editor, "Home measures the distant tight paragraph") {
+      guard let pane = grid.focusedCompose, let cursor = pane.cursor,
+            let caret = pane.layout.text.caret(for: Int(cursor.position)) else { return false }
+      return abs(caret.minX - hangingX) < 0.001
+    }
+    position = try XCTUnwrap(grid.focusedCompose?.cursor?.position)
+    var pane = try XCTUnwrap(grid.focusedCompose)
+    XCTAssertGreaterThan(pane.pane.compose.sourceStart, parent.contentStart)
+    XCTAssertLessThan(pane.pane.compose.sourceEnd - pane.pane.compose.sourceStart, 128 << 10)
+    XCTAssertTrue(pane.pane.compose.hangingContexts.contains { $0.itemStart == parent.start && $0.text == "100) P" })
+    let edge = pane.pane.compose.sourceStart
+    var pageCount = 0
+    for _ in 0..<128 {
+      if position < edge { break }
+      let before = position; pageCount += 1
+      editor.send(.action(name: "move_page_up", argsJson: ""))
+      try await eventually(editor, "Page Up crosses tight child paragraph windows") { (grid.focusedCompose?.cursor?.position ?? before) < before }
+      position = try XCTUnwrap(grid.focusedCompose?.cursor?.position)
+    }
+    XCTAssertLessThan(position, edge)
+    pane = try XCTUnwrap(grid.focusedCompose)
+    XCTAssertGreaterThan(pane.pane.compose.sourceStart, parent.contentStart)
+    XCTAssertLessThan(pane.pane.compose.sourceEnd - pane.pane.compose.sourceStart, 128 << 10)
+    // Paging can enter a link target and reveal its exact source, reshaping
+    // that caret's line. The item's body origin still owns its hanging inset.
+    let currentChild = try XCTUnwrap(pane.pane.compose.spans.filter {
+      $0.role == 13 && $0.hasContentStart && $0.start <= position && position < $0.end
+    }.min { $0.end - $0.start < $1.end - $1.start })
+    let currentBodyX = try XCTUnwrap(pane.layout.text.caret(for: Int(currentChild.contentStart))).minX
+    XCTAssertEqual(currentBodyX, hangingX, accuracy: 0.001)
+    let prefix = Data(original.utf8.prefix(Int(position))), suffix = Data(original.utf8.dropFirst(Int(position)))
+    XCTAssertEqual(grid.selectedRange(), NSRange(location: String(decoding: prefix, as: UTF8.self).utf16.count, length: 0))
+    let width = pane.layout.width
+    grid.setFrameSize(CGSize(width: 460, height: 420))
+    try await eventually(editor, "resize retains tight-list source ownership") {
+      grid.focusedCompose?.cursor?.position == position && (grid.focusedCompose?.layout.width ?? width) < width
+    }
+    let insertion = "追加👩🏽‍💻"
+    grid.insertText(insertion, replacementRange: NSRange(location: NSNotFound, length: 0))
+    editor.send(.action(name: "save", argsJson: ""))
+    try await eventually(editor, "save exact CRLF bytes through a nested tight window") { (try? Data(contentsOf: file)) == prefix + Data(insertion.utf8) + suffix }
+    editor.send(.action(name: "undo", argsJson: "")); editor.send(.action(name: "save", argsJson: ""))
+    try await eventually(editor, "one undo restores the tight-list source") { (try? Data(contentsOf: file)) == Data(original.utf8) }
+    XCTAssertTrue(editor.uninsertedText.isEmpty); XCTAssertTrue(backend.server.isRunning)
+    let report: [String: Any] = ["document_bytes": original.utf8.count, "parent_source": parent.start,
+      "child_body_source": child.contentStart, "body_caret_x": Double(hangingX), "page_up_count": pageCount,
+      "body_x_after_pages": Double(currentBodyX),
+      "caret_x_after_pages": Double(try XCTUnwrap(pane.layout.text.caret(for: Int(position))).minX),
+      "window_start_before_pages": edge, "cursor_after_pages": position,
+      "window_start_after_pages": pane.pane.compose.sourceStart, "window_end_after_pages": pane.pane.compose.sourceEnd]
+    try JSONSerialization.data(withJSONObject: report, options: [.sortedKeys]).write(to: backend.root.appendingPathComponent("tight-window-report.json"))
+  }
+
+  @MainActor
   func testRealBackendLooseListWindowsKeepOffscreenMarkersThroughResizeSaveAndUndo() async throws {
     let backend = try backend(); defer {
       backend.captureDiagnostics("paragraph-windows")
