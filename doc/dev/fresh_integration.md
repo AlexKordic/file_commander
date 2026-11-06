@@ -457,9 +457,22 @@ fixed-width formatting do not constrain native layout.
   removes the preview. Fresh's correlated result can correct it, and supplies
   the real coordinates for a following composition or queued commit. Native
   command measurements always use the backend snapshot. Word/line selection,
-  points outside the raw context and pointers behind pending text or opaque
-  actions still await authoritative results; their full interaction workflow
-  remains part of release qualification.
+  points outside raw context and opaque actions still await authoritative
+  results; their full interaction workflow remains part of release qualification.
+- A point within a provisional insert records the draft owner, its UTF-16
+  offset and expected text, and depends on that prefix's queue token. No
+  virtual source position travels on the wire. The matching native edit
+  receipt must prove the edited or preserved caret owner, its source/UTF-16
+  coordinates and the exact source between the point and that caret. A nearby
+  point can be proved without echoing the whole paste in the receipt. Only then
+  can the click
+  become a source pointer at that receipt's revision. The point survives font
+  reflow, secondary-caret inserts and chained prefix replacements. Captured
+  offsets follow the declared native newline normalization. Following text
+  depends on the click's own result. A cancelled predecessor, changed text or
+  insufficient bounded source context cancels the click explicitly and
+  recovers dependent text. Immediate selection/candidate feedback within
+  these pending inserts still awaits further interaction qualification.
 - Type 29, `ComposeViewportRequest`, updates a per-client source marker and
   vertical pixel offset plus a horizontal translation in points. Its acknowledgments and coalescing are independent of the text
   input queue. It changes neither the source cursor nor the terminal viewport.

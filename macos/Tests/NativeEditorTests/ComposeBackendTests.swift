@@ -244,6 +244,37 @@ final class ComposeBackendTests: XCTestCase {
   }
 
   @MainActor
+  func testRealBackendClickWithinUnacknowledgedTextKeepsBothNativeUndoTransactions() async throws {
+    let backend = try backend(); defer { backend.stop() }
+    let pasteboard = BackendPasteboard(), editor = editor(pasteboard)
+    defer { editor.detachAll() }
+    let original = "| A | B |\n|---|---|\n| one | two |\n\n# Heading\n\nTail\n"
+    let file = backend.root.appendingPathComponent("pending-click.md")
+    try Data(original.utf8).write(to: file)
+    try await attach(backend, file: file, editor: editor)
+    let position = original[..<original.range(of: "Tail")!.lowerBound].utf8.count
+    try await click(UInt64(position), editor: editor)
+    let grid = try XCTUnwrap(editor.grid), prefix = "日café 👩🏽‍💻 ", unspecified = NSRange(location: NSNotFound, length: 0)
+    grid.insertText(prefix, replacementRange: unspecified)
+    let pending = try XCTUnwrap(grid.focusedCompose), id = try XCTUnwrap(pending.cursor?.id)
+    let display = try XCTUnwrap(pending.layout.draftDisplayRanges[id])
+    let rect = try XCTUnwrap(pending.layout.text.caret(atUTF16: display.location + 1))
+    editor.grid(grid, point: CGPoint(x: pending.origin.x + rect.minX, y: pending.origin.y + rect.midY),
+      in: pending, extend: false, count: 1)
+    grid.insertText("X", replacementRange: unspecified)
+    let prefixWithX = "日Xcafé 👩🏽‍💻 "
+    let expected = Data(original.utf8.prefix(position)) + Data(prefixWithX.utf8) + Data(original.utf8.dropFirst(position))
+    editor.send(.action(name: "save", argsJson: ""))
+    try await eventually(editor, "save at the point inside an unacknowledged insert") { (try? Data(contentsOf: file)) == expected }
+    editor.send(.action(name: "undo", argsJson: "")); editor.send(.action(name: "save", argsJson: ""))
+    let firstOnly = Data(original.utf8.prefix(position)) + Data(prefix.utf8) + Data(original.utf8.dropFirst(position))
+    try await eventually(editor, "undo only the following insertion") { (try? Data(contentsOf: file)) == firstOnly }
+    editor.send(.action(name: "undo", argsJson: "")); editor.send(.action(name: "save", argsJson: ""))
+    try await eventually(editor, "undo the original provisional insert") { (try? Data(contentsOf: file)) == Data(original.utf8) }
+    XCTAssertTrue(editor.uninsertedText.isEmpty); XCTAssertTrue(backend.server.isRunning)
+  }
+
+  @MainActor
   func testRealBackendPageSelectionCrossesTheSourceWindowAndCommitsOneReplacement() async throws {
     let backend = try backend(); defer { backend.stop() }
     let pasteboard = BackendPasteboard(), editor = editor(pasteboard)

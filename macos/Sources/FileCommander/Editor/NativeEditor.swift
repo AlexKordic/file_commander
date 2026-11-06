@@ -59,6 +59,7 @@ final class NativeEditor: NSObject, CellGridDelegate {
     case pointer(ComposePointer)
     case replacement(ComposeReplacement)
     case pendingText(ComposePendingText)
+    case pendingPointer(ComposePendingPointer, after: UUID)
   }
   private struct InputTarget {
     var identity: ComposePresentation.Identity
@@ -552,8 +553,23 @@ final class NativeEditor: NSObject, CellGridDelegate {
   func grid(_ grid: CellGridView, send input: SceneInput) { send(input) }
 
   func grid(_ grid: CellGridView, point: CGPoint, in pane: ComposePresentation, extend: Bool, count: Int) {
-    guard receivedHello, let hit = pane.hit(at: point),
-          let pointer = ComposePointer(scope: pane.scope, epoch: pane.pane.compose.viewport.epoch, hit: hit, extend: extend, count: count) else { return }
+    guard receivedHello, let hit = pane.hit(at: point) else { return }
+    if let displayed = pane.layout.composition,
+       let position = pane.layout.text.hitUTF16(at: CGPoint(x: point.x - pane.origin.x, y: point.y - pane.origin.y)),
+       let owner = ([displayed.primaryID] + displayed.ordered.filter { $0 != displayed.primaryID }).first(where: {
+         guard let range = pane.layout.draftDisplayRanges[$0] else { return false }
+         return range.location <= position && position <= NSMaxRange(range)
+       }), let range = pane.layout.draftDisplayRanges[owner] {
+      guard let pending = self.grid(grid, pendingTextFor: pane.pane), let text = pending.text,
+            let capture = text.pointer(scope: pane.scope, epoch: pane.pane.compose.viewport.epoch, displayed: displayed,
+              cursor: owner, offset: position - range.location, affinity: hit.affinity, extend: extend, count: count,
+              nativeNewline: pane.pane.compose.nativeNewline) else {
+        reportPendingPointerCancellation(); return
+      }
+      enqueueCompose(.pendingPointer(capture, after: pending.prefixToken ?? pending.token), target: pane)
+      return
+    }
+    guard let pointer = ComposePointer(scope: pane.scope, epoch: pane.pane.compose.viewport.epoch, hit: hit, extend: extend, count: count) else { return }
     let predictable = pane.layout.composition == nil && composeQueue.allSatisfy {
       $0.pointerPreview != nil && $0.target?.identity == pane.identity
         && $0.target?.epoch == pane.pane.compose.viewport.epoch && $0.target?.scope.bufferRevision == pane.scope.bufferRevision
@@ -646,6 +662,16 @@ final class NativeEditor: NSObject, CellGridDelegate {
     var failed: Set<UUID> = edit == nil && result == nil ? [first.token] : []
     var retained = [first]
     for var queued in composeQueue.dropFirst() {
+      if case .pendingPointer(let capture, let predecessor) = queued.input,
+         predecessor == first.token || failed.contains(predecessor) {
+        if predecessor == first.token, let edit, let pointer = capture.resolved(edit), let original = queued.snapshot {
+          var pane = original.pane; pane.compose = edit.pane
+          queued.input = .pointer(pointer); queued.target?.scope = edit.scope
+          queued.pointerPreview = pointer.preview(in: edit.pane); queued.snapshot = grid?.composeSnapshot(pane)
+        } else {
+          failed.insert(queued.token); reportPendingPointerCancellation(); continue
+        }
+      }
       if let chain = queued.chain, chain.predecessor == first.token || failed.contains(chain.predecessor) {
         if let receipt = chain.afterAction ? result : edit, chain.predecessor == first.token, let target = queued.target,
            receipt.matches(target.scope, epoch: target.epoch),
@@ -667,6 +693,14 @@ final class NativeEditor: NSObject, CellGridDelegate {
     composeQueue = retained
     grid?.resolveComposition(after: first.token, edit: edit, result: result)
     for token in failed where token != first.token { grid?.resolveComposition(after: token, edit: nil, result: nil) }
+  }
+
+  private func reportPendingPointerCancellation() {
+    let message = "The text for this editor click could not be confirmed. Click again."
+    guard lastComposeCancellation != message else { return }
+    lastComposeCancellation = message
+    app?.engine.reportError(message)
+    Trace.write("editor input cancelled: \(message)")
   }
 
   func grid(_ grid: CellGridView, recover text: String) {
@@ -783,7 +817,10 @@ final class NativeEditor: NSObject, CellGridDelegate {
   /// resulting source map. A stale event keeps its id and is measured again.
   private func pumpComposeInput() {
     guard receivedHello, let socket, socket.isOpen, !composeInFlight, !completingComposeInput, let queued = composeQueue.first else { return }
-    if case .pendingText = queued.input { return } // Its predecessor must supply real source coordinates.
+    switch queued.input {
+    case .pendingText, .pendingPointer: return // The predecessor must supply real source coordinates.
+    default: break
+    }
     if pendingComposeID == nil {
       nextComposeID += 1
       pendingComposeID = nextComposeID
@@ -802,7 +839,7 @@ final class NativeEditor: NSObject, CellGridDelegate {
     var input = WireComposeInput()
     input.id = pendingComposeID ?? 0
     switch queued.input {
-    case .pendingText: return
+    case .pendingText, .pendingPointer: return
     case .message(let message):
       input.kind = UInt32(message.kind.rawValue)
       input.payload = Data(message.payload())

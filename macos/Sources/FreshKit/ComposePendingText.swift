@@ -137,6 +137,23 @@ public struct ComposePendingText {
     next.presentation = composition; next.committedEdits = edits; return next
   }
 
+  /// Capture a displayed draft point against this committed prefix. A commit
+  /// can normalize newlines, so convert the captured prefix before retaining
+  /// its offset. Receipt resolution still proves the actual resulting text.
+  public func pointer(scope: WireComposeScope, epoch: UInt64, displayed: ComposeComposition,
+                      cursor: UInt64, offset: Int, affinity: ComposeProjection.Affinity,
+                      extend: Bool, count: Int, nativeNewline: UInt32) -> ComposePendingPointer? {
+    guard committedEdits != nil, let value = presentation.values[cursor], let shown = displayed.values[cursor],
+          value.source == shown.source, value.originalRange == shown.originalRange, value.selected.length == 0,
+          let normalized = Self.normalize(shown.draft, policy: nativeNewline),
+          normalized.string.utf16.elementsEqual(value.draft.string.utf16),
+          let local = ComposeTextContext(.with { $0.text = shown.draft.string }, documentLength: UInt64(shown.draft.string.utf8.count)),
+          local.sourceRange(forUTF16: NSRange(location: offset, length: 0)) != nil,
+          let prefix = Self.normalize(NSAttributedString(string: (shown.draft.string as NSString).substring(to: offset)), policy: nativeNewline) else { return nil }
+    return ComposePendingPointer(scope: scope, epoch: epoch, cursor: cursor, text: value.draft.string,
+      caretOffset: value.selected.location, offset: prefix.length, affinity: affinity, extend: extend, count: count)
+  }
+
   /// Only real, receipt-bound ranges can become wire replacements.
   public func replacement(scope: WireComposeScope, epoch: UInt64) -> ComposeReplacement? {
     guard baseline == nil else { return nil }
