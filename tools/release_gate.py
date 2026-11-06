@@ -4,13 +4,15 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import platform
 import re
 import tarfile
 
 
-def required_tests(repo):
+def required_tests(repo, system=None):
     manifest = json.loads((repo / 'test/release_required.json').read_text())
     names = set(manifest['standalone'])
+    names.update(manifest.get('platforms', {}).get(system or platform.system(), []))
     for group, cases in manifest['groups'].items():
         names.update(f'fc.{group}.{case}' for case in cases)
     names.update('fc.command.' + name for name in re.findall(
@@ -59,6 +61,8 @@ def check_build(build, repo, system, arch):
     required = {'CMAKE_BUILD_TYPE': 'Release', 'BUILD_TESTING': 'ON', 'FC_CORE_ONLY': 'OFF',
                 'FC_ALLOW_UNPINNED_DEPENDENCIES': 'OFF', 'FC_BUILD_FRESH': 'ON',
                 'FC_BUILD_SEVENZIP': 'ON', 'FC_TEST_DEPENDENCY_REBUILDS': 'ON'}
+    if system == 'Darwin':
+        required['FC_TEST_MACOS_NATIVE'] = 'ON'
     for key, value in required.items():
         if cache.get(key) != value:
             raise ValueError(f'release requires {key}={value}, got {cache.get(key)!r}')

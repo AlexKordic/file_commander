@@ -14,6 +14,10 @@ repo = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(repo / 'tools'))
 from release_gate import required_tests, manual_tests
 
+require(required_tests(repo, 'Darwin') - required_tests(repo, 'Linux') == {'fc.macos.native_editor'},
+        'native editor qualification must be required only on macOS')
+require(required_tests(repo, 'Linux') <= required_tests(repo, 'Darwin'), 'macOS registry loses common contracts')
+
 presets = json.loads((repo / 'CMakePresets.json').read_text())['testPresets']
 for preset in presets:
     if preset['name'] == 'manual':
@@ -46,6 +50,10 @@ if '--show-only=json-v1' in sys.argv:
  if mode == 'missing_test': names = names[1:]
  if mode == 'duplicate_test': names.append(names[0])
  if mode == 'missing_manual': names.remove(manual[0])
+ if mode == 'wrong_platform':
+  native = 'fc.macos.native_editor'
+  if native in names: names.remove(native)
+  else: names.append(native)
  tests = [{'name': n, 'command': [sys.executable], 'properties': [{'name': 'LABELS', 'value': ['manual'] if n in manual else []}]} for n in names]
  target = next((t for t in tests if t['name'] in manual), tests[0])
  if mode == 'disabled': target['properties'].append({'name': 'DISABLED', 'value': True})
@@ -72,6 +80,7 @@ else:
              'FC_CORE_ONLY': 'OFF', 'FC_ALLOW_UNPINNED_DEPENDENCIES': 'OFF', 'FC_BUILD_FRESH': 'ON',
              'FC_BUILD_SEVENZIP': 'ON', 'FC_TEST_DEPENDENCY_REBUILDS': 'ON',
              'CMAKE_CACHE_MAJOR_VERSION': '3', 'CMAKE_CACHE_MINOR_VERSION': '30', 'CMAKE_CACHE_PATCH_VERSION': '0'}
+    if platform.system() == 'Darwin': cache['FC_TEST_MACOS_NATIVE'] = 'ON'
     def write_cache(values):
         (build / 'CMakeCache.txt').write_text(''.join(f'{key}:STRING={value}\n' for key, value in values.items()))
     write_cache(cache)
@@ -119,7 +128,7 @@ else:
         return result
     run(valid=True)
     for mode in ('one_test', 'missing_test', 'duplicate_test', 'disabled', 'unbuilt', 'one_result',
-                 'duplicate_result', 'skip', 'failure', 'error', 'empty', 'missing', 'malformed'):
+                 'duplicate_result', 'skip', 'failure', 'error', 'empty', 'missing', 'malformed', 'wrong_platform'):
         run(control=mode)
     for mode in ('missing_manual', 'wrong_manual_label', 'extra_manual_label', 'leak_manual'):
         run(control=mode)
@@ -140,6 +149,10 @@ else:
                        ('FC_BUILD_SEVENZIP', 'OFF'), ('FC_TEST_DEPENDENCY_REBUILDS', 'OFF'), ('FETCHCONTENT_SOURCE_DIR_BOOST', '/unchecked')]:
         write_cache(dict(cache, **{key: value})); run()
     write_cache(cache)
+    if platform.system() == 'Darwin':
+        write_cache(dict(cache, FC_TEST_MACOS_NATIVE='OFF')); run()
+        write_cache({key: value for key, value in cache.items() if key != 'FC_TEST_MACOS_NATIVE'}); run()
+        write_cache(cache)
     native = system.read_text()
     system.write_text(native.replace('"FALSE"', '"TRUE"')); run(); system.write_text(native)
     for path in binaries.values():

@@ -775,8 +775,23 @@ final class ComposeBackendTests: XCTestCase {
   @MainActor
   func testRealBackendPageSelectionCrossesTheSourceWindowAndCommitsOneReplacement() async throws {
     let backend = try backend(); defer { backend.stop() }
+    defer { backend.captureDiagnostics("page-selection") }
     let pasteboard = BackendPasteboard(), editor = editor(pasteboard)
-    defer { editor.detachAll() }
+    defer {
+      if let directory = ProcessInfo.processInfo.environment["FC_COMPOSE_ARTIFACT_DIR"], let pane = editor.grid?.focusedCompose {
+        let compose = pane.pane.compose
+        let record: [String: Any] = ["source_start": compose.sourceStart, "source_end": compose.sourceEnd,
+          "document_length": compose.documentLen, "cursor": pane.cursor?.position ?? 0,
+          "viewport_position": pane.viewport.position, "viewport_offset": pane.viewport.offset,
+          "backend_viewport_position": compose.viewport.position, "backend_viewport_offset": compose.viewport.offset,
+          "layout_height": pane.layout.text.size.height, "pane_height": pane.bounds.height,
+          "tables": pane.layout.text.tables.count, "ready": compose.formattingReady]
+        let output = URL(fileURLWithPath: directory).appendingPathComponent("page-window-" + backend.root.lastPathComponent + ".json")
+        try? FileManager.default.createDirectory(at: output.deletingLastPathComponent(), withIntermediateDirectories: true)
+        if let data = try? JSONSerialization.data(withJSONObject: record, options: [.prettyPrinted, .sortedKeys]) { try? data.write(to: output) }
+      }
+      editor.detachAll()
+    }
     let original = "| Head | Image |\n|---|---|\n| tiny | ![p](" + String(repeating: "x", count: 90_000)
       + ".png) |\n\n" + (0..<500).map { "Paragraph \($0) with measured words and café 👩🏽‍💻.\n\n" }.joined()
     let file = backend.root.appendingPathComponent("page.md")

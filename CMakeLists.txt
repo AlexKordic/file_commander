@@ -17,6 +17,7 @@ include(CTest)
 include(cmake/manual_tests.cmake)
 find_package(Threads REQUIRED)
 option(FC_CORE_ONLY "Build headless core and tests without UI/Lua/editor dependencies" OFF)
+option(FC_TEST_MACOS_NATIVE "Qualify the native macOS editor against this build's engine and Fresh" ${APPLE})
 
 option(FC_BUILD_FRESH "Build local Fresh editor alongside file_commander" ON)
 set(FC_FRESH_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../editor-fresh" CACHE PATH "Path to local Fresh source checkout")
@@ -254,6 +255,8 @@ if(BUILD_TESTING)
     # Fixture/ownership contracts use no GUI or SSH and run on both supported OSes.
     add_test(NAME fc.macos.compose_fixtures COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/macos/tools/test_qualify_compose.py")
     set_tests_properties(fc.macos.compose_fixtures PROPERTIES LABELS "unit;macos" TIMEOUT 30)
+    add_test(NAME fc.macos.native_harness COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/macos/tools/test_native_editor_gate.py")
+    set_tests_properties(fc.macos.native_harness PROPERTIES LABELS "unit;macos" TIMEOUT 30)
   endif()
 endif()
 
@@ -423,6 +426,20 @@ if(FC_BUILD_FRESH)
 endif()
 
 target_compile_definitions(fc_model PRIVATE FC_FRESH_DEFAULT_BIN="${_fc_fresh_default_bin}")
+
+if(APPLE AND BUILD_TESTING AND FC_TEST_MACOS_NATIVE)
+  find_program(FC_SWIFT_EXECUTABLE swift REQUIRED)
+  add_test(NAME fc.macos.native_editor
+    COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/macos/tools/run_native_editor_tests.py"
+      --swift "${FC_SWIFT_EXECUTABLE}" --engine-build "${CMAKE_BINARY_DIR}"
+      --fresh "${CMAKE_BINARY_DIR}/third_party/fresh/bin/fresh"
+      --scratch-path "${CMAKE_BINARY_DIR}/native-editor"
+      --configuration "$<IF:$<CONFIG:Debug>,debug,release>")
+  # Swift compilation and native resource-heavy workflows should own the lane
+  # while running; their private views do not open the installed application.
+  set_tests_properties(fc.macos.native_editor PROPERTIES
+    LABELS "integration;macos;native;compose" TIMEOUT 1200 RUN_SERIAL TRUE)
+endif()
 
 
 if(BUILD_TESTING)

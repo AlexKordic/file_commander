@@ -196,6 +196,8 @@ needs no Metal toolchain.
 | `fc.model.engine` | The facade end to end: start, rows, glob, jobs, profile lock |
 | `fc.model.editor` | Attaching hands the app the session's scene socket, or the terminal command when there is none |
 | `fc.macos.explainers` | `macos/tools/check_explainers.py`: every step, key, command and anchor in the explainers exists, and every visible command is covered |
+| `fc.macos.native_harness` | Negative controls for native test discovery, complete results, skipped cases, input hashes and process timeouts; runs without Swift or an app on both supported platforms |
+| `fc.macos.native_editor` | macOS integration/release gate: every compiled FreshKit and NativeEditor case, including real private Fresh backends; refuses missing/duplicate/skipped results |
 | `swift test --package-path macos` | FCKit drives the real engine; ExplainerKit decodes every explainer and builds captions; FreshKit checks the scene protocol, source maps, measured typography, images, and scrolling; NativeEditorTests drives the production native editor against a private scene peer |
 
 `Tests/NativeEditorTests` imports the application target and controls scene
@@ -214,6 +216,33 @@ open the installed app. To run the affected editor checks:
 ```sh
 swift test --package-path macos --filter 'NativeEditorTests|FreshKitTests'
 ```
+
+The complete automatic editor gate is registered in non-core macOS builds
+with `FC_TEST_MACOS_NATIVE=ON` (the default). Build first, then run:
+
+```sh
+ctest --test-dir build-release -R '^fc.macos.native_editor$' --output-on-failure
+```
+
+It uses that build's `libfc_engine_bundle.a` and staged Fresh, rather than an
+archive or backend from another app build. `FC_ENGINE_LIBRARY_DIR` supplies
+the selected archive directory to the Swift package; ordinary app builds keep
+their default `build-macos` directory. The gate uses an isolated Swift scratch
+directory, locked package versions and the matching build configuration.
+The first run may fetch the Swift dependencies in `Package.resolved`.
+Compiled discovery must include every suite in
+`macos/Tests/required_editor_suites.json`, and every discovered method must
+finish exactly once without a skip. Logs, discovery, per-case XML and input
+hashes live under `<build>/test-logs/native-editor-*` (inside a lane's artifact
+directory when run through the lane). A developer can disable the gate, but
+macOS release preflight rejects `FC_TEST_MACOS_NATIVE=OFF`.
+
+Direct `swift test` still allows real-backend cases to skip when
+`FC_COMPOSE_TEST_FRESH` is absent. The CTest gate always supplies it and rejects
+skips. These private offscreen checks do not qualify actual input methods,
+candidate windows, VoiceOver or live SSH; use the isolated
+[interactive qualification workflow](testing.md#interactive-compose-qualification)
+for those checks.
 
 The development mode `FC_NATIVE_RICH_COMPOSE=1` exposes **Settings › Editor ›
 Markdown Compose**. `ComposePreferences` stores body/code font families, body

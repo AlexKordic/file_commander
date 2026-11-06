@@ -18,7 +18,7 @@ python3 tools/run_test_lane.py fast --build build-release
 | --- | --- | --- | --- |
 | Core C++ tests | `test/core_operations.cpp`, `core_contracts.cpp`, `lifetime_contracts.cpp`, `file_faults.cpp`, `transfer_recovery.cpp` | `fc.core`, `fc.contract.*`, `fc.lifetime.*`, `fc.fault.*`, `fc.recovery.*` | `fc_core` without a UI: operation planning and execution, settings and locations, worker lifetimes, real-file fault injection and transfer recovery. The core and sanitizer presets build these too. |
 | Model contracts | `test/model_contracts.cpp` | `fc.model.*` | `fc_model` and the `fc_engine` facade the macOS app uses: panes, tabs, commands, live transfer speed, the engine end to end, scene attaches. |
-| macOS app | `macos/tools/check_explainers.py`, `macos/Tests/`, the explainers | `fc.macos.explainers`; `swift test --package-path macos`; `--run-explainer` | Explainer scripts against the real commands and anchors; FCKit and ExplainerKit; FreshKit scene, Compose layout and asset checks; NativeEditorTests against a private scene peer; and app explainers. See [macos_app.md](macos_app.md#tests). |
+| macOS app | `macos/tools/`, `macos/Tests/`, the explainers | `fc.macos.explainers`, `fc.macos.compose_fixtures`, `fc.macos.native_harness`, macOS-only `fc.macos.native_editor`; `swift test --package-path macos`; `--run-explainer` | Explainer/fixture/gate contracts; required native scene, Compose layout, asset/input and private real-backend checks; separate FCKit/ExplainerKit tests and app explainers. See [macos_app.md](macos_app.md#tests). |
 | UI regressions and command contracts | `test/review_regressions.cpp`, `test/command_contracts.cpp` | `fc.regression.*`, `fc.command.*` | The application, panels, dialogs and Lua adapter, driven in-process without a terminal. Each command runs through its key binding, the command palette and Lua `fc.cmd`. |
 | Lua UI suites | `test/*.lua`, registered in `test/lua_suites.json` | `fc.lua.*` | End-to-end workflows. `fc run` executes the script in a pseudo-terminal (PTY) against disposable fixtures, with a fake editor (`test/fakes/fresh_fake.sh`). |
 | Negative controls | `test/negative_controls.json` | `fc.negative.*` | Sabotaged copies of Lua suites that must fail with a specific error, proving that the suites can fail. |
@@ -242,10 +242,15 @@ Set `--expect-os` and `--expect-arch` to the platform you are qualifying.
 Before running any test, the release lane checks that:
 
 - The build directory was configured from this checkout with `CMAKE_BUILD_TYPE=Release`, `BUILD_TESTING=ON`, `FC_CORE_ONLY=OFF`, `FC_ALLOW_UNPINNED_DEPENDENCIES=OFF`, `FC_BUILD_FRESH=ON`, `FC_BUILD_SEVENZIP=ON` and `FC_TEST_DEPENDENCY_REBUILDS=ON`, and without a Boost source override. The `release` preset sets all of these.
+- macOS also requires `FC_TEST_MACOS_NATIVE=ON`, enabled by default for native
+  builds. Its `fc.macos.native_editor` test runs FreshKit and NativeEditor
+  against the selected build's engine archive and staged Fresh, with compiled
+  method discovery, complete per-case results and no skips.
 - The build is native for the current OS and architecture.
 - `fc`, `fresh` and `7z.so` exist and are executable.
 - CTest's test list matches the expected list exactly. The expected list comes
-  from `test/release_required.json` plus the registries
+  from `test/release_required.json`, including its current-OS `platforms`
+  entries, plus the registries
   `test/command_cases.inc`, `test/review_cases.inc`, `test/lua_suites.json`
   and `test/negative_controls.json`, minus the manual tests. A missing, extra,
   duplicate, disabled or unbuilt test fails, as does a `manual` label that
@@ -257,9 +262,10 @@ required license files and executables with the same SHA-256 as the build
 outputs, and records those hashes.
 
 The release lane does not run the manual tests; its metadata lists them as not
-run. A release candidate is qualified on a platform when the release lane and
-the manual lane pass for the same revision and build, on that operating system
-and architecture.
+run. A release candidate's automatic and registered manual checks are qualified
+when both lanes pass for the same revision and build, on that operating system
+and architecture. Interactive GUI/input-method/VoiceOver and live SSH results
+remain separate evidence; neither lane implies those checks passed.
 
 ## Sanitizers
 
@@ -599,6 +605,8 @@ A native selection frame keeps unchanged geometry while exposing the new
 text-service selection. The Release profiler reports cold and selection-only
 context preparation separately, using independently decoded message strings;
 these timings exclude input-to-paint latency.
+
+### Interactive Compose qualification
 
 For interactive development qualification, prepare a separate app from the
 built Swift products and an explicitly supplied matching Fresh binary:

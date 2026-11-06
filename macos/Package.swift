@@ -3,8 +3,12 @@
 // writes build-macos/libfc_engine_bundle.a); macos/build_app.sh then builds
 // this package and assembles File Commander.app.
 import PackageDescription
+import Foundation
 
-let engineLibraries = Context.packageDirectory + "/../build-macos"
+// CTest links the engine from the build it is qualifying, rather than a
+// potentially stale archive in the interactive app's default build directory.
+let engineLibraries = ProcessInfo.processInfo.environment["FC_ENGINE_LIBRARY_DIR"]
+  ?? Context.packageDirectory + "/../build-macos"
 
 let package = Package(
   name: "FileCommander",
