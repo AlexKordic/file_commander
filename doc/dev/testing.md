@@ -508,6 +508,26 @@ exact CRLF save and undo in a large loose list. Whole parsed paragraphs and
 atomic marker resources must remain complete; these are fixture-specific
 window checks, not a global byte or latency budget.
 
+Fresh's prefix tests also cover reuse across viewport/cursor changes, exact
+header replacement and reveal inputs, unrelated metadata, formatter refresh
+failure/recovery, document replacement, LRU eviction and allocation bounds.
+An oversized prefix must produce the complete presentation without retention.
+The ignored `profile_offscreen_prefix_reuse` test compares interleaved empty
+and warm caches in the same build, using a long formatted opening line. Run
+it in the Fresh checkout with the bundled backend's optimization profile:
+
+```sh
+FC_COMPOSE_PREFIX_PROFILE_OUTPUT=/tmp/fc-compose-prefix-profile.json \
+cargo test --locked -p fresh-editor --features web --lib --profile fc-release \
+  --config 'profile.fc-release.inherits="release"' \
+  --config 'profile.fc-release.opt-level=3' \
+  profile_offscreen_prefix_reuse -- --ignored --nocapture
+```
+
+This measures prefix preparation with supplied completed decorations. It
+excludes parser/plugin work, scene traffic, native shaping and input latency;
+its retained-allocation count is not a total memory budget.
+
 ## CI
 
 `.github/workflows/tests.yml` is the repository's only workflow. It runs on

@@ -458,6 +458,18 @@ Rendering, deferred navigation
 and editing receipts use the same negotiated policy. Clients omitting the
 capability keep the previous marker-bearing window policy.
 
+Repeated offscreen marker requests reuse a semantic sample only when its source
+range, item/body anchors and exact resolved conceal/replacement inputs match.
+Cursor-driven reveal therefore remains current without invalidating the cache
+for unrelated formatting elsewhere. Formatter readiness is checked before any
+reuse, including refresh failures. The cache belongs to one parsed document;
+source revision, marker-owner or authority replacement discards it. It retains
+at most 16 samples and 1 MiB of owned allocation capacity per cached document,
+including keys and entry storage. Oversized samples render without retention.
+This accounts for cache allocations, not allocator overhead or total process
+memory. It retains neither whole projections nor native font geometry, and
+the current pane's physical-line-start flag is recomputed on every request.
+
 The 64 KiB window size remains a target, not a content limit. A complete parsed
 paragraph or atomic replacement can extend it. Tight lists and blank
 boundaries of single-paragraph items retain their existing context until
