@@ -398,4 +398,59 @@ final class ComposeBackendTests: XCTestCase {
     XCTAssertTrue(editor.uninsertedText.isEmpty)
   }
 
+  @MainActor
+  func testExplicitPendingReplacementAndFollowingLiteralSaveAndUndoAsThreeTransactions() async throws {
+    let backend = try backend(); defer { backend.stop() }
+    let editor = editor(BackendPasteboard()); defer { editor.detachAll() }
+    let original = "| A | B |\n|---|---|\n| cell | value |\n\nalpha Tail\n"
+    let file = backend.root.appendingPathComponent("pending-explicit.md")
+    try Data(original.utf8).write(to: file)
+    try await attach(backend, file: file, editor: editor)
+    let grid = try XCTUnwrap(editor.grid), word = (original as NSString).range(of: "alpha")
+    grid.insertText("beta", replacementRange: word)
+    XCTAssertFalse(grid.hasMarkedText())
+    XCTAssertEqual(grid.selectedRange().location, word.location + 4)
+    grid.insertText("theta", replacementRange: NSRange(location: word.location, length: 4))
+    grid.insertText("!", replacementRange: NSRange(location: NSNotFound, length: 0))
+    XCTAssertEqual(grid.selectedRange().location, word.location + 6)
+    let expected = Data(original.replacingOccurrences(of: "alpha", with: "theta!").utf8)
+    XCTAssertEqual(grid.attributedSubstring(forProposedRange: NSRange(location: word.location, length: 6), actualRange: nil)?.string, "theta!")
+    try await eventually(editor, "three source-bound edits acknowledged") {
+      grid.focusedCompose?.pane.compose.documentLen == UInt64(expected.count) && grid.focusedCompose?.cursor?.position == UInt64(word.location + 6)
+    }
+    editor.send(.action(name: "save", argsJson: ""))
+    try await eventually(editor, "save explicit replacement of pending prefix") { (try? Data(contentsOf: file)) == expected }
+    for (index, size) in [original.utf8.count, original.utf8.count - 1, original.utf8.count].enumerated() {
+      editor.send(.action(name: "undo", argsJson: ""))
+      try await eventually(editor, "undo pending transaction \(index + 1)") { grid.focusedCompose?.pane.compose.documentLen == UInt64(size) }
+    }
+    editor.send(.action(name: "save", argsJson: ""))
+    try await eventually(editor, "save exact original after three undos") { (try? Data(contentsOf: file)) == Data(original.utf8) }
+    XCTAssertTrue(editor.uninsertedText.isEmpty)
+  }
+
+  @MainActor
+  func testCRFilePreviewUsesNormalizedLFAndSaveRetainsCRDiskPolicy() async throws {
+    let backend = try backend(); defer { backend.stop() }
+    let editor = editor(BackendPasteboard()); defer { editor.detachAll() }
+    let original = "| A | B |\r|---|---|\r| alpha | beta |\r"
+    let file = backend.root.appendingPathComponent("pending-cr.md")
+    try Data(original.utf8).write(to: file)
+    try await attach(backend, file: file, editor: editor)
+    let grid = try XCTUnwrap(editor.grid), word = (original as NSString).range(of: "alpha")
+    try await click(UInt64(word.location), editor: editor)
+    XCTAssertEqual(grid.focusedCompose?.pane.compose.nativeNewline, 1)
+    grid.insertText("🙂\r", replacementRange: NSRange(location: NSNotFound, length: 0))
+    XCTAssertEqual(grid.selectedRange().location, word.location + 3)
+    grid.insertText("語", replacementRange: NSRange(location: NSNotFound, length: 0))
+    XCTAssertEqual(grid.selectedRange().location, word.location + 4)
+    let expected = Data(original.replacingOccurrences(of: "alpha", with: "🙂\r語alpha").utf8)
+    try await eventually(editor, "normalized CR buffer coordinates acknowledged") {
+      grid.focusedCompose?.pane.compose.documentLen == UInt64(expected.count) && grid.focusedCompose?.cursor?.position == UInt64(word.location + 8)
+    }
+    editor.send(.action(name: "save", argsJson: ""))
+    try await eventually(editor, "save retains CR disk policy after both phrases") { (try? Data(contentsOf: file)) == expected }
+    XCTAssertTrue(editor.uninsertedText.isEmpty)
+  }
+
 }

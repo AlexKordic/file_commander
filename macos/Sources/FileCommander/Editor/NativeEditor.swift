@@ -58,6 +58,7 @@ final class NativeEditor: NSObject, CellGridDelegate {
     case message(SceneInput)
     case pointer(ComposePointer)
     case replacement(ComposeReplacement)
+    case pendingText(ComposePendingText)
   }
   private struct InputTarget {
     var identity: ComposePresentation.Identity
@@ -69,15 +70,16 @@ final class NativeEditor: NSObject, CellGridDelegate {
   }
   private struct CompositionChain {
     let predecessor: UUID
-    let initial, text: ComposeComposition
+    let text: ComposePendingText
   }
   private struct QueuedInput {
     let token = UUID()
     var input: PendingInput
     var scrollGeneration: UInt64
     var target: InputTarget?
-    let cursors: [UInt64]
     var chain: CompositionChain?
+    var preview: ComposePendingText?
+    var previewTarget: ComposePresentation?
   }
   private var composeQueue: [QueuedInput] = []
   private var nextComposeID: UInt64 = 0
@@ -343,11 +345,13 @@ final class NativeEditor: NSObject, CellGridDelegate {
           app?.engine.reportError(reply.error)
           Trace.write("editor input cancelled: \(reply.error)")
         } else if reply.accepted { lastComposeCancellation = nil }
-        if reply.cancelled, case .replacement(let replacement)? = composeQueue.first?.input {
-          if let grid { for text in replacement.texts { self.grid(grid, recover: text) } }
+        if reply.cancelled, let first = composeQueue.first, let grid {
+          if let preview = first.preview { for text in preview.recoveryTexts { self.grid(grid, recover: text) } }
+          else if case .replacement(let replacement) = first.input { for text in replacement.texts { self.grid(grid, recover: text) } }
         }
         resolveCompositionChains(receipt: reply.accepted && reply.hasEdit ? reply.edit : nil)
         if !composeQueue.isEmpty { composeQueue.removeFirst() }
+        grid?.refreshComposeImages()
         pendingComposeID = nil
         pendingComposePane = nil
         pendingComposeLayout = false
@@ -574,25 +578,24 @@ final class NativeEditor: NSObject, CellGridDelegate {
     enqueueCompose(.replacement(replacement), target: pane)
   }
 
-  func grid(_ grid: CellGridView, compositionPredecessorFor pane: ComposePresentation, cursors: [UInt64]) -> UUID? {
-    guard let last = composeQueue.last, let target = last.target, target.identity == pane.identity,
-          target.epoch == pane.pane.compose.viewport.epoch else { return nil }
-    let edited: Set<UInt64>
-    switch last.input {
-    case .replacement(let replacement):
-      let input = replacement.input(id: 0)
-      edited = Set([input.replacementCursor] + input.replacements.map(\.cursor))
-    case .message(.text(_)): edited = Set(last.cursors)
-    default: return nil
-    }
-    return Set(cursors).isSubset(of: edited) ? last.token : nil
+  func grid(_ grid: CellGridView, pendingTextFor pane: WirePane) -> ComposePendingPreview? {
+    guard let last = composeQueue.last, let target = last.previewTarget, let text = last.preview,
+          target.identity == .init(window: UInt64(store.windowID), leaf: pane.leaf, buffer: pane.buffer),
+          pane.hasCompose, pane.compose.viewport.epoch == target.pane.compose.viewport.epoch else { return nil }
+    return ComposePendingPreview(token: last.token, target: target, text: text)
   }
 
-  func grid(_ grid: CellGridView, commit replacement: ComposeReplacement, composition: ComposeComposition,
-            initial: ComposeComposition, after: UUID?, in pane: ComposePresentation) {
-    guard receivedHello else { for text in replacement.texts { self.grid(grid, recover: text) }; return }
-    let chain = after.map { CompositionChain(predecessor: $0, initial: initial, text: composition) }
-    enqueueCompose(.replacement(replacement), target: pane, chain: chain)
+  func grid(_ grid: CellGridView, commit text: ComposePendingText, after: UUID?, in pane: ComposePresentation) {
+    guard receivedHello else { for value in text.recoveryTexts { self.grid(grid, recover: value) }; return }
+    let chain = after.map { CompositionChain(predecessor: $0, text: text) }
+    if let after, !composeQueue.contains(where: { $0.token == after }) {
+      for value in text.recoveryTexts { self.grid(grid, recover: value) }; return
+    }
+    let input: PendingInput
+    if after != nil { input = .pendingText(text) }
+    else if let replacement = text.replacement(scope: pane.scope, epoch: pane.pane.compose.viewport.epoch) { input = .replacement(replacement) }
+    else { for value in text.recoveryTexts { self.grid(grid, recover: value) }; return }
+    enqueueCompose(input, target: pane, chain: chain, preview: text)
   }
 
   /// Rebase only descendants of this acknowledged native edit. Its immutable
@@ -608,14 +611,15 @@ final class NativeEditor: NSObject, CellGridDelegate {
       if let chain = queued.chain, chain.predecessor == first.token || failed.contains(chain.predecessor) {
         if let receipt = valid, chain.predecessor == first.token, let target = queued.target,
            receipt.matches(target.scope, epoch: target.epoch),
-           let text = chain.text.following(chain.initial, pane: receipt.pane, edited: receipt.cursors),
-           let replacement = ComposeReplacement(scope: receipt.scope, epoch: receipt.epoch, composition: text) {
+           let text = chain.text.resolved(pane: receipt.pane, edited: receipt.cursors),
+           let replacement = text.replacement(scope: receipt.scope, epoch: receipt.epoch),
+           let original = queued.previewTarget {
+          var pane = original.pane; pane.compose = receipt.pane
           queued.input = .replacement(replacement); queued.target?.scope = receipt.scope; queued.chain = nil
+          queued.preview = text; queued.previewTarget = grid?.composeSnapshot(pane)
         } else {
           failed.insert(queued.token)
-          if case .replacement(let replacement) = queued.input, let grid {
-            for text in replacement.texts { self.grid(grid, recover: text) }
-          }
+          if let grid { for text in chain.text.recoveryTexts { self.grid(grid, recover: text) } }
           continue
         }
       }
@@ -640,7 +644,10 @@ final class NativeEditor: NSObject, CellGridDelegate {
   private func recoverPendingText() {
     grid?.cancelComposition(recover: true)
     for queued in composeQueue {
-      if case .replacement(let replacement) = queued.input, let grid { for text in replacement.texts { self.grid(grid, recover: text) } }
+      if let grid {
+        if let preview = queued.preview { for text in preview.recoveryTexts { self.grid(grid, recover: text) } }
+        else if case .replacement(let replacement) = queued.input { for text in replacement.texts { self.grid(grid, recover: text) } }
+      }
     }
     composeQueue.removeAll()
   }
@@ -699,16 +706,36 @@ final class NativeEditor: NSObject, CellGridDelegate {
       case .key, .paste, .text, .action: target = grid?.focusedCompose
       default: target = nil
       }
-      enqueueCompose(.message(input), target: target)
+      if case .text(let text) = input, let target {
+        let unspecified = NSRange(location: NSNotFound, length: 0)
+        let pending = grid.flatMap { self.grid($0, pendingTextFor: target.pane) }
+        let draft = pending.flatMap {
+          ComposePendingText(following: $0.text, pane: $0.target.pane.compose,
+            text: NSAttributedString(string: text), selected: NSRange(location: text.utf16.count, length: 0), replacement: unspecified)
+        } ?? (pending == nil ? ComposePendingText(pane: target.pane.compose, text: NSAttributedString(string: text),
+          selected: NSRange(location: text.utf16.count, length: 0), replacement: unspecified) : nil)
+        let root = pending?.target ?? target
+        if let preview = draft?.committed(nativeNewline: root.pane.compose.nativeNewline) {
+          let chain = pending.map { CompositionChain(predecessor: $0.token, text: preview) }
+          enqueueCompose(chain == nil ? .message(input) : .pendingText(preview), target: root, chain: chain, preview: preview)
+        } else {
+          // Older peers or opaque queued actions still use Fresh's ordinary
+          // ordered input path; there is no guessed multiline preview.
+          enqueueCompose(.message(input), target: target)
+        }
+      } else { enqueueCompose(.message(input), target: target) }
     default:
       socket?.send(input)
     }
   }
 
-  private func enqueueCompose(_ input: PendingInput, target: ComposePresentation?, chain: CompositionChain? = nil) {
+  private func enqueueCompose(_ input: PendingInput, target: ComposePresentation?, chain: CompositionChain? = nil,
+                              preview: ComposePendingText? = nil) {
     if composeQueue.isEmpty { lastComposeCancellation = nil }
     composeQueue.append(.init(input: input, scrollGeneration: composeViewports.userScrollGeneration,
-      target: target.map(InputTarget.init), cursors: target?.pane.compose.cursors.map(\.id) ?? [], chain: chain))
+      target: target.map(InputTarget.init), chain: chain,
+      preview: preview, previewTarget: preview == nil ? nil : target))
+    grid?.refreshComposeImages()
     pumpComposeInput()
   }
 
@@ -716,6 +743,7 @@ final class NativeEditor: NSObject, CellGridDelegate {
   /// resulting source map. A stale event keeps its id and is measured again.
   private func pumpComposeInput() {
     guard receivedHello, let socket, socket.isOpen, !composeInFlight, !completingComposeInput, let queued = composeQueue.first else { return }
+    if case .pendingText = queued.input { return } // Its predecessor must supply real source coordinates.
     if pendingComposeID == nil {
       nextComposeID += 1
       pendingComposeID = nextComposeID
@@ -734,6 +762,7 @@ final class NativeEditor: NSObject, CellGridDelegate {
     var input = WireComposeInput()
     input.id = pendingComposeID ?? 0
     switch queued.input {
+    case .pendingText: return
     case .message(let message):
       input.kind = UInt32(message.kind.rawValue)
       input.payload = Data(message.payload())

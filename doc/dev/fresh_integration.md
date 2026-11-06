@@ -506,8 +506,8 @@ cursor's source/UTF-16 position, with the client's viewport epoch. The source
 may still owe its formatting projection. Retries of the current accepted input
 repeat that receipt; later edits cannot rewrite it.
 
-A new default-range composition can record a dependency on the preceding
-queued native edit that owns its captured carets. The native controller uses
+A new composition can record a dependency on the preceding queued native edit
+that owns its captured carets. The native controller uses
 only that edit's matching receipt to rebase active drafts and already queued
 commits. A newer scene's cursor cannot replace the captured owner. The rebase
 retains attributed draft text, marked/selected subranges and every cursor ID;
@@ -515,6 +515,25 @@ expanded surrounding ranges must still agree with the accepted source context.
 Invalid lifetime, retired/foreign carets, conflicting context or a missing
 receipt recovers the dependent text without partially inserting its group.
 Rejecting a predecessor recovers queued and still-marked descendants as well.
+
+`ComposePendingText` keeps committed prefixes visible before their replies.
+Drawing, selected ranges, substring queries and hit/candidate geometry use the
+same provisional document. A committed prefix is unmarked; a following draft
+can replace part of that prefix or expand into the captured surrounding source.
+Each subsequent operation records its delta from the preceding committed
+preview. That delta becomes a source replacement only after its predecessor's
+receipt supplies real byte/UTF-16 coordinates and matching context. Virtual
+source ranges never travel on the wire, and already submitted prefixes are
+not inserted or recovered twice. This is a presentation overlay over Fresh's
+snapshot, not a second Markdown parser or editable buffer.
+
+`ComposePane.native_newline` (field 23) declares Fresh's insertion separator:
+0 unknown, 1 LF, 2 CRLF. CR disk files use LF internally. The native preview
+normalizes committed phrases using that policy, including surrogate characters
+and attributed text; it does not infer line endings from rendered Markdown.
+Unknown older peers cannot provide a reliable multiline composition preview;
+the composition is retained as uninserted text. Ordinary text actions retain
+Fresh's ordered-input fallback. Development tests require a matching backend.
 
 Receipt source, byte ranges and UTF-16 context form one snapshot. While a
 rebased draft is active, a pending formatting update cannot substitute an older
@@ -561,11 +580,14 @@ be copied explicitly from **Edit > Copy Uninserted Text**, including after
 disconnection. Failure never overwrites the system clipboard, and copying
 does not erase the retained text. This is not a persistent crash checkpoint.
 Dependent active and queued conversions now use accepted source receipts.
-Local text-service presentation before those receipts, explicit initial ranges
-during queued edits, interactive input-method behavior and full recovery
-qualification remain open; this development implementation does not establish
-full IME support. Context
-sizing and scene traffic still need performance qualification before release.
+Immediate presentation and explicit initial replacements during consecutive
+queued text edits have automated coverage. A different caret group still
+requires a fresh authoritative context. Opaque queued navigation, clipboard
+paste and other actions form a boundary for local prediction; arbitrary
+interleavings, interactive input-method behavior and full recovery qualification
+remain open. This development implementation does not establish full IME
+support. Context sizing and scene traffic still need performance qualification
+before release.
 
 Native Compose must wrap using measured fonts and available pixel width.
 Terminal Markdown column counts, padded or truncated table replacements and
