@@ -437,6 +437,21 @@ This index supplies source coordinates, not visual widths. The real-backend
 offscreen movement, document-wide UTF-16 positions, resize, Unicode editing,
 exact save and undo. Prose remains proportional and wraps to available pixels.
 
+Parser-owned hanging-prefix samples now travel in `ComposePane.hanging_contexts`
+(field 25). Each sample contains the projected marker and one complete body
+grapheme, with relative display-byte font spans and the source item/body
+anchors. It contains no column count. The native client validates ownership
+and UTF-8 boundaries, then measures it in the current fonts if the marker is
+outside a supplied source slice. It charges physical continuation whitespace
+only once and invalidates reused geometry when the sample changes. Sample
+text contributes neither editable characters nor caret stops.
+
+This is a prerequisite for bounded windows. The current producer extracts
+samples from complete marker-bearing projections; the window planner still
+retains whole paragraph/list context. A future clipped producer must assemble
+and retain its prefix sample before clipping. Paragraph shaping context and
+repeatable soft-wrap anchors remain separate requirements.
+
 These changes bound the continuation reader's requests, not whole-window
 payloads, retained logical batches or subsequent grammar/formatter work. A long
 physical paragraph can still occupy a complete native source window. Source

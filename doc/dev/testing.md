@@ -491,6 +491,14 @@ Fresh's pure plugin tests separately compare the long-line UTF-8 offset index
 against native encoding, including malformed-string and surrogate-interior
 fallback. That index changes source lookup cost, not native wrapping width.
 
+Hanging-prefix contract tests compare clipped list indentation with complete
+Core Text layouts at multiple font sizes and pane widths, including styled
+Latin, Arabic, Hebrew, CJK and emoji. They check physical continuation
+whitespace, unchanged source/caret ownership, malformed or foreign samples,
+and geometry reuse after prefix-font changes. The real-plugin/socket contract
+checks parser-owned prefix samples for nested, task and quoted lists. These
+checks do not qualify clipping a whole bidi paragraph or soft-wrap paging.
+
 ## CI
 
 `.github/workflows/tests.yml` is the repository's only workflow. It runs on
