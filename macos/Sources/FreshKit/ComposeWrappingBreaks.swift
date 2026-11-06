@@ -73,6 +73,7 @@ final class ComposeWrappingBreaks {
     var paragraphs: [Paragraph] = [], from = 0
     var tokenizer: CFStringTokenizer?
     let whitespace = CharacterSet.whitespacesAndNewlines
+    let nonWhitespace = whitespace.inverted
     while from < string.length {
       let newline = string.rangeOfCharacter(from: .newlines,
         range: NSRange(location: from, length: string.length - from))
@@ -110,8 +111,8 @@ final class ComposeWrappingBreaks {
       while CFStringTokenizerAdvanceToNextToken(tokenizer).rawValue != 0 {
         let token = CFStringTokenizerGetCurrentTokenRange(tokenizer)
         let unit = NSRange(location: token.location, length: token.length)
-        let first = string.rangeOfCharacter(from: whitespace.inverted, range: unit)
-        let last = string.rangeOfCharacter(from: whitespace.inverted, options: .backwards, range: unit)
+        let first = string.rangeOfCharacter(from: nonWhitespace, range: unit)
+        let last = string.rangeOfCharacter(from: nonWhitespace, options: .backwards, range: unit)
         let complex = first.location != NSNotFound && string.rangeOfCharacter(from: whitespace,
           range: NSRange(location: first.location, length: NSMaxRange(last) - first.location)).location != NSNotFound
         units.append(Unit(end: NSMaxRange(unit),
