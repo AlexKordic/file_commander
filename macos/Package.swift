@@ -40,6 +40,8 @@ let package = Package(
       swiftSettings: [.interoperabilityMode(.Cxx)]),
     .executableTarget(name: "fc-relaunch"),
     .executableTarget(name: "fc-askpass"),
+    // Explicit development resource profile; not included in the app bundle.
+    .executableTarget(name: "fc-compose-profile", dependencies: ["FreshKit"]),
     .testTarget(name: "FCKitTests", dependencies: ["FCKit"], swiftSettings: [.interoperabilityMode(.Cxx)]),
     .testTarget(name: "ExplainerKitTests", dependencies: ["ExplainerKit"]),
     .testTarget(name: "FreshKitTests", dependencies: ["FreshKit"], resources: [.copy("Fixtures")]),

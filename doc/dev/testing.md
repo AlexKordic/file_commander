@@ -432,6 +432,33 @@ The index covers FC's own code, not the vendored libraries, and does not claim
 a line or branch coverage percentage. Benchmarks report timings without
 thresholds; compare them only between Release builds on the same machine.
 
+### Rich Compose resource profiles
+
+The experimental native Compose path has an explicit, reproducible resource
+profile. Use a matching development Fresh checkout containing the profile
+module:
+
+```sh
+python3 macos/tools/profile_compose.py --fresh ../editor-fresh \
+  --profile release --output build-xcode-evidence/compose-resources-release
+```
+
+The tool runs an ignored Fresh parser/projection profile, exports actual binary
+Compose panes, then measures protobuf decoding and Core Text layout with the
+native consumer. Fixtures cover small and large prose, nested quotes/lists/code,
+an image-heavy paragraph, and a large table with unique cells. Each records
+three samples, unchanged-layout reuse and four simultaneous pane layouts.
+Artifacts include hardware/compiler/repository metadata, fixture SHA-256s,
+source/window/payload sizes, timings and process peak RSS. RSS is a cumulative
+process high-water mark, not the allocation cost of an individual case.
+
+Use `--profile debug` for diagnosing algorithms; compare the same fixtures and
+configuration on the same machine. These profiles exclude plugin formatting,
+image reads/decode, painting and typing-to-paint latency. They neither create
+a backend session nor qualify GUI/SSH/recovery behavior. Source sizes beyond
+the current native cache limit are measured directly and explicitly reported
+as unavailable through that cache; exporting a pane does not remove the limit.
+
 ## CI
 
 `.github/workflows/tests.yml` is the repository's only workflow. It runs on
