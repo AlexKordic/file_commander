@@ -377,12 +377,12 @@ missing-cell source reveal through a font change and page selection/replacement
 across a large source window. Without the variable these backend checks skip;
 ordinary native unit/scene-peer checks still run.
 
-One strict expected-failure regression records the consecutive-composition
-snapshot bug: after Fresh accepts a phrase, a second marked draft keeps the
-older displayed source and UTF-16 location. The test still requires both
-commits to save in order, and does not waive any source-preservation check.
-That display/coordinate failure must be fixed before release; these tests
-are not full system input-method, SSH or interactive qualification.
+The consecutive-composition regression now requires the accepted prefix to
+remain visible with correct source UTF-16 positions; it has no expected-failure
+exemption. Further backend checks replace an initial selection only once when
+two commits are queued, preserve all original carets, undo each phrase/batch
+separately and follow Fresh's CRLF normalization. These tests are not full
+system input-method, SSH or interactive qualification.
 
 The experimental client hello opts into source-preserving Compose projections.
 Fresh owns source buffers, selections, undo, saving, and filesystem authority;
@@ -498,6 +498,30 @@ selections in its captured view. It uses Fresh's normal event/undo machinery
 and line-ending policy without clipboard column distribution. Plain clipboard
 paste keeps that distribution.
 
+Successful native phrase/replacement replies include `InputReply.edit`
+(field 10), a `ComposeEditReceipt`. It identifies the window, split, buffer and
+buffer lifetime, the edited cursor IDs, and an immutable `ComposePane` captured
+immediately after the transaction. It includes raw source context and each
+cursor's source/UTF-16 position, with the client's viewport epoch. The source
+may still owe its formatting projection. Retries of the current accepted input
+repeat that receipt; later edits cannot rewrite it.
+
+A new default-range composition can record a dependency on the preceding
+queued native edit that owns its captured carets. The native controller uses
+only that edit's matching receipt to rebase active drafts and already queued
+commits. A newer scene's cursor cannot replace the captured owner. The rebase
+retains attributed draft text, marked/selected subranges and every cursor ID;
+expanded surrounding ranges must still agree with the accepted source context.
+Invalid lifetime, retired/foreign carets, conflicting context or a missing
+receipt recovers the dependent text without partially inserting its group.
+Rejecting a predecessor recovers queued and still-marked descendants as well.
+
+Receipt source, byte ranges and UTF-16 context form one snapshot. While a
+rebased draft is active, a pending formatting update cannot substitute an older
+source projection. Completed formatting for the same source revision can
+replace the raw projection while preserving the captured context. Input queue
+completion also prevents reentrant callbacks from resending the accepted edit.
+
 `ComposePane.text_context` supplies raw Markdown near the primary caret for
 unmarked native text services. `source_start` is a buffer-wide UTF-8 byte
 offset; `utf16_start` and the selection bounds are buffer-wide source UTF-16
@@ -536,9 +560,11 @@ Uninserted text is retained in FC memory for the application session and can
 be copied explicitly from **Edit > Copy Uninserted Text**, including after
 disconnection. Failure never overwrites the system clipboard, and copying
 does not erase the retained text. This is not a persistent crash checkpoint.
-Consecutive compositions while edits await replies,
-interactive input-method behavior and recovery qualification remain open;
-this development implementation does not establish full IME support. Context
+Dependent active and queued conversions now use accepted source receipts.
+Local text-service presentation before those receipts, explicit initial ranges
+during queued edits, interactive input-method behavior and full recovery
+qualification remain open; this development implementation does not establish
+full IME support. Context
 sizing and scene traffic still need performance qualification before release.
 
 Native Compose must wrap using measured fonts and available pixel width.

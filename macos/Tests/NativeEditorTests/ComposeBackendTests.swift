@@ -290,15 +290,10 @@ final class ComposeBackendTests: XCTestCase {
       editor.store.panes.contains { $0.hasCompose && $0.compose.bufferRevision != revision }
     }
     XCTAssertTrue(grid.hasMarkedText())
-    // Strict known failure until dependent drafts can move from their captured
-    // snapshot to the acknowledged preceding commit. Saving below must still
-    // prove both phrases reached Fresh in order; no data-loss check is waived.
-    XCTExpectFailure("A consecutive marked draft freezes the snapshot from before the preceding native commit") {
-      XCTAssertTrue(grid.focusedCompose?.layout.text.projection.text.contains("日本語alpha") == true,
-        "the acknowledged first commit must remain visible while composing the next phrase")
-      let base = original[..<word.lowerBound].utf16.count
-      XCTAssertEqual(grid.markedRange().location, base + "日本".utf16.count)
-    }
+    XCTAssertTrue(grid.focusedCompose?.layout.text.projection.text.contains("日本語alpha") == true,
+      "the acknowledged first commit must remain visible while composing the next phrase")
+    let base = original[..<word.lowerBound].utf16.count
+    XCTAssertEqual(grid.markedRange().location, base + "日本".utf16.count)
     grid.insertText("語", replacementRange: NSRange(location: NSNotFound, length: 0))
     let expected = Data(original.utf8.prefix(Int(start))) + Data("日本語".utf8) + Data(original.utf8.dropFirst(Int(start)))
     try await eventually(editor, "consecutive native commits append in source order") {
@@ -306,6 +301,100 @@ final class ComposeBackendTests: XCTestCase {
     }
     editor.send(.action(name: "save", argsJson: ""))
     try await eventually(editor, "save both phrases without reversing or replacing either") { (try? Data(contentsOf: file)) == expected }
+    XCTAssertTrue(editor.uninsertedText.isEmpty)
+  }
+
+  @MainActor
+  func testConsecutiveCommitsBeforeAcknowledgmentReplaceTheOriginalSelectionOnlyOnce() async throws {
+    let backend = try backend(); defer { backend.stop() }
+    let pasteboard = BackendPasteboard(), editor = editor(pasteboard)
+    defer { editor.detachAll() }
+    let original = "| A | B |\n|---|---|\n| alpha | beta |\n"
+    let file = backend.root.appendingPathComponent("queued-compositions.md")
+    try Data(original.utf8).write(to: file)
+    try await attach(backend, file: file, editor: editor)
+    let grid = try XCTUnwrap(editor.grid)
+    let word = try XCTUnwrap(original.range(of: "alpha")), start = UInt64(original[..<word.lowerBound].utf8.count)
+    try await click(start, editor: editor)
+    for _ in 0..<5 { editor.send(.action(name: "select_right", argsJson: "")) }
+    try await eventually(editor, "select original word") { grid.focusedCompose?.cursor?.position == start + 5 && grid.focusedCompose?.cursor?.anchor == start }
+    for phrase in ["日本", "語"] {
+      grid.setMarkedText(phrase, selectedRange: NSRange(location: phrase.utf16.count, length: 0), replacementRange: NSRange(location: NSNotFound, length: 0))
+      grid.insertText(phrase, replacementRange: NSRange(location: NSNotFound, length: 0))
+    }
+    let expected = Data(original.utf8.prefix(Int(start))) + Data("日本語".utf8) + Data(original.utf8.dropFirst(Int(start) + 5))
+    try await eventually(editor, "queued conversions complete without replacing the first phrase") {
+      grid.focusedCompose?.pane.compose.documentLen == UInt64(expected.count) && grid.focusedCompose?.cursor?.position == start + 9
+    }
+    editor.send(.action(name: "save", argsJson: ""))
+    try await eventually(editor, "save queued conversions in order") { (try? Data(contentsOf: file)) == expected }
+    editor.send(.action(name: "undo", argsJson: ""))
+    try await eventually(editor, "undo only the second phrase") { grid.focusedCompose?.pane.compose.documentLen == UInt64(original.utf8.count + 1) }
+    editor.send(.action(name: "undo", argsJson: ""))
+    try await eventually(editor, "undo the original replacement") { grid.focusedCompose?.pane.compose.documentLen == UInt64(original.utf8.count) }
+    editor.send(.action(name: "save", argsJson: ""))
+    try await eventually(editor, "save exact original after two undos") { (try? Data(contentsOf: file)) == Data(original.utf8) }
+    XCTAssertTrue(editor.uninsertedText.isEmpty)
+  }
+
+  @MainActor
+  func testDependentConversionsKeepEveryOriginalCaretThroughARealBackendBatch() async throws {
+    let backend = try backend(); defer { backend.stop() }
+    let pasteboard = BackendPasteboard(), editor = editor(pasteboard)
+    defer { editor.detachAll() }
+    let original = "| A | B |\n|---|---|\n| cell | value |\n\nalpha one\nalpha two\n"
+    let file = backend.root.appendingPathComponent("multi-compositions.md")
+    try Data(original.utf8).write(to: file)
+    try await attach(backend, file: file, editor: editor)
+    let grid = try XCTUnwrap(editor.grid), word = try XCTUnwrap(original.range(of: "alpha"))
+    try await click(UInt64(original[..<word.lowerBound].utf8.count), editor: editor)
+    editor.send(.action(name: "add_cursor_below", argsJson: ""))
+    try await eventually(editor, "two captured carets") { grid.focusedCompose?.pane.compose.cursors.count == 2 }
+    let ids = Set(try XCTUnwrap(grid.focusedCompose).pane.compose.cursors.map(\.id))
+    for phrase in ["日本", "語"] {
+      grid.setMarkedText(phrase, selectedRange: NSRange(location: phrase.utf16.count, length: 0), replacementRange: NSRange(location: NSNotFound, length: 0))
+      grid.insertText(phrase, replacementRange: NSRange(location: NSNotFound, length: 0))
+    }
+    let expected = Data(original.replacingOccurrences(of: "alpha", with: "日本語alpha").utf8)
+    try await eventually(editor, "both batches complete at both original carets") {
+      grid.focusedCompose?.pane.compose.documentLen == UInt64(expected.count)
+    }
+    XCTAssertEqual(Set(try XCTUnwrap(grid.focusedCompose).pane.compose.cursors.map(\.id)), ids)
+    editor.send(.action(name: "save", argsJson: ""))
+    try await eventually(editor, "save both complete phrases at both carets") { (try? Data(contentsOf: file)) == expected }
+    editor.send(.action(name: "undo", argsJson: ""))
+    try await eventually(editor, "one undo removes the second phrase from both carets") {
+      grid.focusedCompose?.pane.compose.documentLen == UInt64(original.utf8.count + 12)
+    }
+    editor.send(.action(name: "undo", argsJson: ""))
+    try await eventually(editor, "second undo removes the first batch") { grid.focusedCompose?.pane.compose.documentLen == UInt64(original.utf8.count) }
+    editor.send(.action(name: "save", argsJson: ""))
+    try await eventually(editor, "save exact original after undoing both batches") { (try? Data(contentsOf: file)) == Data(original.utf8) }
+    XCTAssertTrue(editor.uninsertedText.isEmpty)
+  }
+
+  @MainActor
+  func testReceiptCoordinatesFollowFreshNewlineNormalization() async throws {
+    let backend = try backend(); defer { backend.stop() }
+    let pasteboard = BackendPasteboard(), editor = editor(pasteboard)
+    defer { editor.detachAll() }
+    let original = "| A | B |\r\n|---|---|\r\n| alpha | beta |\r\n"
+    let file = backend.root.appendingPathComponent("newline-compositions.md")
+    try Data(original.utf8).write(to: file)
+    try await attach(backend, file: file, editor: editor)
+    let grid = try XCTUnwrap(editor.grid), word = try XCTUnwrap(original.range(of: "alpha"))
+    let start = UInt64(original[..<word.lowerBound].utf8.count)
+    try await click(start, editor: editor)
+    for phrase in ["🙂\n", "語"] {
+      grid.setMarkedText(phrase, selectedRange: NSRange(location: phrase.utf16.count, length: 0), replacementRange: NSRange(location: NSNotFound, length: 0))
+      grid.insertText(phrase, replacementRange: NSRange(location: NSNotFound, length: 0))
+    }
+    let expected = Data(original.utf8.prefix(Int(start))) + Data("🙂\r\n語".utf8) + Data(original.utf8.dropFirst(Int(start)))
+    try await eventually(editor, "Fresh-normalized source and UTF-16 coordinates") {
+      grid.focusedCompose?.pane.compose.documentLen == UInt64(expected.count) && grid.focusedCompose?.cursor?.position == start + 9
+    }
+    editor.send(.action(name: "save", argsJson: ""))
+    try await eventually(editor, "save normalized CRLF with both phrases") { (try? Data(contentsOf: file)) == expected }
     XCTAssertTrue(editor.uninsertedText.isEmpty)
   }
 

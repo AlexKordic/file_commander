@@ -16,7 +16,9 @@ protocol CellGridDelegate: AnyObject {
   func grid(_ grid: CellGridView, scroll delta: CGPoint, in pane: ComposePresentation)
   func grid(_ grid: CellGridView, revealCaretIn pane: ComposePresentation)
   func grid(_ grid: CellGridView, replace text: String, range: NSRange, in pane: ComposePresentation)
-  func grid(_ grid: CellGridView, commit replacement: ComposeReplacement, in pane: ComposePresentation)
+  func grid(_ grid: CellGridView, compositionPredecessorFor pane: ComposePresentation, cursors: [UInt64]) -> UUID?
+  func grid(_ grid: CellGridView, commit replacement: ComposeReplacement, composition: ComposeComposition,
+            initial: ComposeComposition, after: UUID?, in pane: ComposePresentation)
   func grid(_ grid: CellGridView, recover text: String)
   var optionAsAlt: Bool { get }
 }
@@ -53,6 +55,8 @@ final class CellGridView: NSView, @preconcurrency NSTextInputClient {
   private struct Composition {
     let target: ComposePresentation
     var text: ComposeComposition
+    let initial: ComposeComposition
+    let after: UUID?
   }
   private var composition: Composition?
   private var compositionDragAnchor: Int?
@@ -240,11 +244,18 @@ final class CellGridView: NSView, @preconcurrency NSTextInputClient {
             input.compose.viewport.epoch == value.target.pane.compose.viewport.epoch else { return nil }
       pane = value.target.pane; pane.content = input.content
       if input.compose.bufferRevision == pane.compose.bufferRevision {
+        // Formatting can finish after an edit receipt. Use that projection
+        // while retaining the captured cursor and raw text-service context.
+        if value.text.values.values.allSatisfy({ $0.source.lowerBound >= input.compose.sourceStart && $0.source.upperBound <= input.compose.sourceEnd }) {
+          let captured = pane.compose
+          pane.compose = input.compose; pane.compose.cursors = captured.cursors
+          pane.compose.textContext = captured.textContext; pane.compose.textChunks = captured.textChunks
+        }
         pane.compose.viewport = input.compose.viewport; pane.compose.topByte = input.compose.topByte
       }
       return value.text
     }
-    if pane.hasCompose, !pane.compose.formattingReady, let reuse, reuse.pane.compose.formattingReady,
+    if preedit == nil, pane.hasCompose, !pane.compose.formattingReady, let reuse, reuse.pane.compose.formattingReady,
        reuse.identity == .init(window: UInt64(store.windowID), leaf: pane.leaf, buffer: pane.buffer),
        reuse.pane.compose.viewport.epoch == pane.compose.viewport.epoch,
        reuse.pane.compose.assetAuthority == pane.compose.assetAuthority,
@@ -615,7 +626,9 @@ final class CellGridView: NSView, @preconcurrency NSTextInputClient {
       guard let value = ComposeComposition(pane: target.pane.compose, text: text, selected: selectedRange, replacement: replacementRange) else {
         delegate?.grid(self, recover: text.string); return
       }
-      composition = Composition(target: target, text: value)
+      let after = replacementRange.location == NSNotFound
+        ? delegate?.grid(self, compositionPredecessorFor: target, cursors: value.ordered) : nil
+      composition = Composition(target: target, text: value, initial: value, after: after)
       marked = ""; rebuildCompose(); revealCompositionCaret(); needsDisplay = true; return
     }
     marked = (string as? NSAttributedString)?.string ?? (string as? String) ?? ""
@@ -639,7 +652,7 @@ final class CellGridView: NSView, @preconcurrency NSTextInputClient {
     compositionDragAnchor = nil
     if let replacement = ComposeReplacement(scope: current.target.scope, epoch: current.target.pane.compose.viewport.epoch,
       composition: current.text) {
-      delegate?.grid(self, commit: replacement, in: current.target)
+      delegate?.grid(self, commit: replacement, composition: current.text, initial: current.initial, after: current.after, in: current.target)
     } else {
       var seen: Set<String> = []
       for id in current.text.ordered {
@@ -649,6 +662,28 @@ final class CellGridView: NSView, @preconcurrency NSTextInputClient {
     }
     inputContext?.discardMarkedText()
     if rebuild { rebuildCompose(); needsDisplay = true }
+  }
+
+  /// Only a draft explicitly following this queued edit can use its receipt.
+  /// A later scene's cursor is never substituted for the captured owner.
+  func resolveComposition(after token: UUID, receipt: WireComposeEditReceipt?) {
+    guard let current = composition, current.after == token else { return }
+    let target = current.target
+    guard let receipt, receipt.matches(target.scope, epoch: target.pane.compose.viewport.epoch),
+          UInt64(store.windowID) == receipt.window,
+          store.panes.contains(where: { $0.leaf == receipt.leaf && $0.buffer == receipt.buffer && $0.hasCompose
+            && $0.compose.viewport.epoch == receipt.epoch }),
+          let text = current.text.following(current.initial, pane: receipt.pane, edited: receipt.cursors) else {
+      cancelComposition(recover: true); return
+    }
+    var pane = target.pane; pane.compose = receipt.pane
+    composition = nil
+    guard let next = presentation(pane) else {
+      composition = current; cancelComposition(recover: true); return
+    }
+    composition = Composition(target: next, text: text, initial: text, after: nil)
+    rebuildCompose(); revealCompositionCaret(); needsDisplay = true
+    inputContext?.invalidateCharacterCoordinates()
   }
 
   func cancelComposition(recover: Bool, rebuild: Bool = true) {

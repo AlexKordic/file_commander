@@ -344,6 +344,64 @@ final class ComposeInputTests: XCTestCase {
   }
 
   @MainActor
+  func testDependentMarkedDraftUsesTheAcceptedReceiptInsteadOfANewerSceneCursor() async throws {
+    var before = pane("alpha Tail")
+    before.compose.cursors[0].anchor = 0; before.compose.cursors[0].position = 5
+    before.compose.cursors[0].utf16Anchor = 0; before.compose.cursors[0].utf16Position = 5
+    before.compose.textContext.selectionStart = 0; before.compose.textContext.selectionEnd = 5
+    let peer = try ScenePeer(pane: before); defer { peer.close() }
+    let editor = richEditor(); defer { editor.detachAll() }
+    editor.attach(socketPath: peer.path, app: nil)
+    try await eventually { editor.grid?.focusedCompose != nil }
+    let grid = try XCTUnwrap(editor.grid)
+    grid.setMarkedText("日本", selectedRange: NSRange(location: 2, length: 0), replacementRange: NSRange(location: NSNotFound, length: 0))
+    grid.insertText("日本", replacementRange: NSRange(location: NSNotFound, length: 0))
+    try await eventually { peer.inputs.count == 1 }
+    grid.setMarkedText("語", selectedRange: NSRange(location: 1, length: 0), replacementRange: NSRange(location: NSNotFound, length: 0))
+    var committed = pane("日本 Tail", revision: 5)
+    committed.compose.ready = false // Receipt source is current while formatting still owes its projection.
+    committed.compose.cursors[0].position = 6; committed.compose.cursors[0].utf16Position = 2
+    committed.compose.textContext.selectionStart = 2; committed.compose.textContext.selectionEnd = 2
+    let receipt = WireComposeEditReceipt.with {
+      $0.window = 1; $0.leaf = 2; $0.buffer = 3; $0.epoch = 7; $0.cursors = [1]; $0.pane = committed.compose
+    }
+    let newer = pane("X日本 Tail", revision: 6)
+    peer.reply(.with { $0.id = 1; $0.accepted = true; $0.edit = receipt }, pane: newer)
+    try await eventually { grid.markedRange().location == 2 && grid.focusedCompose?.pane.compose.bufferRevision == 5 }
+    XCTAssertTrue(grid.focusedCompose?.layout.text.projection.text.contains("日本語 Tail") == true)
+    XCTAssertEqual(grid.selectedRange(), NSRange(location: 3, length: 0))
+    grid.insertText("語", replacementRange: NSRange(location: NSNotFound, length: 0))
+    try await eventually { peer.inputs.count == 2 }
+    let next = peer.inputs[1]
+    XCTAssertEqual(next.sourceRevision, 5); XCTAssertEqual(next.replacementStart, 6); XCTAssertEqual(next.replacementEnd, 6)
+    XCTAssertEqual(next.replacementCursor, 1)
+    peer.reply(.with { $0.id = 2; $0.accepted = true })
+  }
+
+  @MainActor
+  func testRejectingAPredecessorRecoversQueuedAndStillMarkedDependentPhrasesOnce() async throws {
+    let peer = try ScenePeer(pane: pane("alpha Tail")); defer { peer.close() }
+    let editor = richEditor(); defer { editor.detachAll() }
+    editor.attach(socketPath: peer.path, app: nil)
+    try await eventually { editor.grid?.focusedCompose != nil }
+    let grid = try XCTUnwrap(editor.grid)
+    for text in ["日本", "語"] {
+      grid.setMarkedText(text, selectedRange: NSRange(location: text.utf16.count, length: 0), replacementRange: NSRange(location: NSNotFound, length: 0))
+      grid.insertText(text, replacementRange: NSRange(location: NSNotFound, length: 0))
+    }
+    grid.setMarkedText("次", selectedRange: NSRange(location: 1, length: 0), replacementRange: NSRange(location: NSNotFound, length: 0))
+    try await eventually { peer.inputs.count == 1 }
+    peer.reply(.with { $0.id = 1; $0.cancelled = true; $0.error = "The original range changed." })
+    try await eventually { editor.uninsertedText.count == 3 }
+    XCTAssertEqual(editor.uninsertedText, ["日本", "語", "次"])
+    XCTAssertFalse(grid.hasMarkedText()); XCTAssertEqual(peer.inputs.count, 1)
+    grid.insertText("ok", replacementRange: NSRange(location: NSNotFound, length: 0))
+    try await eventually { peer.inputs.count == 2 }
+    XCTAssertEqual(try WirePaste(serializedBytes: peer.inputs[1].payload).text, "ok")
+    peer.reply(.with { $0.id = 2; $0.accepted = true })
+  }
+
+  @MainActor
   func testLargePrimarySelectionCanBeReplacedBeyondTheBoundedTextContext() async throws {
     let prefix = String(repeating: "文", count: 4000), source = prefix + "Tail"
     var last = pane(source)

@@ -11,13 +11,14 @@ public struct ComposeMarkedText {
   public private(set) var selected: NSRange
 
   public init?(context: ComposeTextContext, range: NSRange, source: Range<Int>,
-               text: NSAttributedString, selected: NSRange) {
-    guard Self.end(range) != nil, Self.valid(selected, in: text.string), source.lowerBound >= 0,
+               text: NSAttributedString, selected: NSRange, marked: NSRange? = nil) {
+    let marked = marked ?? NSRange(location: 0, length: text.length)
+    guard Self.end(range) != nil, Self.valid(selected, in: text.string), Self.valid(marked, in: text.string), source.lowerBound >= 0,
           range.location <= Int.max - text.length,
           range.location <= NSMaxRange(context.range), NSMaxRange(range) >= context.range.location else { return nil }
     self.context = context; originalRange = range; self.source = source
     draft = text.copy() as! NSAttributedString
-    marked = NSRange(location: 0, length: text.length); self.selected = selected
+    self.marked = marked; self.selected = selected
   }
 
   public var markedRange: NSRange { NSRange(location: originalRange.location + marked.location, length: marked.length) }

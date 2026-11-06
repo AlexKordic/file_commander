@@ -54,6 +54,45 @@ public struct ComposeComposition {
     self.init(primary: cursor.id, values: values)
   }
 
+  /// A new conversion started while a preceding native commit was pending.
+  /// Only its receipt's edited cursors can supply the new insertion basis.
+  /// Unchanged context outside an expanded range must agree with that receipt.
+  public func following(_ initial: ComposeComposition, pane: WireComposePane, edited: [UInt64]) -> ComposeComposition? {
+    guard primaryID == initial.primaryID, Set(ordered) == Set(initial.ordered), Set(edited).count == edited.count,
+          Set(ordered).isSubset(of: Set(edited)), pane.hasTextContext else { return nil }
+    var pane = pane
+    pane.cursors = pane.cursors.filter { values[$0.id] != nil }
+    guard pane.cursors.count == values.count, pane.cursors.allSatisfy({
+      (!$0.hasAnchor || $0.anchor == $0.position) && $0.hasUtf16Position
+    }) else { return nil }
+    for index in pane.cursors.indices { pane.cursors[index].primary = pane.cursors[index].id == primaryID }
+    guard let fresh = ComposeComposition(pane: pane, text: NSAttributedString(string: ""),
+      selected: NSRange(location: 0, length: 0), replacement: NSRange(location: NSNotFound, length: 0)) else { return nil }
+    var rebased: [UInt64: ComposeMarkedText] = [:]
+    for id in ordered {
+      guard let value = values[id], let basis = initial.values[id], let target = fresh.values[id] else { return nil }
+      let prefix = basis.originalRange.location - value.originalRange.location
+      let suffix = NSMaxRange(value.originalRange) - NSMaxRange(basis.originalRange)
+      guard prefix >= 0, suffix >= 0, target.originalRange.length == 0,
+            target.context.sourceRange(forUTF16: target.originalRange) == target.source,
+            target.originalRange.location >= prefix, suffix <= Int.max - target.originalRange.location else { return nil }
+      let range = NSRange(location: target.originalRange.location - prefix, length: prefix + suffix)
+      // A range extending outside the initial conversion cannot silently take
+      // different surrounding bytes from the predecessor or another edit.
+      for (old, new) in [
+        (NSRange(location: value.originalRange.location, length: prefix), NSRange(location: range.location, length: prefix)),
+        (NSRange(location: NSMaxRange(basis.originalRange), length: suffix), NSRange(location: target.originalRange.location, length: suffix)),
+      ] where old.length > 0 {
+        guard let before = value.context.exactText(for: old), before == target.context.exactText(for: new) else { return nil }
+      }
+      guard let source = target.context.sourceRange(forUTF16: range),
+            let next = ComposeMarkedText(context: target.context, range: range, source: source,
+              text: value.draft, selected: value.selected, marked: value.marked) else { return nil }
+      rebased[id] = next
+    }
+    return ComposeComposition(primary: primaryID, values: rebased)
+  }
+
   public func virtualStart(for id: UInt64) -> Int { starts[id]! }
 
   @discardableResult
