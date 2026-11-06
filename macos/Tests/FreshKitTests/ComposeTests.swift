@@ -4,6 +4,45 @@ import ImageIO
 @testable import FreshKit
 
 final class ComposeTests: XCTestCase {
+  func testProjectionLookupRetainsBothSidesOfCoincidentHiddenAndInsertedEdges() throws {
+    let projection = try XCTUnwrap(ComposeProjection(source: 0..<8, text: "LxyéQZ", segments: [
+      .init(source: 0..<2, display: 0..<0, kind: .hidden),
+      .init(source: 2..<3, display: 0..<0, kind: .hidden),
+      .init(source: 3..<3, display: 0..<1, kind: .insertion),
+      .init(source: 3..<3, display: 1..<2, kind: .insertion),
+      .init(source: 3..<6, display: 2..<5, kind: .copy),
+      .init(source: 6..<8, display: 5..<6, kind: .replacement),
+      .init(source: 8..<8, display: 6..<7, kind: .insertion),
+    ]))
+    let display: [(Int?, Int?)] = [(0,0), (0,0), (0,0), (0,2), (3,3), (nil,nil), (5,5), (5,6), (6,7)]
+    for (source, expected) in display.enumerated() {
+      XCTAssertEqual(projection.displayPosition(for: source, affinity: .upstream), expected.0)
+      XCTAssertEqual(projection.displayPosition(for: source), expected.1)
+    }
+    let source: [(Int?, Int?)] = [(0,3), (3,3), (3,3), (4,4), (nil,nil), (6,6), (8,8), (8,8)]
+    for (display, expected) in source.enumerated() {
+      XCTAssertEqual(projection.sourcePosition(at: display, affinity: .upstream), expected.0)
+      XCTAssertEqual(projection.sourcePosition(at: display), expected.1)
+    }
+    XCTAssertNil(projection.displayPosition(for: -1)); XCTAssertNil(projection.displayPosition(for: 9))
+    XCTAssertNil(projection.sourcePosition(at: -1)); XCTAssertNil(projection.sourcePosition(at: 8))
+    let objects = try XCTUnwrap(projection.replacingObjects([3..<6, 6..<8]))
+    XCTAssertEqual(objects.projection.text, "\u{fffc}\u{fffc}")
+    XCTAssertEqual(objects.objects.map(\.source), [3..<6, 6..<8])
+    XCTAssertEqual(objects.projection.sourcePosition(at: 0, affinity: .upstream), 0)
+    XCTAssertEqual(objects.projection.sourcePosition(at: 0), 3)
+    XCTAssertEqual(try XCTUnwrap(projection.replacingObjects([4..<6])).projection.text, "Lxy\u{fffc}QZ")
+    XCTAssertNil(projection.replacingObjects([5..<6]), "an object cannot split a copied UTF-8 scalar")
+    XCTAssertNil(projection.replacingObjects([6..<7]), "an existing atomic replacement cannot be split")
+    let base = Int.max - 4
+    let offset = try XCTUnwrap(ComposeProjection(source: base..<Int.max, text: "xyabcd", segments: [
+      .init(source: base..<base, display: 0..<2, kind: .insertion),
+      .init(source: base..<Int.max, display: 2..<6, kind: .copy),
+    ]))
+    XCTAssertEqual(offset.displayPosition(for: Int.max), 6)
+    XCTAssertEqual(offset.sourcePosition(at: 5), Int.max - 1)
+  }
+
   func testCroppedWindowDoesNotExportItsSyntheticEOFAsARealNavigationLine() throws {
     let source = 100..<106
     let projection = try XCTUnwrap(ComposeProjection(source: source, text: "hello\n",

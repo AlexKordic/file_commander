@@ -95,38 +95,49 @@ public struct ComposeProjection {
   public func sourcePosition(at display: Int, affinity: Affinity = .downstream) -> Int? {
     guard boundaries.contains(display) else { return nil }
     if segments.isEmpty { return display == 0 ? source.lowerBound : nil }
-    let positions = segments.compactMap { segment -> Int? in
-      guard display >= segment.display.lowerBound, display <= segment.display.upperBound else { return nil }
-      switch segment.kind {
-      case .copy: return segment.source.lowerBound + display - segment.display.lowerBound
-      default:
-        if !segment.display.isEmpty {
-          if display == segment.display.lowerBound { return segment.source.lowerBound }
-          if display == segment.display.upperBound { return segment.source.upperBound }
-        }
-        return affinity == .upstream ? segment.source.lowerBound : segment.source.upperBound
+    let index = affinity == .upstream ? firstSegment { $0.display.upperBound >= display }
+      : firstSegment { $0.display.lowerBound > display } - 1
+    guard segments.indices.contains(index) else { return nil }
+    let segment = segments[index]
+    switch segment.kind {
+    case .copy: return segment.source.lowerBound + (display - segment.display.lowerBound)
+    default:
+      if !segment.display.isEmpty {
+        if display == segment.display.lowerBound { return segment.source.lowerBound }
+        if display == segment.display.upperBound { return segment.source.upperBound }
       }
+      return affinity == .upstream ? segment.source.lowerBound : segment.source.upperBound
     }
-    return affinity == .upstream ? positions.min() : positions.max()
   }
 
   public func displayPosition(for source: Int, affinity: Affinity = .downstream) -> Int? {
     guard source >= self.source.lowerBound, source <= self.source.upperBound else { return nil }
     if segments.isEmpty { return 0 }
-    let positions = segments.compactMap { segment -> Int? in
-      guard source >= segment.source.lowerBound, source <= segment.source.upperBound else { return nil }
-      let display: Int
-      switch segment.kind {
-      case .copy: display = segment.display.lowerBound + source - segment.source.lowerBound
-      case .insertion: display = affinity == .upstream ? segment.display.lowerBound : segment.display.upperBound
-      default:
-        if source == segment.source.lowerBound { display = segment.display.lowerBound }
-        else if source == segment.source.upperBound { display = segment.display.upperBound }
-        else { display = affinity == .upstream ? segment.display.lowerBound : segment.display.upperBound }
-      }
-      return boundaries.contains(display) ? display : nil
+    let index = affinity == .upstream ? firstSegment { $0.source.upperBound >= source }
+      : firstSegment { $0.source.lowerBound > source } - 1
+    guard segments.indices.contains(index) else { return nil }
+    let segment = segments[index], display: Int
+    switch segment.kind {
+    case .copy: display = segment.display.lowerBound + (source - segment.source.lowerBound)
+    case .insertion: display = affinity == .upstream ? segment.display.lowerBound : segment.display.upperBound
+    default:
+      if source == segment.source.lowerBound { display = segment.display.lowerBound }
+      else if source == segment.source.upperBound { display = segment.display.upperBound }
+      else { display = affinity == .upstream ? segment.display.lowerBound : segment.display.upperBound }
     }
-    return affinity == .upstream ? positions.min() : positions.max()
+    return boundaries.contains(display) ? display : nil
+  }
+
+  /// Validation guarantees both coordinate spaces are monotonic. Inclusive
+  /// edges can have several hidden/inserted segments: the first match owns
+  /// upstream affinity and the last owns downstream, without an array scan.
+  private func firstSegment(where predicate: (Segment) -> Bool) -> Int {
+    var low = 0, high = segments.count
+    while low < high {
+      let middle = low + (high - low) / 2
+      if predicate(segments[middle]) { high = middle } else { low = middle + 1 }
+    }
+    return low
   }
 
   public struct Object {
@@ -139,6 +150,11 @@ public struct ComposeProjection {
   public func replacingObjects(_ ranges: [Range<Int>]) -> (projection: Self, objects: [Object])? {
     let ordered = ranges.sorted { $0.lowerBound < $1.lowerBound }
     guard !ordered.isEmpty else { return (self, []) }
+    var previous = source.lowerBound
+    for range in ordered {
+      guard !range.isEmpty, range.lowerBound >= previous, range.upperBound <= source.upperBound else { return nil }
+      previous = range.upperBound
+    }
     let bytes = Array(text.utf8)
     var result = "", mapped: [Segment] = [], objects: [Object] = []
     func append(_ source: Range<Int>, _ display: Range<Int>, _ kind: Kind) -> Bool {
@@ -149,11 +165,19 @@ public struct ComposeProjection {
       return true
     }
     func gap(_ range: Range<Int>) -> Bool {
-      for segment in segments {
+      let first = firstSegment { $0.source.upperBound >= range.lowerBound }
+      for segment in segments[first...] {
+        if segment.source.lowerBound > range.upperBound { break }
         if segment.kind == .insertion {
           let at = segment.source.lowerBound
+          var low = 0, high = ordered.count
+          while low < high {
+            let middle = low + (high - low) / 2
+            if ordered[middle].upperBound >= at { high = middle } else { low = middle + 1 }
+          }
+          let inObject = low < ordered.count && ordered[low].lowerBound <= at
           if (range.contains(at) || at == source.upperBound && range.upperBound == at),
-             !ordered.contains(where: { at >= $0.lowerBound && at <= $0.upperBound }),
+             !inObject,
              !append(segment.source, segment.display, .insertion) { return false }
           continue
         }
