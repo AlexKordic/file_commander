@@ -368,7 +368,8 @@ structure, emphasis, link, underline, and strikethrough information; the
 native client does not parse Markdown. Core Text measures indentation and
 spacing before producing caret, selection, and navigation geometry. Font
 and spacing changes replace that client's style revision and preserve its
-source scroll anchor. Code and table fonts remain monospaced.
+source scroll anchor. Code and raw table source use a monospace font; measured
+table cells use proportional body text unless inline markup selects code.
 
 `ComposePane.ready` distinguishes a coherent projection from formatting still
 being applied. Readiness correlates the source revision, window, buffer
@@ -570,8 +571,24 @@ another measurement. Logical column intent is independent of the pixel goal,
 so a style change can reset pixel positioning while retaining the column
 through a full-width source row. Pointer input resets that intent.
 
-Cross-window retry qualification, horizontal scrolling when complete clusters
-exceed the pane, and stable column measures across source windows remain
+Deferred Up/Down between table rows retains its parser-owned destination and
+logical column when the next source window excludes the original cursor.
+Another sparse measurement can refine that destination without restarting
+the motion. The input reply retains the requested source anchor until a later
+pixel request supersedes it. A source window must contain its requested byte,
+including after an unrelated long paragraph. The visible viewport remains
+independent of these offscreen measurements.
+
+Already resolved cursors remain part of the pending action until all cursors
+can be planned; Fresh then emits one complete event batch. Changed source
+revisions, cursor positions, selections or actions invalidate their saved
+destinations. Acceptance, cancellation and pointer input retire the pending
+plans. The real-plugin socket regression covers a disjoint table-row retry
+followed by a second pixel measurement without moving the cursor early.
+
+Cross-window paging and entry/exit through prose still need qualification.
+Horizontal scrolling when complete clusters exceed the pane and stable
+column measures across source windows also remain
 prerequisites for enabling the capability. Legacy rich clients keep table source and
 can share the same backend with a table-capable client without exchanging
 their per-client projections. `compose-tables.pb` records that real-plugin
