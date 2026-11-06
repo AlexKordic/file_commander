@@ -26,7 +26,15 @@ public struct ComposePendingPointer {
   /// placement and exact intervening text keep this independent of screen reflow.
   public func preview(in prefix: ComposeComposition, selections: ComposeVirtualSelections) -> ComposeVirtualSelections? {
     guard let owner = prefix.values[cursor] else { return nil }
-    let caret = prefix.virtualStart(for: cursor) + NSMaxRange(owner.selected)
+    return preview(caret: prefix.virtualStart(for: cursor) + NSMaxRange(owner.selected), selections: selections)
+  }
+
+  public func preview(basis: ComposeVirtualSelections, updating selections: ComposeVirtualSelections) -> ComposeVirtualSelections? {
+    guard let caret = basis.cursors[cursor]?.position else { return nil }
+    return preview(caret: caret, selections: selections)
+  }
+
+  private func preview(caret: Int, selections: ComposeVirtualSelections) -> ComposeVirtualSelections? {
     let delta = offset - caretOffset
     let (point, overflow) = caret.addingReportingOverflow(delta)
     guard !overflow, point >= 0 else { return nil }
@@ -35,7 +43,7 @@ public struct ComposePendingPointer {
     let expected = (text as NSString).substring(with: NSRange(location: expectedStart, length: length))
     guard let actual = selections.substring(for: NSRange(location: low, length: length)),
           actual.string.utf16.elementsEqual(expected.utf16) else { return nil }
-    return selections.movingPrimary(to: point, extend: extend)
+    return selections.movingPrimary(to: point, extend: extend, affinity: affinity)
   }
 
   public func resolved(_ receipt: WireComposeEditReceipt) -> ComposePointer? {

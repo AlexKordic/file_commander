@@ -6,25 +6,47 @@ import Foundation
 public struct ComposeVirtualInsertion {
   // Synthetic region identities stay inside the presentation implementation.
   let regions: ComposeComposition
+  public var sourceRanges: [Range<Int>] { regions.ordered.compactMap {
+    let value = regions.values[$0]!
+    return value.source.isEmpty && value.draft.length == 0 ? nil : value.source
+  } }
   public let primaryID: UInt64
   public let cursors: [UInt64: ComposeVirtualSelections.Cursor]
   public let marked: [UInt64: NSRange]
+  public let drafts: [UInt64: NSRange]
   private let placements: [UInt64: Placement]
-  private struct Placement { let region: UInt64; let range: NSRange }
+  private struct Placement { let region: UInt64; let range, marked: NSRange }
+  private struct Edit { let range: NSRange; let text: NSAttributedString; let marked, selected: NSRange }
   private struct Group { var original: NSRange; var source: Range<Int> }
 
   public init?(selections: ComposeVirtualSelections, text: NSAttributedString, selected: NSRange) {
+    self.init(selections: selections, edits: selections.cursors.mapValues {
+      Edit(range: $0.selection, text: text, marked: NSRange(location: 0, length: text.length), selected: selected)
+    })
+  }
+
+  public init?(selections: ComposeVirtualSelections, drafts: [UInt64: ComposeMarkedText]) {
+    self.init(selections: selections, edits: drafts.mapValues {
+      Edit(range: $0.originalRange, text: $0.draft, marked: $0.marked, selected: $0.selected)
+    })
+  }
+
+  private init?(selections: ComposeVirtualSelections, edits: [UInt64: Edit]) {
     let prefix = selections.prefix
-    let units = Array(text.string.utf16)
-    func boundary(_ at: Int) -> Bool {
-      at >= 0 && at <= units.count && (at == 0 || at == units.count
-        || !(0xd800...0xdbff).contains(units[at - 1]) || !(0xdc00...0xdfff).contains(units[at]))
+    guard !edits.isEmpty, Set(edits.keys).isSubset(of: Set(selections.cursors.keys)) else { return nil }
+    for edit in edits.values {
+      let units = Array(edit.text.string.utf16)
+      func valid(_ range: NSRange) -> Bool {
+        guard range.location >= 0, range.length >= 0, range.location <= units.count, range.length <= units.count - range.location else { return false }
+        return [range.location, NSMaxRange(range)].allSatisfy { at in
+          at == 0 || at == units.count || !(0xd800...0xdbff).contains(units[at - 1]) || !(0xdc00...0xdfff).contains(units[at])
+        }
+      }
+      guard valid(edit.marked), valid(edit.selected), selections.substring(for: edit.range) != nil else { return nil }
     }
-    guard selected.location >= 0, selected.length >= 0, selected.location <= units.count,
-          selected.length <= units.count - selected.location, boundary(selected.location), boundary(NSMaxRange(selected)) else { return nil }
-    let targets = selections.cursors.sorted { $0.value.selection.location < $1.value.selection.location }
-    guard !targets.isEmpty, zip(targets, targets.dropFirst()).allSatisfy({
-      $0.value.selection.location != $1.value.selection.location && NSMaxRange($0.value.selection) <= $1.value.selection.location
+    let targets = edits.sorted { $0.value.range.location < $1.value.range.location }
+    guard zip(targets, targets.dropFirst()).allSatisfy({
+      $0.value.range.location != $1.value.range.location && NSMaxRange($0.value.range) <= $1.value.range.location
     }) else { return nil }
     let rawContexts = prefix.ordered.map { prefix.values[$0]!.context }
     guard let document = rawContexts.first?.documentLength,
@@ -59,8 +81,8 @@ public struct ComposeVirtualInsertion {
       return Group(original: value.originalRange, source: value.source)
     }
     var owners: [UInt64: NSRange] = [:]
-    for (id, cursor) in targets {
-      let range = cursor.selection
+    for (id, edit) in targets {
+      let range = edit.range
       guard let start = original(range.location, end: false), let end = original(NSMaxRange(range), end: true), start <= end,
             let first = source(start), let last = source(end), first <= last else { return nil }
       let original = NSRange(location: start, length: end - start)
@@ -85,10 +107,10 @@ public struct ComposeVirtualInsertion {
         return group.original.location <= range.location && NSMaxRange(range) <= NSMaxRange(group.original)
       }
       let result = NSMutableAttributedString(attributedString: raw)
-      for (_, cursor) in members.reversed() {
-        let range = cursor.selection
+      for (_, edit) in members.reversed() {
+        let range = edit.range
         guard range.location >= start, NSMaxRange(range) <= end else { return nil }
-        result.replaceCharacters(in: NSRange(location: range.location - start, length: range.length), with: text)
+        result.replaceCharacters(in: NSRange(location: range.location - start, length: range.length), with: edit.text)
       }
       let context: ComposeTextContext
       if let existing = rawContexts.first(where: { $0.sourceRange(forUTF16: group.original) == group.source }) { context = existing }
@@ -112,33 +134,68 @@ public struct ComposeVirtualInsertion {
         text: result, selected: NSRange(location: 0, length: 0), marked: NSRange(location: 0, length: 0)) else { return nil }
       values[key] = value
       var shift = 0
-      for (id, cursor) in members {
-        let location = cursor.selection.location - start + shift
-        placements[id] = Placement(region: key, range: NSRange(location: location, length: text.length))
-        shift += text.length - cursor.selection.length
+      for (id, edit) in members {
+        let location = edit.range.location - start + shift
+        placements[id] = Placement(region: key, range: NSRange(location: location, length: edit.text.length), marked: edit.marked)
+        shift += edit.text.length - edit.range.length
       }
     }
     guard let first = values.keys.min(), let regions = ComposeComposition(primary: first, values: values) else { return nil }
-    var cursors: [UInt64: ComposeVirtualSelections.Cursor] = [:], marked: [UInt64: NSRange] = [:]
+    var cursors: [UInt64: ComposeVirtualSelections.Cursor] = [:], marked: [UInt64: NSRange] = [:], drafts: [UInt64: NSRange] = [:]
     for (id, place) in placements {
+      guard let edit = edits[id] else { return nil }
       let start = regions.virtualStart(for: place.region) + place.range.location
-      marked[id] = NSRange(location: start, length: text.length)
-      cursors[id] = .init(position: start + NSMaxRange(selected), anchor: selected.length == 0 ? nil : start + selected.location)
+      drafts[id] = NSRange(location: start, length: place.range.length)
+      marked[id] = NSRange(location: start + edit.marked.location, length: edit.marked.length)
+      cursors[id] = .init(position: start + NSMaxRange(edit.selected), anchor: edit.selected.length == 0 ? nil : start + edit.selected.location)
+    }
+    func map(_ point: Int) -> Int? {
+      var shift = 0
+      for (_, edit) in targets {
+        if point < edit.range.location { break }
+        guard point > NSMaxRange(edit.range) || point == NSMaxRange(edit.range) && edit.range.length > 0 else { return nil }
+        shift += edit.text.length - edit.range.length
+      }
+      let (result, overflow) = point.addingReportingOverflow(shift)
+      return !overflow && result >= 0 ? result : nil
+    }
+    for (id, cursor) in selections.cursors where edits[id] == nil {
+      guard let point = map(cursor.position) else { return nil }
+      let anchor: Int?
+      if let old = cursor.anchor { guard let result = map(old) else { return nil }; anchor = result } else { anchor = nil }
+      cursors[id] = .init(position: point, anchor: anchor, affinity: cursor.affinity)
     }
     guard cursors.count == selections.cursors.count else { return nil }
-    self.regions = regions; primaryID = selections.primaryID; self.cursors = cursors; self.marked = marked; self.placements = placements
+    self.regions = regions; primaryID = selections.primaryID; self.cursors = cursors; self.marked = marked; self.drafts = drafts; self.placements = placements
+  }
+
+  public func provisionalSelections() -> ComposeVirtualSelections? {
+    ComposeVirtualSelections(prefix: regions, primary: primaryID, cursors: cursors)
   }
 
   public func project(over base: ComposeProjection) -> (projection: ComposeProjection, marked: [UInt64: Range<Int>])? {
-    guard let result = regions.project(over: base) else { return nil }
+    guard let result = projected(over: base) else { return nil }
     var marked: [UInt64: Range<Int>] = [:]
+    for (id, place) in placements {
+      guard let display = result.contexts[place.region], let value = regions.values[place.region] else { continue }
+      let text = value.draft.string as NSString
+      let start = display.lowerBound + text.substring(to: place.range.location + place.marked.location).utf8.count
+      let end = start + text.substring(with: NSRange(location: place.range.location + place.marked.location, length: place.marked.length)).utf8.count
+      marked[id] = start..<end
+    }
+    return (result.projection, marked)
+  }
+
+  func projected(over base: ComposeProjection) -> (projection: ComposeProjection, drafts: [UInt64: Range<Int>], contexts: [UInt64: Range<Int>])? {
+    guard let result = regions.project(over: base) else { return nil }
+    var drafts: [UInt64: Range<Int>] = [:]
     for (id, place) in placements {
       guard let display = result.displays[place.region], let value = regions.values[place.region] else { continue }
       let text = value.draft.string as NSString
       let start = display.lowerBound + text.substring(to: place.range.location).utf8.count
       let end = start + text.substring(with: place.range).utf8.count
-      marked[id] = start..<end
+      drafts[id] = start..<end
     }
-    return (result.projection, marked)
+    return (result.projection, drafts, result.displays)
   }
 }

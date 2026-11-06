@@ -23,21 +23,27 @@ public final class ComposePaneLayout {
   public let draftDisplayRange: NSRange?
   public let composition: ComposeComposition?
   public let draftDisplayRanges: [UInt64: NSRange]
+  public let virtualInsertion: ComposeVirtualInsertion?
+  private let contextDisplayRanges: [UInt64: NSRange]
 
   public init?(pane: WireComposePane, body: CTFont, monospace: CTFont, width: CGFloat,
                typography: ComposeTypography = .init(),
                images: [UInt64: ComposeImageState] = [:], reuse: ComposePaneLayout? = nil,
-               preedit: ComposeMarkedText? = nil, composition: ComposeComposition? = nil) {
+               preedit: ComposeMarkedText? = nil, composition: ComposeComposition? = nil, virtualInsertion: ComposeVirtualInsertion? = nil) {
     guard let baseProjection = ComposeProjection(pane), typography.isValid, width.isFinite, width > 0 else { return nil }
     guard pane.images.allSatisfy({ !($0.rendered && $0.sourcePreview) }) else { return nil }
     let composition = composition ?? preedit.flatMap { ComposeComposition(primary: 0, values: [0: $0]) }
     let preedit = composition?.primary
-    self.composition = composition; self.preedit = preedit
+    self.composition = composition; self.preedit = preedit; self.virtualInsertion = virtualInsertion
+    let sourceComposition = virtualInsertion?.regions ?? composition
     let visible = pane.images.filter { image in
       guard image.rendered || image.sourcePreview else { return false }
-      guard let composition else { return true }
-      return !composition.values.values.contains { value in value.source.overlaps(Int(image.start)..<Int(image.end))
-        || (value.source.isEmpty && Int(image.start) < value.source.lowerBound && value.source.lowerBound < Int(image.end)) }
+      guard let sourceComposition else { return true }
+      return !sourceComposition.values.values.contains { value in
+        guard !value.source.isEmpty || value.draft.length > 0 else { return false }
+        return value.source.overlaps(Int(image.start)..<Int(image.end))
+          || (value.source.isEmpty && Int(image.start) < value.source.lowerBound && value.source.lowerBound < Int(image.end))
+      }
     }
     var sourceRanges: [Range<Int>] = [], sizes: [Int: CGSize] = [:]
     for image in visible {
@@ -57,15 +63,24 @@ public final class ComposePaneLayout {
     let base = objects?.projection ?? baseProjection
     guard let tableModel = ComposeTableModel(pane: pane, projection: base, reuse: reuse?.tableModel) else { return nil }
     self.tableModel = tableModel
-    let replacement = composition?.project(over: base)
+    let layered = virtualInsertion?.projected(over: base)
+    let replacement: (projection: ComposeProjection, displays: [UInt64: Range<Int>])? = layered.map { ($0.projection, $0.drafts) }
+      ?? (virtualInsertion == nil ? composition?.project(over: base) : nil)
+    let sourceDisplays = layered?.contexts ?? replacement?.displays ?? [:]
     guard preedit == nil || replacement != nil else { return nil }
     let projection = replacement?.projection ?? base
-    let drafts = (replacement?.displays ?? [:]).compactMap { id, display -> (source: Range<Int>, display: Range<Int>)? in
-      composition?.values[id].map { ($0.source, display) }
+    let drafts = sourceDisplays.compactMap { id, display -> (source: Range<Int>, display: Range<Int>)? in
+      sourceComposition?.values[id].flatMap { value in
+        value.source.isEmpty && value.draft.length == 0 ? nil : (value.source, display)
+      }
     }
     guard let tables = tableModel.remapping(to: projection, drafts: drafts) else { return nil }
     let displayBytes = Array(projection.text.utf8)
     let displayRanges = (replacement?.displays ?? [:]).mapValues {
+      NSRange(location: String(decoding: displayBytes[..<$0.lowerBound], as: UTF8.self).utf16.count,
+        length: String(decoding: displayBytes[$0], as: UTF8.self).utf16.count)
+    }
+    contextDisplayRanges = sourceDisplays.mapValues {
       NSRange(location: String(decoding: displayBytes[..<$0.lowerBound], as: UTF8.self).utf16.count,
         length: String(decoding: displayBytes[$0], as: UTF8.self).utf16.count)
     }
@@ -149,9 +164,9 @@ public final class ComposePaneLayout {
     for (start, end) in zip(boundaries, boundaries.dropFirst()) where start < end {
       fonts.append(fontRun(spans.filter { $0.range.contains(start) }, start..<end))
     }
-    if let composition, let replacement {
-      for (id, display) in replacement.displays where !display.isEmpty {
-        let value = composition.values[id]!
+    if let sourceComposition {
+      for (id, display) in sourceDisplays where !display.isEmpty {
+        let value = sourceComposition.values[id]!
         fonts.append(fontRun(spans.filter { $0.source.lowerBound <= value.source.lowerBound && value.source.lowerBound <= $0.source.upperBound }, display))
       }
     }
@@ -303,8 +318,36 @@ public final class ComposePaneLayout {
   /// Draw in a context whose y axis points down, using the same line objects
   /// as hit testing and navigation. The native view and rendering tests share
   /// this path; no cell approximation or second text layout is involved.
+  public func containsProvisionalRegion(displayPosition: Int) -> Bool {
+    let regions = virtualInsertion?.regions ?? composition
+    return contextDisplayRanges.contains { id, range in
+      guard let value = regions?.values[id], !value.source.isEmpty || value.draft.length > 0 else { return false }
+      return range.location <= displayPosition && displayPosition <= NSMaxRange(range)
+    }
+  }
+
+  public func provisionalDisplayPosition(_ position: Int) -> Int? {
+    guard let regions = virtualInsertion?.regions ?? composition else { return nil }
+    if let point = regions.draftPosition(at: position) {
+      return contextDisplayRanges[point.id].map { $0.location + point.offset }
+    }
+    guard let source = regions.sourcePosition(at: position) else { return nil }
+    return text.utf16Position(for: source)
+  }
+
+  public func provisionalDocumentPosition(_ display: Int) -> Int? {
+    guard let regions = virtualInsertion?.regions ?? composition else { return nil }
+    for id in [regions.primaryID] + regions.ordered.filter({ $0 != regions.primaryID }) {
+      if let range = contextDisplayRanges[id], range.location <= display && display <= NSMaxRange(range) {
+        return regions.virtualStart(for: id) + display - range.location
+      }
+    }
+    guard let source = text.sourceRange(forUTF16: NSRange(location: display, length: 0)) else { return nil }
+    return regions.virtualPosition(for: source.lowerBound)
+  }
+
   public func draw(in context: CGContext, origin: CGPoint, clip: CGRect, dirty: CGRect,
-                   foreground: CGColor, background: CGColor, selection: CGColor, palette: Palette? = nil) {
+                   foreground: CGColor, background: CGColor, selection: CGColor, palette: Palette? = nil, provisionalSelections: [NSRange]? = nil) {
     guard clip.intersects(dirty) else { return }
     context.saveGState()
     defer { context.restoreGState() }
@@ -384,17 +427,21 @@ public final class ComposePaneLayout {
       }
     }
     context.setFillColor(selection)
-    for cursor in pane.cursors where cursor.hasAnchor && composition?.values[cursor.id] == nil {
+    for cursor in pane.cursors where provisionalSelections == nil && cursor.hasAnchor && composition?.values[cursor.id] == nil {
       guard let a = Int(exactly: cursor.position), let b = Int(exactly: cursor.anchor) else { continue }
       for rect in text.selectionRects(for: min(a, b)..<max(a, b)) {
         context.fill(rect.offsetBy(dx: origin.x, dy: origin.y))
       }
     }
-    for (id, display) in draftDisplayRanges {
+    for (id, display) in draftDisplayRanges where provisionalSelections == nil {
       guard let value = composition?.values[id] else { continue }
       for rect in text.selectionRects(forUTF16: NSRange(location: display.location + value.selected.location, length: value.selected.length)) {
         context.fill(rect.offsetBy(dx: origin.x, dy: origin.y))
       }
+    }
+    for range in provisionalSelections ?? [] {
+      guard let start = provisionalDisplayPosition(range.location), let end = provisionalDisplayPosition(NSMaxRange(range)), start <= end else { continue }
+      for rect in text.selectionRects(forUTF16: NSRange(location: start, length: end - start)) { context.fill(rect.offsetBy(dx: origin.x, dy: origin.y)) }
     }
     context.textMatrix = CGAffineTransform(scaleX: 1, y: -1)
     context.setFillColor(foreground)

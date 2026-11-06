@@ -161,7 +161,8 @@ public struct ComposeComposition {
   public func project(over base: ComposeProjection) -> (projection: ComposeProjection, displays: [UInt64: Range<Int>])? {
     let visible = ordered.filter { values[$0]!.source.lowerBound <= base.source.upperBound && values[$0]!.source.upperBound >= base.source.lowerBound }
     var projection = base
-    for id in visible.reversed() {
+    // Unchanged caret contexts carry no edit and must not reveal a conceal.
+    for id in visible.reversed() where !values[id]!.source.isEmpty || values[id]!.draft.length > 0 {
       guard let replacement = values[id]!.projection(over: projection) else { return nil }
       projection = replacement.projection
     }
@@ -197,6 +198,24 @@ public struct ComposeComposition {
     let (original, overflow) = virtual.subtractingReportingOverflow(shift)
     guard !overflow, original >= 0 else { return nil }
     return values.values.lazy.compactMap { $0.context.sourceRange(forUTF16: NSRange(location: original, length: 0))?.lowerBound }.first
+  }
+
+  /// Byte position in the derived raw provisional document, for internal
+  /// action-intent contexts only. This is never a Fresh source coordinate.
+  func virtualSourcePosition(atUTF16 position: Int) -> Int? {
+    if let point = draftPosition(at: position), let value = values[point.id] {
+      let shift = ordered.prefix(while: { $0 != point.id }).reduce(0) {
+        $0 + values[$1]!.draft.string.utf8.count - values[$1]!.source.count
+      }
+      let local = (value.draft.string as NSString).substring(to: point.offset).utf8.count
+      return value.source.lowerBound + shift + local
+    }
+    guard let source = sourcePosition(at: position) else { return nil }
+    let shift = ordered.filter { values[$0]!.source.upperBound <= source }.reduce(0) {
+      $0 + values[$1]!.draft.string.utf8.count - values[$1]!.source.count
+    }
+    let (result, overflow) = source.addingReportingOverflow(shift)
+    return !overflow && result >= 0 ? result : nil
   }
 
   public func virtualPosition(for source: Int) -> Int? {

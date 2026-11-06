@@ -7,7 +7,10 @@ public struct ComposeVirtualSelections {
   public struct Cursor: Equatable {
     public let position: Int
     public let anchor: Int?
-    public init(position: Int, anchor: Int? = nil) { self.position = position; self.anchor = anchor }
+    public let affinity: ComposeProjection.Affinity
+    public init(position: Int, anchor: Int? = nil, affinity: ComposeProjection.Affinity = .downstream) {
+      self.position = position; self.anchor = anchor; self.affinity = affinity
+    }
     public var selection: NSRange {
       let other = anchor ?? position
       return NSRange(location: min(position, other), length: abs(position - other))
@@ -67,10 +70,15 @@ public struct ComposeVirtualSelections {
 
   public var selection: NSRange { cursors[primaryID]!.selection }
 
-  public func movingPrimary(to position: Int, extend: Bool) -> ComposeVirtualSelections? {
+  public func position(forSource source: UInt64) -> Int? {
+    guard let source = Int(exactly: source) else { return nil }
+    return prefix.virtualPosition(for: source)
+  }
+
+  public func movingPrimary(to position: Int, extend: Bool, affinity: ComposeProjection.Affinity = .downstream) -> ComposeVirtualSelections? {
     guard contexts.contains(where: { $0.contains(position) }), let original = cursors[primaryID] else { return nil }
     var group = cursors
-    group[primaryID] = Cursor(position: position, anchor: extend ? original.anchor ?? original.position : nil)
+    group[primaryID] = Cursor(position: position, anchor: extend ? original.anchor ?? original.position : nil, affinity: affinity)
     return ComposeVirtualSelections(prefix: prefix, primary: primaryID, cursors: group, contexts: contexts)
   }
 
@@ -92,4 +100,68 @@ public struct ComposeVirtualSelections {
     } while position < end
     return NSAttributedString(attributedString: result)
   }
+  public func substring(forProposedRange range: NSRange) -> (text: NSAttributedString, range: NSRange)? {
+    guard range.location >= 0, range.location != NSNotFound, range.length >= 0, range.length <= Int.max - range.location,
+          let context = contexts.first(where: { $0.contains(cursors[primaryID]!.position) }) else { return nil }
+    let start = max(context.range.location, range.location), end = min(NSMaxRange(context.range), NSMaxRange(range))
+    guard start <= end else { return nil }
+    let local = (context.text.string as NSString).rangeOfComposedCharacterSequences(for: NSRange(location: start - context.range.location, length: end - start))
+    return (context.text.attributedSubstring(from: local), NSRange(location: context.range.location + local.location, length: local.length))
+  }
+
+  /// Derived contexts are used solely to retain native action intent. The
+  /// PendingText owner must forbid wire replacements until its action result.
+  func actionPane(like original: WireComposePane) -> WireComposePane? {
+    guard let document = prefix.values.values.first?.context.documentLength else { return nil }
+    var length = document
+    for value in prefix.values.values {
+      let inserted = value.draft.string.utf8.count
+      guard value.source.count <= length, inserted <= Int.max - (length - value.source.count) else { return nil }
+      length = length - value.source.count + inserted
+    }
+    var chunks: [ComposeTextContext] = []
+    for context in contexts {
+      guard let byte = prefix.virtualSourcePosition(atUTF16: context.range.location),
+            let raw = ComposeTextContext(.with {
+              $0.text = context.text.string; $0.sourceStart = UInt64(byte); $0.utf16Start = UInt64(context.range.location)
+            }, documentLength: UInt64(length)) else { return nil }
+      chunks.append(raw)
+    }
+    guard let primary = cursors[primaryID] else { return nil }
+    let raw: ComposeTextContext
+    if let existing = chunks.first(where: { $0.sourceRange(forUTF16: primary.selection) != nil }) { raw = existing }
+    else {
+      let range = primary.selection
+      guard let text = substring(for: range), let byte = prefix.virtualSourcePosition(atUTF16: range.location),
+            let combined = ComposeTextContext(.with {
+              $0.text = text.string; $0.sourceStart = UInt64(byte); $0.utf16Start = UInt64(range.location)
+            }, documentLength: UInt64(length)) else { return nil }
+      raw = combined; chunks.append(raw)
+    }
+    var pane = original
+    pane.documentLen = UInt64(length); pane.text = ""; pane.segments = []; pane.spans = []; pane.images = []; pane.tables = []
+    pane.textContext = .with {
+      $0.text = raw.text; $0.sourceStart = UInt64(raw.source.lowerBound); $0.utf16Start = UInt64(raw.range.location)
+      $0.selectionStart = UInt64(primary.selection.location); $0.selectionEnd = UInt64(NSMaxRange(primary.selection))
+    }
+    pane.textChunks = chunks.map { context in .with {
+      $0.text = context.text; $0.sourceStart = UInt64(context.source.lowerBound); $0.utf16Start = UInt64(context.range.location)
+    } }
+    var group: [WireComposeSelection] = []
+    for (id, cursor) in cursors.sorted(by: { $0.key < $1.key }) {
+      func source(_ unit: Int) -> Int? { chunks.lazy.compactMap { $0.sourceRange(forUTF16: NSRange(location: unit, length: 0))?.lowerBound }.first }
+      guard let byte = source(cursor.position) else { return nil }
+      var value = WireComposeSelection.with {
+        $0.id = id; $0.primary = id == primaryID; $0.position = UInt64(byte); $0.utf16Position = UInt64(cursor.position)
+      }
+      if let anchor = cursor.anchor {
+        guard let byte = source(anchor) else { return nil }
+        value.anchor = UInt64(byte); value.utf16Anchor = UInt64(anchor)
+      }
+      group.append(value)
+    }
+    pane.cursors = group
+    return pane
+  }
+
 }

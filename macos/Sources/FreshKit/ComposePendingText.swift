@@ -11,6 +11,8 @@ public struct ComposePendingText {
   private var newlyIncluded: [UInt64: ComposeMarkedText] = [:]
   public private(set) var observedCursors: [WireComposeCursorAnchor]
   private var committedEdits: [UInt64: Edit]?
+  private var requiresActionResult = false
+  private var actionBroadcast = true
 
   private struct Edit {
     var offset: Int
@@ -35,11 +37,23 @@ public struct ComposePendingText {
   public init?(pane: WireComposePane, text: NSAttributedString, selected: NSRange, replacement: NSRange) {
     guard let value = ComposeComposition(pane: pane, text: text, selected: selected, replacement: replacement) else { return nil }
     presentation = value; baseline = nil; active = Set(value.ordered)
-    observedCursors = Self.anchors(pane)
+    observedCursors = Self.anchors(pane); actionBroadcast = replacement.location == NSNotFound
+  }
+
+  public init?(afterAction selections: ComposeVirtualSelections, pane: WireComposePane,
+               text: NSAttributedString, selected: NSRange, replacement: NSRange) {
+    guard let virtual = selections.actionPane(like: pane) else { return nil }
+    self.init(pane: virtual, text: text, selected: selected, replacement: replacement)
+    requiresActionResult = true
+  }
+
+  public func virtualInsertion(over selections: ComposeVirtualSelections) -> ComposeVirtualInsertion? {
+    guard requiresActionResult else { return nil }
+    return ComposeVirtualInsertion(selections: selections, drafts: presentation.values)
   }
 
   public init?(following previous: ComposePendingText, pane: WireComposePane,
-               text: NSAttributedString, selected: NSRange, replacement: NSRange) {
+               text: NSAttributedString, selected: NSRange, replacement: NSRange, virtualBase: ComposeVirtualSelections? = nil) {
     guard previous.committedEdits != nil else { return nil }
     let base = previous.presentation
     let broadcast = replacement.location == NSNotFound
@@ -49,7 +63,8 @@ public struct ComposePendingText {
     let missing = targets.subtracting(Set(base.ordered))
     var added: [UInt64: ComposeMarkedText] = [:]
     if !missing.isEmpty {
-      guard broadcast, let raw = ComposeComposition(pane: pane, text: text, selected: selected, replacement: replacement) else { return nil }
+      let sourcePane = previous.requiresActionResult ? virtualBase?.actionPane(like: pane) : pane
+      guard broadcast, let sourcePane, let raw = ComposeComposition(pane: sourcePane, text: text, selected: selected, replacement: replacement) else { return nil }
       for id in missing {
         guard let value = raw.values[id] else { return nil }
         // The receipt must later prove this original cursor/range was retained.
@@ -68,6 +83,7 @@ public struct ComposePendingText {
     guard let value = ComposeComposition(primary: base.primaryID, values: values) else { return nil }
     presentation = value; baseline = base; active = targets
     newlyIncluded = added; observedCursors = previous.observedCursors
+    requiresActionResult = previous.requiresActionResult; actionBroadcast = broadcast
   }
 
   @discardableResult
@@ -137,6 +153,89 @@ public struct ComposePendingText {
     next.presentation = composition; next.committedEdits = edits; return next
   }
 
+  public func provisionalSelections(over base: ComposeVirtualSelections? = nil, pane: WireComposePane? = nil) -> ComposeVirtualSelections? {
+    if requiresActionResult {
+      guard let base else { return nil }
+      return virtualInsertion(over: base)?.provisionalSelections()
+    }
+    guard let pane else { return ComposeVirtualSelections(prefix: presentation) }
+    // A primary-only prefix still needs the untouched carets and their raw
+    // contexts when a later click starts a broadcast conversion.
+    let missing = Set(pane.cursors.map(\.id)).subtracting(Set(presentation.ordered))
+    if missing.isEmpty { return ComposeVirtualSelections(prefix: presentation) }
+    guard let raw = ComposeComposition(pane: pane, text: NSAttributedString(string: ""), selected: NSRange(location: 0, length: 0),
+      replacement: NSRange(location: NSNotFound, length: 0)) else { return nil }
+    var values = presentation.values
+    for cursor in pane.cursors where missing.contains(cursor.id) {
+      guard let original = raw.values[cursor.id], let byte = Int(exactly: cursor.position),
+            let unit = original.context.utf16Position(for: byte),
+            let marker = ComposeMarkedText(context: original.context, range: NSRange(location: unit, length: 0), source: byte..<byte,
+              text: NSAttributedString(string: ""), selected: NSRange(location: 0, length: 0), marked: NSRange(location: 0, length: 0)) else { return nil }
+      values[cursor.id] = marker
+    }
+    guard let augmented = ComposeComposition(primary: presentation.primaryID, values: values) else { return nil }
+    func map(_ unit: Int) -> Int? {
+      var shift = 0
+      for id in presentation.ordered {
+        let value = presentation.values[id]!, range = value.originalRange
+        if range.location <= unit && unit < NSMaxRange(range) { return nil }
+        if NSMaxRange(range) <= unit { shift += value.draft.length - range.length }
+      }
+      let (position, overflow) = unit.addingReportingOverflow(shift)
+      return !overflow && position >= 0 ? position : nil
+    }
+    var cursors: [UInt64: ComposeVirtualSelections.Cursor] = [:]
+    for cursor in pane.cursors {
+      if let value = presentation.values[cursor.id] {
+        let start = augmented.virtualStart(for: cursor.id)
+        cursors[cursor.id] = .init(position: start + NSMaxRange(value.selected),
+          anchor: value.selected.length == 0 ? nil : start + value.selected.location)
+      } else {
+        guard let original = raw.values[cursor.id] else { return nil }
+        let backwards = cursor.hasAnchor && cursor.position < cursor.anchor
+        guard let position = map(backwards ? original.originalRange.location : NSMaxRange(original.originalRange)) else { return nil }
+        let anchor: Int?
+        if cursor.hasAnchor {
+          guard let point = map(backwards ? NSMaxRange(original.originalRange) : original.originalRange.location) else { return nil }; anchor = point
+        } else { anchor = nil }
+        cursors[cursor.id] = .init(position: position, anchor: anchor)
+      }
+    }
+    return ComposeVirtualSelections(prefix: augmented, primary: presentation.primaryID, cursors: cursors)
+  }
+
+  public func pointer(scope: WireComposeScope, epoch: UInt64, displayed: ComposeComposition,
+                      point: Int, basis: ComposeVirtualSelections, affinity: ComposeProjection.Affinity,
+                      extend: Bool, count: Int, nativeNewline: UInt32) -> ComposePendingPointer? {
+    guard committedEdits != nil else { return nil }
+    var normalizedPoint = point
+    for id in displayed.ordered {
+      guard let shown = displayed.values[id], let value = presentation.values[id], shown.source == value.source,
+            shown.originalRange == value.originalRange,
+            let normalized = Self.normalize(shown.draft, policy: nativeNewline),
+            normalized.string.utf16.elementsEqual(value.draft.string.utf16) else { return nil }
+      let start = displayed.virtualStart(for: id), end = start + shown.draft.length
+      if start <= point && point <= end {
+        let offset = point - start
+        guard let local = ComposeTextContext(.with { $0.text = shown.draft.string }, documentLength: UInt64(shown.draft.string.utf8.count)),
+              local.sourceRange(forUTF16: NSRange(location: offset, length: 0)) != nil,
+              let prefix = Self.normalize(NSAttributedString(string: (shown.draft.string as NSString).substring(to: offset)), policy: nativeNewline) else { return nil }
+        normalizedPoint = presentation.virtualStart(for: id) + prefix.length
+        break
+      }
+      if end < point { normalizedPoint += value.draft.length - shown.draft.length }
+    }
+    let owners = ordered.compactMap { id -> (UInt64, Int)? in basis.cursors[id].map { (id, $0.position) } }
+      .sorted { abs($0.1 - normalizedPoint) < abs($1.1 - normalizedPoint) }
+    for (id, caret) in owners {
+      let low = min(caret, normalizedPoint), length = abs(caret - normalizedPoint)
+      guard let raw = basis.substring(for: NSRange(location: low, length: length)) else { continue }
+      return ComposePendingPointer(scope: scope, epoch: epoch, cursor: id, text: raw.string,
+        caretOffset: caret - low, offset: normalizedPoint - low, affinity: affinity, extend: extend, count: count)
+    }
+    return nil
+  }
+
   /// Capture a displayed draft point against this committed prefix. A commit
   /// can normalize newlines, so convert the captured prefix before retaining
   /// its offset. Receipt resolution still proves the actual resulting text.
@@ -156,7 +255,7 @@ public struct ComposePendingText {
 
   /// Only real, receipt-bound ranges can become wire replacements.
   public func replacement(scope: WireComposeScope, epoch: UInt64) -> ComposeReplacement? {
-    guard baseline == nil else { return nil }
+    guard baseline == nil, !requiresActionResult else { return nil }
     return ComposeReplacement(scope: scope, epoch: epoch, composition: presentation, observedCursors: observedCursors)
   }
 
@@ -221,6 +320,13 @@ public struct ComposePendingText {
   /// caret created by the action, use the primary conversion's input intent.
   /// Already submitted prefixes are excluded from the resulting replacement.
   public func afterAction(_ initial: ComposePendingText, pane: WireComposePane) -> ComposePendingText? {
+    let observed = Self.anchors(pane)
+    var pane = pane
+    if !actionBroadcast {
+      pane.cursors = pane.cursors.filter { $0.id == presentation.primaryID }
+      guard pane.cursors.count == 1 else { return nil }
+      pane.cursors[0].primary = true
+    }
     guard let fresh = ComposeComposition(pane: pane, text: NSAttributedString(string: ""),
       selected: NSRange(location: 0, length: 0), replacement: NSRange(location: NSNotFound, length: 0)) else { return nil }
     let cursors = Dictionary(uniqueKeysWithValues: pane.cursors.map { ($0.id, $0) })
@@ -244,7 +350,7 @@ public struct ComposePendingText {
       values[id] = value
     }
     guard let composition = ComposeComposition(primary: fresh.primaryID, values: values) else { return nil }
-    let result = ComposePendingText(presentation: composition, committed: false, observedCursors: Self.anchors(pane))
+    let result = ComposePendingText(presentation: composition, committed: false, observedCursors: observed)
     return committedEdits == nil ? result : result.committed(nativeNewline: pane.nativeNewline)
   }
 

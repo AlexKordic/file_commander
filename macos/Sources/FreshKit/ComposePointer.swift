@@ -28,6 +28,16 @@ public struct ComposePointer {
     public let caret: WireComposeCaret
   }
 
+  public func preview(in selections: ComposeVirtualSelections) -> ComposeVirtualSelections? {
+    guard captured.clickCount <= 1, let source = Int(exactly: captured.position),
+          let point = selections.prefix.virtualPosition(for: source) else { return nil }
+    if captured.hasAttachmentStart, !captured.extend {
+      guard let source = Int(exactly: captured.attachmentStart), let anchor = selections.prefix.virtualPosition(for: source) else { return nil }
+      return selections.movingPrimary(to: anchor, extend: false)?.movingPrimary(to: point, extend: true, affinity: captured.affinity == 1 ? .upstream : .downstream)
+    }
+    return selections.movingPrimary(to: point, extend: captured.extend, affinity: captured.affinity == 1 ? .upstream : .downstream)
+  }
+
   public func preview(in pane: WireComposePane) -> Preview? {
     guard pane.bufferRevision == captured.sourceRevision, pane.hasViewport, pane.viewport.epoch == captured.bufferEpoch,
           captured.clickCount <= 1,
