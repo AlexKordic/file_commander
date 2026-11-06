@@ -4,6 +4,21 @@ import ImageIO
 @testable import FreshKit
 
 final class ComposeTests: XCTestCase {
+  func testCroppedWindowDoesNotExportItsSyntheticEOFAsARealNavigationLine() throws {
+    let source = 100..<106
+    let projection = try XCTUnwrap(ComposeProjection(source: source, text: "hello\n",
+      segments: [.init(source: source, display: 0..<6, kind: .copy)]))
+    let layout = try XCTUnwrap(ComposeTextLayout(projection: projection,
+      font: CTFontCreateWithName("Helvetica" as CFString, 18, nil), width: 320))
+    let cropped = try XCTUnwrap(layout.navigation(id: 1, pageHeight: 200, documentLength: 1000, positions: [100]))
+    XCTAssertEqual(cropped.totalLines, 1)
+    XCTAssertEqual(cropped.lines.count, 1)
+    XCTAssertFalse(cropped.lines.contains { $0.sourceStart == 106 && $0.sourceEnd == 106 })
+    let complete = try XCTUnwrap(layout.navigation(id: 2, pageHeight: 200, documentLength: 106, positions: [100]))
+    XCTAssertEqual(complete.totalLines, 2)
+    XCTAssertEqual(complete.lines.last?.start.source, 106, "the document's real trailing empty line is editable")
+  }
+
   func testTextServiceRangesPreserveConcealedMarkupAndRejectPartialSurrogates() throws {
     let body = "café 👩🏽‍💻", source = "**\(body)**"
     let end = body.utf8.count + 2

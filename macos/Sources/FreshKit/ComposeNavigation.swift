@@ -22,7 +22,13 @@ extension ComposeTextLayout {
     func nearby(_ rect: CGRect) -> Bool { centers.contains { $0 + radius >= rect.minY && $0 - radius <= rect.maxY } }
     var rows: [ComposeRowAxis: (table: Table, row: TableRow)] = [:]
     var selected: Set<ComposeRowAxis> = []
-    var all = fragments
+    // A cropped projection ending in a newline has a drawing placeholder at
+    // its upper source bound. Only the complete document owns that EOF line;
+    // navigation must measure the next window before choosing its real caret.
+    var all = fragments.filter { fragment in
+      !(projection.source.upperBound < documentLength && fragment.table == nil
+        && fragment.range.length == 0 && fragment.range.location == string.length)
+    }
     let empty = CTLineCreateWithAttributedString(NSAttributedString(string: ""))
     for table in tables {
       for row in table.rows {

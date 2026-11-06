@@ -586,7 +586,16 @@ destinations. Acceptance, cancellation and pointer input retire the pending
 plans. The real-plugin socket regression covers a disjoint table-row retry
 followed by a second pixel measurement without moving the cursor early.
 
-Cross-window paging and entry/exit through prose still need qualification.
+Table entry and exit also retain a source-flow boundary when their origin is
+absent from the next geometry. Complete parser-owned row ranges include pipes,
+container prefixes and line endings; a request at those structural bytes must
+choose the intended column's first or last part, rather than a sibling's text.
+Prose intervals use the real line's source ownership. A cropped projection's
+empty trailing drawing placeholder is excluded from native navigation until
+the actual next line has been measured. A real document EOF line remains
+addressable. These boundary requests preserve the pending selection anchor.
+
+Cross-window paging and complex nested entry/exit still need qualification.
 Horizontal scrolling when complete clusters exceed the pane and stable
 column measures across source windows also remain
 prerequisites for enabling the capability. Legacy rich clients keep table source and
