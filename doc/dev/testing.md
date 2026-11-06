@@ -481,6 +481,16 @@ selection, Unicode insertion, save and undo beyond the old cutoff. Controlled
 scene-peer checks require receipt-bound typing to proceed during parsing while
 measured navigation waits for usable geometry.
 
+The same private backend suite keeps a 200 KB single physical list paragraph
+with emphasis, accented text, emoji and CJK. It checks formatter
+readiness and hanging indentation through offscreen movement, resize, Unicode
+insertion, exact save and undo. Formatter source assembly must make progress
+through bounded reader calls without certifying an incomplete line. This does
+not assert a bound on complete native source windows or retained batches.
+Fresh's pure plugin tests separately compare the long-line UTF-8 offset index
+against native encoding, including malformed-string and surrogate-interior
+fallback. That index changes source lookup cost, not native wrapping width.
+
 ## CI
 
 `.github/workflows/tests.yml` is the repository's only workflow. It runs on

@@ -369,13 +369,18 @@ FC_COMPOSE_TEST_FRESH="$PWD/../editor-fresh/target/debug/fresh" \
   swift test --package-path macos --filter ComposeBackendTests
 ```
 
-It starts foreground Fresh processes with private HOME/config/data/runtime
+It starts foreground Fresh processes with private HOME/config/data/state/runtime
 folders and source fixtures, uses an in-memory native clipboard and disables
 Fresh's system clipboard. It covers measured-cell editing, local image reads
 and decode, nested code, resize, undo/redo, exact CRLF saves, editor switching,
 missing-cell source reveal through a font change and page selection/replacement
 across a large source window. Without the variable these backend checks skip;
 ordinary native unit/scene-peer checks still run.
+
+For fixture and server-log artifacts, set `FC_COMPOSE_ARTIFACT_DIR` to a private
+output directory. `FC_COMPOSE_TEST_LOG` optionally overrides the backend's
+default `warn` tracing filter. Detached backend logs are captured from its
+private state directory; the launcher log alone does not contain server output.
 
 The consecutive-composition regression now requires the accepted prefix to
 remain visible with correct source UTF-16 positions; it has no expected-failure
@@ -418,12 +423,25 @@ retain the original Core Text break path. The index is scoped to one layout
 construction; it supplies no fixed column count and does not bound source
 windows or payloads.
 
-An oversized physical source line can currently exceed the formatter's bounded
-offer while remaining inside a native source window. The missing coverage
-expires into editable-source fallback. The native/backend long-paragraph
-regression preserves a 200 KB example of this release gap. Native break-index
-timings do not qualify that workflow; bounded source/formatter continuation
-still needs to be implemented and verified.
+Native formatter offers assemble complete physical lines across frames. Each
+reader call requests at most 64 KiB, within the existing per-poll offer budget
+(at most 128 KiB). Incomplete UTF-8 suffixes are retried exactly; partial lines
+are never certified as complete formatting. Each tracked buffer retains at
+most one unfinished offer. Edits, ownership changes, invalidation and withdrawn
+demands discard it. Completion still requires the existing formatter receipt.
+
+The Markdown plugin indexes UTF-8 byte offsets lazily for long source lines
+during one formatting hook, avoiding repeated encoding of growing prefixes.
+This index supplies source coordinates, not visual widths. The real-backend
+200 KB list-paragraph regression now verifies readiness, hanging indentation,
+offscreen movement, document-wide UTF-16 positions, resize, Unicode editing,
+exact save and undo. Prose remains proportional and wraps to available pixels.
+
+These changes bound the continuation reader's requests, not whole-window
+payloads, retained logical batches or subsequent grammar/formatter work. A long
+physical paragraph can still occupy a complete native source window. Source
+window and memory budgets, continuation context and interactive performance
+qualification remain release work.
 
 Complete table-input measurement reuses each derived body/code font variant
 within its pass, including bold and italic combinations. Each validated
