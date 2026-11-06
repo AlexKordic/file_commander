@@ -3555,47 +3555,113 @@ public nonisolated struct WireComposeLayout: Sendable {
   public init() {}
 }
 
-public nonisolated struct WireComposeLine: Sendable {
+public nonisolated struct WireComposeLine: @unchecked Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
 
-  public var y: Double = 0
+  public var y: Double {
+    get {_storage._y}
+    set {_uniqueStorage()._y = newValue}
+  }
 
-  public var height: Double = 0
+  public var height: Double {
+    get {_storage._height}
+    set {_uniqueStorage()._height = newValue}
+  }
 
-  public var sourceStart: UInt64 = 0
+  public var sourceStart: UInt64 {
+    get {_storage._sourceStart}
+    set {_uniqueStorage()._sourceStart = newValue}
+  }
 
-  public var sourceEnd: UInt64 = 0
+  public var sourceEnd: UInt64 {
+    get {_storage._sourceEnd}
+    set {_uniqueStorage()._sourceEnd = newValue}
+  }
 
-  public var stops: [WireComposeStop] = []
+  public var stops: [WireComposeStop] {
+    get {_storage._stops}
+    set {_uniqueStorage()._stops = newValue}
+  }
 
   public var start: WireComposeStop {
-    get {_start ?? WireComposeStop()}
-    set {_start = newValue}
+    get {_storage._start ?? WireComposeStop()}
+    set {_uniqueStorage()._start = newValue}
   }
   /// Returns true if `start` has been explicitly set.
-  public var hasStart: Bool {self._start != nil}
+  public var hasStart: Bool {_storage._start != nil}
   /// Clears the value of `start`. Subsequent reads from it will return its default value.
-  public mutating func clearStart() {self._start = nil}
+  public mutating func clearStart() {_uniqueStorage()._start = nil}
 
   public var end: WireComposeStop {
-    get {_end ?? WireComposeStop()}
-    set {_end = newValue}
+    get {_storage._end ?? WireComposeStop()}
+    set {_uniqueStorage()._end = newValue}
   }
   /// Returns true if `end` has been explicitly set.
-  public var hasEnd: Bool {self._end != nil}
+  public var hasEnd: Bool {_storage._end != nil}
   /// Clears the value of `end`. Subsequent reads from it will return its default value.
-  public mutating func clearEnd() {self._end = nil}
+  public mutating func clearEnd() {_uniqueStorage()._end = nil}
 
-  public var number: UInt64 = 0
+  public var number: UInt64 {
+    get {_storage._number}
+    set {_uniqueStorage()._number = newValue}
+  }
+
+  public var cell: WireComposeCellLine {
+    get {_storage._cell ?? WireComposeCellLine()}
+    set {_uniqueStorage()._cell = newValue}
+  }
+  /// Returns true if `cell` has been explicitly set.
+  public var hasCell: Bool {_storage._cell != nil}
+  /// Clears the value of `cell`. Subsequent reads from it will return its default value.
+  public mutating func clearCell() {_uniqueStorage()._cell = nil}
 
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
 
-  fileprivate var _start: WireComposeStop? = nil
-  fileprivate var _end: WireComposeStop? = nil
+  fileprivate var _storage = _StorageClass.defaultInstance
+}
+
+/// Cell fragments keep source-order numbers. A row may have columns at the
+/// same y; part/parts prove adjacency within a wrapped cell despite sparse data.
+public nonisolated struct WireComposeCellLine: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var tableStart: UInt64 = 0
+
+  public var rowStart: UInt64 = 0
+
+  /// absent for a full-width structural source row
+  public var column: UInt32 {
+    get {_column ?? 0}
+    set {_column = newValue}
+  }
+  /// Returns true if `column` has been explicitly set.
+  public var hasColumn: Bool {self._column != nil}
+  /// Clears the value of `column`. Subsequent reads from it will return its default value.
+  public mutating func clearColumn() {self._column = nil}
+
+  public var part: UInt64 = 0
+
+  public var parts: UInt64 = 0
+
+  public var x: Double = 0
+
+  public var width: Double = 0
+
+  public var rowY: Double = 0
+
+  public var rowHeight: Double = 0
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+
+  fileprivate var _column: UInt32? = nil
 }
 
 public nonisolated struct WireComposeStop: Sendable {
@@ -9659,7 +9725,133 @@ nonisolated extension WireComposeLayout: SwiftProtobuf.Message, SwiftProtobuf._M
 
 nonisolated extension WireComposeLine: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".ComposeLine"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}y\0\u{1}height\0\u{3}source_start\0\u{3}source_end\0\u{1}stops\0\u{1}start\0\u{1}end\0\u{1}number\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}y\0\u{1}height\0\u{3}source_start\0\u{3}source_end\0\u{1}stops\0\u{1}start\0\u{1}end\0\u{1}number\0\u{1}cell\0")
+
+  fileprivate class _StorageClass {
+    var _y: Double = 0
+    var _height: Double = 0
+    var _sourceStart: UInt64 = 0
+    var _sourceEnd: UInt64 = 0
+    var _stops: [WireComposeStop] = []
+    var _start: WireComposeStop? = nil
+    var _end: WireComposeStop? = nil
+    var _number: UInt64 = 0
+    var _cell: WireComposeCellLine? = nil
+
+      // This property is used as the initial default value for new instances of the type.
+      // The type itself is protecting the reference to its storage via CoW semantics.
+      // This will force a copy to be made of this reference when the first mutation occurs;
+      // hence, it is safe to mark this as `nonisolated(unsafe)`.
+      static nonisolated(unsafe) let defaultInstance = _StorageClass()
+
+    private init() {}
+
+    init(copying source: _StorageClass) {
+      _y = source._y
+      _height = source._height
+      _sourceStart = source._sourceStart
+      _sourceEnd = source._sourceEnd
+      _stops = source._stops
+      _start = source._start
+      _end = source._end
+      _number = source._number
+      _cell = source._cell
+    }
+  }
+
+  fileprivate mutating func _uniqueStorage() -> _StorageClass {
+    if !isKnownUniquelyReferenced(&_storage) {
+      _storage = _StorageClass(copying: _storage)
+    }
+    return _storage
+  }
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    _ = _uniqueStorage()
+    try withExtendedLifetime(_storage) { (_storage: _StorageClass) in
+      while let fieldNumber = try decoder.nextFieldNumber() {
+        // The use of inline closures is to circumvent an issue where the compiler
+        // allocates stack space for every case branch when no optimizations are
+        // enabled. https://github.com/apple/swift-protobuf/issues/1034
+        switch fieldNumber {
+        case 1: try { try decoder.decodeSingularDoubleField(value: &_storage._y) }()
+        case 2: try { try decoder.decodeSingularDoubleField(value: &_storage._height) }()
+        case 3: try { try decoder.decodeSingularUInt64Field(value: &_storage._sourceStart) }()
+        case 4: try { try decoder.decodeSingularUInt64Field(value: &_storage._sourceEnd) }()
+        case 5: try { try decoder.decodeRepeatedMessageField(value: &_storage._stops) }()
+        case 6: try { try decoder.decodeSingularMessageField(value: &_storage._start) }()
+        case 7: try { try decoder.decodeSingularMessageField(value: &_storage._end) }()
+        case 8: try { try decoder.decodeSingularUInt64Field(value: &_storage._number) }()
+        case 9: try { try decoder.decodeSingularMessageField(value: &_storage._cell) }()
+        default: break
+        }
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    try withExtendedLifetime(_storage) { (_storage: _StorageClass) in
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every if/case branch local when no optimizations
+      // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+      // https://github.com/apple/swift-protobuf/issues/1182
+      if _storage._y.bitPattern != 0 {
+        try visitor.visitSingularDoubleField(value: _storage._y, fieldNumber: 1)
+      }
+      if _storage._height.bitPattern != 0 {
+        try visitor.visitSingularDoubleField(value: _storage._height, fieldNumber: 2)
+      }
+      if _storage._sourceStart != 0 {
+        try visitor.visitSingularUInt64Field(value: _storage._sourceStart, fieldNumber: 3)
+      }
+      if _storage._sourceEnd != 0 {
+        try visitor.visitSingularUInt64Field(value: _storage._sourceEnd, fieldNumber: 4)
+      }
+      if !_storage._stops.isEmpty {
+        try visitor.visitRepeatedMessageField(value: _storage._stops, fieldNumber: 5)
+      }
+      try { if let v = _storage._start {
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 6)
+      } }()
+      try { if let v = _storage._end {
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 7)
+      } }()
+      if _storage._number != 0 {
+        try visitor.visitSingularUInt64Field(value: _storage._number, fieldNumber: 8)
+      }
+      try { if let v = _storage._cell {
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 9)
+      } }()
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: WireComposeLine, rhs: WireComposeLine) -> Bool {
+    if lhs._storage !== rhs._storage {
+      let storagesAreEqual: Bool = withExtendedLifetime((lhs._storage, rhs._storage)) { (_args: (_StorageClass, _StorageClass)) in
+        let _storage = _args.0
+        let rhs_storage = _args.1
+        if _storage._y != rhs_storage._y {return false}
+        if _storage._height != rhs_storage._height {return false}
+        if _storage._sourceStart != rhs_storage._sourceStart {return false}
+        if _storage._sourceEnd != rhs_storage._sourceEnd {return false}
+        if _storage._stops != rhs_storage._stops {return false}
+        if _storage._start != rhs_storage._start {return false}
+        if _storage._end != rhs_storage._end {return false}
+        if _storage._number != rhs_storage._number {return false}
+        if _storage._cell != rhs_storage._cell {return false}
+        return true
+      }
+      if !storagesAreEqual {return false}
+    }
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension WireComposeCellLine: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".ComposeCellLine"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}table_start\0\u{3}row_start\0\u{1}column\0\u{1}part\0\u{1}parts\0\u{1}x\0\u{1}width\0\u{3}row_y\0\u{3}row_height\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -9667,14 +9859,15 @@ nonisolated extension WireComposeLine: SwiftProtobuf.Message, SwiftProtobuf._Mes
       // allocates stack space for every case branch when no optimizations are
       // enabled. https://github.com/apple/swift-protobuf/issues/1034
       switch fieldNumber {
-      case 1: try { try decoder.decodeSingularDoubleField(value: &self.y) }()
-      case 2: try { try decoder.decodeSingularDoubleField(value: &self.height) }()
-      case 3: try { try decoder.decodeSingularUInt64Field(value: &self.sourceStart) }()
-      case 4: try { try decoder.decodeSingularUInt64Field(value: &self.sourceEnd) }()
-      case 5: try { try decoder.decodeRepeatedMessageField(value: &self.stops) }()
-      case 6: try { try decoder.decodeSingularMessageField(value: &self._start) }()
-      case 7: try { try decoder.decodeSingularMessageField(value: &self._end) }()
-      case 8: try { try decoder.decodeSingularUInt64Field(value: &self.number) }()
+      case 1: try { try decoder.decodeSingularUInt64Field(value: &self.tableStart) }()
+      case 2: try { try decoder.decodeSingularUInt64Field(value: &self.rowStart) }()
+      case 3: try { try decoder.decodeSingularUInt32Field(value: &self._column) }()
+      case 4: try { try decoder.decodeSingularUInt64Field(value: &self.part) }()
+      case 5: try { try decoder.decodeSingularUInt64Field(value: &self.parts) }()
+      case 6: try { try decoder.decodeSingularDoubleField(value: &self.x) }()
+      case 7: try { try decoder.decodeSingularDoubleField(value: &self.width) }()
+      case 8: try { try decoder.decodeSingularDoubleField(value: &self.rowY) }()
+      case 9: try { try decoder.decodeSingularDoubleField(value: &self.rowHeight) }()
       default: break
       }
     }
@@ -9685,42 +9878,46 @@ nonisolated extension WireComposeLine: SwiftProtobuf.Message, SwiftProtobuf._Mes
     // allocates stack space for every if/case branch local when no optimizations
     // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
     // https://github.com/apple/swift-protobuf/issues/1182
-    if self.y.bitPattern != 0 {
-      try visitor.visitSingularDoubleField(value: self.y, fieldNumber: 1)
+    if self.tableStart != 0 {
+      try visitor.visitSingularUInt64Field(value: self.tableStart, fieldNumber: 1)
     }
-    if self.height.bitPattern != 0 {
-      try visitor.visitSingularDoubleField(value: self.height, fieldNumber: 2)
+    if self.rowStart != 0 {
+      try visitor.visitSingularUInt64Field(value: self.rowStart, fieldNumber: 2)
     }
-    if self.sourceStart != 0 {
-      try visitor.visitSingularUInt64Field(value: self.sourceStart, fieldNumber: 3)
-    }
-    if self.sourceEnd != 0 {
-      try visitor.visitSingularUInt64Field(value: self.sourceEnd, fieldNumber: 4)
-    }
-    if !self.stops.isEmpty {
-      try visitor.visitRepeatedMessageField(value: self.stops, fieldNumber: 5)
-    }
-    try { if let v = self._start {
-      try visitor.visitSingularMessageField(value: v, fieldNumber: 6)
+    try { if let v = self._column {
+      try visitor.visitSingularUInt32Field(value: v, fieldNumber: 3)
     } }()
-    try { if let v = self._end {
-      try visitor.visitSingularMessageField(value: v, fieldNumber: 7)
-    } }()
-    if self.number != 0 {
-      try visitor.visitSingularUInt64Field(value: self.number, fieldNumber: 8)
+    if self.part != 0 {
+      try visitor.visitSingularUInt64Field(value: self.part, fieldNumber: 4)
+    }
+    if self.parts != 0 {
+      try visitor.visitSingularUInt64Field(value: self.parts, fieldNumber: 5)
+    }
+    if self.x.bitPattern != 0 {
+      try visitor.visitSingularDoubleField(value: self.x, fieldNumber: 6)
+    }
+    if self.width.bitPattern != 0 {
+      try visitor.visitSingularDoubleField(value: self.width, fieldNumber: 7)
+    }
+    if self.rowY.bitPattern != 0 {
+      try visitor.visitSingularDoubleField(value: self.rowY, fieldNumber: 8)
+    }
+    if self.rowHeight.bitPattern != 0 {
+      try visitor.visitSingularDoubleField(value: self.rowHeight, fieldNumber: 9)
     }
     try unknownFields.traverse(visitor: &visitor)
   }
 
-  public static func ==(lhs: WireComposeLine, rhs: WireComposeLine) -> Bool {
-    if lhs.y != rhs.y {return false}
-    if lhs.height != rhs.height {return false}
-    if lhs.sourceStart != rhs.sourceStart {return false}
-    if lhs.sourceEnd != rhs.sourceEnd {return false}
-    if lhs.stops != rhs.stops {return false}
-    if lhs._start != rhs._start {return false}
-    if lhs._end != rhs._end {return false}
-    if lhs.number != rhs.number {return false}
+  public static func ==(lhs: WireComposeCellLine, rhs: WireComposeCellLine) -> Bool {
+    if lhs.tableStart != rhs.tableStart {return false}
+    if lhs.rowStart != rhs.rowStart {return false}
+    if lhs._column != rhs._column {return false}
+    if lhs.part != rhs.part {return false}
+    if lhs.parts != rhs.parts {return false}
+    if lhs.x != rhs.x {return false}
+    if lhs.width != rhs.width {return false}
+    if lhs.rowY != rhs.rowY {return false}
+    if lhs.rowHeight != rhs.rowHeight {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }

@@ -556,13 +556,30 @@ Short cells keep a full-height click region beside taller cells; real empty
 cells retain their own anchor, while missing-cell clicks enter structural
 source. Provisional text reflows within its cell; a draft crossing cells uses
 one shared projected flow until commit. Structural source rows span the table.
-Two-dimensional navigation, horizontal scrolling when complete clusters exceed
-the pane, and stable column measures across source windows remain prerequisites
-for enabling and qualifying the capability. Legacy rich clients keep table source and
+
+Navigation now carries optional `ComposeLine.cell` geometry. Source-order line
+numbers and per-cell part/count ordinals expose gaps in sparse measurements.
+Full row bounds permit side-by-side columns and padding/image space; cell
+regions must remain disjoint. Fresh validates source ownership, UTF-8 bounds,
+column IDs, part order and row geometry before using a layout. Parser-owned
+row neighbors remain on the backend, including neighbors outside a published
+source window. Up/Down retains a column across wraps and rows; Home/End uses
+the cell's current visual line. Paging selects a real caret in the same column
+when its shorter text ends above a taller neighbor. Unknown geometry requests
+another measurement. Logical column intent is independent of the pixel goal,
+so a style change can reset pixel positioning while retaining the column
+through a full-width source row. Pointer input resets that intent.
+
+Cross-window retry qualification, horizontal scrolling when complete clusters
+exceed the pane, and stable column measures across source windows remain
+prerequisites for enabling the capability. Legacy rich clients keep table source and
 can share the same backend with a table-capable client without exchanging
 their per-client projections. `compose-tables.pb` records that real-plugin
 source contract; `compose-table-image-source.pb` adds edited image markup and
-its preview. Renderer/model checks do not prove complete table ergonomics.
+its preview. `compose-tables-missing-source.pb` records a missing-cell motion
+revealing structural source. Core Text navigation fixtures are replayed by
+Fresh's scene socket test, including source reveal and style changes.
+These checks do not prove complete interactive table ergonomics.
 
 Visible images are checked on a five-second prototype interval and when the
 editor is shown again. POSIX local/SSH stats include file identity plus

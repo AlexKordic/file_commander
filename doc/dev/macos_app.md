@@ -230,7 +230,9 @@ app's zoom scales native Compose fonts and spacing as well.
 
 Terminal Markdown's fixed column measure does not govern native wrapping.
 Parsed tables currently retain editable source instead of terminal-padded or
-truncated cell replacements. Native measured table cells remain unfinished.
+truncated cell replacements. The shared measured table renderer and navigation
+are experimental; the native editor still requests table source pending the
+remaining integration and qualification gates described below.
 Code blocks use parser-owned content ranges and measured native frames;
 character-sized terminal frames do not enter the native projection.
 
@@ -282,8 +284,16 @@ text-service geometry use those same cell fragments. Real empty cells retain
 an anchor; missing cells enter source flow. Marked text reflows within a cell;
 a cross-cell draft temporarily uses one shared projected flow. The additional
 `compose-table-image-source.pb` fixture exercises edited image markup/previews.
-The native editor still requests table source while two-dimensional navigation,
-horizontal scrolling and stable measures across source windows are completed.
+Cell navigation now exports source-ordered line/part ordinals, complete cell
+edges around sparse regions and full row bounds. Missing-cell regions target
+real structural source; empty cells keep their explicit anchor. Fresh validates
+ownership and routes Up/Down, Home/End and Page actions through its keybindings.
+Logical column intent survives source reveal and pixel-goal resets. Native
+column geometry changes reset the pixel goal. The scene socket test replays
+Core Text geometry through source reveal and selection; the additional
+`compose-tables-missing-source.pb` fixture covers the revealed row.
+The native editor still requests table source while cross-window retries,
+horizontal scrolling and stable measures across source windows are qualified.
 `SceneSocket.open(measuredTables:)` defaults to false. These renderer tests do
 not establish complete interactive table qualification.
 Native clipboard access is injectable; scene/input tests use memory storage

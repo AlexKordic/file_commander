@@ -48,8 +48,13 @@ final class ComposePresentation {
     self.body = body as CTFont
     self.monospace = monospace as CTFont
     self.typography = typography
+    let sameColumns = reuse.map { previous in
+      previous.layout.text.tables.count == layout.text.tables.count && zip(previous.layout.text.tables, layout.text.tables).allSatisfy {
+        $0.source == $1.source && $0.columns == $1.columns && $0.rect.minX == $1.rect.minX
+      }
+    } ?? false
     if let reuse, reuse.layout.text.size.width == layout.text.size.width, reuse.bounds.height == bounds.height,
-       CFEqual(reuse.body, body as CTFont), CFEqual(reuse.monospace, monospace as CTFont), reuse.typography == typography {
+       CFEqual(reuse.body, body as CTFont), CFEqual(reuse.monospace, monospace as CTFont), reuse.typography == typography, sameColumns {
       styleRevision = reuse.styleRevision
     } else { styleRevision = UInt64.random(in: 1...UInt64.max) }
     self.caretStates = caretStates
