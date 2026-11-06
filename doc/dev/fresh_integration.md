@@ -465,14 +465,17 @@ fixed-width formatting do not constrain native layout.
   receipt must prove the edited or preserved caret owner, its source/UTF-16
   coordinates and the exact source between the point and that caret. A nearby
   point can be proved without echoing the whole paste in the receipt. Only then
-  can the click
-  become a source pointer at that receipt's revision. The point survives font
+  can the click become a source pointer at that receipt's revision. The point survives font
   reflow, secondary-caret inserts and chained prefix replacements. Captured
   offsets follow the declared native newline normalization. Following text
   depends on the click's own result. A cancelled predecessor, changed text or
   insufficient bounded source context cancels the click explicitly and
-  recovers dependent text. Immediate selection/candidate feedback within
-  these pending inserts still awaits further interaction qualification.
+  recovers dependent text. Native selection, caret, substring and candidate
+  geometry can follow that point immediately in the provisional document.
+  Drag selection may cross into known source. Confirmed prefix replies rebind
+  derived source points and carry prediction forward in queue order; a later
+  click result remains authoritative. Broader interaction qualification remains
+  in progress.
 - Type 29, `ComposeViewportRequest`, updates a per-client source marker and
   vertical pixel offset plus a horizontal translation in points. Its acknowledgments and coalescing are independent of the text
   input queue. It changes neither the source cursor nor the terminal viewport.
@@ -607,17 +610,35 @@ Navigation measurement uses the actual source snapshot independently of
 the provisional drawing overlay, so a key awaiting geometry can finish while
 a following conversion is marked.
 
-The experimental presentation model separates actual caret IDs from the draft
-regions that own provisional text. `ComposeVirtualSelections` keeps bounded,
-immutable attributed contexts and directional UTF-16 selections, preserving
-secondary carets when the primary moves into another draft. Conflicting
-contexts and unknown gaps cannot supply text. `ComposeVirtualInsertion` folds
-a broadcast conversion back into disjoint real source regions, merging drafts
-when several carets affect one region. Its real source map and per-caret display
-ranges use the existing measured text layout; synthetic region IDs remain
-inside FreshKit. This model is preparatory: native input/drawing integration
-and the complete marked-text update lifecycle are still in progress. It
-introduces neither a Markdown parser nor a second editable buffer.
+The native presentation separates actual caret IDs from the draft regions
+that own provisional text. `ComposeVirtualSelections` keeps bounded immutable
+attributed contexts, directional UTF-16 selections and caret affinity,
+preserving secondary carets when the primary moves into another draft.
+A primary-only prefix adds unchanged context witnesses for the other carets;
+these provide positions and raw context without editing the projection.
+Conflicting contexts and unknown gaps cannot supply text. Per-caret conversions
+can have partial marked/selected ranges and expand into captured surrounding
+source. `ComposeVirtualInsertion` folds them back into disjoint real source
+regions, merging drafts when several carets affect one region. The real source
+map and separate draft/context display ranges feed one measured layout for
+painting, caret, selection, hit testing and native text services. Synthetic
+region IDs stay inside FreshKit. Code/table context and image suppression use
+these real source regions; prose remains proportional and wraps to pixels.
+Completed formatting can replace temporary visible markup without retiring an
+active conversion. Zero-length candidate queries at the current selection use
+the caret's visual affinity, including the two sides of a soft wrap.
+
+Action-intent contexts derive correct provisional UTF-8 starts and global
+UTF-16 starts. They retain native input while a click/result is pending; they
+are not an editable buffer. A strict guard forbids turning those provisional
+ranges into a replacement packet, including after commit or a following
+conversion. Only the matching result can rebuild real source ranges. An
+explicit primary-only conversion remains primary-only after binding and
+retains observed secondary owners for a following broadcast. Queued previews
+carry their prefix until that binding, then retire it without repeating already
+accepted text. Navigation measurements always use the backend snapshot. No
+second Markdown parser is introduced. System IME panels, arbitrary action
+sequences and broader view/recovery timing still require release qualification.
 
 `ComposePane.native_newline` (field 23) declares Fresh's insertion separator:
 0 unknown, 1 LF, 2 CRLF. CR disk files use LF internally. The native preview

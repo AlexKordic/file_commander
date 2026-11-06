@@ -501,6 +501,279 @@ final class ComposeInputTests: XCTestCase {
   }
 
   @MainActor
+  func testInitialPrimaryOnlyPrefixRetainsUntouchedSecondaryDuringAPendingClickAndConversion() async throws {
+    var initial = pane("aa BB cc")
+    initial.compose.cursors[0].utf16Position = 0
+    initial.compose.cursors.append(.with { $0.id = 2; $0.position = 3; $0.utf16Position = 3 })
+    let peer = try ScenePeer(pane: initial); defer { peer.close() }
+    let editor = richEditor(); defer { editor.detachAll() }
+    editor.attach(socketPath: peer.path, app: nil)
+    try await eventually { editor.grid?.focusedCompose != nil }
+    let grid = try XCTUnwrap(editor.grid)
+    grid.insertText("ab", replacementRange: NSRange(location: 0, length: 0))
+    try await eventually { peer.inputs.count == 1 }
+    XCTAssertEqual(grid.focusedCompose?.carets.count, 2)
+    let prefix = try XCTUnwrap(grid.focusedCompose), range = try XCTUnwrap(prefix.layout.draftDisplayRanges[1])
+    let rect = try XCTUnwrap(prefix.layout.text.caret(atUTF16: range.location + 1))
+    editor.grid(grid, point: CGPoint(x: prefix.origin.x + rect.minX, y: prefix.origin.y + rect.midY), in: prefix, extend: false, count: 1)
+    XCTAssertEqual(grid.focusedCompose?.carets.count, 2)
+    grid.setMarkedText("X", selectedRange: NSRange(location: 1, length: 0), replacementRange: NSRange(location: NSNotFound, length: 0))
+    XCTAssertEqual(grid.focusedCompose?.carets.count, 2)
+    XCTAssertEqual(grid.focusedCompose?.layout.text.projection.text, "aXbaa XBB cc")
+    XCTAssertTrue(editor.uninsertedText.isEmpty)
+  }
+
+  @MainActor
+  func testCompletedFormattingReplacesVisibleMarkupDuringAVirtualComposition() async throws {
+    let source = "# Title\n\n**bold**\n\nTail\n"
+    var initial = pane(source)
+    initial.compose.text = String(source.dropFirst(2))
+    initial.compose.segments = [.with { $0.sourceEnd = 2; $0.kind = 1 },
+      .with { $0.sourceStart = 2; $0.sourceEnd = UInt64(source.utf8.count); $0.displayEnd = UInt64(source.utf8.count - 2) }]
+    initial.compose.spans = [.with { $0.start = 0; $0.end = 8; $0.role = 1 }, .with { $0.start = 9; $0.end = 17; $0.flags = 1 }]
+    initial.compose.cursors[0].position = UInt64(source.utf8.count); initial.compose.cursors[0].utf16Position = UInt64(source.utf16.count)
+    initial.compose.textContext.selectionStart = UInt64(source.utf16.count); initial.compose.textContext.selectionEnd = UInt64(source.utf16.count)
+    initial.compose.ready = false; initial.compose.currentProjection = true
+    let peer = try ScenePeer(pane: initial); defer { peer.close() }
+    let editor = richEditor(); defer { editor.detachAll() }
+    editor.attach(socketPath: peer.path, app: nil)
+    try await eventually { editor.grid?.focusedCompose != nil }
+    let grid = try XCTUnwrap(editor.grid), unspecified = NSRange(location: NSNotFound, length: 0)
+    grid.insertText("abc", replacementRange: unspecified)
+    let prefix = try XCTUnwrap(grid.focusedCompose), range = try XCTUnwrap(prefix.layout.draftDisplayRanges[1])
+    let rect = try XCTUnwrap(prefix.layout.text.caret(atUTF16: range.location + 1))
+    editor.grid(grid, point: CGPoint(x: prefix.origin.x + rect.minX, y: prefix.origin.y + rect.midY), in: prefix, extend: false, count: 1)
+    grid.setMarkedText("日", selectedRange: NSRange(location: 1, length: 0), replacementRange: unspecified)
+    XCTAssertTrue(try XCTUnwrap(grid.focusedCompose).layout.text.projection.text.contains("**bold**"))
+    var ready = initial
+    ready.compose.ready = true; ready.compose.projectionRevision = 5
+    ready.compose.text = "Title\n\nbold\n\nTail\n"
+    ready.compose.segments = [.with { $0.sourceEnd = 2; $0.kind = 1 },
+      .with { $0.sourceStart = 2; $0.sourceEnd = 9; $0.displayEnd = 7 },
+      .with { $0.sourceStart = 9; $0.sourceEnd = 11; $0.displayStart = 7; $0.displayEnd = 7; $0.kind = 1 },
+      .with { $0.sourceStart = 11; $0.sourceEnd = 15; $0.displayStart = 7; $0.displayEnd = 11 },
+      .with { $0.sourceStart = 15; $0.sourceEnd = 17; $0.displayStart = 11; $0.displayEnd = 11; $0.kind = 1 },
+      .with { $0.sourceStart = 17; $0.sourceEnd = UInt64(source.utf8.count); $0.displayStart = 11; $0.displayEnd = UInt64(ready.compose.text.utf8.count) }]
+    let sequence = peer.lastApplied; peer.show(ready)
+    try await eventually { peer.lastApplied > sequence }
+    XCTAssertEqual(grid.focusedCompose?.layout.text.projection.text, "Title\n\nbold\n\nTail\na日bc")
+    XCTAssertEqual(grid.markedRange(), NSRange(location: source.utf16.count + 1, length: 1))
+    XCTAssertEqual(grid.focusedCompose?.scope.projectionRevision, 5)
+    XCTAssertTrue(editor.uninsertedText.isEmpty)
+  }
+
+  @MainActor
+  func testPendingClickAtSoftWrapKeepsCaretAndCandidateOnTheCapturedVisualLine() async throws {
+    let peer = try ScenePeer(pane: pane("Tail\n", width: 20)); defer { peer.close() }
+    let editor = richEditor(); defer { editor.detachAll() }
+    editor.attach(socketPath: peer.path, app: nil)
+    try await eventually { editor.grid?.focusedCompose != nil }
+    let grid = try XCTUnwrap(editor.grid), prefix = "A long pending line that wraps across several rows "
+    grid.insertText(prefix, replacementRange: NSRange(location: NSNotFound, length: 0))
+    try await eventually { peer.inputs.count == 1 }
+    let pending = try XCTUnwrap(grid.focusedCompose)
+    XCTAssertGreaterThan(pending.layout.text.fragments.count, 1)
+    let boundary = pending.layout.text.fragments[1].range.location
+    XCTAssertLessThan(boundary, prefix.utf16.count)
+    let upstream = try XCTUnwrap(pending.layout.text.caret(atUTF16: boundary, affinity: .upstream))
+    let downstream = try XCTUnwrap(pending.layout.text.caret(atUTF16: boundary, affinity: .downstream))
+    XCTAssertGreaterThan(downstream.minY, upstream.minY)
+    editor.grid(grid, point: CGPoint(x: pending.origin.x + upstream.minX, y: pending.origin.y + upstream.midY),
+      in: pending, extend: false, count: 1)
+    let clicked = try XCTUnwrap(grid.focusedCompose), caret = try XCTUnwrap(clicked.caret)
+    XCTAssertEqual(caret.minY - clicked.origin.y, upstream.minY, accuracy: 0.01)
+    let candidate = try XCTUnwrap(clicked.textServiceRect(for: grid.selectedRange()))
+    XCTAssertEqual(candidate.rect.minY, upstream.minY, accuracy: 0.01)
+    XCTAssertEqual(candidate.range, grid.selectedRange())
+    var inserted = pane(prefix + "Tail\n", revision: 5, width: 20)
+    inserted.compose.cursors[0].position = UInt64(prefix.utf8.count); inserted.compose.cursors[0].utf16Position = UInt64(prefix.utf16.count)
+    inserted.compose.textContext.selectionStart = UInt64(prefix.utf16.count); inserted.compose.textContext.selectionEnd = UInt64(prefix.utf16.count)
+    let edit = WireComposeEditReceipt.with {
+      $0.window = 1; $0.leaf = 2; $0.buffer = 3; $0.epoch = 7; $0.cursors = [1]; $0.pane = inserted.compose
+    }
+    peer.reply(.with { $0.id = 1; $0.accepted = true; $0.edit = edit }, pane: inserted)
+    try await eventually { peer.inputs.count == 2 }
+    XCTAssertEqual(peer.inputs[1].affinity, 1)
+    let following = try XCTUnwrap(grid.focusedCompose)
+    XCTAssertEqual(try XCTUnwrap(following.caret).minY - following.origin.y, upstream.minY, accuracy: 0.01)
+    XCTAssertEqual(try XCTUnwrap(following.textServiceRect(for: grid.selectedRange())).rect.minY, upstream.minY, accuracy: 0.01)
+    inserted.compose.cursors[0].position = UInt64(boundary); inserted.compose.cursors[0].utf16Position = UInt64(boundary)
+    inserted.compose.textContext.selectionStart = UInt64(boundary); inserted.compose.textContext.selectionEnd = UInt64(boundary)
+    inserted.compose.selectionRevision = 6
+    let result = WireComposeEditReceipt.with {
+      $0.window = 1; $0.leaf = 2; $0.buffer = 3; $0.epoch = 7; $0.pane = inserted.compose
+    }
+    let sequence = peer.reply(.with { $0.id = 2; $0.accepted = true; $0.result = result
+      $0.carets = [.with { $0.id = 1; $0.position = UInt64(boundary); $0.affinity = 1 }] }, pane: inserted)
+    try await eventually { peer.lastApplied >= sequence }
+    let accepted = try XCTUnwrap(grid.focusedCompose)
+    XCTAssertEqual(try XCTUnwrap(accepted.caret).minY - accepted.origin.y, upstream.minY, accuracy: 0.01)
+    XCTAssertEqual(try XCTUnwrap(accepted.textServiceRect(for: grid.selectedRange())).rect.minY, upstream.minY, accuracy: 0.01)
+  }
+
+  @MainActor
+  func testPendingDragCanCrossFromAnInsertIntoSourceAndKeepItsTextServiceSelectionDuringReflow() async throws {
+    let initial = pane("Tail\n"), peer = try ScenePeer(pane: initial)
+    defer { peer.close() }
+    let editor = richEditor(); defer { editor.detachAll() }
+    editor.attach(socketPath: peer.path, app: nil)
+    try await eventually { editor.grid?.focusedCompose != nil }
+    let grid = try XCTUnwrap(editor.grid)
+    grid.insertText("abcd", replacementRange: NSRange(location: NSNotFound, length: 0))
+    try await eventually { peer.inputs.count == 1 }
+    func point(_ position: Int, extend: Bool) throws {
+      let current = try XCTUnwrap(grid.focusedCompose), rect = try XCTUnwrap(current.layout.text.caret(atUTF16: position))
+      editor.grid(grid, point: CGPoint(x: current.origin.x + rect.minX, y: current.origin.y + rect.midY), in: current, extend: extend, count: 1)
+    }
+    try point(1, extend: false); try point(6, extend: true)
+    XCTAssertEqual(grid.selectedRange(), NSRange(location: 1, length: 5))
+    var actual = NSRange(location: NSNotFound, length: 0)
+    XCTAssertEqual(grid.attributedSubstring(forProposedRange: grid.selectedRange(), actualRange: &actual)?.string, "bcdTa")
+    XCTAssertEqual(actual, grid.selectedRange())
+    var preferences = ComposePreferences(); preferences.bodySize = 24
+    grid.setComposePreferences(preferences, zoom: 1)
+    XCTAssertEqual(grid.selectedRange(), NSRange(location: 1, length: 5))
+    let candidate = try XCTUnwrap(grid.focusedCompose?.textServiceRect(for: grid.selectedRange()))
+    XCTAssertEqual(candidate.range, grid.selectedRange()); XCTAssertGreaterThan(candidate.rect.width, 0)
+    XCTAssertEqual(peer.inputs.count, 1)
+    var inserted = pane("abcdTail\n", revision: 5)
+    inserted.compose.cursors[0].position = 4; inserted.compose.cursors[0].utf16Position = 4
+    inserted.compose.textContext.selectionStart = 4; inserted.compose.textContext.selectionEnd = 4
+    let edit = WireComposeEditReceipt.with {
+      $0.window = 1; $0.leaf = 2; $0.buffer = 3; $0.epoch = 7; $0.cursors = [1]; $0.pane = inserted.compose
+    }
+    peer.reply(.with { $0.id = 1; $0.accepted = true; $0.edit = edit }, pane: inserted)
+    try await eventually { peer.inputs.count == 2 }
+    XCTAssertEqual(grid.selectedRange(), NSRange(location: 1, length: 5))
+    inserted.compose.cursors[0].position = 1; inserted.compose.cursors[0].utf16Position = 1
+    inserted.compose.textContext.selectionStart = 1; inserted.compose.textContext.selectionEnd = 1
+    inserted.compose.selectionRevision = 6
+    let result = WireComposeEditReceipt.with {
+      $0.window = 1; $0.leaf = 2; $0.buffer = 3; $0.epoch = 7; $0.pane = inserted.compose
+    }
+    peer.reply(.with { $0.id = 2; $0.accepted = true; $0.result = result }, pane: inserted)
+    try await eventually { peer.inputs.count == 3 }
+    XCTAssertEqual(peer.inputs[2].position, 6); XCTAssertEqual(peer.inputs[2].sourceRevision, 5)
+    XCTAssertEqual(grid.selectedRange(), NSRange(location: 1, length: 5))
+    peer.reply(.with { $0.id = 3; $0.accepted = true })
+  }
+
+  @MainActor
+  func testPendingClickInsideAnotherDraftPreviewsEveryCaretAndPartialIMEBeforeReplies() async throws {
+    var initial = pane("aa BB cc\n")
+    initial.compose.cursors[0].utf16Position = 0
+    initial.compose.cursors.append(.with { $0.id = 2; $0.position = 3; $0.utf16Position = 3 })
+    let peer = try ScenePeer(pane: initial); defer { peer.close() }
+    let editor = richEditor(); defer { editor.detachAll() }
+    editor.attach(socketPath: peer.path, app: nil)
+    try await eventually { editor.grid?.focusedCompose != nil }
+    let grid = try XCTUnwrap(editor.grid), unspecified = NSRange(location: NSNotFound, length: 0)
+    grid.insertText("日本", replacementRange: unspecified)
+    try await eventually { peer.inputs.count == 1 }
+    let prefix = try XCTUnwrap(grid.focusedCompose), range = try XCTUnwrap(prefix.layout.draftDisplayRanges[2])
+    let rect = try XCTUnwrap(prefix.layout.text.caret(atUTF16: range.location + 1))
+    editor.grid(grid, point: CGPoint(x: prefix.origin.x + rect.minX, y: prefix.origin.y + rect.midY), in: prefix, extend: false, count: 1)
+    XCTAssertEqual(grid.selectedRange(), NSRange(location: 6, length: 0))
+    grid.setMarkedText("X", selectedRange: NSRange(location: 1, length: 0), replacementRange: unspecified)
+    XCTAssertEqual(grid.markedRange(), NSRange(location: 6, length: 1))
+    XCTAssertEqual(grid.focusedCompose?.layout.text.projection.text, "日本aa 日X本XBB cc\n")
+    XCTAssertEqual(grid.focusedCompose?.carets.count, 2)
+    grid.setMarkedText("YZ", selectedRange: NSRange(location: 1, length: 0), replacementRange: unspecified)
+    XCTAssertEqual(grid.markedRange(), NSRange(location: 6, length: 2)); XCTAssertEqual(grid.selectedRange().location, 7)
+    XCTAssertEqual(grid.focusedCompose?.layout.text.projection.text, "日本aa 日YZ本YZBB cc\n")
+    let candidate = try XCTUnwrap(grid.focusedCompose?.textServiceRect(for: grid.selectedRange()))
+    XCTAssertEqual(candidate.range, grid.selectedRange()); XCTAssertGreaterThan(candidate.rect.height, 0)
+    grid.insertText("YZ", replacementRange: unspecified)
+    XCTAssertEqual(peer.inputs.count, 1)
+    editor.send(.action(name: "save", argsJson: ""))
+    XCTAssertEqual(grid.focusedCompose?.layout.text.projection.text, "日本aa 日YZ本YZBB cc\n")
+    var inserted = pane("日本aa 日本BB cc\n", revision: 5)
+    inserted.compose.cursors = [.with { $0.id = 1; $0.primary = true; $0.position = 6; $0.utf16Position = 2 },
+      .with { $0.id = 2; $0.position = 15; $0.utf16Position = 7 }]
+    inserted.compose.textContext.selectionStart = 2; inserted.compose.textContext.selectionEnd = 2
+    let edit = WireComposeEditReceipt.with {
+      $0.window = 1; $0.leaf = 2; $0.buffer = 3; $0.epoch = 7; $0.cursors = [1, 2]; $0.pane = inserted.compose
+    }
+    peer.reply(.with { $0.id = 1; $0.accepted = true; $0.edit = edit }, pane: inserted)
+    try await eventually { peer.inputs.count == 2 }
+    XCTAssertEqual(peer.inputs[1].position, 12)
+    XCTAssertEqual(grid.focusedCompose?.layout.text.projection.text, "日本aa 日YZ本YZBB cc\n")
+    inserted.compose.cursors[0].position = 12; inserted.compose.cursors[0].utf16Position = 6
+    inserted.compose.textContext.selectionStart = 6; inserted.compose.textContext.selectionEnd = 6
+    inserted.compose.selectionRevision = 8
+    let result = WireComposeEditReceipt.with {
+      $0.window = 1; $0.leaf = 2; $0.buffer = 3; $0.epoch = 7; $0.pane = inserted.compose
+    }
+    peer.reply(.with { $0.id = 2; $0.accepted = true; $0.result = result }, pane: inserted)
+    try await eventually { peer.inputs.count == 3 }
+    XCTAssertEqual(peer.inputs[2].sourceRevision, 5)
+    XCTAssertEqual(peer.inputs[2].replacementStart, 12); XCTAssertEqual(peer.inputs[2].replacements.first?.start, 15)
+    XCTAssertEqual(try WirePaste(serializedBytes: peer.inputs[2].payload).text, "YZ")
+    XCTAssertTrue(editor.uninsertedText.isEmpty)
+    var committed = pane("日本aa 日YZ本YZBB cc\n", revision: 6)
+    committed.compose.cursors = [.with { $0.id = 1; $0.primary = true; $0.position = 14; $0.utf16Position = 8 },
+      .with { $0.id = 2; $0.position = 19; $0.utf16Position = 11 }]
+    committed.compose.textContext.selectionStart = 8; committed.compose.textContext.selectionEnd = 8
+    let receipt = WireComposeEditReceipt.with {
+      $0.window = 1; $0.leaf = 2; $0.buffer = 3; $0.epoch = 7; $0.cursors = [1, 2]; $0.pane = committed.compose
+    }
+    peer.reply(.with { $0.id = 3; $0.accepted = true; $0.edit = receipt }, pane: committed)
+    try await eventually { peer.inputs.count == 4 }
+    XCTAssertEqual(grid.focusedCompose?.layout.text.projection.text, "日本aa 日YZ本YZBB cc\n")
+    peer.reply(.with { $0.id = 4; $0.accepted = true })
+  }
+
+  @MainActor
+  func testExplicitPendingConversionKeepsSecondaryFeedbackAcrossBindingAndFollowingBroadcast() async throws {
+    var initial = pane("aa BB cc")
+    initial.compose.cursors[0].utf16Position = 0
+    initial.compose.cursors.append(.with { $0.id = 2; $0.position = 3; $0.utf16Position = 3 })
+    let peer = try ScenePeer(pane: initial); defer { peer.close() }
+    let editor = richEditor(); defer { editor.detachAll() }
+    editor.attach(socketPath: peer.path, app: nil)
+    try await eventually { editor.grid?.focusedCompose != nil }
+    let grid = try XCTUnwrap(editor.grid), unspecified = NSRange(location: NSNotFound, length: 0)
+    grid.insertText("日本", replacementRange: unspecified)
+    let prefix = try XCTUnwrap(grid.focusedCompose), range = try XCTUnwrap(prefix.layout.draftDisplayRanges[2])
+    let rect = try XCTUnwrap(prefix.layout.text.caret(atUTF16: range.location + 1))
+    editor.grid(grid, point: CGPoint(x: prefix.origin.x + rect.minX, y: prefix.origin.y + rect.midY), in: prefix, extend: false, count: 1)
+    grid.setMarkedText("X", selectedRange: NSRange(location: 1, length: 0), replacementRange: grid.selectedRange())
+    XCTAssertEqual(grid.focusedCompose?.carets.count, 2)
+    var actual = pane("日本aa 日本BB cc", revision: 5)
+    actual.compose.cursors = [.with { $0.id = 1; $0.primary = true; $0.position = 6; $0.utf16Position = 2 },
+      .with { $0.id = 2; $0.position = 15; $0.utf16Position = 7 }]
+    actual.compose.textContext.selectionStart = 2; actual.compose.textContext.selectionEnd = 2
+    func receipt(_ pane: WirePane, edited: [UInt64] = [], preserved: [UInt64] = []) -> WireComposeEditReceipt {
+      .with { $0.window = 1; $0.leaf = 2; $0.buffer = 3; $0.epoch = 7; $0.cursors = edited; $0.preservedCursors = preserved; $0.pane = pane.compose }
+    }
+    try await eventually { peer.inputs.count == 1 }
+    peer.reply(.with { $0.id = 1; $0.accepted = true; $0.edit = receipt(actual, edited: [1, 2]) }, pane: actual)
+    try await eventually { peer.inputs.count == 2 }
+    actual.compose.cursors[0].position = 12; actual.compose.cursors[0].utf16Position = 6
+    actual.compose.textContext.selectionStart = 6; actual.compose.textContext.selectionEnd = 6
+    actual.compose.selectionRevision = 7
+    let sequence = peer.reply(.with { $0.id = 2; $0.accepted = true; $0.result = receipt(actual) }, pane: actual)
+    try await eventually { peer.lastApplied >= sequence }
+    XCTAssertTrue(grid.hasMarkedText()); XCTAssertEqual(grid.focusedCompose?.carets.count, 2)
+    XCTAssertEqual(grid.focusedCompose?.layout.text.projection.text, "日本aa 日X本BB cc")
+    grid.insertText("X", replacementRange: unspecified)
+    grid.insertText("Y", replacementRange: unspecified)
+    try await eventually { peer.inputs.count == 3 }
+    XCTAssertTrue(peer.inputs[2].replacements.isEmpty); XCTAssertEqual(Set(peer.inputs[2].observedCursors.map(\.id)), [1, 2])
+    actual = pane("日本aa 日X本BB cc", revision: 6)
+    actual.compose.cursors = [.with { $0.id = 1; $0.primary = true; $0.position = 13; $0.utf16Position = 7 },
+      .with { $0.id = 2; $0.position = 16; $0.utf16Position = 8 }]
+    actual.compose.textContext.selectionStart = 7; actual.compose.textContext.selectionEnd = 7
+    peer.reply(.with { $0.id = 3; $0.accepted = true; $0.edit = receipt(actual, edited: [1], preserved: [2]) }, pane: actual)
+    try await eventually { peer.inputs.count == 4 }
+    XCTAssertEqual(peer.inputs[3].replacementStart, 13); XCTAssertEqual(peer.inputs[3].replacements.first?.start, 16)
+    XCTAssertEqual(grid.focusedCompose?.carets.count, 2)
+    XCTAssertEqual(grid.focusedCompose?.layout.text.projection.text, "日本aa 日XY本YBB cc")
+    XCTAssertTrue(editor.uninsertedText.isEmpty)
+    peer.reply(.with { $0.id = 4; $0.accepted = true })
+  }
+
+  @MainActor
   func testClickInsidePendingInsertUsesItsReceiptBeforeSendingFollowingText() async throws {
     let initial = pane("Tail\n"), peer = try ScenePeer(pane: initial)
     defer { peer.close() }
@@ -1705,7 +1978,21 @@ final class ComposeInputTests: XCTestCase {
     try await eventually { peer.inputs.count == 2 }
     XCTAssertEqual(peer.inputs[1].id, 1); XCTAssertTrue(peer.inputs[1].hasLayout)
     XCTAssertEqual(peer.inputs[1].scope.projectionRevision, 5)
-    peer.reply(.with { $0.id = 1; $0.accepted = true })
+    let sequence = peer.reply(.with { $0.id = 1; $0.accepted = true })
+    try await eventually { peer.lastApplied >= sequence }
+    let unspecified = NSRange(location: NSNotFound, length: 0)
+    grid.insertText("abc", replacementRange: unspecified)
+    try await eventually { peer.inputs.count == 3 }
+    let prefix = try XCTUnwrap(grid.focusedCompose), draft = try XCTUnwrap(prefix.layout.draftDisplayRanges[1])
+    let rect = try XCTUnwrap(prefix.layout.text.caret(atUTF16: draft.location + 1))
+    editor.grid(grid, point: CGPoint(x: prefix.origin.x + rect.minX, y: prefix.origin.y + rect.midY), in: prefix, extend: false, count: 1)
+    grid.setMarkedText("日", selectedRange: NSRange(location: 1, length: 0), replacementRange: unspecified)
+    let layered = try XCTUnwrap(grid.focusedCompose)
+    XCTAssertTrue(layered.layout.text.projection.text.hasSuffix("a日bc"))
+    XCTAssertEqual(layered.layout.text.attachments.first?.rect.width, 80)
+    XCTAssertEqual(peer.assets.filter { !$0.cancel }.count, 1)
+    XCTAssertGreaterThan(try XCTUnwrap(layered.layout.text.fragments.first?.rect.height), try XCTUnwrap(layered.layout.text.fragments.last?.rect.height))
+    try artifact("nested-pending")
   }
 
   @MainActor

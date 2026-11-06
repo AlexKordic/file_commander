@@ -261,6 +261,13 @@ final class ComposeBackendTests: XCTestCase {
     let rect = try XCTUnwrap(pending.layout.text.caret(atUTF16: display.location + 1))
     editor.grid(grid, point: CGPoint(x: pending.origin.x + rect.minX, y: pending.origin.y + rect.midY),
       in: pending, extend: false, count: 1)
+    XCTAssertEqual(grid.selectedRange(), NSRange(location: position + 1, length: 0))
+    grid.setMarkedText("X", selectedRange: NSRange(location: 1, length: 0), replacementRange: unspecified)
+    XCTAssertEqual(grid.markedRange(), NSRange(location: position + 1, length: 1))
+    let converted = try XCTUnwrap(grid.focusedCompose)
+    XCTAssertTrue(converted.layout.text.projection.text.contains("日Xcafé"))
+    let candidate = try XCTUnwrap(converted.textServiceRect(for: grid.selectedRange()))
+    XCTAssertEqual(candidate.range, grid.selectedRange()); XCTAssertGreaterThan(candidate.rect.height, 0)
     grid.insertText("X", replacementRange: unspecified)
     let prefixWithX = "日Xcafé 👩🏽‍💻 "
     let expected = Data(original.utf8.prefix(position)) + Data(prefixWithX.utf8) + Data(original.utf8.dropFirst(position))

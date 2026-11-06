@@ -20,6 +20,7 @@ final class ComposePresentation {
   let textContext: ComposeTextContext?
   /// Selection feedback only; input measurements must use the backend snapshot.
   let pendingSelection: Bool
+  let virtualSelections: ComposeVirtualSelections?
   private let caretStates: [UInt64: WireComposeCaret]
   private(set) var navigation: WireComposeLayout?
   private let monospace: CTFont
@@ -31,6 +32,7 @@ final class ComposePresentation {
         typography: ComposeTypography = .init(), pageWidth: CGFloat = 0, reuse: ComposePresentation? = nil,
         caretStates: [UInt64: WireComposeCaret] = [:], images: [UInt64: ComposeImageState] = [:], viewport: WireComposeViewport? = nil,
         preedit: ComposeMarkedText? = nil, composition: ComposeComposition? = nil, pendingSelection: Bool = false,
+        virtualInsertion: ComposeVirtualInsertion? = nil, virtualSelections: ComposeVirtualSelections? = nil,
         environmentLike: ComposePresentation? = nil, geometryRevision: UInt64 = 0) {
     guard pane.hasCompose, pane.hasBuffer else { return nil }
     if pane.compose.hasTextContext {
@@ -45,8 +47,8 @@ final class ComposePresentation {
     let available = bounds.width - 32
     let width = pageWidth > 0 ? min(pageWidth, available) : available
     guard width > 0, let layout = ComposePaneLayout(pane: pane.compose, body: body as CTFont,
-      monospace: monospace as CTFont, width: width, typography: typography, images: images, reuse: reuse?.layout, preedit: preedit, composition: composition) else { return nil }
-    self.pane = pane; self.pendingSelection = pendingSelection
+      monospace: monospace as CTFont, width: width, typography: typography, images: images, reuse: reuse?.layout, preedit: preedit, composition: composition, virtualInsertion: virtualInsertion) else { return nil }
+    self.pane = pane; self.pendingSelection = pendingSelection; self.virtualSelections = virtualSelections
     self.layout = layout
     self.bounds = bounds
     self.body = body as CTFont
@@ -103,6 +105,9 @@ final class ComposePresentation {
   }
 
   var caret: CGRect? {
+    if let selections = virtualSelections, let unit = layout.provisionalDisplayPosition(selections.cursors[selections.primaryID]!.position) {
+      return layout.text.caret(atUTF16: unit, affinity: selections.cursors[selections.primaryID]!.affinity)?.offsetBy(dx: origin.x, dy: origin.y)
+    }
     if let preedit = layout.preedit, let display = layout.draftDisplayRange {
       return layout.text.caret(atUTF16: display.location + NSMaxRange(preedit.selected))?.offsetBy(dx: origin.x, dy: origin.y)
     }
@@ -118,11 +123,28 @@ final class ComposePresentation {
   var cursorAffinity: UInt32 { cursor.map { affinity(for: $0) == .upstream ? 1 : 0 } ?? 0 }
 
   var carets: [CGRect] {
+    if let selections = virtualSelections {
+      return selections.cursors.values.compactMap { cursor in
+        layout.provisionalDisplayPosition(cursor.position).flatMap { layout.text.caret(atUTF16: $0, affinity: cursor.affinity) }?.offsetBy(dx: origin.x, dy: origin.y)
+      }
+    }
+    if let insertion = layout.virtualInsertion {
+      return insertion.cursors.values.compactMap { cursor in
+        layout.provisionalDisplayPosition(cursor.position).flatMap { layout.text.caret(atUTF16: $0, affinity: cursor.affinity) }?.offsetBy(dx: origin.x, dy: origin.y)
+      }
+    }
     if let composition = layout.composition {
-      return layout.draftDisplayRanges.compactMap { id, display in
+      var result = layout.draftDisplayRanges.compactMap { id, display -> CGRect? in
         guard let value = composition.values[id] else { return nil }
         return layout.text.caret(atUTF16: display.location + NSMaxRange(value.selected))?.offsetBy(dx: origin.x, dy: origin.y)
       }
+      for cursor in pane.compose.cursors where composition.values[cursor.id] == nil {
+        guard let source = Int(exactly: cursor.position), let unit = composition.virtualPosition(for: source),
+              composition.sourcePosition(at: unit) == source, let display = layout.provisionalDisplayPosition(unit),
+              let caret = layout.text.caret(atUTF16: display, affinity: affinity(for: cursor)) else { continue }
+        result.append(caret.offsetBy(dx: origin.x, dy: origin.y))
+      }
+      return result
     }
     return pane.compose.cursors.compactMap { cursor in
       Int(exactly: cursor.position).flatMap { layout.text.caret(for: $0, affinity: affinity(for: cursor)) }?.offsetBy(dx: origin.x, dy: origin.y)
@@ -166,7 +188,7 @@ final class ComposePresentation {
     return NSRange(location: start, length: max(0, end - start))
   }
 
-  var textServiceSelectedRange: NSRange { textContext?.selection ?? selectedRange }
+  var textServiceSelectedRange: NSRange { virtualSelections?.selection ?? layout.composition?.selectedRange ?? textContext?.selection ?? selectedRange }
 
   func sourceRange(forTextServiceRange range: NSRange) -> Range<Int>? {
     guard let context = textContext else {
@@ -188,6 +210,9 @@ final class ComposePresentation {
   }
 
   func textServiceRect(for range: NSRange) -> (rect: CGRect, range: NSRange)? {
+    if range.length == 0, range == textServiceSelectedRange, let caret {
+      return (caret.offsetBy(dx: -origin.x, dy: -origin.y), range)
+    }
     if layout.preedit != nil, layout.draftDisplayRange != nil {
       guard range.location >= 0, range.location != NSNotFound,
             let a = preeditDisplayPosition(range.location), range.length >= 0,
@@ -209,29 +234,15 @@ final class ComposePresentation {
     return (area.rect, NSRange(location: start, length: end - start))
   }
 
-  private func preeditDisplayPosition(_ position: Int) -> Int? {
-    guard let composition = layout.composition else { return nil }
-    if let draft = composition.draftPosition(at: position) {
-      return layout.draftDisplayRanges[draft.id].map { $0.location + draft.offset }
-    }
-    guard let source = composition.sourcePosition(at: position) else { return nil }
-    return layout.text.utf16Position(for: source)
-  }
+  private func preeditDisplayPosition(_ position: Int) -> Int? { layout.provisionalDisplayPosition(position) }
 
-  func preeditDocumentPosition(_ displayPosition: Int) -> Int? {
-    guard let composition = layout.composition else { return nil }
-    for id in [composition.primaryID] + composition.ordered.filter({ $0 != composition.primaryID }) {
-      if let display = layout.draftDisplayRanges[id], displayPosition >= display.location && displayPosition <= NSMaxRange(display) {
-        return composition.virtualStart(for: id) + displayPosition - display.location
-      }
-    }
-    guard let sourceRange = layout.text.sourceRange(forUTF16: NSRange(location: displayPosition, length: 0)) else { return nil }
-    return composition.virtualPosition(for: sourceRange.lowerBound)
-  }
+  func preeditDocumentPosition(_ displayPosition: Int) -> Int? { layout.provisionalDocumentPosition(displayPosition) }
 
   func draw(in context: CGContext, dirty: CGRect, foreground: NSColor, background: NSColor, selection: NSColor,
             palette: ComposePaneLayout.Palette? = nil) {
     layout.draw(in: context, origin: origin, clip: bounds, dirty: dirty, foreground: foreground.cgColor,
-                background: background.cgColor, selection: selection.withAlphaComponent(0.4).cgColor, palette: palette)
+                background: background.cgColor, selection: selection.withAlphaComponent(0.4).cgColor, palette: palette,
+                provisionalSelections: virtualSelections.map { $0.cursors.values.map(\.selection) }
+                  ?? layout.virtualInsertion.map { $0.cursors.values.map(\.selection) })
   }
 }
