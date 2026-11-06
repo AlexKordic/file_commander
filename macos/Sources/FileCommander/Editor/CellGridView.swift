@@ -30,6 +30,7 @@ struct ComposePendingPreview {
   let text: ComposePendingText?
   let afterAction: Bool
   let prefixToken: UUID?
+  var selection: ComposePointer.Preview? = nil
 }
 
 /// Draws Fresh's frame as cells, the way its terminal interface does, and turns
@@ -252,6 +253,12 @@ final class CellGridView: NSView, @preconcurrency NSTextInputClient {
   private func presentation(_ input: WirePane, reuse: ComposePresentation? = nil, includePending: Bool = true) -> ComposePresentation? {
     var pane = input
     let pending = includePending ? delegate?.grid(self, pendingTextFor: input) : nil
+    let selection = pending?.selection
+    if let selection, let cursor = selection.pane.cursors.first(where: { $0.id == selection.caret.id }),
+       let index = pane.compose.cursors.firstIndex(where: { $0.id == cursor.id }) {
+      pane.compose.cursors[index] = cursor
+      pane.compose.textContext = selection.pane.textContext
+    }
     let overlay = includePending ? composition ?? pending.flatMap { pending in pending.text.map {
       Composition(target: pending.target, text: $0, initial: $0, after: nil, afterAction: false)
     } } : nil
@@ -295,11 +302,14 @@ final class CellGridView: NSView, @preconcurrency NSTextInputClient {
         authority: pane.compose.assetAuthority, document: pane.compose.assetDocument) ?? .loading)
     })
     let viewport = pane.compose.hasViewport ? composeViewportController?.value(scope: scope, remote: pane.compose.viewport) ?? pane.compose.viewport : nil
+    var caretStates = composeCaretIdentity == .init(window: UInt64(store.windowID), leaf: pane.leaf, buffer: pane.buffer)
+      && composeCaretRevision == pane.compose.bufferRevision ? composeCarets : [:]
+    if let selection { caretStates[selection.caret.id] = selection.caret }
     return ComposePresentation(pane: pane, window: UInt64(store.windowID),
       cell: CGSize(width: cellWidth, height: cellHeight), body: bodyFont, monospace: monoFont,
       typography: composePreferences.typography(zoom: composeZoom), pageWidth: composePreferences.pageWidth * composeZoom,
-      reuse: reuse, caretStates: composeCaretIdentity == .init(window: UInt64(store.windowID), leaf: pane.leaf, buffer: pane.buffer)
-        && composeCaretRevision == pane.compose.bufferRevision ? composeCarets : [:], images: images, viewport: viewport, composition: preedit,
+      reuse: reuse, caretStates: caretStates, images: images, viewport: viewport, composition: preedit,
+      pendingSelection: selection != nil,
       environmentLike: reuse ?? composePanes[pane.leaf], geometryRevision: composeGeometryRevision)
   }
 

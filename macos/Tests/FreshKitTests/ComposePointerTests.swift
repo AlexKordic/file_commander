@@ -53,6 +53,11 @@ final class ComposePointerTests: XCTestCase {
     let click = try XCTUnwrap(ComposePointer(scope: scope, epoch: 7, hit: hit, extend: false, count: 1)).input(id: 1)
     XCTAssertEqual(click.attachmentStart, start)
     XCTAssertEqual(click.position, end)
+    pane.bufferRevision = 4; pane.viewport.epoch = 7; pane.textContext.text = source
+    pane.cursors = [.with { $0.id = 1; $0.primary = true }]
+    let preview = try XCTUnwrap(ComposePointer(scope: scope, epoch: 7, hit: hit, extend: false, count: 1)?.preview(in: pane))
+    XCTAssertEqual(preview.pane.cursors[0].anchor, start); XCTAssertEqual(preview.pane.cursors[0].position, end)
+    XCTAssertEqual(preview.pane.textContext.selectionStart, start); XCTAssertEqual(preview.pane.textContext.selectionEnd, end)
     let double = try XCTUnwrap(ComposePointer(scope: scope, epoch: 7, hit: hit, extend: false, count: 2)).input(id: 2)
     XCTAssertEqual(double.attachmentStart, start)
     XCTAssertEqual(double.clickCount, 2)
@@ -61,4 +66,37 @@ final class ComposePointerTests: XCTestCase {
     XCTAssertFalse(extending.hasAttachmentStart)
     XCTAssertEqual(extending.position, UInt64(hit.source))
   }
+  func testSelectionPreviewKeepsUTF16AndSourceCoordinatesAndSecondaryCaretsDistinct() throws {
+    let source = "alpha café Tail\n"
+    let scope = WireComposeScope.with { $0.windowID = 1; $0.leaf = 2; $0.buffer = 3; $0.bufferRevision = 4 }
+    let pane = WireComposePane.with {
+      $0.bufferRevision = 4; $0.documentLen = UInt64(source.utf8.count); $0.viewport.epoch = 7
+      $0.textContext.text = source
+      $0.cursors = [.with { $0.id = 1; $0.primary = true; $0.position = 6; $0.utf16Position = 6 },
+        .with { $0.id = 2; $0.position = 0; $0.utf16Position = 0 }]
+    }
+    let font = CTFontCreateWithName("Helvetica" as CFString, 16, nil)
+    let layout = try XCTUnwrap(ComposeTextLayout(projection: try copied(source), font: font, width: 440))
+    let rect = try XCTUnwrap(layout.caret(for: 12))
+    let hit = try XCTUnwrap(layout.hit(at: CGPoint(x: rect.minX, y: rect.midY)))
+    XCTAssertEqual(hit.source, 12)
+    let pointer = try XCTUnwrap(ComposePointer(scope: scope, epoch: 7, hit: hit, extend: true, count: 1))
+    let preview = try XCTUnwrap(pointer.preview(in: pane))
+    XCTAssertEqual(preview.pane.cursors[0].position, 12)
+    XCTAssertEqual(preview.pane.cursors[0].utf16Position, 11)
+    XCTAssertEqual(preview.pane.cursors[0].anchor, 6)
+    XCTAssertEqual(preview.pane.textContext.selectionStart, 6); XCTAssertEqual(preview.pane.textContext.selectionEnd, 11)
+    XCTAssertEqual(preview.pane.cursors[1], pane.cursors[1])
+    XCTAssertEqual(pointer.input(id: 1).sourceRevision, 4)
+    XCTAssertEqual(pane.cursors[0].position, 6, "the backend's source snapshot remains immutable")
+    var changed = pane; changed.bufferRevision = 5
+    XCTAssertNil(pointer.preview(in: changed))
+    changed = pane; changed.viewport.epoch = 8
+    XCTAssertNil(pointer.preview(in: changed))
+    changed = pane; changed.textContext.text = "alpha"
+    XCTAssertNil(pointer.preview(in: changed), "no source context is invented beyond the bounded snapshot")
+    XCTAssertNil(ComposePointer(scope: scope, epoch: 7, hit: hit, extend: false, count: 2)?.preview(in: pane),
+      "Fresh still owns word/line selection policy")
+  }
+
 }

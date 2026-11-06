@@ -81,6 +81,7 @@ final class NativeEditor: NSObject, CellGridDelegate {
     var chain: CompositionChain?
     var preview: ComposePendingText?
     var snapshot: ComposePresentation?
+    var pointerPreview: ComposePointer.Preview?
   }
   private var composeQueue: [QueuedInput] = []
   private var nextComposeID: UInt64 = 0
@@ -553,7 +554,11 @@ final class NativeEditor: NSObject, CellGridDelegate {
   func grid(_ grid: CellGridView, point: CGPoint, in pane: ComposePresentation, extend: Bool, count: Int) {
     guard receivedHello, let hit = pane.hit(at: point),
           let pointer = ComposePointer(scope: pane.scope, epoch: pane.pane.compose.viewport.epoch, hit: hit, extend: extend, count: count) else { return }
-    enqueueCompose(.pointer(pointer), target: pane)
+    let predictable = pane.layout.composition == nil && composeQueue.allSatisfy {
+      $0.pointerPreview != nil && $0.target?.identity == pane.identity
+        && $0.target?.epoch == pane.pane.compose.viewport.epoch && $0.target?.scope.bufferRevision == pane.scope.bufferRevision
+    }
+    enqueueCompose(.pointer(pointer), target: pane, pointerPreview: predictable ? pointer.preview(in: pane.pane.compose) : nil)
   }
 
   func grid(_ grid: CellGridView, scroll delta: CGPoint, in pane: ComposePresentation) {
@@ -604,8 +609,14 @@ final class NativeEditor: NSObject, CellGridDelegate {
       guard queued.target?.identity == last.target?.identity, queued.target?.epoch == last.target?.epoch else { break }
       if queued.preview != nil { prefix = queued; break }
     }
+    let selection = last.pointerPreview.flatMap { preview in
+      pane.compose.bufferRevision == preview.pane.bufferRevision && pane.compose.assetDocument == preview.pane.assetDocument
+        && pane.compose.assetAuthority == preview.pane.assetAuthority
+        && (pane.compose.cursors.first(where: \.primary) ?? pane.compose.cursors.first)?.id == preview.caret.id
+        && pane.compose.focused && pane.compose.keyboard ? preview : nil
+    }
     return ComposePendingPreview(token: last.token, target: prefix?.snapshot ?? target,
-      text: prefix?.preview, afterAction: true, prefixToken: prefix?.token)
+      text: prefix?.preview, afterAction: true, prefixToken: prefix?.token, selection: selection)
   }
 
   func grid(_ grid: CellGridView, commit text: ComposePendingText, initial: ComposePendingText,
@@ -759,11 +770,11 @@ final class NativeEditor: NSObject, CellGridDelegate {
   }
 
   private func enqueueCompose(_ input: PendingInput, target: ComposePresentation?, chain: CompositionChain? = nil,
-                              preview: ComposePendingText? = nil) {
+                              preview: ComposePendingText? = nil, pointerPreview: ComposePointer.Preview? = nil) {
     if composeQueue.isEmpty { lastComposeCancellation = nil }
     composeQueue.append(.init(input: input, scrollGeneration: composeViewports.userScrollGeneration,
       target: target.map(InputTarget.init), chain: chain,
-      preview: preview, snapshot: target))
+      preview: preview, snapshot: target, pointerPreview: pointerPreview))
     grid?.refreshComposeImages()
     pumpComposeInput()
   }
@@ -815,7 +826,7 @@ final class NativeEditor: NSObject, CellGridDelegate {
           input.cancel = true
           break
         }
-        if visible.layout.composition != nil, let actual = store.panes.first(where: { $0.leaf == identity.leaf && $0.hasBuffer && $0.buffer == identity.buffer }),
+        if visible.layout.composition != nil || visible.pendingSelection, let actual = store.panes.first(where: { $0.leaf == identity.leaf && $0.hasBuffer && $0.buffer == identity.buffer }),
            let measured = grid?.composeInputSnapshot(actual) { visible = measured }
         let pane = pendingComposeProjection.flatMap { grid?.composeMeasurement(identity: identity, projection: $0) } ?? visible
         pendingComposeBefore = (visible.pane.compose.bufferRevision, visible.pane.compose.cursors)
@@ -839,8 +850,10 @@ final class NativeEditor: NSObject, CellGridDelegate {
       }
     case .pointer(let pointer):
       input = pointer.input(id: input.id)
-      if let identity = pendingComposePane, let pane = grid?.composePanes[identity.leaf], pane.identity == identity {
-        pendingComposeBefore = (pane.pane.compose.bufferRevision, pane.pane.compose.cursors)
+      if let identity = pendingComposePane, let actual = store.panes.first(where: {
+        $0.leaf == identity.leaf && $0.hasBuffer && $0.buffer == identity.buffer && $0.hasCompose
+      }) {
+        pendingComposeBefore = (actual.compose.bufferRevision, actual.compose.cursors)
       }
     case .replacement(let replacement):
       input = replacement.input(id: input.id)

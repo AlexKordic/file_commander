@@ -18,6 +18,8 @@ final class ComposePresentation {
   let viewport: WireComposeViewport
   let scrolling: ComposeViewport
   let textContext: ComposeTextContext?
+  /// Selection feedback only; input measurements must use the backend snapshot.
+  let pendingSelection: Bool
   private let caretStates: [UInt64: WireComposeCaret]
   private(set) var navigation: WireComposeLayout?
   private let monospace: CTFont
@@ -28,7 +30,7 @@ final class ComposePresentation {
   init?(pane: WirePane, window: UInt64, cell: CGSize, body: NSFont, monospace: NSFont,
         typography: ComposeTypography = .init(), pageWidth: CGFloat = 0, reuse: ComposePresentation? = nil,
         caretStates: [UInt64: WireComposeCaret] = [:], images: [UInt64: ComposeImageState] = [:], viewport: WireComposeViewport? = nil,
-        preedit: ComposeMarkedText? = nil, composition: ComposeComposition? = nil,
+        preedit: ComposeMarkedText? = nil, composition: ComposeComposition? = nil, pendingSelection: Bool = false,
         environmentLike: ComposePresentation? = nil, geometryRevision: UInt64 = 0) {
     guard pane.hasCompose, pane.hasBuffer else { return nil }
     if pane.compose.hasTextContext {
@@ -44,7 +46,7 @@ final class ComposePresentation {
     let width = pageWidth > 0 ? min(pageWidth, available) : available
     guard width > 0, let layout = ComposePaneLayout(pane: pane.compose, body: body as CTFont,
       monospace: monospace as CTFont, width: width, typography: typography, images: images, reuse: reuse?.layout, preedit: preedit, composition: composition) else { return nil }
-    self.pane = pane
+    self.pane = pane; self.pendingSelection = pendingSelection
     self.layout = layout
     self.bounds = bounds
     self.body = body as CTFont

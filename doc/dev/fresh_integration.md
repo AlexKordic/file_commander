@@ -448,6 +448,18 @@ fixed-width formatting do not constrain native layout.
   consumer never hit-tests a queued screen point against a newer layout.
   Unmappable positions, changed image annotations, and retired targets terminate
   explicitly rather than selecting unrelated text or holding up later input.
+- A source click, drag or single image selection can preview its primary
+  selection before the reply when its source/UTF-16 endpoints are present in
+  the captured raw context. Drawing, selected-range queries and a following
+  composition share that selection. This is a presentation overlay; the scene
+  store and captured pointer input remain unchanged. Current secondary carets
+  are preserved. A source/lifetime change, retired primary or cancellation
+  removes the preview. Fresh's correlated result can correct it, and supplies
+  the real coordinates for a following composition or queued commit. Native
+  command measurements always use the backend snapshot. Word/line selection,
+  points outside the raw context and pointers behind pending text or opaque
+  actions still await authoritative results; their full interaction workflow
+  remains part of release qualification.
 - Type 29, `ComposeViewportRequest`, updates a per-client source marker and
   vertical pixel offset plus a horizontal translation in points. Its acknowledgments and coalescing are independent of the text
   input queue. It changes neither the source cursor nor the terminal viewport.

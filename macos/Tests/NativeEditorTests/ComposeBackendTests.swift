@@ -209,6 +209,41 @@ final class ComposeBackendTests: XCTestCase {
   }
 
   @MainActor
+  func testRealBackendSourceClickPreviewsAndCommitsFollowingCompositionBeforeAcknowledgment() async throws {
+    let backend = try backend(); defer { backend.stop() }
+    let pasteboard = BackendPasteboard(), editor = editor(pasteboard)
+    defer { editor.detachAll() }
+    let original = "| A | B |\n|---|---|\n| one | two |\n\n# Heading\n\nalpha café Tail\n"
+    let file = backend.root.appendingPathComponent("click.md")
+    try Data(original.utf8).write(to: file)
+    try await attach(backend, file: file, editor: editor)
+    let grid = try XCTUnwrap(editor.grid), initial = try XCTUnwrap(grid.focusedCompose)
+    let index = try XCTUnwrap(original.range(of: "café"))
+    let position = original[..<index.lowerBound].utf8.count, unit = original[..<index.lowerBound].utf16.count
+    let rect = try XCTUnwrap(initial.layout.text.caret(for: position))
+    editor.grid(grid, point: CGPoint(x: initial.origin.x + rect.minX, y: initial.origin.y + rect.midY),
+      in: initial, extend: false, count: 1)
+    XCTAssertEqual(grid.selectedRange(), NSRange(location: unit, length: 0))
+    XCTAssertEqual(editor.store.panes.first?.compose.cursors.first?.position, initial.cursor?.position)
+    let unspecified = NSRange(location: NSNotFound, length: 0)
+    grid.setMarkedText("日本", selectedRange: NSRange(location: 1, length: 0), replacementRange: unspecified)
+    XCTAssertEqual(grid.markedRange(), NSRange(location: unit, length: 2))
+    XCTAssertTrue(try XCTUnwrap(grid.focusedCompose).layout.text.projection.text.contains("alpha 日本café Tail"))
+    grid.insertText("日本", replacementRange: unspecified)
+    try await eventually(editor, "source click and immediately committed conversion") {
+      grid.focusedCompose?.cursor?.position == UInt64(position + "日本".utf8.count)
+        && grid.focusedCompose?.pane.compose.documentLen == UInt64(original.utf8.count + "日本".utf8.count)
+    }
+    let expected = Data(original.utf8.prefix(position)) + Data("日本".utf8) + Data(original.utf8.dropFirst(position))
+    editor.send(.action(name: "save", argsJson: ""))
+    try await eventually(editor, "save composition at the clicked source") { (try? Data(contentsOf: file)) == expected }
+    editor.send(.action(name: "undo", argsJson: ""))
+    editor.send(.action(name: "save", argsJson: ""))
+    try await eventually(editor, "undo the composition while retaining the click") { (try? Data(contentsOf: file)) == Data(original.utf8) }
+    XCTAssertTrue(editor.uninsertedText.isEmpty); XCTAssertTrue(backend.server.isRunning)
+  }
+
+  @MainActor
   func testRealBackendPageSelectionCrossesTheSourceWindowAndCommitsOneReplacement() async throws {
     let backend = try backend(); defer { backend.stop() }
     let pasteboard = BackendPasteboard(), editor = editor(pasteboard)

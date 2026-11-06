@@ -501,6 +501,187 @@ final class ComposeInputTests: XCTestCase {
   }
 
   @MainActor
+  func testSourceClickPlacesCaretAndCompositionBeforeItsReplyWithoutChangingTheCapturedIntent() async throws {
+    let initial = pane("alpha café Tail\n"), peer = try ScenePeer(pane: initial)
+    defer { peer.close() }
+    let editor = richEditor(); defer { editor.detachAll() }
+    editor.attach(socketPath: peer.path, app: nil)
+    try await eventually { editor.grid?.focusedCompose != nil }
+    let window = NSWindow(contentRect: CGRect(x: 90, y: 110, width: 1040, height: 700),
+      styleMask: .borderless, backing: .buffered, defer: false)
+    window.isReleasedWhenClosed = false
+    window.contentView = try XCTUnwrap(editor.view)
+    defer { window.contentView = nil; window.close() }
+    let grid = try XCTUnwrap(editor.grid), before = try XCTUnwrap(grid.focusedCompose)
+    let caret = try XCTUnwrap(before.layout.text.caret(for: 6))
+    editor.grid(grid, point: CGPoint(x: before.origin.x + caret.minX, y: before.origin.y + caret.midY),
+      in: before, extend: false, count: 1)
+    try await eventually { peer.inputs.count == 1 }
+    XCTAssertEqual(peer.inputs[0].position, 6)
+    XCTAssertEqual(editor.store.panes[0].compose.cursors[0].position, 0, "the preview must not mutate Fresh's snapshot")
+    XCTAssertEqual(grid.selectedRange(), NSRange(location: 6, length: 0))
+    let unspecified = NSRange(location: NSNotFound, length: 0)
+    grid.setMarkedText("日本", selectedRange: NSRange(location: 1, length: 0), replacementRange: unspecified)
+    XCTAssertEqual(grid.markedRange(), NSRange(location: 6, length: 2))
+    XCTAssertEqual(grid.focusedCompose?.layout.text.projection.text, "alpha 日本café Tail\n")
+    let provisional = try XCTUnwrap(grid.focusedCompose)
+    let area = try XCTUnwrap(provisional.textServiceRect(for: grid.selectedRange()))
+    XCTAssertEqual(area.range, grid.selectedRange())
+    XCTAssertGreaterThan(area.rect.minX, caret.minX)
+    var actualRange = NSRange(location: NSNotFound, length: 0)
+    let screen = grid.firstRect(forCharacterRange: grid.selectedRange(), actualRange: &actualRange)
+    XCTAssertEqual(actualRange, grid.selectedRange()); XCTAssertGreaterThan(screen.height, 0)
+    XCTAssertEqual(grid.characterIndex(for: CGPoint(x: screen.midX, y: screen.midY)), grid.selectedRange().location)
+    var moved = initial
+    moved.compose.cursors[0].position = 7; moved.compose.cursors[0].utf16Position = 7
+    moved.compose.textContext.selectionStart = 7; moved.compose.textContext.selectionEnd = 7
+    moved.compose.selectionRevision = 5
+    let result = WireComposeEditReceipt.with {
+      $0.window = 1; $0.leaf = 2; $0.buffer = 3; $0.epoch = 7; $0.pane = moved.compose
+    }
+    var newer = moved
+    newer.compose.cursors[0].position = 12; newer.compose.cursors[0].utf16Position = 11
+    newer.compose.textContext.selectionStart = 11; newer.compose.textContext.selectionEnd = 11
+    newer.compose.selectionRevision = 6
+    peer.reply(.with { $0.id = 1; $0.accepted = true; $0.result = result }, pane: newer)
+    try await eventually { peer.lastApplied >= 2 }
+    XCTAssertEqual(grid.markedRange(), NSRange(location: 7, length: 2))
+    XCTAssertEqual(grid.focusedCompose?.layout.text.projection.text, "alpha c日本afé Tail\n")
+    grid.insertText("日本", replacementRange: unspecified)
+    try await eventually { peer.inputs.count == 2 }
+    XCTAssertEqual(peer.inputs[1].replacementStart, 7); XCTAssertEqual(peer.inputs[1].replacementEnd, 7)
+    XCTAssertEqual(peer.inputs[1].sourceRevision, 4)
+    XCTAssertEqual(try WirePaste(serializedBytes: peer.inputs[1].payload).text, "日本")
+    peer.reply(.with { $0.id = 2; $0.accepted = true })
+  }
+
+  @MainActor
+  func testQueuedSourceDragKeepsItsSelectionThroughReflowAndRevertsWhenCancelled() async throws {
+    let initial = pane("alpha café Tail\n"), peer = try ScenePeer(pane: initial)
+    defer { peer.close() }
+    let editor = richEditor(); defer { editor.detachAll() }
+    editor.attach(socketPath: peer.path, app: nil)
+    try await eventually { editor.grid?.focusedCompose != nil }
+    let grid = try XCTUnwrap(editor.grid)
+    func click(_ position: Int, extend: Bool) throws {
+      let current = try XCTUnwrap(grid.focusedCompose), rect = try XCTUnwrap(current.layout.text.caret(for: position))
+      editor.grid(grid, point: CGPoint(x: current.origin.x + rect.minX, y: current.origin.y + rect.midY),
+        in: current, extend: extend, count: 1)
+    }
+    try click(6, extend: false)
+    try await eventually { peer.inputs.count == 1 }
+    try click(12, extend: true)
+    XCTAssertEqual(grid.selectedRange(), NSRange(location: 6, length: 5))
+    XCTAssertEqual(editor.store.panes[0].compose.cursors[0].position, 0)
+    var preferences = ComposePreferences(); preferences.bodySize = 22
+    grid.setComposePreferences(preferences, zoom: 1)
+    XCTAssertEqual(grid.selectedRange(), NSRange(location: 6, length: 5))
+    var moved = initial
+    moved.compose.cursors[0].position = 6; moved.compose.cursors[0].utf16Position = 6
+    moved.compose.textContext.selectionStart = 6; moved.compose.textContext.selectionEnd = 6
+    moved.compose.selectionRevision = 5
+    let result = WireComposeEditReceipt.with {
+      $0.window = 1; $0.leaf = 2; $0.buffer = 3; $0.epoch = 7; $0.pane = moved.compose
+    }
+    peer.reply(.with { $0.id = 1; $0.accepted = true; $0.result = result }, pane: moved)
+    try await eventually { peer.inputs.count == 2 }
+    XCTAssertEqual(peer.inputs[1].position, 12); XCTAssertTrue(peer.inputs[1].extend)
+    XCTAssertEqual(peer.inputs[1].sourceRevision, 4)
+    XCTAssertEqual(grid.selectedRange(), NSRange(location: 6, length: 5))
+    let sequence = peer.reply(.with { $0.id = 2; $0.cancelled = true; $0.error = "The source drag was cancelled." })
+    try await eventually { peer.lastApplied >= sequence }
+    XCTAssertEqual(grid.selectedRange(), NSRange(location: 6, length: 0))
+    XCTAssertEqual(grid.focusedCompose?.layout.text.projection.text, initial.compose.text)
+  }
+
+  @MainActor
+  func testCancelledSourceClickRecoversItsFollowingCompositionAndRetiresThePreview() async throws {
+    let initial = pane("alpha Tail\n"), peer = try ScenePeer(pane: initial)
+    defer { peer.close() }
+    let editor = richEditor(); defer { editor.detachAll() }
+    editor.attach(socketPath: peer.path, app: nil)
+    try await eventually { editor.grid?.focusedCompose != nil }
+    let grid = try XCTUnwrap(editor.grid), current = try XCTUnwrap(grid.focusedCompose)
+    let rect = try XCTUnwrap(current.layout.text.caret(for: 6))
+    editor.grid(grid, point: CGPoint(x: current.origin.x + rect.minX, y: current.origin.y + rect.midY),
+      in: current, extend: false, count: 1)
+    grid.setMarkedText("保存", selectedRange: NSRange(location: 1, length: 0),
+      replacementRange: NSRange(location: NSNotFound, length: 0))
+    XCTAssertEqual(grid.markedRange().location, 6)
+    try await eventually { peer.inputs.count == 1 }
+    let sequence = peer.reply(.with { $0.id = 1; $0.cancelled = true; $0.error = "The source click was cancelled." })
+    try await eventually { peer.lastApplied >= sequence }
+    XCTAssertFalse(grid.hasMarkedText()); XCTAssertEqual(editor.uninsertedText, ["保存"])
+    XCTAssertEqual(grid.selectedRange(), NSRange(location: 0, length: 0))
+    XCTAssertEqual(peer.inputs.count, 1); XCTAssertEqual(grid.focusedCompose?.layout.text.projection.text, initial.compose.text)
+  }
+
+  @MainActor
+  func testSourceChangeRetiresSelectionPreviewWithoutRelabelingTheQueuedClick() async throws {
+    let initial = pane("alpha Tail\n"), peer = try ScenePeer(pane: initial)
+    defer { peer.close() }
+    let editor = richEditor(); defer { editor.detachAll() }
+    editor.attach(socketPath: peer.path, app: nil)
+    try await eventually { editor.grid?.focusedCompose != nil }
+    let grid = try XCTUnwrap(editor.grid), current = try XCTUnwrap(grid.focusedCompose)
+    let rect = try XCTUnwrap(current.layout.text.caret(for: 6))
+    editor.grid(grid, point: CGPoint(x: current.origin.x + rect.minX, y: current.origin.y + rect.midY),
+      in: current, extend: false, count: 1)
+    try await eventually { peer.inputs.count == 1 }
+    XCTAssertEqual(grid.selectedRange().location, 6)
+    var group = initial
+    group.compose.cursors.append(.with { $0.id = 2; $0.position = 10; $0.utf16Position = 10 })
+    group.compose.selectionRevision = 5
+    var sequence = peer.lastApplied; peer.show(group)
+    try await eventually { peer.lastApplied > sequence }
+    XCTAssertEqual(grid.focusedCompose?.pane.compose.cursors.map(\.id), [1, 2], "a primary preview cannot roll back authoritative secondary carets")
+    XCTAssertEqual(grid.selectedRange().location, 6)
+    group.compose.cursors[0].id = 3
+    sequence = peer.lastApplied; peer.show(group)
+    try await eventually { peer.lastApplied > sequence }
+    XCTAssertFalse(try XCTUnwrap(grid.focusedCompose).pendingSelection, "retiring the captured primary retires its selection preview")
+    XCTAssertEqual(grid.selectedRange().location, 0)
+    sequence = peer.lastApplied
+    peer.show(pane("Zalpha Tail\n", revision: 5))
+    try await eventually { peer.lastApplied > sequence }
+    XCTAssertEqual(grid.selectedRange().location, 1)
+    XCTAssertFalse(try XCTUnwrap(grid.focusedCompose).pendingSelection)
+    XCTAssertEqual(peer.inputs[0].sourceRevision, 4); XCTAssertEqual(peer.inputs[0].position, 6)
+  }
+
+  @MainActor
+  func testAcceptedSourceClickRevealsItsCaretAfterReflowWhileItsReplyWasDelayed() async throws {
+    let source = (0..<30).map { "Line \($0) measured words.\n" }.joined()
+    let initial = pane(source), peer = try ScenePeer(pane: initial)
+    defer { peer.close() }
+    let editor = richEditor(); defer { editor.detachAll() }
+    editor.attach(socketPath: peer.path, app: nil)
+    try await eventually { editor.grid?.focusedCompose != nil }
+    let grid = try XCTUnwrap(editor.grid), current = try XCTUnwrap(grid.focusedCompose)
+    let index = try XCTUnwrap(source.range(of: "Line 16")), position = source[..<index.lowerBound].utf8.count
+    let rect = try XCTUnwrap(current.layout.text.caret(for: position))
+    let point = CGPoint(x: current.origin.x + rect.minX, y: current.origin.y + rect.midY)
+    XCTAssertTrue(current.bounds.contains(point))
+    editor.grid(grid, point: point, in: current, extend: false, count: 1)
+    try await eventually { peer.inputs.count == 1 }
+    var preferences = ComposePreferences(); preferences.bodySize = 48
+    grid.setComposePreferences(preferences, zoom: 1)
+    let resized = try XCTUnwrap(grid.focusedCompose)
+    XCTAssertGreaterThan(try XCTUnwrap(resized.caret).maxY, resized.bounds.maxY)
+    var moved = initial
+    moved.compose.cursors[0].position = UInt64(position); moved.compose.cursors[0].utf16Position = UInt64(position)
+    moved.compose.textContext.selectionStart = UInt64(position); moved.compose.textContext.selectionEnd = UInt64(position)
+    moved.compose.selectionRevision = 5
+    let result = WireComposeEditReceipt.with {
+      $0.window = 1; $0.leaf = 2; $0.buffer = 3; $0.epoch = 7; $0.pane = moved.compose
+    }
+    peer.reply(.with { $0.id = 1; $0.accepted = true; $0.result = result }, pane: moved)
+    try await eventually { peer.viewports.count == 1 }
+    XCTAssertGreaterThan(peer.viewports[0].position, 0)
+    XCTAssertEqual(peer.viewports[0].scope.bufferRevision, 4)
+  }
+
+  @MainActor
   func testMarkedCommitBehindNavigationUsesItsCorrelatedResultRatherThanANewerCursor() async throws {
     let peer = try ScenePeer(pane: pane("alpha Tail")); defer { peer.close() }
     let editor = richEditor(); defer { editor.detachAll() }
