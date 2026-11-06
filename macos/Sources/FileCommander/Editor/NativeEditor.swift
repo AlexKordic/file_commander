@@ -315,7 +315,16 @@ final class NativeEditor: NSObject, CellGridDelegate {
   private func received(_ message: SceneMessage) {
     let started = ProcessInfo.processInfo.systemUptime
     if message.isHello { receivedHello = true }
-    store.apply(message)
+    var acceptedSource: WireComposeEditReceipt?
+    if message.frame.hasInputReply, message.frame.inputReply.id == pendingComposeID,
+       message.frame.inputReply.accepted, let target = composeQueue.first?.target {
+      let reply = message.frame.inputReply
+      let window = message.frame.hasWindowID ? message.frame.windowID : UInt64(store.windowID)
+      acceptedSource = [reply.hasEdit ? reply.edit : nil, reply.hasResult ? reply.result : nil].compactMap { $0 }.first {
+        $0.window == window && $0.matches(target.scope, epoch: target.epoch, notBefore: store.composeAcceptances[$0.leaf])
+      }
+    }
+    store.apply(message, acceptedCompose: acceptedSource)
     reportFormattingFailures()
     composeViewports.observe(window: UInt64(store.windowID), panes: store.panes,
       reply: message.frame.hasViewportReply ? message.frame.viewportReply : nil)
@@ -615,7 +624,8 @@ final class NativeEditor: NSObject, CellGridDelegate {
   private func resolveCompositionChains(edit: WireComposeEditReceipt?, result: WireComposeEditReceipt?) {
     guard let first = composeQueue.first else { return }
     func valid(_ receipt: WireComposeEditReceipt?) -> WireComposeEditReceipt? {
-      guard let receipt, let target = first.target, receipt.matches(target.scope, epoch: target.epoch) else { return nil }
+      guard let receipt, let target = first.target,
+            receipt.matches(target.scope, epoch: target.epoch, notBefore: store.composeAcceptances[receipt.leaf]) else { return nil }
       return receipt
     }
     let edit = valid(edit), result = valid(result ?? edit)

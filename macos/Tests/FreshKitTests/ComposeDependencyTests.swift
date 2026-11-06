@@ -67,6 +67,10 @@ final class ComposeDependencyTests: XCTestCase {
       $0.pane = pane("日本 tail", [1: 6..<6], primary: 1); $0.pane.bufferRevision = 5; $0.pane.viewport.epoch = 7; $0.cursors = [1]
     }
     XCTAssertTrue(value.matches(scope, epoch: 7))
+    var later = value; later.pane.bufferRevision = 6
+    XCTAssertFalse(value.matches(scope, epoch: 7, notBefore: ComposeAcceptance(later)))
+    later.epoch = 8; later.pane.viewport.epoch = 8
+    XCTAssertTrue(value.matches(scope, epoch: 7, notBefore: ComposeAcceptance(later)), "an earlier buffer lifetime cannot constrain this receipt")
     for invalid in [
       WireComposeEditReceipt.with { $0 = value; $0.window = 2 },
       .with { $0 = value; $0.leaf = 3 }, .with { $0 = value; $0.buffer = 4 },

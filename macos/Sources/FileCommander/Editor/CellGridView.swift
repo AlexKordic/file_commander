@@ -275,6 +275,7 @@ final class CellGridView: NSView, @preconcurrency NSTextInputClient {
     if preedit == nil, pane.hasCompose, !pane.compose.formattingReady, let reuse, reuse.pane.compose.formattingReady,
        reuse.identity == .init(window: UInt64(store.windowID), leaf: pane.leaf, buffer: pane.buffer),
        reuse.pane.compose.viewport.epoch == pane.compose.viewport.epoch,
+       store.composeAcceptances[pane.leaf]?.permits(reuse.pane, window: UInt64(store.windowID)) ?? true,
        reuse.pane.compose.assetAuthority == pane.compose.assetAuthority,
        reuse.pane.compose.assetDocument == pane.compose.assetDocument {
       // Retain the whole old source/map pair, including its revision and

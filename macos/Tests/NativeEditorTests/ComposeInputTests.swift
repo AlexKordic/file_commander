@@ -933,6 +933,127 @@ final class ComposeInputTests: XCTestCase {
   }
 
   @MainActor
+  func testAcceptedTextRemainsVisibleAndQueryableWhileFormattingIsPending() async throws {
+    for includePane in [true, false] {
+      let peer = try ScenePeer(pane: pane("alpha Tail")); defer { peer.close() }
+      let editor = richEditor(); defer { editor.detachAll() }
+      editor.attach(socketPath: peer.path, app: nil)
+      try await eventually { editor.grid?.focusedCompose != nil }
+      let grid = try XCTUnwrap(editor.grid)
+      grid.insertText("日本", replacementRange: NSRange(location: NSNotFound, length: 0))
+      try await eventually { peer.inputs.count == 1 }
+      var current = pane("日本alpha Tail", revision: 5)
+      current.compose.ready = false
+      current.compose.cursors[0].position = 6; current.compose.cursors[0].utf16Position = 2
+      current.compose.textContext.selectionStart = 2; current.compose.textContext.selectionEnd = 2
+      let receipt = WireComposeEditReceipt.with {
+        $0.window = 1; $0.leaf = 2; $0.buffer = 3; $0.epoch = 7; $0.cursors = [1]; $0.pane = current.compose
+      }
+      let sequence = peer.reply(.with { $0.id = 1; $0.accepted = true; $0.edit = receipt }, pane: includePane ? current : nil)
+      try await eventually { peer.lastApplied >= sequence }
+      XCTAssertEqual(grid.focusedCompose?.layout.text.projection.text, "日本alpha Tail")
+      XCTAssertEqual(grid.focusedCompose?.pane.compose.bufferRevision, 5)
+      XCTAssertEqual(grid.selectedRange(), NSRange(location: 2, length: 0))
+      XCTAssertEqual(grid.attributedSubstring(forProposedRange: NSRange(location: 0, length: 100), actualRange: nil)?.string, "日本alpha Tail")
+      XCTAssertFalse(grid.hasMarkedText())
+      current.compose.ready = true
+      let before = peer.lastApplied
+      peer.show(current)
+      try await eventually { peer.lastApplied > before && grid.focusedCompose?.pane.compose.bufferRevision == 5 && grid.focusedCompose?.pane.compose.formattingReady == true }
+      XCTAssertEqual(grid.focusedCompose?.layout.text.projection.text, "日本alpha Tail")
+      XCTAssertTrue(editor.uninsertedText.isEmpty)
+    }
+  }
+
+  @MainActor
+  func testAcceptedNavigationKeepsItsSelectionAndLaterPaneUpdatesRemainAuthoritative() async throws {
+    for includePane in [true, false] {
+      let peer = try ScenePeer(pane: pane("alpha Tail")); defer { peer.close() }
+      let editor = richEditor(); defer { editor.detachAll() }
+      editor.attach(socketPath: peer.path, app: nil)
+      try await eventually { editor.grid?.focusedCompose != nil }
+      let grid = try XCTUnwrap(editor.grid)
+      editor.send(.key(.with { $0.key = "ArrowRight" }))
+      try await eventually { peer.inputs.count == 1 }
+      var current = pane("alpha Tail")
+      current.compose.ready = false; current.compose.selectionRevision = 1 // Hash identity can decrease.
+      current.compose.cursors[0].position = 1; current.compose.cursors[0].utf16Position = 1
+      current.compose.textContext.selectionStart = 1; current.compose.textContext.selectionEnd = 1
+      let result = WireComposeEditReceipt.with {
+        $0.window = 1; $0.leaf = 2; $0.buffer = 3; $0.epoch = 7; $0.pane = current.compose
+      }
+      let accepted = peer.reply(.with { $0.id = 1; $0.accepted = true; $0.result = result }, pane: includePane ? current : nil)
+      try await eventually { peer.lastApplied >= accepted }
+      XCTAssertEqual(grid.selectedRange(), NSRange(location: 1, length: 0))
+      XCTAssertEqual(editor.store.panes[0].compose.selectionRevision, 1)
+      current.compose.selectionRevision = 2; current.compose.cursors[0].position = 7; current.compose.cursors[0].utf16Position = 7
+      current.compose.textContext.selectionStart = 7; current.compose.textContext.selectionEnd = 7
+      let before = peer.lastApplied
+      peer.show(current)
+      try await eventually { peer.lastApplied > before }
+      XCTAssertEqual(grid.selectedRange(), NSRange(location: 7, length: 0), "a later actual pane can move beyond the accepted result")
+    }
+  }
+
+  @MainActor
+  func testFurtherTypingUsesAcceptedSourceAndWaitsForItsFormattingBeforeDispatch() async throws {
+    let peer = try ScenePeer(pane: pane("alpha Tail")); defer { peer.close() }
+    let editor = richEditor(); defer { editor.detachAll() }
+    editor.attach(socketPath: peer.path, app: nil)
+    try await eventually { editor.grid?.focusedCompose != nil }
+    let grid = try XCTUnwrap(editor.grid), unspecified = NSRange(location: NSNotFound, length: 0)
+    grid.insertText("日本", replacementRange: unspecified)
+    try await eventually { peer.inputs.count == 1 }
+    var current = pane("日本alpha Tail", revision: 5)
+    current.compose.ready = false; current.compose.cursors[0].position = 6; current.compose.cursors[0].utf16Position = 2
+    current.compose.textContext.selectionStart = 2; current.compose.textContext.selectionEnd = 2
+    let receipt = WireComposeEditReceipt.with {
+      $0.window = 1; $0.leaf = 2; $0.buffer = 3; $0.epoch = 7; $0.cursors = [1]; $0.pane = current.compose
+    }
+    let accepted = peer.reply(.with { $0.id = 1; $0.accepted = true; $0.edit = receipt })
+    try await eventually { peer.lastApplied >= accepted }
+    grid.insertText("語", replacementRange: unspecified)
+    XCTAssertEqual(grid.attributedSubstring(forProposedRange: NSRange(location: 0, length: 100), actualRange: nil)?.string, "日本語alpha Tail")
+    XCTAssertEqual(grid.selectedRange().location, 3)
+    XCTAssertEqual(peer.inputs.count, 1, "accepted raw source is not ready navigation/dispatch geometry")
+    current.compose.ready = true; peer.show(current)
+    try await eventually { peer.inputs.count == 2 }
+    XCTAssertEqual(peer.inputs[1].scope.bufferRevision, 5)
+    XCTAssertTrue(peer.inputs[1].textInput)
+    XCTAssertEqual(try WirePaste(serializedBytes: peer.inputs[1].payload).text, "語")
+    peer.reply(.with { $0.id = 2; $0.accepted = true })
+  }
+
+  @MainActor
+  func testAcceptedSourceCannotReplaceANewerSceneOrEscapeItsBufferLifetime() async throws {
+    let peer = try ScenePeer(pane: pane("alpha Tail")); defer { peer.close() }
+    let editor = richEditor(); defer { editor.detachAll() }
+    editor.attach(socketPath: peer.path, app: nil)
+    try await eventually { editor.grid?.focusedCompose != nil }
+    let grid = try XCTUnwrap(editor.grid)
+    grid.insertText("日本", replacementRange: NSRange(location: NSNotFound, length: 0))
+    try await eventually { peer.inputs.count == 1 }
+    var accepted = pane("日本alpha Tail", revision: 5)
+    accepted.compose.cursors[0].position = 6; accepted.compose.cursors[0].utf16Position = 2
+    accepted.compose.textContext.selectionStart = 2; accepted.compose.textContext.selectionEnd = 2
+    let receipt = WireComposeEditReceipt.with {
+      $0.window = 1; $0.leaf = 2; $0.buffer = 3; $0.epoch = 7; $0.cursors = [1]; $0.pane = accepted.compose
+    }
+    var newer = pane("X日本alpha Tail", revision: 6); newer.compose.ready = false
+    let sequence = peer.reply(.with { $0.id = 1; $0.accepted = true; $0.edit = receipt }, pane: newer)
+    try await eventually { peer.lastApplied >= sequence }
+    XCTAssertEqual(grid.focusedCompose?.pane.compose.bufferRevision, 6)
+    XCTAssertEqual(grid.attributedSubstring(forProposedRange: NSRange(location: 0, length: 100), actualRange: nil)?.string, "X日本alpha Tail")
+    var replacement = pane("replacement", revision: 1); replacement.compose.viewport.epoch = 8; replacement.compose.ready = false
+    let before = peer.lastApplied
+    peer.show(replacement)
+    try await eventually { peer.lastApplied > before }
+    XCTAssertTrue(editor.store.composeAcceptances.isEmpty)
+    XCTAssertEqual(grid.focusedCompose?.layout.text.projection.text, "replacement")
+    XCTAssertTrue(editor.uninsertedText.isEmpty)
+  }
+
+  @MainActor
   func testAcceptedInputRevealsTheCaretAfterFormattingFinishes() async throws {
     let source = (0..<200).map { "Paragraph \($0) with enough words to measure.\n\n" }.joined()
     let peer = try ScenePeer(pane: pane(source))

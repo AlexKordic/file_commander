@@ -579,6 +579,26 @@ source projection. Completed formatting for the same source revision can
 replace the raw projection while preserving the captured context. Input queue
 completion also prevents reentrant callbacks from resending the accepted edit.
 
+An accepted edit or action result is applied atomically with its scene update.
+If the pane diff is omitted or older than that source, `SceneStore` uses the
+receipt's self-contained pane. An explicitly updated same/newer pane can contain
+a later cursor and remains authoritative. Only a matching in-flight input's
+validated view/lifetime result can establish this accepted basis.
+`ComposeAcceptance` records a small source/cursor basis per live view, preventing
+the retained-formatting fallback from rolling back accepted text or selection.
+Selection revisions are opaque hashes and are compared for identity, not
+numeric order. Regressive accepted source revisions are refused within the same
+owner/lifetime. Records retire with the view/buffer lifetime and reset on a new
+server hello, which can reuse every numeric owner ID after a backend restart.
+No additional full-document snapshot cache is retained.
+
+During that formatting interval, drawing and text services use the current
+editable Markdown source, including its actual UTF-16 selection. Further text
+can be previewed immediately, but dispatch still waits for a coherent current
+formatting projection. The completed rich projection replaces that source view;
+this does not establish flicker-free formatted presentation or complete system
+IME/candidate behavior throughout the interval.
+
 `ComposePane.text_context` supplies raw Markdown near the primary caret for
 unmarked native text services. `source_start` is a buffer-wide UTF-8 byte
 offset; `utf16_start` and the selection bounds are buffer-wide source UTF-16

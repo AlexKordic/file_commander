@@ -243,6 +243,7 @@ public final class SceneStore {
   /// Every row of the frame.
   @ObservationIgnored public private(set) var grid: [[CellRun]] = []
   @ObservationIgnored public private(set) var panes: [WirePane] = []
+  @ObservationIgnored public private(set) var composeAcceptances: [UInt64: ComposeAcceptance] = [:]
   @ObservationIgnored public private(set) var menus: [WireMenuEntry] = []
   @ObservationIgnored public private(set) var statusBar: WireStatusView?
   @ObservationIgnored public private(set) var fileExplorer: WireFileExplorerView?
@@ -261,8 +262,9 @@ public final class SceneStore {
 
   public init() {}
 
-  public func apply(_ message: SceneMessage) {
+  public func apply(_ message: SceneMessage, acceptedCompose: WireComposeEditReceipt? = nil) {
     let frame = message.frame
+    if message.isHello { composeAcceptances.removeAll() }
     let previousWindow = windowID
     var change = SceneChange()
     change.isHello = message.isHello
@@ -336,6 +338,26 @@ public final class SceneStore {
         pane.compose = pane.compose.retainingTableMeasurements(from: previous.hasCompose ? previous.compose : nil)
       }
       panes[Int(update.index)] = pane
+    }
+    if let receipt = acceptedCompose, receipt.matches(receipt.scope, epoch: receipt.epoch, notBefore: composeAcceptances[receipt.leaf]),
+       let index = panes.firstIndex(where: { ComposeAcceptance(receipt).matches($0, window: UInt64(windowID)) }) {
+      let acceptance = ComposeAcceptance(receipt)
+      let updated = frame.panes.contains { $0.pane.leaf == receipt.leaf && $0.pane.hasBuffer && $0.pane.buffer == receipt.buffer }
+      // A reply is self-contained even when the pane diff is omitted or still
+      // older than its source. A same/newer pane explicitly in this frame may
+      // contain a later cursor and remains authoritative.
+      if panes[index].compose.bufferRevision < receipt.pane.bufferRevision
+          || !updated && panes[index].compose.bufferRevision == receipt.pane.bufferRevision {
+        panes[index].compose = receipt.pane.retainingTableMeasurements(from: panes[index].compose)
+      }
+      composeAcceptances[receipt.leaf] = acceptance
+      change.regions.insert("panes")
+    }
+    if !composeAcceptances.isEmpty {
+      let live = Dictionary(panes.map { ($0.leaf, $0) }, uniquingKeysWith: { _, last in last })
+      composeAcceptances = composeAcceptances.filter { leaf, acceptance in
+        live[leaf].map { acceptance.matches($0, window: UInt64(windowID)) } ?? false
+      }
     }
     if frame.hasPaneLen || !frame.panes.isEmpty { change.regions.insert("panes") }
     func region(_ present: Bool, _ name: String, _ apply: () -> Void) {
