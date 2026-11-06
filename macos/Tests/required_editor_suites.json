@@ -13,6 +13,7 @@
   "FreshKitTests.ComposePendingPointerTests",
   "FreshKitTests.ComposePendingTextTests",
   "FreshKitTests.ComposePointerTests",
+  "FreshKitTests.ComposeShapingTests",
   "FreshKitTests.ComposeTableLayoutTests",
   "FreshKitTests.ComposeTableMeasurementTests",
   "FreshKitTests.ComposeTableModelTests",

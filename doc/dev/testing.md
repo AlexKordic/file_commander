@@ -468,6 +468,14 @@ Artifacts include hardware/compiler/repository metadata, fixture SHA-256s,
 source/window/payload sizes, timings and process peak RSS. RSS is a cumulative
 process high-water mark, not the allocation cost of an individual case.
 
+`ComposeShapingTests` compare joined-emoji glyphs in long prose, semantic font
+runs, complete table samples and presentation labels with independently shaped
+short text. They also verify source coordinates and unchanged UTF-8 bytes.
+The real-backend page-selection fixture exports its initial binary pane beside
+the JSON and image artifacts, allowing the exact input to be replayed by
+`fc-compose-profile`. These correctness checks do not qualify the resource
+cost of complete shaping when Core Text refuses its default bounded policy.
+
 Use `--profile debug` for diagnosing algorithms; compare the same fixtures and
 configuration on the same machine. `--profile release` uses FC's `fc-release`
 Cargo profile at optimization level 3 and Swift's Release configuration,

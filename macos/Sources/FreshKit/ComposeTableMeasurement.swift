@@ -37,7 +37,7 @@ public final class ComposeTableMeasurement {
   }
 
   func widths(body: CTFont, monospace: CTFont, available: CGFloat) -> [CGFloat] {
-    let metrics = fontMetrics(body: body, monospace: monospace)
+    guard let metrics = fontMetrics(body: body, monospace: monospace) else { return [] }
     guard !metrics.minimum.isEmpty else { return [] }
     var constraints = ComposeColumnConstraints(count: metrics.minimum.count, emptyWidth: metrics.emptyWidth, available: available)
     let share = max(metrics.emptyWidth, available / CGFloat(metrics.minimum.count) - ComposeMeasuredTable.padding * 2)
@@ -49,7 +49,7 @@ public final class ComposeTableMeasurement {
     return constraints.widths
   }
 
-  private func fontMetrics(body: CTFont, monospace: CTFont) -> FontMetrics {
+  private func fontMetrics(body: CTFont, monospace: CTFont) -> FontMetrics? {
     metricsLock.lock()
     if let cachedMetrics, CFEqual(cachedMetrics.body, body), CFEqual(cachedMetrics.monospace, monospace) {
       metricsLock.unlock()
@@ -94,8 +94,8 @@ public final class ComposeTableMeasurement {
           text.addAttribute(NSAttributedString.Key(kCTFontAttributeName as String), value: font,
             range: NSRange(location: start, length: length))
         }
-        constraints.include(text, range: NSRange(location: 0, length: text.length), column: column,
-          preferred: !sample.minimumOnly)
+        guard constraints.include(text, range: NSRange(location: 0, length: text.length), column: column,
+          preferred: !sample.minimumOnly) else { return nil }
         images[column] = images[column] || sample.image
       }
     }
@@ -121,10 +121,11 @@ struct ComposeColumnConstraints {
     self.available = available; self.emptyWidth = emptyWidth
     minimum = Array(repeating: emptyWidth, count: count); natural = minimum; glyphMinimum = minimum
   }
-  mutating func include(_ text: NSAttributedString, range: NSRange, column: Int, preferred: Bool, imageWidth: CGFloat = 0, typesetter: CTTypesetter? = nil) {
+  @discardableResult
+  mutating func include(_ text: NSAttributedString, range: NSRange, column: Int, preferred: Bool, imageWidth: CGFloat = 0, typesetter: CTTypesetter? = nil) -> Bool {
     if preferred { natural[column] = max(natural[column], min(available, imageWidth)) }
-    guard range.length > 0 else { return }
-    let typesetter = typesetter ?? CTTypesetterCreateWithAttributedString(text)
+    guard range.length > 0 else { return true }
+    guard let typesetter = typesetter ?? ComposeShaping.typesetter(text) else { return false }
     let line = CTTypesetterCreateLine(typesetter, CFRange(location: range.location, length: range.length))
     let string = text.string as NSString
     // A point query enumerates the shaped line internally. Asking at every
@@ -150,7 +151,7 @@ struct ComposeColumnConstraints {
     }
     glyphMinimum[column] = glyph
     minimum[column] = max(minimum[column], glyph)
-    guard preferred else { return }
+    guard preferred else { return true }
     natural[column] = max(natural[column], min(available, CGFloat(CTLineGetTypographicBounds(line, nil, nil, nil))))
     let share = max(emptyWidth, available / CGFloat(natural.count) - ComposeMeasuredTable.padding * 2)
     var wordMinimum = minimum[column]
@@ -160,6 +161,7 @@ struct ComposeColumnConstraints {
       return wordMinimum < share
     } }
     minimum[column] = wordMinimum
+    return true
   }
   var widths: [CGFloat] {
     let minimum = minimum.map { $0 + ComposeMeasuredTable.padding * 2 }

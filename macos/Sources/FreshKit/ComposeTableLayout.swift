@@ -68,7 +68,7 @@ struct ComposeMeasuredTable {
     self.run = run
     indent = min(run.indent, width * 0.6)
     let available = max(1, width - indent)
-    let typesetter = CTTypesetterCreateWithAttributedString(attributed)
+    guard let typesetter = ComposeShaping.typesetter(attributed) else { return nil }
     var constraints = ComposeColumnConstraints(count: run.table.alignments.count, font: font, available: available)
     if let columns = run.columns {
       guard columns.count == run.table.alignments.count, columns.allSatisfy({ $0.isFinite && $0 > Self.padding * 2 }) else { return nil }
@@ -88,8 +88,8 @@ struct ComposeMeasuredTable {
         cells.append(span)
         if !row.raw, run.columns == nil || run.adaptiveMinimum {
           let imageWidth = attachments.filter { $0.display.overlaps(display) }.map { min($0.size.width, available * 0.35) }.max() ?? 0
-          constraints.include(attributed, range: span, column: column, preferred: run.columns == nil,
-            imageWidth: imageWidth, typesetter: typesetter)
+          guard constraints.include(attributed, range: span, column: column, preferred: run.columns == nil,
+            imageWidth: imageWidth, typesetter: typesetter) else { return nil }
         }
       }
       guard row.raw || cells.count == run.table.alignments.count else { return nil }

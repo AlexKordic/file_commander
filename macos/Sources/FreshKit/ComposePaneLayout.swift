@@ -187,7 +187,7 @@ public final class ComposePaneLayout {
       let role: UInt32 = heading ?? (active.contains { $0.role == 12 } ? 12 : mono ? 7 : active.contains { $0.role == 9 } ? 9 : 0)
       return .init(display: range, font: font, role: role, flags: flags)
     }
-    func prefixWidth(_ context: ComposeHangingContext) -> CGFloat {
+    func prefixWidth(_ context: ComposeHangingContext) -> CGFloat? {
       let wire = context.wire, bytes = Array(context.wire.text.utf8)
       let value = NSMutableAttributedString(string: wire.text,
         attributes: [NSAttributedString.Key(kCTFontAttributeName as String): body])
@@ -200,7 +200,8 @@ public final class ComposePaneLayout {
         value.addAttribute(NSAttributedString.Key(kCTFontAttributeName as String), value: font,
           range: NSRange(location: from, length: count))
       }
-      return ComposeTextLayout.hangingPrefixWidth(CTLineCreateWithAttributedString(value), start: 0, content: context.prefixUTF16)
+      guard let line = ComposeShaping.line(value) else { return nil }
+      return ComposeTextLayout.hangingPrefixWidth(line, start: 0, content: context.prefixUTF16)
     }
     for (start, end) in zip(boundaries, boundaries.dropFirst()) where start < end {
       fonts.append(fontRun(styleIndex.matches(at: start).map { spans[$0] }, start..<end))
@@ -248,8 +249,9 @@ public final class ComposePaneLayout {
          let context = hangingContexts[item.start],
          let end = projection.displayPosition(for: min(Int(item.end), projection.source.upperBound), affinity: .upstream), end > 0 {
         let containers = pane.spans.filter { ($0.role == 9 || $0.role == 10) && $0.start <= item.contentStart && item.contentStart < $0.end }.count
+        guard let measuredPrefix = prefixWidth(context) else { return nil }
         hanging.append(.init(display: 0..<end, contentStart: 0, indent: CGFloat(containers) * typography.indent,
-          measuredPrefix: prefixWidth(context), physicalStart: context.wire.sourceLineStart))
+          measuredPrefix: measuredPrefix, physicalStart: context.wire.sourceLineStart))
         continue
       }
       // Older producers omit offscreen marker samples. Preserve that behavior
@@ -539,13 +541,13 @@ public final class ComposePaneLayout {
       if placed.attachment.preview {
         context.setFillColor(foreground.copy(alpha: 0.65) ?? foreground)
         let font = CTFontCreateCopyWithAttributes(body, min(12, CTFontGetSize(body)), nil, nil)
-        let label = CTLineCreateWithAttributedString(NSAttributedString(string: "Preview", attributes: [
+        let label = ComposeShaping.line(NSAttributedString(string: "Preview", attributes: [
           NSAttributedString.Key(kCTFontAttributeName as String): font,
           NSAttributedString.Key(kCTForegroundColorFromContextAttributeName as String): true,
         ]))
         context.saveGState(); context.clip(to: caption)
         context.textPosition = CGPoint(x: caption.minX, y: caption.minY + CTFontGetAscent(font) + 1)
-        CTLineDraw(label, context); context.restoreGState()
+        if let label { CTLineDraw(label, context) }; context.restoreGState()
       }
       context.clip(to: rect)
       if let asset = state.asset {
@@ -561,12 +563,12 @@ public final class ComposePaneLayout {
         if case .failed(let error) = state { label = "\(image.alt.isEmpty ? "Image" : image.alt): \(error)" }
         else if case .deferred = state { label = "\(image.alt.isEmpty ? "Image" : image.alt): preview memory limit reached" }
         else { label = "Loading \(image.alt.isEmpty ? "image" : image.alt)…" }
-        let line = CTLineCreateWithAttributedString(NSAttributedString(string: label, attributes: [
+        let line = ComposeShaping.line(NSAttributedString(string: label, attributes: [
           NSAttributedString.Key(kCTFontAttributeName as String): body,
           NSAttributedString.Key(kCTForegroundColorFromContextAttributeName as String): true,
         ]))
         context.textPosition = CGPoint(x: rect.minX + 6, y: rect.minY + 4 + CTFontGetAscent(body))
-        CTLineDraw(line, context)
+        if let line { CTLineDraw(line, context) }
       }
       context.restoreGState()
       if case .stale(_, let warning) = state {
@@ -589,12 +591,12 @@ public final class ComposePaneLayout {
           context.setFillColor(foreground)
           let font = CTFontCreateCopyWithAttributes(body, min(12, CTFontGetSize(body)), nil, nil)
           let label = "Last preview: \(String(warning.prefix(160)))"
-          let line = CTLineCreateWithAttributedString(NSAttributedString(string: label, attributes: [
+          let line = ComposeShaping.line(NSAttributedString(string: label, attributes: [
             NSAttributedString.Key(kCTFontAttributeName as String): font,
             NSAttributedString.Key(kCTForegroundColorFromContextAttributeName as String): true,
           ]))
           context.textPosition = CGPoint(x: strip.minX + 4, y: strip.minY + CTFontGetAscent(font) + 2)
-          CTLineDraw(line, context)
+          if let line { CTLineDraw(line, context) }
         }
         context.restoreGState()
       }

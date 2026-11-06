@@ -387,7 +387,7 @@ public final class ComposeTextLayout {
     }
     // One attributed typesetter supplies contextual marker shaping and, when
     // attachments do not modify its attributes below, the final text layout.
-    let prefixTypesetter = hanging.contains { $0.measuredPrefix == nil } ? CTTypesetterCreateWithAttributedString(attributed) : nil
+    let prefixTypesetter = hanging.contains { $0.measuredPrefix == nil } ? ComposeShaping.typesetter(attributed) : nil
     var hangs: [(range: NSRange, content: Int, prefix: CGFloat, indent: CGFloat, physicalStart: Bool)] = []
     for item in hanging {
       guard let start = byteToUTF16[item.display.lowerBound], let end = byteToUTF16[item.display.upperBound],
@@ -488,9 +488,9 @@ public final class ComposeTextLayout {
     }
     // Non-preview images added run delegates after marker measurement. Their
     // final typesetter must see those new attributes instead of reusing it.
-    let typesetter = attachments.contains(where: { !$0.preview })
-      ? CTTypesetterCreateWithAttributedString(attributed)
-      : (prefixTypesetter ?? CTTypesetterCreateWithAttributedString(attributed))
+    guard let typesetter = (attachments.contains(where: { !$0.preview })
+      ? ComposeShaping.typesetter(attributed)
+      : (prefixTypesetter ?? ComposeShaping.typesetter(attributed))) else { return nil }
     var lines: [Fragment] = []
     var from = 0
     var top: CGFloat = 0

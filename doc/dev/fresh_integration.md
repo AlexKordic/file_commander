@@ -404,6 +404,16 @@ and spacing changes replace that client's style revision and preserve its
 source scroll anchor. Code and raw table source use a monospace font; measured
 table cells use proportional body text unless inline markup selects code.
 
+Native text, list-prefix, table-sample and presentation-label shaping first
+use Core Text's bounded typesetter factory. If that factory refuses a complex
+input, the consumer explicitly requests complete shaping. The legacy
+nonnullable factory can silently split joined emoji in long strings. Source
+text, semantic font runs and contextual shaping remain intact; a failure of
+both factories rejects the layout rather than asserting. This fallback permits
+work beyond Core Text's default limit. Long-document CPU, memory and
+input-to-paint budgets still require qualification before enabling the feature
+by default.
+
 Validated source/display maps use ordered coordinate queries, preserving both
 sides of hidden and inserted boundaries without scanning the entire map for
 each image, caret or span. Object substitution visits only intersecting map

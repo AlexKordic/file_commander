@@ -810,6 +810,7 @@ final class ComposeBackendTests: XCTestCase {
     if let directory = ProcessInfo.processInfo.environment["FC_COMPOSE_ARTIFACT_DIR"] {
       let output = URL(fileURLWithPath: directory)
       try FileManager.default.createDirectory(at: output, withIntermediateDirectories: true)
+      try initial.pane.compose.serializedData().write(to: output.appendingPathComponent("page-initial-window.pb"))
       let record: [String: Any] = ["source_start": initial.pane.compose.sourceStart, "source_end": edge,
         "cursor": initial.cursor?.position ?? 0, "viewport_position": initial.viewport.position,
         "viewport_offset": initial.viewport.offset, "probe": initial.viewport.region, "tables": initial.layout.text.tables.count]
