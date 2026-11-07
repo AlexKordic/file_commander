@@ -24,7 +24,16 @@ protocol CellGridDelegate: AnyObject {
   func grid(_ grid: CellGridView, commit text: ComposePendingText, initial: ComposePendingText,
             after: UUID?, afterAction: Bool, virtualPrefix: ComposeVirtualSelections?, in pane: ComposePresentation)
   func grid(_ grid: CellGridView, recover text: String)
+  func gridAccessibility(_ grid: CellGridView, activate: Bool) -> ComposeCompleteAccessibility?
+  func grid(_ grid: CellGridView, selectDocument ranges: [NSRange], in model: ComposeDocumentPresentation) -> Bool
+  func grid(_ grid: CellGridView, replaceDocumentSelection text: String, in model: ComposeDocumentPresentation) -> Bool
   var optionAsAlt: Bool { get }
+}
+
+extension CellGridDelegate {
+  func gridAccessibility(_ grid: CellGridView, activate: Bool) -> ComposeCompleteAccessibility? { nil }
+  func grid(_ grid: CellGridView, selectDocument ranges: [NSRange], in model: ComposeDocumentPresentation) -> Bool { false }
+  func grid(_ grid: CellGridView, replaceDocumentSelection text: String, in model: ComposeDocumentPresentation) -> Bool { false }
 }
 
 @MainActor
@@ -597,11 +606,27 @@ final class CellGridView: NSView, @preconcurrency NSTextInputClient {
   override func accessibilityRole() -> NSAccessibility.Role? { .textArea }
   override func accessibilityRoleDescription() -> String? { "editor" }
   override func accessibilityLabel() -> String? { title }
-  override func accessibilityValue() -> Any? { focusedCompose?.layout.text.projection.text ?? store.lines.joined(separator: "\n") }
+  var usesCompleteAccessibility: Bool { focusedCompose != nil && store.composeDocumentUpdates }
+  var completeAccessibility: ComposeCompleteAccessibility? { delegate?.gridAccessibility(self, activate: true) }
+
+  func completeAccessibilityChanged() {
+    updateAccessibleImages()
+    NSAccessibility.post(element: self, notification: .valueChanged)
+    NSAccessibility.post(element: self, notification: .selectedTextChanged)
+  }
+
+  override func accessibilityValue() -> Any? {
+    if usesCompleteAccessibility { return completeAccessibility?.model.text ?? "" }
+    return focusedCompose?.layout.text.projection.text ?? store.lines.joined(separator: "\n")
+  }
   override func accessibilityCustomRotors() -> [NSAccessibilityCustomRotor] { composeNavigation.rotors() }
-  override func accessibilityHelp() -> String? { composeNavigation.help ?? super.accessibilityHelp() }
+  override func accessibilityHelp() -> String? {
+    if usesCompleteAccessibility, completeAccessibility == nil { return "Loading complete document text." }
+    return composeNavigation.help ?? super.accessibilityHelp()
+  }
 
   override func accessibilitySelectedTextRange() -> NSRange {
+    if usesCompleteAccessibility { return completeAccessibility?.model.selectedRanges?.first ?? ComposeAccessibilityText.missing }
     if let compose = focusedCompose { return compose.selectedRange }
     guard let cursor = store.cursor else { return NSRange(location: 0, length: 0) }
     let before = store.lines.prefix(cursor.row).reduce(0) { $0 + ($1 as NSString).length + 1 }
@@ -611,7 +636,8 @@ final class CellGridView: NSView, @preconcurrency NSTextInputClient {
   }
 
   override func accessibilitySelectedTextRanges() -> [NSValue]? {
-    (focusedCompose?.selectedRanges ?? [accessibilitySelectedTextRange()]).map { NSValue(range: $0) }
+    if usesCompleteAccessibility { return completeAccessibility?.model.selectedRanges?.map { NSValue(range: $0) } }
+    return (focusedCompose?.selectedRanges ?? [accessibilitySelectedTextRange()]).map { NSValue(range: $0) }
   }
 
   override func accessibilitySelectedText() -> String? { accessibilityString(for: accessibilitySelectedTextRange()) }
@@ -637,6 +663,20 @@ final class CellGridView: NSView, @preconcurrency NSTextInputClient {
   }
 
   override func isAccessibilitySelectorAllowed(_ selector: Selector) -> Bool {
+    if usesCompleteAccessibility {
+      if selector == #selector(setAccessibilityValue(_:)) { return false }
+      if selector == #selector(setAccessibilitySelectedTextRange(_:)) || selector == #selector(setAccessibilitySelectedTextRanges(_:)) {
+        guard let value = completeAccessibility else { return false }
+        return delegate?.connected == true && store.composeSourceSelections
+          && value.model.document.owns(window: value.pane.identity.window, pane: value.pane.pane)
+      }
+      if selector == #selector(setAccessibilitySelectedText(_:)) {
+        guard let value = completeAccessibility else { return false }
+        return delegate?.connected == true && store.composeSourceSelections && value.pane.pane.compose.editable
+          && value.model.selectedRanges?.first != nil
+          && value.model.document.owns(window: value.pane.identity.window, pane: value.pane.pane)
+      }
+    }
     if selector == #selector(setAccessibilitySelectedTextRange(_:)) || selector == #selector(setAccessibilitySelectedTextRanges(_:)) {
       return accessibilitySelectionPane != nil
     }
@@ -654,6 +694,13 @@ final class CellGridView: NSView, @preconcurrency NSTextInputClient {
   }
 
   override func setAccessibilitySelectedTextRanges(_ ranges: [NSValue]?) {
+    if usesCompleteAccessibility {
+      guard let value = completeAccessibility, let ranges, !ranges.isEmpty, ranges.count <= 1024 else { return }
+      let type = String(cString: NSValue(range: NSRange()).objCType)
+      guard ranges.allSatisfy({ String(cString: $0.objCType) == type }) else { return }
+      _ = delegate?.grid(self, selectDocument: ranges.map(\.rangeValue), in: value.model)
+      return
+    }
     guard let pane = accessibilitySelectionPane, let ranges, !ranges.isEmpty, ranges.count <= 1024 else { return }
     let type = String(cString: NSValue(range: NSRange()).objCType)
     var sources: [Range<Int>] = []
@@ -668,38 +715,52 @@ final class CellGridView: NSView, @preconcurrency NSTextInputClient {
   }
 
   override func setAccessibilitySelectedText(_ text: String?) {
+    if usesCompleteAccessibility {
+      guard let text, let value = completeAccessibility else { return }
+      _ = delegate?.grid(self, replaceDocumentSelection: text, in: value.model)
+      return
+    }
     guard let text, let target = accessibilityReplacement else { return }
     delegate?.grid(self, replaceSource: target.source, with: text, in: target.pane)
   }
 
   override func accessibilityString(for range: NSRange) -> String? {
+    if usesCompleteAccessibility { return completeAccessibility?.model.string(for: range) }
     guard let text = accessibilityValue() as? NSString, range.location >= 0, range.location <= text.length,
           range.length >= 0, range.length <= text.length - range.location else { return nil }
     return text.substring(with: range)
   }
 
   override func accessibilityRange(for index: Int) -> NSRange {
+    if usesCompleteAccessibility { return completeAccessibility?.model.character(at: index) ?? ComposeAccessibilityText.missing }
     guard let pane = focusedCompose else { return super.accessibilityRange(for: index) }
     return ComposeAccessibilityText(pane: pane).character(at: index)
   }
 
   override func accessibilityLine(for index: Int) -> Int {
+    if usesCompleteAccessibility { return completeAccessibility?.flow?.textIndex.line(atUTF16: index) ?? NSNotFound }
     guard let pane = focusedCompose else { return super.accessibilityLine(for: index) }
     return ComposeAccessibilityText(pane: pane).line(at: index)
   }
 
   override func accessibilityRange(forLine line: Int) -> NSRange {
+    if usesCompleteAccessibility { return completeAccessibility?.flow?.textIndex.range(forLine: line) ?? ComposeAccessibilityText.missing }
     guard let pane = focusedCompose else { return super.accessibilityRange(forLine: line) }
     guard pane.layout.text.fragments.indices.contains(line) else { return ComposeAccessibilityText.missing }
     return pane.layout.text.fragments[line].range
   }
 
   override func accessibilityVisibleCharacterRange() -> NSRange {
+    if usesCompleteAccessibility { return completeAccessibility?.visibleRange ?? ComposeAccessibilityText.missing }
     guard let pane = focusedCompose else { return super.accessibilityVisibleCharacterRange() }
     return ComposeAccessibilityText(pane: pane).visibleRange
   }
 
   override func accessibilityInsertionPointLineNumber() -> Int {
+    if usesCompleteAccessibility {
+      guard let value = completeAccessibility, let selected = value.model.selectedRanges?.first else { return NSNotFound }
+      return value.flow?.textIndex.line(atUTF16: selected.location) ?? NSNotFound
+    }
     guard let pane = focusedCompose else { return store.cursor?.row ?? 0 }
     if let caret = pane.caret, let line = pane.layout.text.fragments.firstIndex(where: {
       $0.range.location <= pane.selectedRange.location && pane.selectedRange.location <= $0.contentEnd
@@ -709,6 +770,10 @@ final class CellGridView: NSView, @preconcurrency NSTextInputClient {
   }
 
   override func accessibilityAttributedString(for range: NSRange) -> NSAttributedString? {
+    if usesCompleteAccessibility {
+      guard let value = completeAccessibility else { return nil }
+      return value.attributed(range) { self.accessibleImages[.init(owner: value.model.document.owner, source: $0)] }
+    }
     guard let pane = focusedCompose, let base = ComposeAccessibilityText(pane: pane).attributed(range) else { return nil }
     let result = NSMutableAttributedString(attributedString: base)
     for placed in pane.layout.text.attachments where !placed.attachment.preview {
@@ -725,6 +790,10 @@ final class CellGridView: NSView, @preconcurrency NSTextInputClient {
   }
 
   override func accessibilityStyleRange(for index: Int) -> NSRange {
+    if usesCompleteAccessibility {
+      guard let value = completeAccessibility else { return ComposeAccessibilityText.missing }
+      return value.flow?.textIndex.style(atUTF16: index)?.range ?? value.model.character(at: index) ?? ComposeAccessibilityText.missing
+    }
     guard let pane = focusedCompose else { return super.accessibilityStyleRange(for: index) }
     let text = ComposeAccessibilityText(pane: pane)
     guard index >= 0, index < text.text.length,
@@ -735,6 +804,10 @@ final class CellGridView: NSView, @preconcurrency NSTextInputClient {
   }
 
   override func accessibilityFrame(for range: NSRange) -> NSRect {
+    if usesCompleteAccessibility {
+      guard let rect = completeAccessibility?.bounds(for: range) else { return .zero }
+      return accessibilityScreenRect(rect)
+    }
     guard let pane = focusedCompose, let rect = ComposeAccessibilityText(pane: pane).bounds(for: range) else { return .zero }
     return accessibilityScreenRect(rect)
   }
@@ -745,6 +818,10 @@ final class CellGridView: NSView, @preconcurrency NSTextInputClient {
   }
 
   override func accessibilityRange(for point: NSPoint) -> NSRange {
+    if usesCompleteAccessibility {
+      guard let value = completeAccessibility, let window, point.x.isFinite, point.y.isFinite else { return ComposeAccessibilityText.missing }
+      return value.character(at: convert(window.convertPoint(fromScreen: point), from: nil))
+    }
     guard let pane = focusedCompose, let window, point.x.isFinite, point.y.isFinite else { return ComposeAccessibilityText.missing }
     let point = convert(window.convertPoint(fromScreen: point), from: nil)
     guard pane.bounds.contains(point) else { return ComposeAccessibilityText.missing }
@@ -758,6 +835,14 @@ final class CellGridView: NSView, @preconcurrency NSTextInputClient {
   }
 
   override func accessibilityChildren() -> [Any]? {
+    if usesCompleteAccessibility {
+      guard let value = completeAccessibility else { return [] }
+      var children: [Any] = value.model.images.compactMap { image in
+        accessibleImages[.init(owner: value.model.document.owner, source: Int(image.start)..<Int(image.end))]
+      }
+      if let element = composeNavigation.loadedElement { children.append(element) }
+      return children
+    }
     guard let pane = focusedCompose else { return super.accessibilityChildren() }
     var children: [Any] = pane.layout.text.attachments.compactMap { accessibleImages[.init(pane, source: $0.attachment.source)] }
     if let element = composeNavigation.loadedElement { children.append(element) }
@@ -771,6 +856,11 @@ final class CellGridView: NSView, @preconcurrency NSTextInputClient {
   }
 
   func isCurrentAccessibilityImage(_ image: ComposeAccessibilityImage) -> Bool {
+    if usesCompleteAccessibility {
+      guard delegate?.connected == true, accessibleImages[image.id] === image, let value = completeAccessibility else { return false }
+      let source = Int(image.id.start)..<Int(image.id.end)
+      return image.id == .init(owner: value.model.document.owner, source: source) && value.model.image(source: source) != nil
+    }
     let id = image.id
     guard delegate?.connected == true, accessibleImages[id] === image, UInt64(store.windowID) == id.window,
           let pane = store.panes.first(where: { $0.leaf == id.leaf && $0.hasBuffer && $0.buffer == id.buffer }),
@@ -799,7 +889,13 @@ final class CellGridView: NSView, @preconcurrency NSTextInputClient {
     let old = Set(accessibleImages.keys)
     var next: [ComposeAccessibilityImage.ID: ComposeAccessibilityImage] = [:]
     var labels: [ComposeAccessibilityImage.ID: String] = [:]
-    if delegate?.connected == true, let pane = focusedCompose {
+    if usesCompleteAccessibility, delegate?.connected == true, let value = delegate?.gridAccessibility(self, activate: false) {
+      for image in value.model.images {
+        let id = ComposeAccessibilityImage.ID(owner: value.model.document.owner, source: Int(image.start)..<Int(image.end))
+        next[id] = accessibleImages[id] ?? ComposeAccessibilityImage(id: id, grid: self)
+        labels[id] = completeImageDescription(image, in: value.pane)
+      }
+    } else if !usesCompleteAccessibility, delegate?.connected == true, let pane = focusedCompose {
       for placed in pane.layout.text.attachments {
         let id = ComposeAccessibilityImage.ID(pane, source: placed.attachment.source)
         next[id] = accessibleImages[id] ?? ComposeAccessibilityImage(id: id, grid: self)
@@ -814,6 +910,12 @@ final class CellGridView: NSView, @preconcurrency NSTextInputClient {
     }
     accessibleImageLabels = labels
     if old != Set(next.keys) { NSAccessibility.post(element: self, notification: .layoutChanged) }
+  }
+
+  func completeImageDescription(_ image: WireComposeImage, in pane: ComposePresentation) -> String {
+    if pane.image(start: image.start, end: image.end) != nil { return pane.layout.imageDescription(image) }
+    let label = image.alt.isEmpty ? "Image" : image.alt
+    return String((image.title.isEmpty ? label : "\(label): \(image.title)").prefix(512))
   }
 
   // MARK: Caret blink

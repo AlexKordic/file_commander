@@ -972,7 +972,8 @@ refused. Context queries can return a bounded, grapheme-adjusted result or nil.
 Secondary carets receive document-wide UTF-16 positions and coalesced raw
 `text_chunks` around their source positions. Nearby carets share each chunk;
 these additional windows together cannot exceed the parsed document size.
-The accessibility value and its selection retain display-relative coordinates.
+The accessibility value and its selection use document-wide displayed UTF-16
+coordinates when the complete-document capability is present.
 Character, substring, font/style, visual-line, visible-range and screen-bounds
 queries use that same measured projection, including provisional selections
 at every known caret. An offscreen primary is unavailable rather than replaced
@@ -985,7 +986,7 @@ the complete image list. Every attachment retains its accessibility element;
 the indices do not replace source or connection ownership checks.
 Source-edit previews remain ordinary source text and expose a separate image
 element without adding a character. Pressing an image selects its exact Markdown
-source through the normal captured pointer queue; it does not copy or edit by
+source through the normal captured input queue; it does not copy or edit by
 itself. Source/buffer/authority/focus changes and disconnection invalidate the
 object's action ownership; a new connection cannot revive a retained old object.
 Value, selection, image-description and hierarchy changes post accessibility
@@ -1004,11 +1005,14 @@ raw context. Cancellation, missing ownership and disconnect retain dependent
 text for explicit recovery. Deferred modal selections wait for keyboard focus
 without repeated retries; retired targets consume cancellation instead.
 
-Setter availability is explicit: older peers, active provisional composition
-and unavailable ownership disable these actions. An unconfirmed selection
-after a source change cannot redirect a selected-text replacement. Replacing
-only the displayed part of a larger selected range is refused. AXValue is
-not writable because it may be a cropped projection with concealed Markdown.
+Setter availability is explicit: complete-value setters require current source
+ownership and the source-selection capability. A current provisional composition
+can be selected or replaced through its accepted predecessor receipts. Older
+peers retain their bounded presentation path and do not accept provisional
+selection actions. An unconfirmed selection after a source change cannot
+redirect a selected-text replacement. Replacing only the displayed part of a
+larger selected range is refused. AXValue remains unwritable because displayed
+text does not include every Markdown source byte.
 Development peers also advertise `ServerHello.compose_semantic_index` (field
 6). One parser-owned inventory covers every heading, link and image in the
 document, including source outside the displayed window. Parsed labels retain
@@ -1173,26 +1177,46 @@ boundary. Region keys cannot be sent as Fresh cursor IDs, and draft offsets
 need accepted predecessor receipts before becoming wire action coordinates.
 Superseded overlays cannot publish through a still-current transport baseline.
 
-This remains an internal generation until public AX value, selection, styles,
-lines, visible ranges, bounds and provisional actions can switch together.
-The public AX implementation still uses its existing cropped presentation;
-it does not switch between cropped and complete values as measurement runs.
-The internal native action path now queues complete-value selection and primary
-replacement through the existing ordered input queue. Draft endpoints bind to
-their actual predecessor's accepted insertion proof; copied endpoints rebase
-only through a verified source transition. A proposed caret ordinal binds to
-the genuine Fresh selection receipt before any edit is sent. The whole action
-is cancelled on unknown source changes, lifetime changes or replaced interiors,
-and a waiting replacement is recovered once on disconnect. Backend regressions
-cover distant source selection, consecutive pending edits, IME clause selection,
-primary-only replacement with another caret, allocator history and recovery.
-Independent logical publication while geometry is pending and complete public
-image elements remain required before public adoption.
-Current certified formatting coverage skips redundant source-window preparation.
-Formatter/parser caches, transient allocations and the full native flow still
-require the general resource audit. The coordinator is integrated with the native
-editor lifecycle; complete public AX adoption remains separate work so all text,
-line, style and geometry APIs can switch to one coordinate system together.
+Public AX value, character/substrings, selection groups, setters, styles,
+visual lines, visible ranges, bounds, point queries and image elements now use
+one complete displayed coordinate space when `compose_document_updates` is
+supported. The first text query demands a complete snapshot. While it loads,
+the value is empty and help reports loading; the drawing crop is never passed
+off as the complete value. The coordinator prepares logical text on its single
+worker before shaping. Same-document refreshes retain that logical value with
+its original source owner; hide, disconnect or another document retires it.
+Selection-only local changes share the immutable projection immediately, so a
+following selected-text setter sees the proposed group before its receipt.
+
+Geometry publication uses that exact logical object. Pending or rejected
+measurement does not replace its text. Certified visible crop geometry remains
+usable; complete measured bounds need a verified crop-to-flow translation.
+Unavailable geometry returns no range/frame rather than an estimated prefix
+height. Font runs arrive with measurement; image attachment ownership and the
+complete image inventory are available before it. Source-keyed image and
+placement indices and one cached crop/geometry certificate per immutable view
+generation avoid rescanning the complete inventory for every child. Offscreen
+image elements load no pixels; pressing one selects its captured source.
+
+The native action path queues complete-value selection and primary replacement
+through the existing ordered input queue. Draft endpoints bind to their actual
+predecessor's accepted insertion proof; copied endpoints rebase only through a
+verified source transition. A proposed caret ordinal binds to the genuine
+Fresh selection receipt before an edit is sent. Unknown source changes,
+lifetime changes or replaced interiors cancel the whole action; a waiting
+replacement is recovered once on disconnect. Backend regressions cover distant
+source selection, consecutive pending edits, IME clause selection, primary-only
+replacement with another caret, allocator history and recovery.
+
+This development cutover still needs interactive and resource qualification.
+A retained logical value can outlive its action owner during the complete
+snapshot refresh interval. Actions against that retired owner are refused;
+receipt history for frozen logical endpoints remains follow-up work. Proposed
+caret groups across successive pending conversions, broader control-range/EOF
+coverage and actual GUI/IME/VoiceOver/macOS 14/SSH behavior remain unqualified.
+Current certified formatting coverage skips redundant source-window preparation;
+formatter/parser caches, transient allocations and the full native flow still
+require the general resource audit.
 
 Projection boundary validation and this model share a sparse UTF-8/UTF-16
 index with checkpoints about every 1,024 bytes. It retains literal bytes and

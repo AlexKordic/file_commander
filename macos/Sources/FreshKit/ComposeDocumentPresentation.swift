@@ -17,8 +17,33 @@ public final class ComposeDocumentPresentation: Sendable {
   public let projection: ComposeProjection
   public let selectedRanges: [NSRange]?
   let plan: ComposeProjectionPlan
+  public struct ImageRange: Sendable {
+    public let source: Range<Int>
+    public let range: NSRange
+  }
+  final class ImageInventory: Sendable {
+    let indices: [Range<Int>: Int]
+    let rendered: [ImageRange]
+    init(_ images: [WireComposeImage], projection: ComposeProjection) {
+      var indices: [Range<Int>: Int] = [:]
+      var rendered: [ImageRange] = []
+      indices.reserveCapacity(images.count)
+      for (index, image) in images.enumerated() {
+        let source = Int(image.start)..<Int(image.end)
+        if indices[source] == nil { indices[source] = index }
+        if image.rendered, let start = projection.utf16Position(for: source.lowerBound),
+           let end = projection.utf16Position(for: source.upperBound, affinity: .upstream), start < end {
+          rendered.append(.init(source: source, range: NSRange(location: start, length: end - start)))
+        }
+      }
+      self.indices = indices
+      self.rendered = rendered.sorted { $0.range.location < $1.range.location }
+    }
+  }
+  private let imageInventory: ImageInventory
   public var text: String { projection.text }
   public var characterCount: Int { projection.textIndex.utf16Count }
+  public var images: [WireComposeImage] { plan.images }
 
   public convenience init?(_ snapshot: ComposeDocumentSnapshot, overlay: ComposeDocumentOverlay? = nil) {
     guard overlay?.owns(snapshot.document) ?? true,
@@ -26,20 +51,62 @@ public final class ComposeDocumentPresentation: Sendable {
     self.init(snapshot, overlay: overlay, prepared: prepared)
   }
 
-  init(_ snapshot: ComposeDocumentSnapshot, overlay: ComposeDocumentOverlay?, prepared: ComposeProjectionPlan) {
+  init(_ snapshot: ComposeDocumentSnapshot, overlay: ComposeDocumentOverlay?, prepared: ComposeProjectionPlan,
+       imageInventory: ImageInventory? = nil) {
     document = snapshot.document; self.overlay = overlay; plan = prepared; projection = prepared.projection
+    self.imageInventory = imageInventory ?? ImageInventory(prepared.images, projection: prepared.projection)
     selectedRanges = Self.selections(snapshot, overlay: overlay, plan: prepared)
   }
 
   private static func prepare(_ snapshot: ComposeDocumentSnapshot, overlay: ComposeDocumentOverlay?) -> ComposeProjectionPlan? {
     let composition = overlay?.composition?.restore(), insertion = overlay?.insertion?.restore()
     guard overlay?.composition == nil || composition != nil, overlay?.insertion == nil || insertion != nil else { return nil }
-    return ComposeProjectionPlan(pane: snapshot.pane, composition: composition, virtualInsertion: insertion)
+    return ComposeProjectionPlan(pane: snapshot.pane, composition: composition, virtualInsertion: insertion,
+      original: snapshot.document.projection)
   }
 
   public func string(for range: NSRange) -> String? {
     guard projection.textIndex.bytes(for: range) != nil else { return nil }
     return (text as NSString).substring(with: range)
+  }
+
+  public func contains(_ range: NSRange) -> Bool { projection.textIndex.bytes(for: range) != nil }
+
+  public func image(source: Range<Int>) -> WireComposeImage? {
+    imageInventory.indices[source].map { plan.images[$0] }
+  }
+
+  public func imageRanges(intersecting range: NSRange) -> ArraySlice<ImageRange> {
+    let images = imageInventory.rendered
+    guard contains(range), range.length > 0 else { return images[0..<0] }
+    var low = 0, high = images.count
+    while low < high {
+      let mid = low + (high - low) / 2
+      if NSMaxRange(images[mid].range) <= range.location { low = mid + 1 } else { high = mid }
+    }
+    let first = low, end = NSMaxRange(range)
+    high = images.count
+    while low < high {
+      let mid = low + (high - low) / 2
+      if images[mid].range.location < end { low = mid + 1 } else { high = mid }
+    }
+    return images[first..<low]
+  }
+
+  /// Selection-only local changes need no full text preparation or shaping.
+  /// Keep the exact verified baseline and shared immutable projection plan.
+  func updatingSelection(_ snapshot: ComposeDocumentSnapshot, overlay next: ComposeDocumentOverlay?) -> ComposeDocumentPresentation? {
+    guard document === snapshot.document, next?.owns(document) ?? true else { return nil }
+    switch (overlay, next) {
+    case (nil, nil): return self
+    case (let a?, let b?) where a.id == b.id: return self
+    case (let a?, let b?) where a.isEquivalent(to: b): break
+    case (nil, let b?) where b.sourceComposition == nil: break
+    case (let a?, nil) where a.sourceComposition == nil: break
+    case (let a?, let b?) where a.hasSameLayout(as: b): break
+    default: return nil
+    }
+    return .init(snapshot, overlay: next, prepared: plan, imageInventory: imageInventory)
   }
 
   public func character(at index: Int) -> NSRange? {

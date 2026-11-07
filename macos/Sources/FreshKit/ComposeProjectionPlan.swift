@@ -33,12 +33,13 @@ struct ComposeProjectionPlan: Sendable {
   }
 
   init?(pane: WireComposePane, composition: ComposeComposition? = nil,
-        virtualInsertion: ComposeVirtualInsertion? = nil, visibleImages: [WireComposeImage]? = nil) {
+        virtualInsertion: ComposeVirtualInsertion? = nil, visibleImages: [WireComposeImage]? = nil,
+        original verified: ComposeProjection? = nil) {
     let source = virtualInsertion?.regions ?? composition
     guard let images = visibleImages ?? Self.visibleImages(pane: pane, editing: source),
-          let original = ComposeProjection(pane) else { return nil }
+          let original = verified ?? ComposeProjection(pane) else { return nil }
     let rendered = images.filter(\.rendered).map { Int($0.start)..<Int($0.end) }
-    let replacementObjects = original.replacingObjects(rendered)
+    let replacementObjects = rendered.isEmpty ? nil : original.replacingObjects(rendered)
     let base = replacementObjects?.projection ?? original
     let layered = virtualInsertion?.projected(over: base)
     let replacement: (projection: ComposeProjection, displays: [UInt64: Range<Int>])? = layered.map { ($0.projection, $0.drafts) }

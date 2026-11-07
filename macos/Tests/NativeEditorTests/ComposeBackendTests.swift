@@ -138,7 +138,12 @@ final class ComposeBackendTests: XCTestCase {
     let grid = try XCTUnwrap(editor.grid), model = try await completeModel(editor)
     let range = (model.text as NSString).range(of: target,options: .literal)
     XCTAssertNotEqual(range.location,NSNotFound); XCTAssertGreaterThan(range.location,16_384)
-    XCTAssertTrue(editor.selectDocument([range],in: model))
+    XCTAssertEqual(grid.accessibilityValue() as? String, model.text)
+    XCTAssertEqual(grid.accessibilityNumberOfCharacters(), model.characterCount)
+    XCTAssertEqual(grid.accessibilityString(for: range), target)
+    XCTAssertTrue(grid.isAccessibilitySelectorAllowed(#selector(grid.setAccessibilitySelectedTextRange(_:))))
+    grid.setAccessibilitySelectedTextRange(range)
+    XCTAssertEqual(grid.accessibilitySelectedTextRange(), range)
     grid.insertText("replaced",replacementRange: NSRange(location: NSNotFound,length: 0))
     grid.insertText("_",replacementRange: NSRange(location: NSNotFound,length: 0))
     editor.send(.action(name: "save",argsJson: ""))
@@ -166,7 +171,7 @@ final class ComposeBackendTests: XCTestCase {
     let model = try await completeModel(editor,provisional: true)
     let selection = NSRange(location: 1,length: 3)
     XCTAssertEqual(model.string(for: selection),"本ab")
-    XCTAssertTrue(editor.selectDocument([selection],in: model))
+    grid.setAccessibilitySelectedTextRange(selection)
     XCTAssertFalse(grid.hasMarkedText())
     grid.insertText("Z",replacementRange: unspecified)
     editor.send(.action(name: "save",argsJson: ""))
@@ -298,6 +303,61 @@ final class ComposeBackendTests: XCTestCase {
   }
 
   @MainActor
+  func testCompletePublicAccessibilityKeepsOffscreenImagesStylesAndSourceActionsInOneValue() async throws {
+    let backend = try backend(); defer { backend.captureDiagnostics("complete-public-ax"); backend.stop() }
+    let editor = editor(BackendPasteboard()); defer { editor.detachAll() }
+    let original = "# Heading\n\n" + String(repeating: "Paragraph café **bold** 👩🏽‍💻 العربية אבג and text.\n\n", count: 1400)
+      + "![far picture](missing.png)\n\nEnd\n"
+    let file = backend.root.appendingPathComponent("complete-public-ax.md")
+    try Data(original.utf8).write(to: file)
+    try await attach(backend, file: file, editor: editor, requireTables: false)
+    let grid = try XCTUnwrap(editor.grid)
+    _ = grid.accessibilityValue() // Demand comes from the actual public query.
+    try await eventually(editor, "complete AX logical value and measured styles", timeout: 20) { editor.composeFlow.status == .ready }
+    let model = try XCTUnwrap(editor.composeFlow.presentation), flow = try XCTUnwrap(editor.composeFlow.flow)
+    let pane = try XCTUnwrap(grid.focusedCompose)
+    XCTAssertLessThan(pane.pane.compose.sourceEnd, pane.pane.compose.documentLen)
+    XCTAssertEqual(grid.accessibilityValue() as? String, model.text)
+    XCTAssertEqual(grid.accessibilityNumberOfCharacters(), model.characterCount)
+    let end = (model.text as NSString).range(of: "End", options: [.literal, .backwards])
+    XCTAssertGreaterThan(end.location, pane.layout.text.projection.text.utf16.count)
+    XCTAssertEqual(grid.accessibilityString(for: end), "End")
+    XCTAssertEqual(grid.accessibilityLine(for: end.location), flow.textIndex.line(atUTF16: end.location))
+    XCTAssertEqual(grid.accessibilityRange(forLine: grid.accessibilityLine(for: end.location)), flow.textIndex.range(forLine: flow.textIndex.line(atUTF16: end.location)!))
+    XCTAssertEqual(grid.accessibilityRange(for: model.characterCount), NSRange(location: model.characterCount, length: 0))
+    XCTAssertEqual(grid.accessibilityLine(for: model.characterCount), flow.textIndex.lineCount - 1)
+    let heading = try XCTUnwrap(grid.accessibilityAttributedString(for: NSRange(location: 0, length: 7)))
+    let font = try XCTUnwrap(heading.attribute(.accessibilityFont, at: 0, effectiveRange: nil) as? [NSAccessibility.FontAttributeKey: Any])
+    XCTAssertGreaterThan(try XCTUnwrap(font[.fontSize] as? CGFloat), 20)
+    let image = try XCTUnwrap(model.images.first), source = Int(image.start)..<Int(image.end)
+    XCTAssertNil(pane.image(start: image.start, end: image.end))
+    XCTAssertFalse(grid.composeImageDemands().contains { $0.image.start == image.start })
+    let element = try XCTUnwrap(grid.accessibilityChildren()?.compactMap { $0 as? ComposeAccessibilityImage }.first)
+    XCTAssertTrue(element.isAccessibilityElement()); XCTAssertEqual(element.accessibilityLabel(), "far picture")
+    let imageRange = try XCTUnwrap(model.displayedRange(for: source))
+    XCTAssertEqual(grid.accessibilityString(for: imageRange), "\u{fffc}")
+    let attributed = try XCTUnwrap(grid.accessibilityAttributedString(for: imageRange))
+    XCTAssertTrue((attributed.attribute(.accessibilityAttachment, at: 0, effectiveRange: nil) as? ComposeAccessibilityImage) === element)
+    let value = try XCTUnwrap(grid.completeAccessibility)
+    XCTAssertGreaterThan(try XCTUnwrap(value.bounds(for: end)).minY, pane.bounds.maxY)
+    XCTAssertGreaterThan(try XCTUnwrap(value.imageRect(source)).minY, pane.bounds.maxY)
+    let visible = grid.accessibilityVisibleCharacterRange()
+    XCTAssertLessThan(visible.length, model.characterCount)
+    XCTAssertNotEqual(visible.location, NSNotFound)
+    let withoutGeometry = ComposeCompleteAccessibility(model: model, pane: pane, flow: nil)
+    XCTAssertEqual(withoutGeometry.model.characterCount, value.model.characterCount)
+    XCTAssertEqual(withoutGeometry.attributed(imageRange) { _ in element }?.attribute(.accessibilityAttachment, at: 0, effectiveRange: nil) as? ComposeAccessibilityImage, element)
+    XCTAssertTrue(element.accessibilityPerformPress())
+    try await eventually(editor, "offscreen image source selection through the complete AX element", timeout: 20) {
+      guard let cursor = grid.focusedCompose?.pane.compose.cursors.first(where: \.primary), cursor.hasAnchor else { return false }
+      return min(cursor.position, cursor.anchor) == image.start && max(cursor.position, cursor.anchor) == image.end
+    }
+    XCTAssertEqual(try Data(contentsOf: file), Data(original.utf8))
+    editor.detachAll()
+    XCTAssertFalse(element.isAccessibilityElement()); XCTAssertNil(element.accessibilityLabel()); XCTAssertFalse(element.accessibilityPerformPress())
+  }
+
+  @MainActor
   func testCompleteMeasuredFlowCertifiesFreshDrawingAtTheStartAndAtAnOffscreenSecondTable() async throws {
     let backend = try backend(); defer { backend.captureDiagnostics("complete-flow"); backend.stop() }
     let editor = editor(BackendPasteboard()); defer { editor.detachAll() }
@@ -347,7 +407,8 @@ final class ComposeBackendTests: XCTestCase {
     let localHeading = (shown.layout.text.projection.text as NSString).range(of: "Final heading", options: .literal)
     XCTAssertNotEqual(localHeading.location, NSNotFound)
     let selection = zoomed.document.selectionRevision
-    grid.setAccessibilitySelectedTextRange(localHeading)
+    let globalHeading = (zoomed.presentation.text as NSString).range(of: "Final heading", options: .literal)
+    grid.setAccessibilitySelectedTextRange(globalHeading)
     XCTAssertNil(editor.composeFlow.flow, "a pending local selection retires the previous logical generation")
     try await eventually(editor, "current source selection and complete geometry", timeout: 20) {
       editor.composeFlow.status == .ready && editor.composeFlow.flow?.document.selectionRevision != selection
@@ -519,6 +580,7 @@ final class ComposeBackendTests: XCTestCase {
     let grid = try XCTUnwrap(editor.grid), pane = try XCTUnwrap(grid.focusedCompose)
     XCTAssertEqual(pane.pane.compose.sourceStart, 0)
     XCTAssertEqual(pane.pane.compose.sourceEnd, UInt64(original.utf8.count))
+    _ = try await completeModel(editor)
     let model = try XCTUnwrap(ComposeAccessibleDocument(window: UInt64(editor.store.windowID), pane: pane.pane))
     XCTAssertEqual(Array(model.text.utf8), Array(try XCTUnwrap(grid.accessibilityValue() as? String).utf8))
     XCTAssertEqual(model.characterCount, grid.accessibilityNumberOfCharacters())
@@ -590,6 +652,7 @@ final class ComposeBackendTests: XCTestCase {
     try await attach(backend, file: file, editor: editor)
     let grid = try XCTUnwrap(editor.grid)
     try await eventually(editor, "source selection capability") { editor.store.composeSourceSelections && grid.focusedCompose?.pane.compose.editable == true }
+    _ = try await completeModel(editor)
     let display = try XCTUnwrap(grid.accessibilityValue() as? String) as NSString
     grid.setAccessibilitySelectedTextRanges([NSValue(range: display.range(of: "👩🏽‍💻")), NSValue(range: display.range(of: "café"))])
     grid.insertText("X", replacementRange: NSRange(location: NSNotFound, length: 0))
@@ -598,6 +661,7 @@ final class ComposeBackendTests: XCTestCase {
     try await eventually(editor, "immediate text at both source selections") { (try? Data(contentsOf: file)) == Data(expected.utf8) }
     editor.send(.action(name: "undo", argsJson: "")); editor.send(.action(name: "save", argsJson: ""))
     try await eventually(editor, "one undo restores both selections' exact CRLF Markdown") { (try? Data(contentsOf: file)) == Data(original.utf8) }
+    _ = try await completeModel(editor)
     let current = try XCTUnwrap(grid.accessibilityValue() as? String) as NSString
     grid.setAccessibilitySelectedTextRange(current.range(of: "alpha"))
     grid.setAccessibilitySelectedText("ALPHA")
@@ -607,6 +671,7 @@ final class ComposeBackendTests: XCTestCase {
     }
     editor.send(.action(name: "undo", argsJson: "")); editor.send(.action(name: "save", argsJson: ""))
     try await eventually(editor, "AX replacement has the same Fresh undo history") { (try? Data(contentsOf: file)) == Data(original.utf8) }
+    _ = try await completeModel(editor)
     try await eventually(editor, "rendered image exposes one AX object character") {
       (grid.accessibilityValue() as? String)?.contains("\u{fffc}") == true
     }
@@ -964,7 +1029,14 @@ final class ComposeBackendTests: XCTestCase {
     let report: [String: Any] = ["source_bytes": original.utf8.count, "attachments": 4000, "page_positions": positions,
       "initial_width": Double(width), "resized_width": Double(try XCTUnwrap(grid.focusedCompose?.layout.width))]
     try JSONSerialization.data(withJSONObject: report, options: [.sortedKeys]).write(to: backend.root.appendingPathComponent("dense-image-report.json"))
+    _ = grid.accessibilityValue()
+    try await eventually(editor, "dense document logical accessibility value", timeout: 20) {
+      guard let model = editor.composeFlow.presentation, let pane = grid.focusedCompose else { return false }
+      return model.document.owns(window: UInt64(editor.store.windowID), pane: pane.pane) && model.images.count == 4000
+    }
+    let firstAccessibility = try XCTUnwrap(grid.completeAccessibility)
     let accessible = try XCTUnwrap(grid.accessibilityChildren() as? [NSAccessibilityElement])
+    XCTAssertTrue(firstAccessibility === grid.completeAccessibility, "one crop certificate is shared by all immutable-generation image queries")
     XCTAssertEqual(accessible.count, 4000, "every attachment remains available to accessibility")
     XCTAssertEqual(accessible.compactMap { $0.accessibilityLabel() }, Array(repeating: "tiny", count: 4000))
   }
@@ -1094,6 +1166,7 @@ final class ComposeBackendTests: XCTestCase {
       guard let pane = grid.focusedCompose, let annotation = pane.pane.compose.images.first else { return false }
       return pane.layout.imageDescription(annotation) == "tiny"
     }
+    _ = try await completeModel(editor)
     let accessibleImage = try XCTUnwrap(grid.accessibilityChildren()?.first as? NSAccessibilityElement)
     XCTAssertEqual(accessibleImage.accessibilityRole(), .image)
     XCTAssertEqual(accessibleImage.accessibilityLabel(), "tiny")

@@ -7,9 +7,9 @@ private actor HeldFlowMeasurement {
   private var held: CheckedContinuation<Void, Never>?
   private var firstGeometry: UUID?
   func run(_ snapshot: ComposeDocumentSnapshot, environment: ComposeFlowMeasurement.Environment,
-           previous: ComposeFlowMeasurement?, overlay: ComposeDocumentOverlay? = nil) async throws -> ComposeFlowMeasurement {
+           previous: ComposeFlowMeasurement?, overlay: ComposeDocumentOverlay? = nil, presentation: ComposeDocumentPresentation) async throws -> ComposeFlowMeasurement {
     XCTAssertFalse(Thread.isMainThread)
-    let flow = try ComposeFlowMeasurement.measure(snapshot, environment: environment, overlay: overlay, reusing: previous)
+    let flow = try ComposeFlowMeasurement.measure(snapshot, environment: environment, overlay: overlay, reusing: previous, presentation: presentation)
     calls += 1; active += 1; maximum = max(maximum, active)
     if calls == 1 {
       firstGeometry = flow.geometryGeneration
@@ -26,7 +26,7 @@ private actor HeldFlowMeasurement {
 private actor WrongFirstFlow {
   private var calls = 0
   func run(_ snapshot: ComposeDocumentSnapshot, environment: ComposeFlowMeasurement.Environment,
-           previous: ComposeFlowMeasurement?) throws -> ComposeFlowMeasurement {
+           previous: ComposeFlowMeasurement?, presentation: ComposeDocumentPresentation) throws -> ComposeFlowMeasurement {
     calls += 1
     if calls == 1 {
       // A different complete instance can reuse every numeric owner/header ID.
@@ -35,7 +35,7 @@ private actor WrongFirstFlow {
       let foreign = ComposeDocumentSnapshot(document: duplicate, pane: snapshot.pane, baseline: snapshot.baseline)
       return try ComposeFlowMeasurement.measure(foreign, environment: environment)
     }
-    return try ComposeFlowMeasurement.measure(snapshot, environment: environment, reusing: previous)
+    return try ComposeFlowMeasurement.measure(snapshot, environment: environment, reusing: previous, presentation: presentation)
   }
   func count() -> Int { calls }
 }
@@ -65,6 +65,47 @@ final class ComposeFlowControllerTests: XCTestCase {
     let state = await gate.state(); XCTAssertEqual(state.calls, 1)
   }
 
+  func testLogicalValuePrecedesHeldGeometryAndSurvivesRefreshUntilReset() async throws {
+    var fixture = fixture()
+    let initial = try fixture.snapshot(), gate = HeldFlowMeasurement()
+    let controller = ComposeFlowController { snapshot, environment, previous, overlay, presentation in
+      try await gate.run(snapshot, environment: environment, previous: previous, overlay: overlay, presentation: presentation)
+    }
+    defer { controller.reset() }
+    controller.update(snapshot: initial, environment: environment())
+    try await held(gate)
+    let logical = try XCTUnwrap(controller.presentation)
+    XCTAssertEqual(logical.text, initial.document.text); XCTAssertNil(controller.flow)
+    XCTAssertTrue(logical.document === initial.document)
+    controller.update(snapshot: nil, environment: nil)
+    XCTAssertTrue(controller.presentation === logical)
+    fixture.pane.compose.selectionRevision += 1
+    let next = try fixture.snapshot(id: 2)
+    controller.update(snapshot: next, environment: environment(150))
+    XCTAssertTrue(controller.presentation === logical, "the retained value keeps its original source owner")
+    await gate.release()
+    try await eventually { controller.status == .ready }
+    XCTAssertTrue(controller.presentation === controller.flow?.presentation)
+    XCTAssertTrue(controller.presentation?.document === next.document)
+    XCTAssertEqual(controller.presentation?.text, logical.text)
+    controller.reset(); XCTAssertNil(controller.presentation); XCTAssertNil(controller.flow)
+  }
+
+  func testGeometryFailureLeavesVerifiedTextAvailableAndAnotherDocumentRetiresIt() async throws {
+    var fixture = fixture()
+    let controller = ComposeFlowController { _, _, _, _, _ in throw ComposeFlowMeasurement.Failure.unavailable }
+    defer { controller.reset() }
+    let first = try fixture.snapshot()
+    controller.update(snapshot: first, environment: environment())
+    try await eventually { controller.status == .failed }
+    XCTAssertEqual(controller.presentation?.text, first.document.text); XCTAssertNil(controller.flow)
+    fixture.pane.buffer += 1
+    controller.update(snapshot: try fixture.snapshot(id: 2), environment: environment())
+    XCTAssertNil(controller.presentation, "another buffer must never inherit the old text")
+    try await eventually { controller.status == .failed }
+    XCTAssertEqual(controller.presentation?.document.owner.buffer, fixture.pane.buffer)
+  }
+
   func testHeaderUpdatesReuseCoordinatesButReplaceOwnershipAndEnvironmentChangesRemeasure() async throws {
     var fixture = fixture(); let initial = try fixture.snapshot(), controller = ComposeFlowController(), env = environment()
     defer { controller.reset() }
@@ -91,8 +132,8 @@ final class ComposeFlowControllerTests: XCTestCase {
 
   func testManySupersededTargetsKeepOneWorkerAndPublishOnlyTheLatest() async throws {
     var fixture = fixture(); let initial = try fixture.snapshot(), gate = HeldFlowMeasurement()
-    let controller = ComposeFlowController { snapshot, environment, previous, _ in
-      try await gate.run(snapshot, environment: environment, previous: previous)
+    let controller = ComposeFlowController { snapshot, environment, previous, _, presentation in
+      try await gate.run(snapshot, environment: environment, previous: previous, presentation: presentation)
     }
     defer { controller.reset() }
     var published: [UInt64] = []
@@ -115,8 +156,8 @@ final class ComposeFlowControllerTests: XCTestCase {
 
   func testResetCannotReviveLateSuccessEvenWhenReconnectReusesAllIDs() async throws {
     let fixture = fixture(), first = try fixture.snapshot(), second = try fixture.snapshot(), gate = HeldFlowMeasurement()
-    let controller = ComposeFlowController { snapshot, environment, previous, _ in
-      try await gate.run(snapshot, environment: environment, previous: previous)
+    let controller = ComposeFlowController { snapshot, environment, previous, _, presentation in
+      try await gate.run(snapshot, environment: environment, previous: previous, presentation: presentation)
     }
     defer { controller.reset() }
     controller.update(snapshot: first, environment: environment())
@@ -134,8 +175,8 @@ final class ComposeFlowControllerTests: XCTestCase {
 
   func testForeignResultFailsWithoutLoopingAndExplicitRetryBuildsTheCurrentDocument() async throws {
     let fixture = fixture(), snapshot = try fixture.snapshot(), wrong = WrongFirstFlow()
-    let controller = ComposeFlowController { snapshot, environment, previous, _ in
-      try await wrong.run(snapshot, environment: environment, previous: previous)
+    let controller = ComposeFlowController { snapshot, environment, previous, _, presentation in
+      try await wrong.run(snapshot, environment: environment, previous: previous, presentation: presentation)
     }
     defer { controller.reset() }
     controller.update(snapshot: snapshot, environment: environment())
@@ -151,8 +192,8 @@ final class ComposeFlowControllerTests: XCTestCase {
 
   func testSupersededLocalDraftsCannotPublishUnderAnUnchangedFreshBaseline() async throws {
     let fixture = fixture(), snapshot = try fixture.snapshot(), gate = HeldFlowMeasurement()
-    let controller = ComposeFlowController { snapshot, environment, previous, overlay in
-      try await gate.run(snapshot, environment: environment, previous: previous, overlay: overlay)
+    let controller = ComposeFlowController { snapshot, environment, previous, overlay, presentation in
+      try await gate.run(snapshot, environment: environment, previous: previous, overlay: overlay, presentation: presentation)
     }
     defer { controller.reset() }
     let context = try XCTUnwrap(ComposeTextContext(.with { $0.text = fixture.pane.compose.text },documentLength: fixture.pane.compose.documentLen))
@@ -173,6 +214,15 @@ final class ComposeFlowControllerTests: XCTestCase {
     XCTAssertEqual(state.calls,2); XCTAssertEqual(state.maximum,1)
     XCTAssertEqual(controller.flow?.presentation.overlay?.id,last?.id)
     XCTAssertTrue(controller.flow?.presentation.text.hasPrefix("draft 10 👩🏽‍💻") == true)
+    let equivalent = try XCTUnwrap(ComposeDocumentOverlay(window: 1, pane: fixture.pane,
+      composition: last?.composition?.restore()))
+    controller.update(snapshot: snapshot, environment: environment(220), overlay: equivalent)
+    XCTAssertEqual(controller.presentation?.overlay?.id, equivalent.id)
+    XCTAssertNil(controller.flow)
+    try await eventually { controller.status == .ready }
+    XCTAssertTrue(controller.flow?.presentation === controller.presentation)
+    controller.update(snapshot: snapshot, environment: environment(), overlay: last)
+    try await eventually { controller.status == .ready }
     let generation = controller.generation
     controller.update(snapshot: snapshot,environment: environment(),overlay: last)
     XCTAssertEqual(controller.generation,generation)

@@ -107,6 +107,10 @@ final class ComposeAccessibilityImage: NSAccessibilityElement {
       authority = pane.pane.compose.assetAuthority
       document = pane.pane.compose.assetDocument; start = UInt64(source.lowerBound); end = UInt64(source.upperBound)
     }
+    init(owner: WireComposeIndexOwner, source: Range<Int>) {
+      window = owner.window; leaf = owner.leaf; buffer = owner.buffer; epoch = owner.epoch; revision = owner.revision
+      authority = owner.authority; document = owner.document; start = UInt64(source.lowerBound); end = UInt64(source.upperBound)
+    }
   }
   let id: ID
   weak var grid: CellGridView?
@@ -114,22 +118,40 @@ final class ComposeAccessibilityImage: NSAccessibilityElement {
   init(id: ID, grid: CellGridView) { self.id = id; self.grid = grid; super.init() }
   override func accessibilityParent() -> Any? { grid }
   override func accessibilityRole() -> NSAccessibility.Role? { .image }
-  override func accessibilityLabel() -> String? { current.map { $0.pane.layout.imageDescription($0.image) } }
-  override func accessibilityHelp() -> String? { current == nil ? nil : "Select image Markdown source" }
+  override func accessibilityLabel() -> String? {
+    if let complete { return grid?.completeImageDescription(complete.image, in: complete.value.pane) }
+    return current.map { $0.pane.layout.imageDescription($0.image) }
+  }
+  override func accessibilityHelp() -> String? { isAccessibilityElement() ? "Select image Markdown source" : nil }
   override func accessibilityFrame() -> NSRect {
+    if let complete, let grid {
+      guard let rect = complete.value.imageRect(Int(id.start)..<Int(id.end)) else { return .zero }
+      return grid.accessibilityScreenRect(rect)
+    }
     guard let current, let grid else { return .zero }
     return grid.accessibilityScreenRect(current.rect)
   }
-  override func isAccessibilityElement() -> Bool { current != nil }
+  override func isAccessibilityElement() -> Bool { complete != nil || current != nil }
+
+  private var complete: (value: ComposeCompleteAccessibility, image: WireComposeImage)? {
+    guard let grid, grid.usesCompleteAccessibility, grid.isCurrentAccessibilityImage(self),
+          let value = grid.completeAccessibility,
+          let image = value.model.image(source: Int(id.start)..<Int(id.end)) else { return nil }
+    return (value, image)
+  }
 
   private var current: (pane: ComposePresentation, image: WireComposeImage, rect: CGRect)? {
-    guard let grid, grid.isCurrentAccessibilityImage(self), let pane = grid.focusedCompose,
+    guard let grid, !grid.usesCompleteAccessibility, grid.isCurrentAccessibilityImage(self), let pane = grid.focusedCompose,
           let placed = pane.attachment(start: id.start, end: id.end), ID(pane, source: placed.attachment.source) == id,
           let image = pane.image(start: id.start, end: id.end) else { return nil }
     return (pane, image, placed.rect.offsetBy(dx: pane.origin.x, dy: pane.origin.y))
   }
 
   override func accessibilityPerformPress() -> Bool {
+    if let complete, let grid, let delegate = grid.delegate {
+      guard let range = complete.value.model.displayedRange(for: Int(id.start)..<Int(id.end)) else { return false }
+      return delegate.grid(grid, selectDocument: [range], in: complete.value.model)
+    }
     guard let grid, current != nil, let delegate = grid.delegate else { return false }
     if grid.hasMarkedText() { grid.unmarkText() }
     guard let current else { return false }

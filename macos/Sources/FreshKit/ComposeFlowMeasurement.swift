@@ -67,6 +67,11 @@ public struct ComposeFlowMeasurement: Sendable {
   private let plan:ComposeShapingContexts.Plan
   private let inputDigest:Data
   private let admission:ComposeTextLayout.MeasurementOptions
+  private let attachmentIndices:[Range<Int>:Int]
+
+  public func attachment(source:Range<Int>) -> ComposeTextLayout.PlacedAttachment? {
+    attachmentIndices[source].map {attachments[$0]}
+  }
 
   /// Serialize only layout inputs, with literal protobuf string bytes. Swift
   /// String equality can equate differently encoded marker/table samples.
@@ -81,11 +86,13 @@ public struct ComposeFlowMeasurement: Sendable {
   }
 
   public static func measure(_ snapshot:ComposeDocumentSnapshot,environment:Environment,overlay:ComposeDocumentOverlay? = nil,
-                             options:ComposeTextLayout.MeasurementOptions = .init(),reusing previous:Self?=nil) throws -> Self {
+                             options:ComposeTextLayout.MeasurementOptions = .init(),reusing previous:Self?=nil,
+                             presentation prepared:ComposeDocumentPresentation?=nil) throws -> Self {
     try Task.checkCancellation()
     let inputDigest=try layoutDigest(snapshot.pane)
     try Task.checkCancellation()
     guard overlay?.owns(snapshot.document) ?? true else {throw Failure.unavailable}
+    guard prepared == nil || prepared!.document === snapshot.document && prepared!.overlay?.id == overlay?.id else {throw Failure.unavailable}
     func sameOverlayLayout(_ old:ComposeDocumentOverlay?) -> Bool {
       switch (old,overlay) {
       case (nil,nil): return true
@@ -99,13 +106,13 @@ public struct ComposeFlowMeasurement: Sendable {
        sameOverlayLayout(previous.presentation.overlay) {
       // Coordinates can survive a caret/selection header update. Ownership
       // cannot: every returned model contains the new complete document.
-      let presentation=ComposeDocumentPresentation(snapshot,overlay:overlay,prepared:previous.presentation.plan)
+      let presentation=prepared ?? ComposeDocumentPresentation(snapshot,overlay:overlay,prepared:previous.presentation.plan)
       return .init(document:snapshot.document,presentation:presentation,environment:environment,lines:previous.lines,fonts:previous.fonts,
         styles:previous.styles,tables:previous.tables,attachments:previous.attachments,size:previous.size,
         usage:previous.usage,textIndex:previous.textIndex,geometryGeneration:previous.geometryGeneration,
-        plan:previous.plan,inputDigest:inputDigest,admission:options)
+        plan:previous.plan,inputDigest:inputDigest,admission:options,attachmentIndices:previous.attachmentIndices)
     }
-    guard let presentation=ComposeDocumentPresentation(snapshot,overlay:overlay) else {throw Failure.unavailable}
+    guard let presentation=prepared ?? ComposeDocumentPresentation(snapshot,overlay:overlay) else {throw Failure.unavailable}
     let text=presentation.text as NSString
     var lines:[Line]=[],fonts:[Font]=[Font(environment.body)],styles:[Style]=[]
     var fontIDs:[Font:Int]=[fonts[0]:0],lastEnd=0
@@ -146,9 +153,14 @@ public struct ComposeFlowMeasurement: Sendable {
     let usage=ComposeTextLayout.MeasurementUsage(
       maximumContextUnits:max(measured.maximumContextUnits,layout.maximumAuxiliaryContextUnits),
       contexts:measured.contexts,coordinateEntries:measured.coordinateEntries,fragments:measured.fragments,retainedGlyphs:false)
+    var attachmentIndices:[Range<Int>:Int]=[:]
+    attachmentIndices.reserveCapacity(layout.text.attachments.count)
+    for (index,placed) in layout.text.attachments.enumerated() where attachmentIndices[placed.attachment.source] == nil {
+      attachmentIndices[placed.attachment.source]=index
+    }
     return .init(document:snapshot.document,presentation:presentation,environment:environment,lines:lines,fonts:fonts,styles:styles,
       tables:layout.text.tables,attachments:layout.text.attachments,size:layout.text.size,usage:usage,textIndex:textIndex,
-      geometryGeneration:UUID(),plan:plan,inputDigest:inputDigest,admission:options)
+      geometryGeneration:UUID(),plan:plan,inputDigest:inputDigest,admission:options,attachmentIndices:attachmentIndices)
   }
 
   /// Exact range bounds use stored whole-line geometry and shape only partial

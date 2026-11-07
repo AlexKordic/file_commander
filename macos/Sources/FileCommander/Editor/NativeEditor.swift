@@ -35,6 +35,7 @@ final class NativeEditor: NSObject, CellGridDelegate {
     self?.socket?.send(.composeDocument(request))
   }
   let composeFlow = ComposeFlowController()
+  private var accessibilitySnapshot: ComposeCompleteAccessibility?
   private var composeFlowOwner: WireComposeIndexOwner?
   private(set) var view: EditorHostView?
   var grid: CellGridView? { view?.grid }
@@ -148,6 +149,10 @@ final class NativeEditor: NSObject, CellGridDelegate {
     measuredTables = richCompose && environment["FC_NATIVE_MEASURED_TABLES"] == "1"
     super.init()
     composeDocument.onChange = { [weak self] in self?.updateCompleteFlow() }
+    composeFlow.onChange = { [weak self] in
+      self?.accessibilitySnapshot = nil
+      self?.grid?.completeAccessibilityChanged()
+    }
     composeImages.onChange = { [weak self] in
       self?.grid?.refreshComposeImages(geometryChanged: true)
       self?.updateImageDemands()
@@ -552,6 +557,7 @@ final class NativeEditor: NSObject, CellGridDelegate {
   }
 
   private func updateCompleteFlow() {
+    if accessibilitySnapshot?.pane !== grid?.focusedCompose { accessibilitySnapshot = nil }
     guard shown, richCompose, let snapshot = composeDocument.snapshot, let pane = grid?.focusedCompose,
           snapshot.document.owns(window: UInt64(store.windowID), pane: pane.pane) else {
       composeFlow.update(snapshot: nil, environment: nil); return
@@ -572,6 +578,24 @@ final class NativeEditor: NSObject, CellGridDelegate {
         authority: snapshot.pane.assetAuthority, document: snapshot.pane.assetDocument)
     }
     composeFlow.update(snapshot: snapshot, environment: pane.layout.measurementEnvironment(images: images), overlay: overlay)
+  }
+
+  func gridAccessibility(_ grid: CellGridView, activate: Bool) -> ComposeCompleteAccessibility? {
+    guard receivedHello, shown, richCompose, let pane = grid.focusedCompose else { return nil }
+    if activate { composeDocument.activate() }
+    guard let model = composeFlow.presentation else { return nil }
+    if let value = accessibilitySnapshot, value.model === model, value.pane === pane { return value }
+    let value = ComposeCompleteAccessibility(model: model, pane: pane, flow: composeFlow.flow)
+    accessibilitySnapshot = value
+    return value
+  }
+
+  func grid(_ grid: CellGridView, selectDocument ranges: [NSRange], in model: ComposeDocumentPresentation) -> Bool {
+    selectDocument(ranges, in: model)
+  }
+
+  func grid(_ grid: CellGridView, replaceDocumentSelection text: String, in model: ComposeDocumentPresentation) -> Bool {
+    replaceDocumentSelection(text, in: model)
   }
 
   private func updateImageDemands(revalidate: Bool = false) {
