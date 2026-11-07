@@ -1372,6 +1372,17 @@ open. This development implementation does not establish full IME support.
 Context sizing and scene traffic still need performance qualification before
 release, including the new action-result snapshots.
 
+Save, Undo and Redo first dispatch against the raw source scope even before
+formatting is usable. These position-free commands follow the preceding input's
+live raw scope at dispatch, within their captured window, leaf, buffer and
+lifetime; a retired target cancels instead of following another file. Fresh
+accepts these core actions without a projection or pixel layout only when source revision, complete caret/context fingerprint,
+focused document and buffer lifetime still match. Modal ownership still defers
+them. Save preserves navigation memory; Undo/Redo retire obsolete measured
+navigation. Stale source/selection, region requests, deferred measured actions
+and unknown actions retain the normal refresh/cancellation path. An older peer
+can still request the ordinary measured retry. No protocol field changes.
+
 Native Compose must wrap using measured fonts and available pixel width.
 Terminal Markdown column counts, padded or truncated table replacements and
 character-sized frames are not a native layout contract. Parsed tables

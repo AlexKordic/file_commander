@@ -2133,6 +2133,44 @@ final class ComposeInputTests: XCTestCase {
     XCTAssertEqual(peer.inputs[0].replacementEnd, UInt64(start + 7))
   }
   @MainActor
+  func testSourceSaveDispatchesBeforeAnUnformattedProjectionBecomesUsable() async throws {
+    var raw = pane("Current raw source café\n")
+    raw.compose.ready = false; raw.compose.currentProjection = false
+    let peer = try ScenePeer(pane: raw); defer { peer.close() }
+    let editor = richEditor(); defer { editor.detachAll() }
+    editor.attach(socketPath: peer.path,app: nil)
+    try await eventually { editor.grid?.composeTextInputBasis != nil }
+    XCTAssertFalse(try XCTUnwrap(editor.store.panes.first).compose.projectionUsable)
+    editor.send(.action(name: "save",argsJson: ""))
+    try await eventually { peer.inputs.count == 1 }
+    let input = peer.inputs[0]
+    XCTAssertEqual(input.scope.bufferRevision,raw.compose.bufferRevision)
+    XCTAssertEqual(input.scope.selectionRevision,raw.compose.selectionRevision)
+    XCTAssertEqual(input.bufferEpoch,raw.compose.viewport.epoch)
+    XCTAssertFalse(input.hasLayout); XCTAssertEqual(input.layoutID,0)
+    XCTAssertEqual(input.kind,UInt32(SceneInput.action(name: "save",argsJson: "").kind.rawValue))
+    XCTAssertEqual(try WireAction(serializedBytes: input.payload).name,"save")
+    editor.send(.action(name: "save",argsJson: ""))
+    var changed = pane("Changed raw source café\n",revision: 5)
+    changed.compose.ready = false; changed.compose.currentProjection = false
+    peer.reply(.with { $0.id = 1; $0.accepted = true },pane: changed)
+    try await eventually { peer.inputs.count == 2 }
+    XCTAssertEqual(peer.inputs[1].scope.bufferRevision,5,"queued Save follows the preceding action's live source")
+    XCTAssertEqual(peer.inputs[1].scope.selectionRevision,5)
+    XCTAssertFalse(peer.inputs[1].hasLayout)
+    editor.send(.action(name: "save",argsJson: ""))
+    var retired = changed; retired.compose.viewport.epoch += 1
+    peer.reply(.with { $0.id = 2; $0.accepted = true },pane: retired)
+    try await eventually { peer.inputs.count == 3 }
+    XCTAssertTrue(peer.inputs[2].cancel,"a live raw scope cannot retarget a retired buffer lifetime")
+    editor.send(.action(name: "save",argsJson: ""))
+    var other = retired; other.buffer += 1; other.compose.viewport.epoch += 1
+    peer.reply(.with { $0.id = 3; $0.cancelled = true },pane: other)
+    try await eventually { peer.inputs.count == 4 }
+    XCTAssertTrue(peer.inputs[3].cancel,"a queued source action cannot follow a different buffer")
+  }
+
+  @MainActor
   func testCommittedPhraseWaitsForModalKeyboardOwnershipWithoutInventingLayoutFeedback() async throws {
     let source = "Text before the input.\n"
     let peer = try ScenePeer(pane: pane(source))

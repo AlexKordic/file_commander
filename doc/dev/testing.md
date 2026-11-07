@@ -688,6 +688,15 @@ selection/replacement, IME input, exact CRLF save and undo before any visible
 preview is published. Render-dependent tests await matching geometry; pending
 pointer workflows deliberately hold backend acknowledgments while the preview
 worker prepares their draft, preserving the unacknowledged-input contract.
+The native source-action regression sends Save while the raw owner is valid
+but its projection is unusable, checking that it dispatches without a layout.
+A queued Save follows an opaque preceding source update and cancels when its
+buffer lifetime or displayed buffer changes, without needing visible geometry.
+The real Fresh socket workflow sends Save/Undo/Redo with an obsolete projection
+and no geometry; each must succeed on its first reply and preserve exact CRLF
+source. It also preserves issued caret affinity across Save and checks duplicate
+Undo, stale source/selection, retired lifetimes, modal deferral/retry and the
+unchanged geometry requirement for navigation.
 Viewport regressions keep the durable source/pixel anchor separate from an
 adjacent-region probe. Wire checks cover explicit byte-zero presence, invalid
 types/ranges, marker rebasing beyond retained coordinate history, opaque resets,

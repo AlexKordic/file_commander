@@ -4,6 +4,17 @@ import FCKit
 import FreshKit
 import SwiftProtobuf
 
+/// Fresh validates these core actions against source/caret ownership without
+/// requiring a Markdown projection. Older peers can still request a layout.
+private extension SceneInput {
+  var isComposeSourceAction: Bool {
+    switch self {
+    case .action("save", _), .action("undo", _), .action("redo", _): return true
+    default: return false
+    }
+  }
+}
+
 /// Clipboard access is injectable so socket/input tests do not depend on, or
 /// overwrite, the logged-in user's pasteboard.
 @MainActor
@@ -1574,6 +1585,9 @@ final class NativeEditor: NSObject, CellGridDelegate {
     switch queued.input {
     case .replacement, .selection: needsGeometry = false // Captured real source ranges need no screen geometry.
     case .message(.text): needsGeometry = false
+    case .message(let message) where message.isComposeSourceAction:
+      // A stale-source or older peer can still ask for the normal retry path.
+      needsGeometry = pendingComposeLayout
     default: needsGeometry = true
     }
     if needsGeometry, let identity = pendingComposePane,
@@ -1613,11 +1627,31 @@ final class NativeEditor: NSObject, CellGridDelegate {
           }) { pendingComposeBefore = (actual.compose.bufferRevision,actual.compose.cursors) }
           composeInFlight = true; socket.send(.composeInput(input)); return
         }
+        if message.isComposeSourceAction, !pendingComposeLayout {
+          input.scope = queued.target?.scope ?? WireComposeScope()
+          guard UInt64(store.windowID) == identity.window,
+                let actual = store.panes.first(where: {
+                  $0.leaf == identity.leaf && $0.hasBuffer && $0.buffer == identity.buffer && $0.hasCompose
+                }), actual.compose.viewport.epoch == input.bufferEpoch else {
+            input.cancel = true; break
+          }
+          // These commands have no captured source positions. They follow the
+          // preceding input's live source/selection, within the same lifetime.
+          // A captured pre-edit scope would force an unnecessary layout retry.
+          input.scope = .with {
+            $0.windowID = identity.window; $0.leaf = actual.leaf; $0.buffer = actual.buffer
+            $0.bufferRevision = actual.compose.bufferRevision
+            $0.projectionRevision = actual.compose.projectionRevision
+            $0.selectionRevision = actual.compose.selectionRevision
+          }
+          pendingComposeBefore = (actual.compose.bufferRevision,actual.compose.cursors)
+          composeInFlight = true; socket.send(.composeInput(input)); return
+        }
         if case .action = message, !pendingComposeLayout,
            let actual = store.panes.first(where: { $0.leaf == identity.leaf && $0.buffer == identity.buffer && $0.hasCompose }),
            grid?.composePanes[identity.leaf].map({ grid?.composeGeometryIsCurrent($0) == true }) != true {
-          // Source-only actions such as Save must remain usable while shaping.
-          // Fresh asks for a measured region if this action actually needs it.
+          // Dispatch the owned action while a changed preview is pending.
+          // Fresh asks for a measured region if this action needs one.
           input.scope = queued.target?.scope ?? WireComposeScope()
           pendingComposeBefore = (actual.compose.bufferRevision, actual.compose.cursors)
           composeInFlight = true; socket.send(.composeInput(input)); return
