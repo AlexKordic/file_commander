@@ -563,8 +563,16 @@ worker threshold. Pane encoding is timed separately. Older results without
 those timings as a semantic-parser speedup. These profiles exclude engine file
 IO, plugin formatting, image reads/decode, painting and typing-to-paint latency. They
 neither create a backend session nor qualify GUI/SSH/recovery behavior.
-Exporting a pane alone does not qualify the asynchronous cache path. The
-private native/backend suite separately opens a document above 2 MiB, checks
+Exporting a pane alone does not qualify the asynchronous cache path.
+Fresh parser-cache unit suite additionally checks snapshot retention by allocated
+source/index capacity: LRU eviction below eight entries, index capacity at the
+64 MiB boundary, exact Unicode/CRLF for an oversized current document, and an
+evicted parser job whose real slot and source remain owned until completion.
+The current document is exempt from the soft retention budget. These checks do
+not bound semantic metadata, editor buffers, parser transients or native input
+history.
+
+The private native/backend suite separately opens a document above 2 MiB, checks
 proportional text, headings and decoded images, and verifies exact source
 selection, Unicode insertion, save and undo beyond the old cutoff. Controlled
 scene-peer checks require receipt-bound typing to proceed during parsing while

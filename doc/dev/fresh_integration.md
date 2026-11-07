@@ -1275,7 +1275,14 @@ formatter/parser caches, transient allocations and the full native flow still
 require the general resource audit.
 
 Fresh's semantic cache keeps at most eight composing documents and reuses live
-tab snapshots. Gathering and parser polling release entries whose window,
+tab snapshots. A 64 MiB soft budget additionally limits retained source String
+capacity and sparse UTF-16 index capacity. It evicts older snapshots before
+copying a new revision, then checks actual capacity after index construction.
+The current document is retained even if it alone exceeds that budget; no
+source is truncated and no file-size restriction is added. Obsolete cached
+source/index ownership is released before the replacement read, while its
+formatter decorations can still rebase to the new source.
+Gathering and parser polling release entries whose window,
 buffer lifetime or filesystem authority has gone away. Obsolete parser jobs are
 cancelled; a running slot remains owned until its completion is consumed, and
 that completion cannot restore a closed document. Private cache tests verify
@@ -1288,8 +1295,12 @@ allowing a later request to start it again; dropping the cache closes its
 channels. Controlled regressions
 cover repeated resets, stale results, source release and retry after a stopped
 worker.
-This entry-count policy still needs the general retained-byte and transient
-allocation audit. Native pending-text literal checks compare UTF-16 sequences
+Byte-pressure tests also verify capacity-based LRU eviction below the entry
+limit, sparse-index accounting at the boundary, exact Unicode/CRLF in a current
+oversized snapshot, and cancellation without releasing a real parser slot or
+publishing its evicted late result. Semantic metadata, editor buffers, parser
+jobs, native caches and transient allocations are outside this snapshot budget
+and still require combined resource admission. Native pending-text literal checks compare UTF-16 sequences
 without materializing a pair of temporary arrays; canonical equivalence cannot
 authorize editing different source bytes.
 
