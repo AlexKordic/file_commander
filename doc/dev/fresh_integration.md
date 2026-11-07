@@ -1725,8 +1725,17 @@ UTF-8 leading bytes in complete blocks, adds the extra surrogate unit for
 four-byte scalars, and counts ASCII blocks directly. The checkpoint positions,
 UTF-16 totals, bounded lookup behavior and allocated index capacity match the
 scalar constructor. No source, Markdown context or display width is shortened.
-Source capture and index construction still scan a changed revision; this is
-not incremental source/semantic parsing or an application latency guarantee.
+Changed-source capture reuses validated prefix/suffix bytes only when the
+coordinate history covers every intervening version and proves consistent
+lengths. It validates the changed bytes and preserves source held by parser
+or stream workers. Uniquely owned storage can be reused; large deletions shed
+excess capacity. The old source capacity remains reserved during capture.
+Missing/evicted history, opaque restores, unproven UTF-8 boundaries and
+source-sized replacements use a complete read and validation. At least half
+the current source must be proven unchanged for the patch path.
+Index construction and semantic parsing still scan complete changed source;
+this is not incremental parsing or an application latency guarantee. No source
+or shaping context is shortened.
 
 ### Scene connection lifetime
 

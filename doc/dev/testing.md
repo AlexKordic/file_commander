@@ -691,6 +691,16 @@ replies for that failed ID. A full-width opaque resource-identity case preserves
 the authority/document bits through reassembly. Existing conditional-response
 tests retain final empty unchanged replies with matching cached digests.
 
+Source-capture checks compare complete source and UTF-16 positions through
+real native edits while older worker snapshots stay immutable. They cover
+unique/shared storage, Unicode and CRLF, incomplete/evicted coordinate history,
+opaque snapshot restores, raw edits within a scalar, invalid UTF-8, large
+deletions and complete replacements. Coordinate-history tests compare proven
+prefix/suffix bytes across every earlier snapshot in sequential/bulk edits.
+Source-stage profiles must use the actual buffer reader and current capture
+helper, isolate compilation and retain exact-byte/UTF-16 controls. Their
+measurements exclude semantic parsing, transport and input-to-paint latency.
+
 Image-identity checks keep canonically equivalent but byte-distinct targets
 separate through out-of-order decodes, validation and cancellation. Identical
 bytes from bridged strings still share work, while mutating a destination
