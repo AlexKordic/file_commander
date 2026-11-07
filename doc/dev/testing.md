@@ -512,6 +512,10 @@ Three serial samples prepare a cold pane at 960 points, then independent
 640-point previews with and without opaque measurement hints. Each input is
 decoded separately; control order alternates. Full glyph/font/position, table,
 attachment and source-map artifacts must agree outside the timing regions.
+For lifetime optimizations, compare matching Release test builds in separate
+scratch directories and keep compilation out of the measurement interval.
+The preview worker interval includes its outer autorelease-pool drain; a
+construction-only timer can exclude cleanup deferred by the control.
 The report separates main-actor capture from worker/handoff intervals. This is
 a same-binary control, excluding parser formatting, GUI paint and interactive
 latency. Its RSS high-water mark includes geometry JSON comparisons.

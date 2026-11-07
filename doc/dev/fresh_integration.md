@@ -1499,6 +1499,11 @@ independent of which image dimensions have arrived. Source reveal and image
 loading therefore do not resize columns. Font, measure or edited table content
 can legitimately replace the constraints; a provisional wider cluster can
 temporarily expand its edited column without splitting the cluster.
+Complete font measurement drains Foundation/Core Text autorelease temporaries
+in batches of at most 128 samples. Font variants remain strongly retained for
+the measurement pass, and the resulting cache holds only aggregate constraints.
+This bounds temporary sample ownership independently of the caller's pool; it
+does not cap source text, sample size, table length or the overall layout graph.
 
 Visible-pane updates deliver measurement inputs once and then refer to their
 ID. Scene comparison treats the full payload and its reference as the same

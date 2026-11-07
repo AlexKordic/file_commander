@@ -84,37 +84,46 @@ public final class ComposeTableMeasurement: @unchecked Sendable {
     struct FontKey: Hashable { let code: Bool; let flags: UInt32 }
     var fonts: [FontKey: CTFont] = [:]
     for (column, value) in wire.columns.enumerated() {
-      for sample in value.samples {
-        let text = NSMutableAttributedString(string: sample.text,
-          attributes: [NSAttributedString.Key(kCTFontAttributeName as String): body])
-        let needed = Set(sample.spans.flatMap { [Int($0.start), Int($0.end)] })
-        var offsets: [Int: Int] = [0: 0], byte = 0, unit = 0
-        if !needed.isEmpty {
-          for scalar in sample.text.unicodeScalars {
-            byte += scalar.utf8.count; unit += scalar.utf16.count
-            if needed.contains(byte) { offsets[byte] = unit }
+      // Core Text and Foundation can autorelease per-sample shaping storage.
+      // Bound its lifetime independently of the caller's pool and table size.
+      for start in stride(from: 0, to: value.samples.count, by: 128) {
+        let end = min(start + 128, value.samples.count)
+        let valid = autoreleasepool {
+          for sample in value.samples[start..<end] {
+            let text = NSMutableAttributedString(string: sample.text,
+              attributes: [NSAttributedString.Key(kCTFontAttributeName as String): body])
+            let needed = Set(sample.spans.flatMap { [Int($0.start), Int($0.end)] })
+            var offsets: [Int: Int] = [0: 0], byte = 0, unit = 0
+            if !needed.isEmpty {
+              for scalar in sample.text.unicodeScalars {
+                byte += scalar.utf8.count; unit += scalar.utf16.count
+                if needed.contains(byte) { offsets[byte] = unit }
+              }
+            }
+            for span in sample.spans {
+              let start = offsets[Int(span.start)]!, length = offsets[Int(span.end)]! - start
+              let key = FontKey(code: span.code, flags: span.flags)
+              let font: CTFont
+              if let cached = fonts[key] { font = cached }
+              else {
+                var traits: CTFontSymbolicTraits = []
+                if span.flags & 1 != 0 { traits.insert(.traitBold) }
+                if span.flags & 2 != 0 { traits.insert(.traitItalic) }
+                let size = CTFontGetSize(body)
+                let base = CTFontCreateCopyWithAttributes(span.code ? monospace : body, size, nil, nil)
+                font = CTFontCreateCopyWithSymbolicTraits(base, size, nil, traits, [.traitBold, .traitItalic]) ?? base
+                fonts[key] = font
+              }
+              text.addAttribute(NSAttributedString.Key(kCTFontAttributeName as String), value: font,
+                range: NSRange(location: start, length: length))
+            }
+            guard constraints.include(text, range: NSRange(location: 0, length: text.length), column: column,
+              preferred: !sample.minimumOnly) else { return false }
+            images[column] = images[column] || sample.image
           }
+          return true
         }
-        for span in sample.spans {
-          let start = offsets[Int(span.start)]!, length = offsets[Int(span.end)]! - start
-          let key = FontKey(code: span.code, flags: span.flags)
-          let font: CTFont
-          if let cached = fonts[key] { font = cached }
-          else {
-            var traits: CTFontSymbolicTraits = []
-            if span.flags & 1 != 0 { traits.insert(.traitBold) }
-            if span.flags & 2 != 0 { traits.insert(.traitItalic) }
-            let size = CTFontGetSize(body)
-            let base = CTFontCreateCopyWithAttributes(span.code ? monospace : body, size, nil, nil)
-            font = CTFontCreateCopyWithSymbolicTraits(base, size, nil, traits, [.traitBold, .traitItalic]) ?? base
-            fonts[key] = font
-          }
-          text.addAttribute(NSAttributedString.Key(kCTFontAttributeName as String), value: font,
-            range: NSRange(location: start, length: length))
-        }
-        guard constraints.include(text, range: NSRange(location: 0, length: text.length), column: column,
-          preferred: !sample.minimumOnly) else { return nil }
-        images[column] = images[column] || sample.image
+        guard valid else { return nil }
       }
     }
     let measured = FontMetrics(body: body, monospace: monospace, minimum: constraints.minimum,
