@@ -84,6 +84,55 @@ final class ComposePendingTextTests: XCTestCase {
     XCTAssertNil(next.replaying(over: first, pane: source, aliases: [1: 2, 3: 2]))
   }
 
+  func testReplayMapsExplicitOffsetsThroughAReboundPrefixesNewlineNormalization() throws {
+    let source = pane("Tail", [NSRange(location: 0, length: 0)])
+    let initial = try draft(source, "A\nB"), first = try XCTUnwrap(initial.committed(nativeNewline: 1))
+    var action = source; action.nativeNewline = 2
+    let bound = try XCTUnwrap(first.afterAction(initial, pane: action))
+    XCTAssertEqual(bound.presentation.primary.draft.string, "A\r\nB")
+    for (range, expected) in [(NSRange(location: 1, length: 0), "AX\r\nBTail"),
+                              (NSRange(location: 1, length: 1), "AXBTail"),
+                              (NSRange(location: 2, length: 0), "A\r\nXBTail")] {
+      let next = try following(first, pane: source, text: "X", range: range)
+      let replayed = try XCTUnwrap(next.replaying(over: bound, pane: action, aliases: [:]))
+      XCTAssertEqual(replayed.substring(for: NSRange(location: 0, length: 100))?.text.string, expected)
+    }
+  }
+
+  func testNormalizedReplayKeepsSurroundingSourceLiteralAndResolvesItsActualReplacement() throws {
+    for oldPolicy: UInt32 in [1, 2] {
+      let newPolicy: UInt32 = oldPolicy == 1 ? 2 : 1, oldEOL = oldPolicy == 2 ? "\r\n" : "\n", newEOL = newPolicy == 2 ? "\r\n" : "\n"
+      let source = pane("p\r\nTail", [NSRange(location: 3, length: 0)], newline: oldPolicy)
+      let initial = try draft(source, "A\nB"), first = try XCTUnwrap(initial.committed(nativeNewline: oldPolicy))
+      var action = source; action.nativeNewline = newPolicy
+      let bound = try XCTUnwrap(first.afterAction(initial, pane: action))
+      let oldLength = 2 + oldEOL.utf16.count, actual = "p\r\nA" + newEOL + "BTail"
+      let receipt = pane(actual, [NSRange(location: 5 + newEOL.utf16.count, length: 0)], newline: newPolicy)
+      let cases: [(Int, Int, String)] = [
+        (1, 0, "p\r\nAX" + newEOL + "BTail"),
+        (1, oldEOL.utf16.count, "p\r\nAXBTail"),
+        (1 + oldEOL.utf16.count, 0, "p\r\nA" + newEOL + "XBTail"),
+        (-2, 3 + oldEOL.utf16.count, "pXBTail"),
+        (1 + oldEOL.utf16.count, 2, "p\r\nA" + newEOL + "Xail"),
+        (-2, oldLength + 3, "pXail"),
+      ]
+      for (start, length, expected) in cases {
+        let next = try following(first, pane: source, text: "X", range: NSRange(location: 3 + start, length: length))
+        for pending in [next, try XCTUnwrap(next.committed(nativeNewline: oldPolicy))] {
+          let replayed = try XCTUnwrap(pending.replaying(over: bound, pane: action, aliases: [:]))
+          XCTAssertEqual(replayed.substring(for: NSRange(location: 0, length: 100))?.text.string, expected)
+          let committed = try XCTUnwrap(replayed.committed(nativeNewline: newPolicy))
+          let ready = try XCTUnwrap(committed.resolved(pane: receipt, edited: [1]))
+          let wire = try XCTUnwrap(ready.replacement(scope: .init(), epoch: 7)).input(id: 1)
+          var saved = Data(actual.utf8)
+          saved.replaceSubrange(Int(wire.replacementStart)..<Int(wire.replacementEnd),
+            with: try WirePaste(serializedBytes: wire.payload).text.utf8)
+          XCTAssertEqual(saved, Data(expected.utf8))
+        }
+      }
+    }
+  }
+
   func testCommittedPrefixIsVisibleAndQueryableBeforeReceiptAndIsSentOnlyOnce() throws {
     let source = pane("alpha Tail", [NSRange(location: 0, length: 5)])
     let first = try XCTUnwrap(try draft(source, "日本").committed(nativeNewline: 1))

@@ -483,11 +483,11 @@ public struct ComposePendingText {
               intent.trailing.isEmpty || Self.exact(original.context.exactText(for: NSRange(location: NSMaxRange(original.originalRange), length: intent.trailing.utf16.count)), intent.trailing) else { return nil }
         range = expanded
       } else {
-        guard let capture = Self.range(at: NSMaxRange(value.selectedRange), offset: intent.offset, length: intent.removed.utf16.count),
+        guard let (capture, removed) = Self.replayedRange(intent, before: baseline?.values[template], after: value, policy: pane.nativeNewline),
               let known = value.substring(for: capture), known.range.location <= capture.location,
               NSMaxRange(capture) <= NSMaxRange(known.range),
               Self.exact(known.text.attributedSubstring(from: NSRange(location: capture.location - known.range.location, length: capture.length)).string,
-                intent.removed) else { return nil }
+                removed) else { return nil }
         range = capture
       }
       guard value.update(intent.inserted, selected: intent.selected, replacement: range) else { return nil }
@@ -500,6 +500,40 @@ public struct ComposePendingText {
     let result = ComposePendingText(presentation: composition, baseline: previous.presentation, active: targets,
       newlyIncluded: added, observed: previous.observedCursors, requiresAction: previous.requiresActionResult, broadcast: actionBroadcast)
     return committedEdits == nil ? result : result.committed(nativeNewline: pane.nativeNewline)
+  }
+
+  /// An earlier action can change the newline policy before this prefix is
+  /// inserted. Rebase points through that exact owned normalization, including
+  /// replacements spanning its edges. Text outside the prefix stays literal.
+  private static func replayedRange(_ edit: Edit, before: ComposeMarkedText?, after: ComposeMarkedText,
+                                    policy: UInt32) -> (NSRange, String)? {
+    guard let before, !exact(before.draft.string, after.draft.string),
+          let normalized = normalize(before.draft, policy: policy), exact(normalized.string, after.draft.string) else {
+      return range(at: NSMaxRange(after.selectedRange), offset: edit.offset, length: edit.removed.utf16.count).map { ($0, edit.removed) }
+    }
+    guard let old = range(at: NSMaxRange(before.selectedRange), offset: edit.offset, length: edit.removed.utf16.count),
+          let known = before.substring(for: old), known.range.location <= old.location, NSMaxRange(old) <= NSMaxRange(known.range),
+          exact(known.text.attributedSubstring(from: NSRange(location: old.location-known.range.location, length: old.length)).string,
+            edit.removed) else { return nil }
+    let start = old.location-before.originalRange.location, end = NSMaxRange(old)-before.originalRange.location
+    func point(_ value: Int) -> Int? {
+      if value < 0 { return value }
+      if value <= before.draft.length { return normalizedOffset(value, in: before.draft, policy: policy) }
+      let (mapped, overflow) = value.addingReportingOverflow(normalized.length-before.draft.length)
+      return overflow ? nil : mapped
+    }
+    guard let a = point(start), let b = point(end), b >= a,
+          let mapped = range(at: after.originalRange.location, offset: a, length: b-a) else { return nil }
+    let literal = edit.removed as NSString
+    let leading = start < 0 ? min(old.length, -start) : 0
+    let trailing = end > before.draft.length ? min(old.length, end-before.draft.length) : 0
+    var removed = literal.substring(to: leading)
+    if end > 0 && start < before.draft.length {
+      guard let low = point(max(0, start)), let high = point(min(before.draft.length, end)), high >= low else { return nil }
+      removed += (normalized.string as NSString).substring(with: NSRange(location: low, length: high-low))
+    }
+    removed += literal.substring(from: literal.length-trailing)
+    return (mapped, removed)
   }
 
   private init(presentation: ComposeComposition, baseline: ComposeComposition, active: Set<UInt64>,

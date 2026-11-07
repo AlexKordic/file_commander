@@ -1250,7 +1250,21 @@ Offscreen drafts do not prevent a visible crop adopting newer formatting, while
 intersecting drafts must still fit that crop. Complete provisional selections
 include added and retired local carets without treating them as wire identities.
 
-Broader control-range/EOF coverage and actual GUI/IME/VoiceOver/macOS 14/SSH
+When a preceding action changes the declared newline policy, explicit ranges
+within its pending text follow that text's exact LF/CRLF normalization. This
+includes replacements spanning the pending prefix's edges. Surrounding source
+remains literal, and the rebound replacement must still match its actual raw
+context before reaching Fresh. Model checks cover both directions, active and
+committed input, and final receipt-bound replacement bytes.
+
+Public range, character and line queries have private-backend coverage over
+tabs, vertical/form-feed controls, NEL and Unicode line/paragraph separators.
+Selected-text replacement and one undo preserve the surrounding Markdown and
+separator bytes. EOF selection and immediate native conversion have the same
+coverage in empty documents and heading-only documents with an absent, LF or
+CRLF final line ending.
+
+Other action/view interleavings and actual GUI/IME/VoiceOver/macOS 14/SSH
 behavior still require qualification. Current certified formatting coverage
 skips redundant source-window preparation;
 formatter/parser caches, transient allocations and the full native flow still

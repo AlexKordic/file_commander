@@ -645,6 +645,63 @@ final class ComposeBackendTests: XCTestCase {
   }
 
   @MainActor
+  func testCompletePublicRangesAcrossUnicodeSeparatorsKeepSourceAndUndo() async throws {
+    let backend = try backend(); defer { backend.captureDiagnostics("complete-control-ranges"); backend.stop() }
+    let editor = editor(BackendPasteboard()); defer { editor.detachAll() }
+    let original = "# Unicode\n\nStart\tTab\nVertical\u{000b}Form\u{000c}Next\u{0085}NEL\u{2028}LS\u{2029}PS\n\nEnd 🙂"
+    let file = backend.root.appendingPathComponent("complete-control-ranges.md")
+    try Data(original.utf8).write(to: file); try await attach(backend, file: file, editor: editor, requireTables: false)
+    let grid = try XCTUnwrap(editor.grid), model = try await completeModel(editor)
+    XCTAssertEqual(grid.accessibilityValue() as? String, model.text)
+    let value = model.text as NSString
+    for unit in 0..<value.length {
+      let line = grid.accessibilityLine(for: unit), range = grid.accessibilityRange(forLine: line)
+      XCTAssertTrue(NSLocationInRange(unit, range), "every displayed control and Unicode unit has a measured line owner")
+      let character = grid.accessibilityRange(for: unit)
+      XCTAssertTrue(NSLocationInRange(unit, character))
+      guard character.location != NSNotFound, character.location <= value.length,
+            character.length <= value.length-character.location else { XCTFail("character query returned an invalid range"); continue }
+      XCTAssertEqual(grid.accessibilityString(for: character), value.substring(with: character))
+    }
+    let needle = "\u{0085}NEL\u{2028}LS\u{2029}", raw = (original as NSString).range(of: needle)
+    let start = (original as NSString).substring(to: raw.location).utf8.count
+    let range = try XCTUnwrap(model.displayedRange(for: start..<(start + needle.utf8.count)))
+    XCTAssertEqual(grid.accessibilityString(for: range), needle)
+    grid.setAccessibilitySelectedTextRange(range)
+    grid.setAccessibilitySelectedText(" replacement 🙂 ")
+    editor.send(.action(name: "save", argsJson: ""))
+    let expected = (original as NSString).replacingCharacters(in: raw, with: " replacement 🙂 ")
+    try await eventually(editor, "public selected-text replacement preserves all surrounding control bytes") { (try? Data(contentsOf: file)) == Data(expected.utf8) }
+    editor.send(.action(name: "undo", argsJson: "")); editor.send(.action(name: "save", argsJson: ""))
+    try await eventually(editor, "one undo restores every separator and original Markdown byte") { (try? Data(contentsOf: file)) == Data(original.utf8) }
+    XCTAssertTrue(editor.uninsertedText.isEmpty)
+  }
+
+  @MainActor
+  func testCompletePublicEOFTypingAndUndoInEmptyAndHeadingDocuments() async throws {
+    for original in ["", "# Heading", "# Heading\n", "# Heading\r\n"] {
+      let backend = try backend(); defer { backend.captureDiagnostics("complete-eof-ranges"); backend.stop() }
+      let editor = editor(BackendPasteboard()); defer { editor.detachAll() }
+      let file = backend.root.appendingPathComponent("complete-eof-ranges.md")
+      try Data(original.utf8).write(to: file); try await attach(backend, file: file, editor: editor, requireTables: false)
+      let grid = try XCTUnwrap(editor.grid), model = try await completeModel(editor)
+      let eof = NSRange(location: model.characterCount, length: 0)
+      XCTAssertEqual(grid.accessibilityRange(for: eof.location), eof)
+      let line = grid.accessibilityLine(for: eof.location), owned = grid.accessibilityRange(forLine: line)
+      XCTAssertEqual(NSMaxRange(owned), eof.location)
+      XCTAssertEqual(grid.accessibilityString(for: eof), "")
+      grid.setAccessibilitySelectedTextRange(eof)
+      let unspecified = NSRange(location: NSNotFound, length: 0), inserted = " 日本👩🏽‍💻"
+      grid.setMarkedText(inserted, selectedRange: NSRange(location: inserted.utf16.count, length: 0), replacementRange: unspecified)
+      grid.unmarkText(); editor.send(.action(name: "save", argsJson: ""))
+      try await eventually(editor, "EOF selection and immediate conversion append to the exact source") { (try? Data(contentsOf: file)) == Data((original + inserted).utf8) }
+      editor.send(.action(name: "undo", argsJson: "")); editor.send(.action(name: "save", argsJson: ""))
+      try await eventually(editor, "EOF conversion undoes to the original empty, unterminated or terminated file") { (try? Data(contentsOf: file)) == Data(original.utf8) }
+      XCTAssertTrue(editor.uninsertedText.isEmpty)
+    }
+  }
+
+  @MainActor
   func testCompletePublicAccessibilityKeepsOffscreenImagesStylesAndSourceActionsInOneValue() async throws {
     let backend = try backend(); defer { backend.captureDiagnostics("complete-public-ax"); backend.stop() }
     let editor = editor(BackendPasteboard()); defer { editor.detachAll() }
