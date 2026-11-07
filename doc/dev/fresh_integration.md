@@ -1275,7 +1275,13 @@ formatter/parser caches, transient allocations and the full native flow still
 require the general resource audit.
 
 Fresh's semantic cache reuses live tab snapshots, with soft retention targets
-of eight documents and 64 MiB of source String and sparse UTF-16 index capacity.
+of eight documents and 64 MiB of document capacity weights. These include source
+and UTF-16 index capacity, parsed spans, links, labels, images, code/table
+structure and complete column samples, plus retained formatter and prefix data.
+Immutable metadata is weighed once during parsing; frame-time queries use
+cached totals. Shared Arc payloads count once per document by allocation identity,
+while separate byte-equal allocations count separately. Formatter counters update
+on capture/rebase; gathering and parse completion recheck the retention targets.
 It evicts older snapshots before
 copying a new revision, then checks actual capacity after index construction.
 The requested document and visible Compose working set remain retained even
@@ -1299,11 +1305,14 @@ channels. Controlled regressions
 cover repeated resets, stale results, source release and retry after a stopped
 worker.
 Byte-pressure tests also verify capacity-based LRU eviction below the entry
-limit, sparse-index accounting at the boundary, exact Unicode/CRLF in a current
+limit, parsed/formatter metadata pressure, shared-target accounting, sparse-index
+capacity at the boundary, exact Unicode/CRLF in a current
 oversized snapshot, and cancellation without releasing a real parser slot or
-publishing its evicted late result. Semantic metadata, editor buffers, parser
-jobs, native caches and transient allocations are outside this snapshot budget
-and still require combined resource admission. Native pending-text literal checks compare UTF-16 sequences
+publishing its evicted late result. These are retention weights, not allocator-live
+or resident-memory measurements. Allocator rounding and unreported container
+bookkeeping, editor buffers, protected working sources, parser jobs, external
+snapshot owners, native caches and transient allocations still need combined
+resource admission. Native pending-text literal checks compare UTF-16 sequences
 without materializing a pair of temporary arrays; canonical equivalence cannot
 authorize editing different source bytes.
 

@@ -564,16 +564,21 @@ those timings as a semantic-parser speedup. These profiles exclude engine file
 IO, plugin formatting, image reads/decode, painting and typing-to-paint latency. They
 neither create a backend session nor qualify GUI/SSH/recovery behavior.
 Exporting a pane alone does not qualify the asynchronous cache path.
-Fresh parser-cache unit suite additionally checks snapshot retention by allocated
-source/index capacity: LRU eviction below eight entries, index capacity at the
+Fresh parser-cache unit suite additionally checks document retention weights:
+LRU eviction below eight entries, index capacity at the
 64 MiB boundary, exact Unicode/CRLF for an oversized current document, and an
 evicted parser job whose real slot and source remain owned until completion.
 The requested document and visible Compose working set are exempt from the soft
 retention targets. A multi-workspace pressure test checks stable snapshot
 identities across repeated gathering, then retirement during polling after a
-workspace leaves Compose. These checks do
-not bound semantic metadata, editor buffers, parser transients or native input
-history.
+workspace leaves Compose. Additional cases exercise complete table samples,
+formatter strings, shared versus separate link allocations, previous/rebased
+formatter ownership and immediate admission of completed parser metadata.
+The opt-in parser profile reports retained-capacity components and a batch of
+10,000 cached weight queries separately from parsing/projection/encoding. Those
+weights and query intervals are not resident memory or interactive latency.
+These checks do not bound editor buffers, protected working sets, external
+snapshot owners, parser transients or native input history.
 
 The private native/backend suite separately opens a document above 2 MiB, checks
 proportional text, headings and decoded images, and verifies exact source
