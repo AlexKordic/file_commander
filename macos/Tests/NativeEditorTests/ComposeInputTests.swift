@@ -188,6 +188,168 @@ private final class ScenePeer: @unchecked Sendable {
 
 final class ComposeInputTests: XCTestCase {
   @MainActor
+  func testStalledPeerBoundsAdmittedTypingAndRetainsOverflowVerbatim() async throws {
+    let peer = try ScenePeer(pane: pane("Tail")); defer { peer.close() }
+    let pasteboard = MemoryPasteboard(), editor = richEditor(pasteboard: pasteboard)
+    defer { editor.detachAll() }
+    editor.attach(socketPath: peer.path, app: nil)
+    try await eventually { editor.grid?.focusedCompose != nil }
+    let grid = try XCTUnwrap(editor.grid)
+    for _ in 0..<1024 { autoreleasepool { editor.send(.text("x")) } }
+    try await eventually { peer.inputs.count == 1 }
+    XCTAssertTrue(editor.composeInputPaused)
+    XCTAssertEqual(grid.attributedSubstring(forProposedRange: NSRange(location: 0, length: 1030), actualRange: nil)?.string,
+      String(repeating: "x", count: 128) + "Tail")
+    XCTAssertEqual(editor.uninsertedText, [String(repeating: "x", count: 896)])
+    editor.copyUninsertedText()
+    XCTAssertEqual(pasteboard.editorText, String(repeating: "x", count: 896))
+  }
+
+  @MainActor
+  func testInputAdmissionDrainsAcknowledgedEditsBeforeResumingWithoutReplayingOverflow() async throws {
+    let peer = try ScenePeer(pane: pane("Tail")); defer { peer.close() }
+    let editor = richEditor(inputLimits: .init(events: 2, textBytes: 1024))
+    defer { editor.detachAll() }
+    editor.attach(socketPath: peer.path, app: nil)
+    try await eventually { editor.grid?.focusedCompose != nil }
+    editor.send(.text("a")); editor.send(.text("b")); editor.send(.text("c")); editor.send(.text("d"))
+    try await eventually { peer.inputs.count == 1 }
+    XCTAssertEqual(editor.uninsertedText, ["cd"])
+    func accept(_ id: UInt64, text: String, revision: UInt64, cursor: UInt64) {
+      var current = pane(text, revision: revision)
+      current.compose.cursors[0].position = cursor; current.compose.cursors[0].utf16Position = cursor
+      current.compose.textContext.selectionStart = cursor; current.compose.textContext.selectionEnd = cursor
+      let receipt = WireComposeEditReceipt.with {
+        $0.window = 1; $0.leaf = 2; $0.buffer = 3; $0.epoch = 7; $0.cursors = [1]; $0.pane = current.compose
+      }
+      peer.reply(.with { $0.id = id; $0.accepted = true; $0.edit = receipt }, pane: current)
+    }
+    accept(1, text: "aTail", revision: 5, cursor: 1)
+    try await eventually { peer.inputs.count == 2 }
+    XCTAssertTrue(editor.composeInputPaused, "a partial drain must not reopen the backlog")
+    XCTAssertEqual(try WirePaste(serializedBytes: peer.inputs[1].payload).text, "b")
+    accept(2, text: "abTail", revision: 6, cursor: 2)
+    try await eventually { !editor.composeInputPaused }
+    XCTAssertEqual(editor.uninsertedText, ["cd"])
+    editor.send(.text("e"))
+    try await eventually { peer.inputs.count == 3 }
+    XCTAssertEqual(try WirePaste(serializedBytes: peer.inputs[2].payload).text, "e")
+    peer.reply(.with { $0.id = 3; $0.accepted = true })
+    try await eventually { peer.lastApplied >= 4 }
+    editor.detachAll()
+    XCTAssertEqual(editor.uninsertedText, ["cd"], "accepted text must not be recovered a second time")
+  }
+
+  @MainActor
+  func testInputAdmissionRecoversTheFinalIMECommitAndCancelledPrefixInOrder() async throws {
+    let peer = try ScenePeer(pane: pane("Tail")); defer { peer.close() }
+    let editor = richEditor(inputLimits: .init(events: 1, textBytes: 1024))
+    defer { editor.detachAll() }
+    editor.attach(socketPath: peer.path, app: nil)
+    try await eventually { editor.grid?.focusedCompose != nil }
+    let grid = try XCTUnwrap(editor.grid), unspecified = NSRange(location: NSNotFound, length: 0)
+    editor.send(.text("a"))
+    try await eventually { peer.inputs.count == 1 }
+    grid.setMarkedText("東京", selectedRange: NSRange(location: 2, length: 0), replacementRange: unspecified)
+    grid.insertText("日本", replacementRange: unspecified)
+    grid.insertText("語", replacementRange: unspecified)
+    XCTAssertFalse(grid.hasMarkedText())
+    XCTAssertTrue(editor.composeInputPaused)
+    XCTAssertEqual(editor.uninsertedText, ["日本語"], "recover only each rejected conversion's delta")
+    peer.reply(.with { $0.id = 1; $0.cancelled = true })
+    try await eventually { !editor.composeInputPaused }
+    XCTAssertEqual(editor.uninsertedText, ["a", "日本語"], "earlier admitted text precedes later overflow")
+    editor.send(.text("R"))
+    try await eventually { peer.inputs.count == 2 }
+    XCTAssertEqual(try WirePaste(serializedBytes: peer.inputs[1].payload).text, "R")
+  }
+
+  @MainActor
+  func testInputAdmissionDisconnectKeepsEarlierQueuedTextBeforeOverflowAndActiveDraft() async throws {
+    let peer = try ScenePeer(pane: pane("Tail")); defer { peer.close() }
+    let editor = richEditor(inputLimits: .init(events: 2, textBytes: 1024))
+    defer { editor.detachAll() }
+    editor.attach(socketPath: peer.path, app: nil)
+    try await eventually { editor.grid?.focusedCompose != nil }
+    let grid = try XCTUnwrap(editor.grid)
+    editor.send(.text("a")); editor.send(.text("b")); editor.send(.text("c"))
+    try await eventually { peer.inputs.count == 1 }
+    grid.setMarkedText("d", selectedRange: NSRange(location: 1, length: 0),
+      replacementRange: NSRange(location: NSNotFound, length: 0))
+    editor.detachAll()
+    XCTAssertFalse(editor.composeInputPaused)
+    XCTAssertFalse(grid.hasMarkedText())
+    XCTAssertEqual(editor.uninsertedText, ["a", "b", "c", "d"])
+    XCTAssertEqual(peer.inputs.count, 1, "disconnect must not replay an unconfirmed edit")
+  }
+
+  @MainActor
+  func testInputAdmissionDoesNotJoinRecoveryAcrossBufferLifetimes() async throws {
+    let peer = try ScenePeer(pane: pane("Tail")); defer { peer.close() }
+    let editor = richEditor(inputLimits: .init(events: 1, textBytes: 1024))
+    defer { editor.detachAll() }
+    editor.attach(socketPath: peer.path, app: nil)
+    try await eventually { editor.grid?.focusedCompose != nil }
+    editor.send(.text("a")); editor.send(.text("old"))
+    try await eventually { peer.inputs.count == 1 }
+    var reopened = pane("New"); reopened.compose.viewport.epoch = 8
+    peer.show(reopened)
+    try await eventually { editor.grid?.composeTextInputBasis?.pane.compose.viewport.epoch == 8 }
+    editor.send(.text("new"))
+    XCTAssertEqual(editor.uninsertedText, ["old", "new"])
+    XCTAssertEqual(peer.inputs.count, 1)
+  }
+
+  @MainActor
+  func testInputAdmissionChargesCumulativeDraftsAndSeparatesRecoveryEpisodes() async throws {
+    let peer = try ScenePeer(pane: pane("Tail")); defer { peer.close() }
+    let editor = richEditor(inputLimits: .init(events: 8, textBytes: 18))
+    defer { editor.detachAll() }
+    editor.attach(socketPath: peer.path, app: nil)
+    try await eventually { editor.grid?.focusedCompose != nil }
+    let grid = try XCTUnwrap(editor.grid)
+    let oversized = String(repeating: "q", count: 19)
+    editor.send(.paste(oversized))
+    XCTAssertEqual(editor.uninsertedText, [oversized])
+    editor.send(.text("a")); editor.send(.text("b"))
+    try await eventually { peer.inputs.count == 1 }
+    XCTAssertTrue(editor.composeInputPaused, "the captured cumulative drafts exceed the byte reservation before the event-count limit")
+    XCTAssertEqual(grid.attributedSubstring(forProposedRange: NSRange(location: 0, length: 20), actualRange: nil)?.string, "aTail")
+    XCTAssertEqual(editor.uninsertedText, [oversized, "b"], "a new backlog must not append to a previous recovery episode")
+    peer.reply(.with { $0.id = 1; $0.cancelled = true })
+    try await eventually { !editor.composeInputPaused }
+    XCTAssertEqual(editor.uninsertedText, [oversized, "a", "b"])
+  }
+
+  @MainActor
+  func testInputAdmissionEnforcesAggregateBytesAndRetainsOversizedPaste() async throws {
+    let peer = try ScenePeer(pane: pane("Tail")); defer { peer.close() }
+    let editor = richEditor(inputLimits: .init(events: 8, textBytes: 16))
+    defer { editor.detachAll() }
+    editor.attach(socketPath: peer.path, app: nil)
+    try await eventually { editor.grid?.focusedCompose != nil }
+    editor.send(.paste("abcdefgh")); editor.send(.paste("ijklmnop")); editor.send(.paste("é"))
+    try await eventually { peer.inputs.count == 1 }
+    XCTAssertTrue(editor.composeInputPaused)
+    XCTAssertEqual(editor.uninsertedText, ["é"])
+    peer.reply(.with { $0.id = 1; $0.accepted = true })
+    try await eventually { peer.inputs.count == 2 }
+    editor.send(.text("👩‍🚀"))
+    XCTAssertEqual(editor.uninsertedText, ["é👩‍🚀"])
+    XCTAssertTrue(editor.composeInputPaused)
+    peer.reply(.with { $0.id = 2; $0.accepted = true })
+    try await eventually { !editor.composeInputPaused }
+    let oversized = String(repeating: "q", count: 33)
+    editor.send(.paste(oversized))
+    XCTAssertFalse(editor.composeInputPaused, "an empty queue has no backlog to drain")
+    XCTAssertEqual(editor.uninsertedText, ["é👩‍🚀", oversized])
+    XCTAssertEqual(peer.inputs.count, 2)
+    editor.send(.paste("ok"))
+    try await eventually { peer.inputs.count == 3 }
+    XCTAssertEqual(try WirePaste(serializedBytes: peer.inputs[2].payload).text, "ok")
+  }
+
+  @MainActor
   func testSemanticRotorTokensCannotActWhileFilesAreShownOrReviveOnReturn() async throws {
     let peer = try ScenePeer(pane: pane("# Heading\n"), semanticIndex: true); defer { peer.close() }
     let editor = richEditor(); defer { editor.detachAll() }; editor.attach(socketPath: peer.path, app: nil)
@@ -2253,13 +2415,14 @@ final class ComposeInputTests: XCTestCase {
 
   @MainActor
   private func richEditor(pasteboard: (any EditorPasteboard)? = nil,
+                          inputLimits: NativeEditor.ComposeInputLimits = .init(),
                           decodeImage: @escaping @Sendable (Data, Int) throws -> ComposeImageAsset = { try ComposeImageAsset.decode($0, maximumDimension: $1) }) -> NativeEditor {
     _ = NSApplication.shared
     NSApp.setActivationPolicy(.prohibited)
     let gate = ProcessInfo.processInfo.environment["FC_NATIVE_RICH_COMPOSE"]
     setenv("FC_NATIVE_RICH_COMPOSE", "1", 1)
     defer { if let gate { setenv("FC_NATIVE_RICH_COMPOSE", gate, 1) } else { unsetenv("FC_NATIVE_RICH_COMPOSE") } }
-    return NativeEditor(pasteboard: pasteboard ?? MemoryPasteboard(), decodeComposeImage: decodeImage)
+    return NativeEditor(pasteboard: pasteboard ?? MemoryPasteboard(), composeInputLimits: inputLimits, decodeComposeImage: decodeImage)
   }
 
   @MainActor

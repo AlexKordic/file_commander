@@ -780,6 +780,15 @@ text-service selection. The Release profiler reports cold and selection-only
 context preparation separately, using independently decoded message strings;
 these timings exclude input-to-paint latency.
 
+Pending-input admission tests use a private scene peer that withholds receipts.
+They distinguish the admitted preview from overflow recovery, enforce aggregate
+payload bytes, drain accepted edits in order without replaying rejected text,
+and exercise final IME commits and cancellation/disconnect recovery ordering.
+The default-policy case submits 1,024 text events while one is in flight; only
+128 remain in the admitted preview and all 896 overflow characters are
+available verbatim through the recovery clipboard action. These checks do not
+establish interactive latency, total app memory or a durable recovery journal.
+
 ### Interactive Compose qualification
 
 For interactive development qualification, prepare a separate app from the

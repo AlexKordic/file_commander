@@ -1708,6 +1708,30 @@ bundle, consumer, and recovery qualification together before enabling the
 feature for users. Native queue checks are described in
 [macOS app tests](macos_app.md#tests).
 
+### Native pending-input admission
+
+The opt-in native Compose path admits at most 128 pending input events and
+8 MiB of charged input/draft text. The first event remains the only event in
+flight. The byte reservation counts literal message text and the cumulative
+attributed drafts captured at admission, including chain previews; shared
+storage can be charged more than once. Source snapshots, layout/image caches,
+allocator overhead and recovery text are outside this reservation. These are
+provisional development safeguards, not a qualified total-memory budget.
+
+When either limit is reached, admitted events retain their order and input
+pauses until that queue drains. Later text is retained in **Edit > Copy
+Uninserted Text**; it is never automatically replayed against a new caret or
+tab. Consecutive rejected text for the same owner is joined without added
+separators. A cancelled admitted prefix is recovered before its later overflow,
+including on disconnect. An input-method conversion contributes its final
+committed delta, not every marked-text update or its already queued prefix.
+Non-text commands must be repeated after the pause. Modal input and the app's
+switch shortcut remain available. An oversized input rejected with an empty
+queue does not prevent a subsequent smaller input. Complete-value selection
+actions report refusal instead of publishing an unqueued optimistic selection.
+Recovery retains literal text in memory; it is not a durable journal and its
+size still grows with the text explicitly retained for recovery.
+
 ## Timeouts
 
 | Bound | Enforced by | On expiry |

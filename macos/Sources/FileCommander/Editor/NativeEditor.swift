@@ -83,6 +83,12 @@ final class NativeEditor: NSObject, CellGridDelegate {
   // plan's end-to-end checks. The shipped path remains the existing grid.
   private let richCompose, measuredTables: Bool
   private let documentQuietNanoseconds: UInt64
+  /// Provisional development admission limits, not a bound on total app memory.
+  struct ComposeInputLimits {
+    var events = 128
+    var textBytes = 8 * 1024 * 1024
+  }
+  private let composeInputLimits: ComposeInputLimits
   private enum PendingInput {
     case message(SceneInput)
     case pointer(ComposePointer)
@@ -107,6 +113,7 @@ final class NativeEditor: NSObject, CellGridDelegate {
   }
   private struct QueuedInput {
     let token: UUID
+    let admissionBytes: Int
     var input: PendingInput
     var scrollGeneration: UInt64
     var target: InputTarget?
@@ -130,6 +137,9 @@ final class NativeEditor: NSObject, CellGridDelegate {
     }
   }
   private var composeQueue: [QueuedInput] = []
+  private(set) var composeInputPaused = false
+  private var rejectedTextGroup: (index: Int, owner: ComposePresentation.Identity?, epoch: UInt64?)?
+  private var pendingRecoveryBarrier: Int?
   private var nextComposeID: UInt64 = 0
   private var pendingComposeID: UInt64?
   private var pendingComposePane: ComposePresentation.Identity?
@@ -173,10 +183,13 @@ final class NativeEditor: NSObject, CellGridDelegate {
 
   init(pasteboard: any EditorPasteboard, environment: [String: String] = ProcessInfo.processInfo.environment,
        documentQuietNanoseconds: UInt64 = 80_000_000,
+       composeInputLimits: ComposeInputLimits = .init(),
        prepareComposePreview: ComposePreviewController.Prepare? = nil,
        decodeComposeImage: @escaping @Sendable (Data, Int) throws -> ComposeImageAsset = { try ComposeImageAsset.decode($0, maximumDimension: $1) }) {
     self.pasteboard = pasteboard
     self.documentQuietNanoseconds = documentQuietNanoseconds
+    precondition(composeInputLimits.events > 0 && composeInputLimits.textBytes > 0 && composeInputLimits.textBytes < Int.max)
+    self.composeInputLimits = composeInputLimits
     self.decodeComposeImage = decodeComposeImage
     self.prepareComposePreview = prepareComposePreview
     richCompose = environment["FC_NATIVE_RICH_COMPOSE"] == "1"
@@ -476,12 +489,13 @@ final class NativeEditor: NSObject, CellGridDelegate {
           app?.engine.reportError(reply.error)
           Trace.write("editor input cancelled: \(reply.error)")
         } else if reply.accepted { lastComposeCancellation = nil }
-        if reply.cancelled, let first = composeQueue.first, let grid {
-          for text in recoveryTexts(for: first) { self.grid(grid, recover: text) }
+        if reply.cancelled, let first = composeQueue.first {
+          for text in recoveryTexts(for: first) { recoverQueuedText(text) }
         }
         resolveCompositionChains(edit: reply.accepted && reply.hasEdit ? reply.edit : nil,
           result: reply.accepted && reply.hasResult ? reply.result : nil)
         if !composeQueue.isEmpty { composeQueue.removeFirst() }
+        if composeQueue.isEmpty { composeInputPaused = false; rejectedTextGroup = nil; pendingRecoveryBarrier = nil }
         grid?.refreshComposeImages()
         if let completedToken { composeFlow.confirmSelection(completedToken) }
         composeFlow.retainSelection(while: Set(composeQueue.map(\.token)))
@@ -1024,15 +1038,13 @@ final class NativeEditor: NSObject, CellGridDelegate {
     guard let action = ComposeDocumentAction(owner: model.document.owner,scope: pane.scope,bounds: bound,kind: kind) else { return false }
     if let barrier = composeQueue.last?.token {
       let preview = replacement == nil && proposed.count == ranges.count ? basis?.replacingGroup(with: proposed) : nil
-      enqueueCompose(.document(action,after: barrier),target: pane,documentSelectionPreview: preview)
-      return true
+      return enqueueCompose(.document(action,after: barrier),target: pane,documentSelectionPreview: preview, recoverOnRejection: false)
     }
     guard let ready = action.ready() else { return false }
     switch ready {
-    case .selection(let change): enqueueCompose(.selection(change),target: pane)
-    case .replacement(let change): enqueueCompose(.replacement(change),target: pane)
+    case .selection(let change): return enqueueCompose(.selection(change),target: pane, recoverOnRejection: false)
+    case .replacement(let change): return enqueueCompose(.replacement(change),target: pane, recoverOnRejection: false)
     }
-    return true
   }
 
   private func replayDocumentHistory(_ original: ComposeDocumentAction, after marker: UInt64) -> ComposeDocumentAction? {
@@ -1082,16 +1094,16 @@ final class NativeEditor: NSObject, CellGridDelegate {
     let target: any ComposeInputBasis = grid.composeSnapshot(actual) ?? pane
     let token = UUID()
     if let barrier = composeQueue.last?.token {
-      enqueueCompose(.document(rebased, after: barrier), target: target, token: token)
+      guard enqueueCompose(.document(rebased, after: barrier), target: target, token: token, recoverOnRejection: false) else { return false }
       if replacement == nil { publishRetainedSelection(ranges, in: model, binding: binding, token: token) }
       return true
     }
     guard let ready = rebased.ready() else { return false }
     switch ready {
     case .selection(let change):
-      enqueueCompose(.selection(change), target: target, token: token)
+      guard enqueueCompose(.selection(change), target: target, token: token, recoverOnRejection: false) else { return false }
       publishRetainedSelection(ranges, in: model, binding: binding, token: token)
-    case .replacement(let change): enqueueCompose(.replacement(change), target: target, token: token)
+    case .replacement(let change): return enqueueCompose(.replacement(change), target: target, token: token, recoverOnRejection: false)
     }
     return true
   }
@@ -1273,7 +1285,7 @@ final class NativeEditor: NSObject, CellGridDelegate {
         } else if !invalid { queued.input = .document(action,after: barrier) }
         if invalid {
           failed.insert(queued.token); reportDocumentActionCancellation()
-          if let grid { for text in captured.recoveryTexts { self.grid(grid,recover: text) } }
+          for text in captured.recoveryTexts { recoverQueuedText(text) }
           continue
         }
       }
@@ -1293,12 +1305,10 @@ final class NativeEditor: NSObject, CellGridDelegate {
         }
         guard let replacement else {
           failed.insert(queued.token)
-          if let grid {
-            switch queued.input {
-            case .replacement(let replacement): for text in replacement.texts { self.grid(grid, recover: text) }
-            case .message(.text(let text)), .message(.paste(let text)): self.grid(grid, recover: text)
-            default: break
-            }
+          switch queued.input {
+          case .replacement(let replacement): for text in replacement.texts { recoverQueuedText(text) }
+          case .message(.text(let text)), .message(.paste(let text)): recoverQueuedText(text)
+          default: break
           }
           continue
         }
@@ -1342,7 +1352,7 @@ final class NativeEditor: NSObject, CellGridDelegate {
               let text = chain.text.replaying(over: parent.text, pane: parent.snapshot.pane.compose,
                 aliases: parent.aliases, virtualBase: parent.prefix) else {
           failed.insert(queued.token)
-          if let grid { for text in chain.text.recoveryTexts { self.grid(grid, recover: text) } }
+          for text in chain.text.recoveryTexts { recoverQueuedText(text) }
           continue
         }
         queued.chain = .init(predecessor: chain.predecessor, initial: initial, text: text, afterAction: false)
@@ -1372,7 +1382,7 @@ final class NativeEditor: NSObject, CellGridDelegate {
           queued.cursorAliases = [:]
         } else {
           failed.insert(queued.token)
-          if let grid { for text in chain.text.recoveryTexts { self.grid(grid, recover: text) } }
+          for text in chain.text.recoveryTexts { recoverQueuedText(text) }
           continue
         }
       }
@@ -1401,6 +1411,7 @@ final class NativeEditor: NSObject, CellGridDelegate {
 
   func grid(_ grid: CellGridView, recover text: String) {
     guard !text.isEmpty else { return }
+    rejectedTextGroup = nil
     uninsertedText.append(text)
     app?.engine.reportError("Editor text was not inserted. Use Edit > Copy Uninserted Text to recover it.")
   }
@@ -1410,14 +1421,25 @@ final class NativeEditor: NSObject, CellGridDelegate {
     pasteboard.replaceEditorText(uninsertedText.joined(separator: "\n\n"))
   }
 
+  /// Admitted edits precede the overflow text even if their failure arrives
+  /// later. Preserve that order in recovery without duplicating an accepted
+  /// prefix in each dependent conversion's recovered delta.
+  private func recoverQueuedText(_ text: String) {
+    guard !text.isEmpty, let grid else { return }
+    guard let index = pendingRecoveryBarrier else { self.grid(grid, recover: text); return }
+    uninsertedText.insert(text, at: index)
+    pendingRecoveryBarrier = index + 1
+    if let group = rejectedTextGroup, group.index >= index { rejectedTextGroup = (group.index + 1, group.owner, group.epoch) }
+    app?.engine.reportError("Editor text was not inserted. Use Edit > Copy Uninserted Text to recover it.")
+  }
+
   private func recoverPendingText() {
     grid?.cancelComposition(recover: true)
-    for queued in composeQueue {
-      if let grid {
-        for text in recoveryTexts(for: queued) { self.grid(grid, recover: text) }
-      }
-    }
+    for queued in composeQueue { for text in recoveryTexts(for: queued) { recoverQueuedText(text) } }
     composeQueue.removeAll()
+    composeInputPaused = false
+    rejectedTextGroup = nil
+    pendingRecoveryBarrier = nil
   }
 
   private func recoveryTexts(for queued: QueuedInput) -> [String] {
@@ -1481,6 +1503,16 @@ final class NativeEditor: NSObject, CellGridDelegate {
         return
       }
     }
+    // Refuse before constructing another cumulative text preview when a peer
+    // has stopped acknowledging input. Modal input above remains usable.
+    if composeInputPaused || composeQueue.count >= composeInputLimits.events {
+      switch input {
+      case .key, .mouse, .popupPointer, .paste, .text, .action, .widget, .settingsClick, .kbEditClick:
+        rejectComposeInput(.message(input), target: grid?.composeTextInputBasis)
+        return
+      default: break
+      }
+    }
     switch input {
     case .key, .mouse, .popupPointer, .paste, .text, .action, .widget, .settingsClick, .kbEditClick:
       let target: (any ComposeInputBasis)?
@@ -1541,11 +1573,24 @@ final class NativeEditor: NSObject, CellGridDelegate {
     }
   }
 
+  @discardableResult
   private func enqueueCompose(_ input: PendingInput, target: (any ComposeInputBasis)?, chain: CompositionChain? = nil,
                               preview: ComposePendingText? = nil, pointerPreview: ComposePointer.Preview? = nil,
                               virtualPrefix: ComposeVirtualSelections? = nil, selectionPredecessor: UUID? = nil,
-                              documentSelectionPreview: ComposeVirtualSelections? = nil, token: UUID = UUID(), cursorAliases: [UInt64: UInt64] = [:]) {
-    if composeQueue.isEmpty { lastComposeCancellation = nil }
+                              documentSelectionPreview: ComposeVirtualSelections? = nil, token: UUID = UUID(), cursorAliases: [UInt64: UInt64] = [:],
+                              recoverOnRejection: Bool = true) -> Bool {
+    let bytes = composeAdmissionBytes(input, preview: preview, chain: chain)
+    let used = composeQueue.reduce(0) { $0 + $1.admissionBytes }
+    guard !composeInputPaused, composeQueue.count < composeInputLimits.events,
+          bytes <= composeInputLimits.textBytes - used else {
+      rejectComposeInput(input, target: target, preview: preview, recover: recoverOnRejection)
+      return false
+    }
+    if composeQueue.isEmpty {
+      lastComposeCancellation = nil
+      rejectedTextGroup = nil
+      pendingRecoveryBarrier = nil
+    }
     var proposedCursorIDs: [UInt64]?
     if let group = documentSelectionPreview {
       proposedCursorIDs = group.cursors.keys.sorted {
@@ -1560,12 +1605,77 @@ final class NativeEditor: NSObject, CellGridDelegate {
       }
       proposedCursorIDs = selector?.preview(in: target.pane.compose)?.cursors.map(\.id)
     }
-    composeQueue.append(.init(token: token, input: input, scrollGeneration: composeViewports.userScrollGeneration,
+    composeQueue.append(.init(token: token, admissionBytes: bytes, input: input, scrollGeneration: composeViewports.userScrollGeneration,
       target: target.map(InputTarget.init), chain: chain,
       preview: preview, origins: preview?.origins(), snapshot: target, pointerPreview: pointerPreview, virtualPrefix: virtualPrefix,
       selectionPredecessor: selectionPredecessor,documentSelectionPreview: documentSelectionPreview,proposedCursorIDs: proposedCursorIDs,cursorAliases: cursorAliases))
     grid?.refreshComposeImages()
     pumpComposeInput()
+    return true
+  }
+
+  /// Charge literal input plus cumulative attributed drafts retained at
+  /// admission. Shared storage may be counted more than once. Source snapshots,
+  /// layout/image caches and linear recovery text have separate lifetimes.
+  private func composeAdmissionBytes(_ input: PendingInput, preview: ComposePendingText?, chain: CompositionChain?) -> Int {
+    let limit = composeInputLimits.textBytes
+    var used = 0
+    func charge(_ bytes: Int) {
+      used = bytes > limit - min(used, limit) ? limit + 1 : used + bytes
+    }
+    func drafts(_ text: ComposePendingText?) {
+      guard let text else { return }
+      for value in text.presentation.values.values {
+        charge(value.draft.length > limit / 2 ? limit + 1 : value.draft.length * 2)
+      }
+    }
+    switch input {
+    case .message(.text(let text)), .message(.paste(let text)): charge(text.utf8.count)
+    case .message(let message): charge(message.payload().count)
+    case .replacement(let replacement): for text in replacement.texts { charge(text.utf8.count) }
+    case .pendingText(let text): drafts(text)
+    case .document(let action, _): for text in action.recoveryTexts { charge(text.utf8.count) }
+    default: break
+    }
+    drafts(preview); drafts(chain?.initial); drafts(chain?.text)
+    return used
+  }
+
+  private func rejectComposeInput(_ input: PendingInput, target: (any ComposeInputBasis)?,
+                                  preview: ComposePendingText? = nil, recover: Bool = true) {
+    let wasPaused = composeInputPaused
+    composeInputPaused = !composeQueue.isEmpty
+    if !wasPaused {
+      rejectedTextGroup = nil
+      pendingRecoveryBarrier = composeInputPaused ? uninsertedText.count : nil
+    }
+    let texts: [String]
+    if !recover { texts = [] }
+    else if let preview { texts = preview.recoveryTexts }
+    else {
+      switch input {
+      case .message(.text(let text)), .message(.paste(let text)): texts = [text]
+      case .message(.key(let key)) where !key.ctrl && !key.alt && !key.meta && key.key.count == 1: texts = [key.key]
+      case .replacement(let replacement): texts = replacement.texts
+      case .pendingText(let text): texts = text.recoveryTexts
+      case .document(let action, _): texts = action.recoveryTexts
+      default: texts = []
+      }
+    }
+    let values = texts.filter { !$0.isEmpty }
+    if values.count == 1, let group = rejectedTextGroup, group.owner == target?.identity,
+       group.epoch == target?.pane.compose.viewport.epoch,
+       uninsertedText.indices.contains(group.index) {
+      uninsertedText[group.index].append(values[0])
+    } else {
+      rejectedTextGroup = nil
+      for text in values { uninsertedText.append(text) }
+      if values.count == 1 { rejectedTextGroup = (uninsertedText.count - 1, target?.identity, target?.pane.compose.viewport.epoch) }
+    }
+    if !wasPaused {
+      let reason = composeInputPaused ? "Editor input is paused until pending edits finish." : "This editor input exceeds the pending-input limit."
+      app?.engine.reportError(reason + " New text was not inserted; use Edit > Copy Uninserted Text to recover it. Repeat other commands after the pause.")
+    }
   }
 
   /// Send one event, wait for its scene/reply, then bind the next event to the
