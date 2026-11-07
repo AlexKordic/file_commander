@@ -15,6 +15,7 @@ public enum SceneWire {
     case frame = 2
     case error = 3
     case composeIndexChunk = 4
+    case composeDocumentChunk = 5
     case clientHello = 16
     case key = 17
     case mouse = 18
@@ -31,6 +32,7 @@ public enum SceneWire {
     case composeViewport = 29
     case popupPointer = 30
     case composeIndexRequest = 31
+    case composeDocumentRequest = 32
   }
 
   /// The protocol version the app speaks; Fresh refuses another.
@@ -125,6 +127,7 @@ public enum SceneInput: Sendable {
   case composeAsset(WireComposeAssetRequest)
   case composeViewport(WireComposeViewportRequest)
   case composeIndex(WireComposeIndexRequest)
+  case composeDocument(WireComposeDocumentRequest)
 
   public var kind: SceneWire.Kind {
     switch self {
@@ -144,6 +147,7 @@ public enum SceneInput: Sendable {
     case .composeAsset: return .composeAsset
     case .composeViewport: return .composeViewport
     case .composeIndex: return .composeIndexRequest
+    case .composeDocument: return .composeDocumentRequest
     }
   }
 
@@ -187,6 +191,7 @@ public enum SceneInput: Sendable {
     case .composeAsset(let request): message = request
     case .composeViewport(let request): message = request
     case .composeIndex(let request): message = request
+    case .composeDocument(let request): message = request
     }
     // A message built from these types always serializes.
     return (try? message.serializedBytes()) ?? []
@@ -212,6 +217,7 @@ public enum SceneInput: Sendable {
     case .composeAsset: return ("composeAsset", nil)
     case .composeViewport: return ("composeViewport", nil)
     case .composeIndex: return ("composeIndex", nil)
+    case .composeDocument: return ("composeDocument", nil)
     }
   }
 

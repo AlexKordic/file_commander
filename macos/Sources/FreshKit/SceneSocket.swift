@@ -33,6 +33,7 @@ public final class SceneSocket: @unchecked Sendable {
   /// Independently paced auxiliary data. These messages never advance the
   /// scene sequence and must not receive a render-frame Applied acknowledgment.
   public var onIndexChunk: (@MainActor (WireComposeIndexChunk) -> Void)?
+  public var onDocumentChunk: (@MainActor (WireComposeDocumentChunk) -> Void)?
   /// Called on the main queue once, when the connection ends; the argument says why.
   public var onClose: (@MainActor (String?) -> Void)?
   /// Called on the write queue after each message is written, for telemetry:
@@ -139,6 +140,7 @@ public final class SceneSocket: @unchecked Sendable {
     var chunk = [UInt8](repeating: 0, count: 262_144)
     var reason: String?
     var greeted = false
+    var documentReads = false
     loop: while true {
       // One read can bring many messages; what they used is dropped once, after.
       var start = 0
@@ -151,6 +153,21 @@ public final class SceneSocket: @unchecked Sendable {
             break loop
           }
           let started = ProcessInfo.processInfo.systemUptime
+          if kind == SceneWire.Kind.composeDocumentChunk.rawValue {
+            guard greeted, documentReads else {
+              reason = "the editor sent an unnegotiated complete document chunk"
+              break loop
+            }
+            guard payload.count <= 128 << 10 else {
+              reason = "the editor sent an oversized complete document chunk"
+              break loop
+            }
+            let chunk = try WireComposeDocumentChunk(serializedBytes: Array(buffer[payload]))
+            DispatchQueue.main.async { [weak self] in
+              MainActor.assumeIsolated { self?.onDocumentChunk?(chunk) }
+            }
+            continue
+          }
           if kind == SceneWire.Kind.composeIndexChunk.rawValue {
             guard greeted else {
               reason = "the editor sent document navigation before its hello"
@@ -188,6 +205,7 @@ public final class SceneSocket: @unchecked Sendable {
               break loop
             }
             greeted = true
+            documentReads = message.composeDocumentText
           } else if message.isHello {
             reason = "the editor sent more than one hello"
             break loop

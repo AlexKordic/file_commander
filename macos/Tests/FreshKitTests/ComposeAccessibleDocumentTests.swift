@@ -7,7 +7,7 @@ final class ComposeAccessibleDocumentTests: XCTestCase {
       $0.leaf = 2; $0.buffer = 3
       $0.compose = .with {
         $0.text = "Aé👩‍💻\u{fffc}Z!"; $0.sourceEnd = 33; $0.documentLen = 33
-        $0.bufferRevision = 5; $0.selectionRevision = 6; $0.viewport.epoch = 7
+        $0.bufferRevision = 5; $0.selectionRevision = 6; $0.decorationRevision = 0; $0.viewport.epoch = 7
         $0.assetAuthority = 8; $0.assetDocument = 9
         $0.segments = [segment(0, 2, 0, 0, 1), segment(2, 16, 0, 14, 0),
           segment(16, 30, 14, 17, 2), segment(30, 32, 17, 17, 1), segment(32, 33, 17, 18, 0), segment(33, 33, 18, 19, 3)]
@@ -66,6 +66,7 @@ final class ComposeAccessibleDocumentTests: XCTestCase {
     let changes: [(inout WirePane) -> Void] = [
       {$0.leaf += 1}, {$0.buffer += 1}, {$0.compose.bufferRevision += 1}, {$0.compose.viewport.epoch += 1},
       {$0.compose.selectionRevision += 1}, {$0.compose.assetAuthority += 1}, {$0.compose.assetDocument += 1},
+      {$0.compose.decorationRevision += 1}, {$0.compose.clearDecorationRevision()},
       {$0.compose.documentLen += 1}, {$0.clearBuffer()}, {$0.clearCompose()},
     ]
     for change in changes {

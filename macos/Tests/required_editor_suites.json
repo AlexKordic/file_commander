@@ -5,6 +5,7 @@
   "FreshKitTests.ComposeCodeTests",
   "FreshKitTests.ComposeCompositionTests",
   "FreshKitTests.ComposeDependencyTests",
+  "FreshKitTests.ComposeDocumentReceiverTests",
   "FreshKitTests.ComposeFlowTests",
   "FreshKitTests.ComposeHangingContextTests",
   "FreshKitTests.ComposeImageControllerTests",

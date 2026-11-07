@@ -3,8 +3,8 @@ import Foundation
 /// Scalar-boundary coordinates without one hash entry per character. A lookup
 /// scans at most one sparse interval; an extended grapheme may span intervals.
 /// UTF-16 positions inside surrogate pairs are never source positions.
-final class ComposeTextIndex {
-  private struct Checkpoint { let byte, unit: Int }
+final class ComposeTextIndex: Sendable {
+  private struct Checkpoint: Sendable { let byte, unit: Int }
   private let bytes: [UInt8]
   private let checkpoints: [Checkpoint]
   let utf16Count: Int

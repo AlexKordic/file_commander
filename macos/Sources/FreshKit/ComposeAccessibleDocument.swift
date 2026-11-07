@@ -4,9 +4,12 @@ import Foundation
 /// Fresh must supply the same conceal/replacement map as its visible Compose
 /// panes. Neither raw Markdown nor a collection of observed crops is complete
 /// evidence for this model. It contains no layout and never reparses Markdown.
-public final class ComposeAccessibleDocument {
+// Every field is immutable. The private NSString is bridged from an immutable
+// Swift String and never escapes; Foundation does not declare it Sendable.
+public final class ComposeAccessibleDocument: @unchecked Sendable {
   public let owner: WireComposeIndexOwner
   public let selectionRevision: UInt64
+  public let decorationRevision: UInt64?
   public let projection: ComposeProjection
   private let value: NSString
   public var characterCount: Int { projection.textIndex.utf16Count }
@@ -19,6 +22,7 @@ public final class ComposeAccessibleDocument {
           let projection = ComposeProjection(pane.compose) else { return nil }
     owner = Self.owner(window: window, pane: pane)
     selectionRevision = pane.compose.selectionRevision
+    decorationRevision = pane.compose.hasDecorationRevision ? pane.compose.decorationRevision : nil
     self.projection = projection; value = projection.text as NSString
   }
 
@@ -34,6 +38,7 @@ public final class ComposeAccessibleDocument {
   public func owns(window: UInt64, pane: WirePane) -> Bool {
     pane.hasBuffer && pane.hasCompose && pane.compose.projectionUsable
       && Self.owner(window: window, pane: pane) == owner && pane.compose.selectionRevision == selectionRevision
+      && (pane.compose.hasDecorationRevision ? pane.compose.decorationRevision : nil) == decorationRevision
   }
 
   public func string(for range: NSRange) -> String? {

@@ -120,6 +120,74 @@ private final class ComposeBackend {
 
 final class ComposeBackendTests: XCTestCase {
   @MainActor
+  func testIndependentCompleteReadUsesFreshFormattingAndCertifiesTheUnmovedDrawingCrop() async throws {
+    let backend = try backend(); defer { backend.captureDiagnostics("complete-document-stream"); backend.stop() }
+    let editor = editor(BackendPasteboard()); defer { editor.detachAll() }
+    let tail = "## Final heading\r\n\r\n![last image](missing.png)\r\n"
+    let original = "# Reading\r\n\r\n| Key | Value |\r\n| --- | --- |\r\n| one | two |\r\n\r\n"
+      + String(repeating: "Paragraph with **bold** café 👩🏽‍💻 and a [link](target.md).\r\n\r\n", count: 1800) + tail
+    let file = backend.root.appendingPathComponent("complete-stream.md")
+    try Data(original.utf8).write(to: file)
+    try await attach(backend, file: file, editor: editor)
+    let ensure = try await backend.command(["ensure", backend.name])
+    let record = try XCTUnwrap(try JSONSerialization.jsonObject(with: ensure) as? [String: Any])
+    let reader = SceneSocket(path: try XCTUnwrap(record["scene"] as? String)), store = SceneStore()
+    defer { reader.close() }
+    var receiver: ComposeDocumentReceiver?, received: Data?, receivedDecoration: UInt64?, failure: Error?
+    reader.onMessage = { [weak reader] message in
+      store.apply(message); reader?.send(.applied(seq: UInt64(message.sequence)))
+    }
+    reader.onDocumentChunk = { [weak reader] chunk in
+      guard var current = receiver else { return }
+      receiver = nil
+      do {
+        let complete = try current.receive(chunk)
+        reader?.send(.composeDocument(.with { $0.id = chunk.id; $0.appliedSequence = chunk.sequence }))
+        if let complete { received = complete; receivedDecoration = current.decorationRevision }
+        else { receiver = current }
+      } catch { failure = error; reader?.send(.composeDocument(.with { $0.id = chunk.id; $0.cancel = true })) }
+    }
+    try reader.open(telemetry: false, richCompose: true, measuredTables: true, paragraphWindows: true)
+    try await eventually(editor, "independent reader capability and ready source") {
+      store.composeDocumentText && store.panes.first?.compose.formattingReady == true
+    }
+    let first = try XCTUnwrap(store.panes.first)
+    let scope = WireComposeScope.with {
+      $0.windowID = UInt64(store.windowID); $0.leaf = first.leaf; $0.buffer = first.buffer
+      $0.bufferRevision = first.compose.bufferRevision; $0.projectionRevision = first.compose.projectionRevision
+      $0.selectionRevision = first.compose.selectionRevision
+    }
+    let anchor = UInt64(original.utf8.count-tail.utf8.count)
+    reader.send(.composeViewport(.with { $0.id = 1; $0.scope = scope; $0.position = anchor; $0.epoch = first.compose.viewport.epoch }))
+    try await eventually(editor, "independent reader drawing crop near EOF") {
+      store.panes.first?.compose.viewport.position == anchor && (store.panes.first?.compose.sourceStart ?? 0) > 0
+    }
+    let crop = try XCTUnwrap(store.panes.first)
+    let owner = WireComposeIndexOwner.with {
+      $0.window = UInt64(store.windowID); $0.leaf = crop.leaf; $0.buffer = crop.buffer
+      $0.epoch = crop.compose.viewport.epoch; $0.revision = crop.compose.bufferRevision; $0.authority = crop.compose.assetAuthority
+      $0.document = crop.compose.assetDocument; $0.length = crop.compose.documentLen
+    }
+    let selection = crop.compose.selectionRevision
+    receiver = .init(id: 1, owner: owner, selection: selection)
+    reader.send(.composeDocument(.with { $0.id = 1; $0.owner = owner; $0.selectionRevision = selection }))
+    try await eventually(editor, "complete authoritative projection arrives independently", timeout: 20) { received != nil || failure != nil }
+    XCTAssertNil(failure)
+    let bytes = try XCTUnwrap(received), decoration = try XCTUnwrap(receivedDecoration)
+    let document = try await Task.detached { try ComposeDocumentReceiver.decode(bytes, owner: owner, selection: selection, decoration: decoration) }.value
+    XCTAssertTrue(document.text.contains("Final heading")); XCTAssertTrue(document.text.contains("café 👩🏽‍💻"))
+    XCTAssertFalse(document.text.contains("**bold**")); XCTAssertTrue(document.text.contains("\u{fffc}"))
+    XCTAssertEqual(document.owner.length, UInt64(original.utf8.count))
+    let current = try XCTUnwrap(store.panes.first)
+    let visible = try XCTUnwrap(document.range(of: UInt64(store.windowID), pane: current))
+    XCTAssertGreaterThan(visible.location, 0)
+    XCTAssertEqual(document.string(for: visible)?.utf8.count, current.compose.text.utf8.count)
+    XCTAssertEqual(current.compose.viewport.position, anchor)
+    XCTAssertEqual(editor.store.panes.first?.compose.viewport.position, 0, "a reader cannot move the other native client's viewport")
+    XCTAssertEqual(try Data(contentsOf: file), Data(original.utf8))
+  }
+
+  @MainActor
   func testCompleteAccessibleTextUsesTheRealFreshProjectionAndExpiresOnSelectionReveal() async throws {
     let backend = try backend(); defer { backend.captureDiagnostics("accessible-document"); backend.stop() }
     let editor = editor(BackendPasteboard()); defer { editor.detachAll() }

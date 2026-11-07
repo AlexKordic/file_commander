@@ -12,11 +12,11 @@ extension WireComposePane {
 
 /// Fresh's source-preserving Compose projection. Coordinates in this contract
 /// are UTF-8 bytes. Text APIs translate displayed UTF-16 through this same map.
-public struct ComposeProjection {
-  public enum Affinity { case upstream, downstream }
-  public enum Kind { case copy, hidden, replacement, insertion }
+public struct ComposeProjection: Sendable {
+  public enum Affinity: Sendable { case upstream, downstream }
+  public enum Kind: Sendable { case copy, hidden, replacement, insertion }
 
-  public struct Segment {
+  public struct Segment: Sendable {
     public var source: Range<Int>
     public var display: Range<Int>
     public var kind: Kind

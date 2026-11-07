@@ -1027,8 +1027,38 @@ when both literal UTF-8 content and conceal/replacement ownership agree.
 Partial atomic replacements, canonically equal but differently spelled text,
 changed source owners and changed selection/reveal revisions are refused.
 Primary selections retain their full ranges rather than clipping to a crop.
-This model is not yet the public AX value: complete projection delivery,
-measured line/geometry integration and provisional actions remain required.
+This model is not yet the public AX value: incremental updates, measured
+line/geometry integration and provisional actions remain required.
+
+Development peers advertise `ServerHello.compose_document_text` (field 7).
+`ComposeDocumentRequest` (TLV 32) captures the same eight source-owner fields
+as navigation, plus the selection/reveal revision. Fresh prepares ordinary
+formatter windows without moving either the requesting client's drawing
+viewport or another client's viewport. Only a complete normal projection is
+published. `ComposePane.decoration_revision` (optional field 27) also binds
+the result to its formatter state; a formatter-only invalidation retires an
+encoded read even when source and cursors have not changed.
+
+`ComposeDocumentChunk` (TLV 5) carries binary pieces of one encoded
+`ComposePane`, with no JSON, base64 or second Markdown parser. Its sequence
+and explicit acknowledgments, including sequence zero, are independent of
+render frames and navigation. Each piece is at most 64 KiB and each encoded
+chunk at most 128 KiB. An error retirement can overtake an unacknowledged
+piece; obsolete request IDs cannot restart a read. The native receiver checks
+all ownership, sequence, length and formatter fields, then decodes and
+validates the completed body away from the UI thread. It never exposes a
+prefix as a document value.
+
+Initial complete reads admit at most 16 MiB of source and 32 MiB of encoded
+projection. Two shared reader permits bound retained encoded snapshots to
+64 MiB per scene bridge, including all connections. Cancellation, disconnect,
+the final chunk, a 30-second preparation timeout or a 10-second acknowledgment
+timeout releases the permit. These limits do not establish total or peak
+process memory or input latency; formatter preparation, projection metadata,
+normal scene caches and transient encoding allocations still require the
+general resource audit. Admission failure preserves source editing. This is
+an initial snapshot service; automatic coalesced/incremental updates and
+public accessibility adoption remain separate work.
 
 Projection boundary validation and this model share a sparse UTF-8/UTF-16
 index with checkpoints about every 1,024 bytes. It retains literal bytes and
