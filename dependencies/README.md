@@ -16,7 +16,7 @@ are in [doc/dev/building.md](../doc/dev/building.md) and licenses in
 | Boost.Filesystem | Modified subtree `boost/filesystem` in the FC repository | The same FC commit |
 | FTXUI (FC fork) | `https://github.com/AlexKordic/FTXUI.git`, branch `fc-integration` | `ff94e7a1008d41e11ce040702654eed6aff1e52c` |
 | LuaJIT | `https://github.com/LuaJIT/LuaJIT.git` | `233ad24035944ece5367157e824e8357df3417d9` |
-| Fresh (FC fork) | `https://github.com/sinelaw/fresh.git` plus `dependencies/fresh-fc.bundle`; also branch `fc-editor-workflow` of `https://github.com/AlexKordic/fresh` | `d972d9d7db9dd75aa2e4af141d986ee892a45f66` on upstream base `b10f9084f5eae571e9b8dac1a0f3694384bcb53d`; bundle SHA-256 `ebb35188bb1aeebf1c329640d257a39542ae851c98cd531ac46a601f782be6f3` |
+| Fresh (FC fork) | `https://github.com/sinelaw/fresh.git` plus `dependencies/fresh-fc.bundle`; also branch `fc-editor-workflow` of `https://github.com/AlexKordic/fresh` | `9e34b65a93ced83b63dbede5051a26bc5f14eace` on upstream base `b10f9084f5eae571e9b8dac1a0f3694384bcb53d`; bundle SHA-256 `5f6f72f582f95ebfe5a3f2f27315cb5dafb2b6b412a89fd658921b0f54919581` |
 | 7-Zip | `dependencies/7zip-26.04-src.tar.xz` in the FC repository, as published at `https://www.7-zip.org/a/7z2604-src.tar.xz` and in the `26.04` release of `https://github.com/ip7z/7zip` | 26.04; archive SHA-256 `9691944c0fe0d01bb49373a704fb983fd33bc98b1738695179dfbf99ac1734f6`; source fingerprint `8fc7a9e48cdd4fe7fa24adefb3f0b7c99633139801f38aa51e6fe2cd3a5ec099` over 1111 files |
 
 FTXUI and Fresh carry FC changes; LuaJIT and Boost come from their public
@@ -50,7 +50,7 @@ pinned revision is FC's fork of it:
   `b10f9084f5eae571e9b8dac1a0f3694384bcb53d`, which is Fresh 0.5.2 plus 40
   upstream commits. It includes the upstream fix that makes daemon sessions run
   the shared editor tick, so recovery saves happen in the background.
-- **Pinned revision** (`revision`): `d972d9d7db9dd75aa2e4af141d986ee892a45f66`,
+- **Pinned revision** (`revision`): `9e34b65a93ced83b63dbede5051a26bc5f14eace`,
   the base plus FC's commits on the `fc-editor-workflow` branch.
 - **Bundle** (`fresh-fc.bundle`): a Git bundle holding exactly the commits from
   the base to the pinned revision, with the branch head
@@ -168,7 +168,7 @@ bundle at `share/file-commander/fresh-fc.bundle`:
 
 ```sh
 BASE=b10f9084f5eae571e9b8dac1a0f3694384bcb53d   # git.fresh.base_revision
-REV=d972d9d7db9dd75aa2e4af141d986ee892a45f66    # git.fresh.revision
+REV=9e34b65a93ced83b63dbede5051a26bc5f14eace    # git.fresh.revision
 BUNDLE=/path/to/share/file-commander/fresh-fc.bundle
 git clone --no-checkout https://github.com/sinelaw/fresh.git fresh
 git -C fresh cat-file -e "$BASE^{commit}"       # the clone must contain the base

@@ -780,6 +780,14 @@ text-service selection. The Release profiler reports cold and selection-only
 context preparation separately, using independently decoded message strings;
 these timings exclude input-to-paint latency.
 
+Sparse UTF-16 source-index tests compare the block constructor with an
+independent scalar reference at every byte alignment around a checkpoint,
+including empty/ASCII/CRLF/combining/ZWJ input and every Unicode scalar. They
+require exact checkpoint and allocated-capacity equality, validate nearby
+lookups and EOF, and retain the existing raw-context/caret-window contracts.
+All six parser profile panes also remain byte-identical to their prior controls.
+Constructor timings exclude buffer extraction, parsing, transport and GUI paint.
+
 Pending-input admission tests use a private scene peer that withholds receipts.
 They distinguish the admitted preview from overflow recovery, enforce aggregate
 payload bytes, drain accepted edits in order without replaying rejected text,

@@ -24,7 +24,7 @@ recovery. FC never closes a tab or writes a file on the editor's behalf.
 
 ## Pinned revision
 
-FC builds Fresh from revision `84814897b187ab8ccd19dca0fc012e7480229b14` on
+FC builds Fresh from revision `9e34b65a93ced83b63dbede5051a26bc5f14eace` on
 the `fc-editor-workflow` branch of the FC fork. Its upstream base is
 `b10f9084f5eae571e9b8dac1a0f3694384bcb53d`, which is Fresh 0.5.2 plus 40
 upstream commits; FC's integration commits sit on top. The pinned Rust
@@ -1707,6 +1707,15 @@ development. Audit the final protocol version and update the dependency pin,
 bundle, consumer, and recovery qualification together before enabling the
 feature for users. Native queue checks are described in
 [macOS app tests](macos_app.md#tests).
+
+The native raw-source UTF-16 index retains one sparse checkpoint approximately
+per 1,024 source bytes, always on a scalar boundary. Construction counts valid
+UTF-8 leading bytes in complete blocks, adds the extra surrogate unit for
+four-byte scalars, and counts ASCII blocks directly. The checkpoint positions,
+UTF-16 totals, bounded lookup behavior and allocated index capacity match the
+scalar constructor. No source, Markdown context or display width is shortened.
+Source capture and index construction still scan a changed revision; this is
+not incremental source/semantic parsing or an application latency guarantee.
 
 ### Native pending-input admission
 
