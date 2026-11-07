@@ -479,6 +479,9 @@ process high-water mark, not the allocation cost of an individual case.
 `ComposeShapingTests` compare joined-emoji glyphs in long prose, semantic font
 runs, complete table samples and presentation labels with independently shaped
 short text. They also verify source coordinates and unchanged UTF-8 bytes.
+`ComposeTests` checks that retained long Unicode prose avoids per-scalar
+coordinate maps, still resolves exact scalar endpoints across sparse intervals,
+rejects UTF-8/surrogate interiors, and preserves construction-boundary admission.
 The real-backend page-selection fixture exports its initial binary pane beside
 the JSON and image artifacts, allowing the exact input to be replayed by
 `fc-compose-profile`. These correctness checks do not qualify the resource

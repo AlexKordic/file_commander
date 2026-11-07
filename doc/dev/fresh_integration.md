@@ -1124,8 +1124,12 @@ edits that shift many absolute map positions can resend substantial metadata.
 `ComposePaneLayout`/`ComposeTextLayout` path as drawing. It retains numeric line,
 font, style, table and image geometry plus immutable attributed-text context;
 Core Text lines and typesetters remain temporary. Partial range bounds reshape
-their boundary lines. Sparse source/display coordinates replace per-scalar
-dictionaries in this measurement mode.
+their boundary lines. Drawing and measurement retain coordinate maps only for
+construction endpoints (font runs, paragraphs, images, markers and table cells).
+Other source/display lookups use the projection's exact sparse index, including
+UTF-8 and surrogate-interior rejection. Each preview no longer duplicates a
+pair of per-scalar dictionaries. Measurement admission still limits the required
+boundary count before shaping.
 
 Both drawing and measurement shape groups of whole Unicode paragraphs, targeting
 16,384 UTF-16 units. Boundaries preserve CRLF and bidirectional paragraph context;
@@ -1292,8 +1296,9 @@ authorize editing different source bytes.
 Projection boundary validation and this model share a sparse UTF-8/UTF-16
 index with checkpoints about every 1,024 bytes. It retains literal bytes and
 rejects surrogate/UTF-8 interiors without a hash entry for every scalar.
-Drawing keeps its existing direct geometry indices; source-range semantics
-are shared with the document model. This changes neither source nor wrapping.
+Drawing keeps its measured glyph geometry and construction endpoint cache;
+other source-range queries share this index with the document model. This
+changes neither source nor wrapping.
 
 Native rich Compose keeps marked text as a provisional replacement over that
 immutable source snapshot. Partial updates, marked/selected subranges and

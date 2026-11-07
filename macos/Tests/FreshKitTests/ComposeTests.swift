@@ -4,6 +4,55 @@ import ImageIO
 @testable import FreshKit
 
 final class ComposeTests: XCTestCase {
+  func testRetainedProseLayoutDoesNotDuplicateEveryScalarCoordinateAndKeepsExactQueries() throws {
+    let paragraph = "café 👩🏽‍💻 e\u{301} אבג 東京\r\n", copies = 1600
+    let source = String(repeating: paragraph, count: copies)
+    let projection = try XCTUnwrap(ComposeProjection(source: 0..<source.utf8.count, text: source,
+      segments: [.init(source: 0..<source.utf8.count, display: 0..<source.utf8.count, kind: .copy)]))
+    let layout = try XCTUnwrap(ComposeTextLayout(projection: projection, font: font(18), width: 480))
+    XCTAssertTrue(layout.measurementUsage.retainedGlyphs)
+    XCTAssertLessThan(layout.measurementUsage.coordinateEntries, 16,
+      "unstyled retained text uses the existing sparse index rather than scalar-sized hash maps")
+    for copy in [0, 1, 511, 1000, copies - 1] {
+      var byte = copy * paragraph.utf8.count, unit = copy * paragraph.utf16.count
+      for scalar in paragraph.unicodeScalars {
+        XCTAssertEqual(layout.byte(forUnit: unit), byte)
+        XCTAssertEqual(layout.unit(forByte: byte), unit)
+        XCTAssertEqual(layout.sourceRange(forUTF16: NSRange(location: unit, length: scalar.utf16.count)),
+          byte..<(byte + scalar.utf8.count))
+        for interior in 1..<scalar.utf8.count { XCTAssertNil(layout.unit(forByte: byte + interior)) }
+        if scalar.utf16.count == 2 { XCTAssertNil(layout.byte(forUnit: unit + 1)) }
+        byte += scalar.utf8.count; unit += scalar.utf16.count
+      }
+    }
+    XCTAssertEqual(layout.byte(forUnit: source.utf16.count), source.utf8.count)
+    XCTAssertNil(layout.byte(forUnit: -1)); XCTAssertNil(layout.unit(forByte: source.utf8.count + 1))
+  }
+
+  func testConstructionCoordinateEndpointsRejectScalarInteriorsAndKeepMeasurementAdmission() throws {
+    let source = "é👩🏽‍💻\n"
+    let projection = try XCTUnwrap(ComposeProjection(source: 0..<source.utf8.count, text: source,
+      segments: [.init(source: 0..<source.utf8.count, display: 0..<source.utf8.count, kind: .copy)]))
+    for range in [0..<1, 1..<1, -1..<0, 0..<(source.utf8.count + 1)] {
+      XCTAssertNil(ComposeTextLayout(projection: projection, font: font(18), width: 480,
+        fonts: [.init(display: range, font: font(20))]))
+    }
+    XCTAssertNil(ComposeTextLayout(projection: projection, font: font(18), width: 480,
+      attachments: [.init(source: 0..<2, display: 0..<1, size: CGSize(width: 20, height: 10))]))
+    XCTAssertNil(ComposeTextLayout(projection: projection, font: font(18), width: 480,
+      paragraphs: [.init(display: 1..<source.utf8.count)]))
+    let styled = [ComposeTextLayout.FontRun(display: 0..<2, font: font(20))]
+    let retained = try XCTUnwrap(ComposeTextLayout(projection: projection, font: font(18), width: 480, fonts: styled))
+    XCTAssertEqual(retained.unit(forByte: 2), 1)
+    XCTAssertNil(ComposeTextLayout(projection: projection, font: font(18), width: 480, fonts: styled,
+      measurement: .init(maximumCoordinates: 2)))
+    let measured = try XCTUnwrap(ComposeTextLayout(projection: projection, font: font(18), width: 480, fonts: styled,
+      measurement: .init(maximumCoordinates: 3)))
+    XCTAssertFalse(measured.measurementUsage.retainedGlyphs)
+    XCTAssertEqual(measured.size, retained.size)
+    XCTAssertEqual(measured.unit(forByte: 2), retained.unit(forByte: 2))
+  }
+
   func testProjectionLookupRetainsBothSidesOfCoincidentHiddenAndInsertedEdges() throws {
     let projection = try XCTUnwrap(ComposeProjection(source: 0..<8, text: "LxyéQZ", segments: [
       .init(source: 0..<2, display: 0..<0, kind: .hidden),

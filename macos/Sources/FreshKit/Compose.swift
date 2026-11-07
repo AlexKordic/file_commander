@@ -385,14 +385,48 @@ public final class ComposeTextLayout {
     guard width.isFinite, width > 0, lineSpacing.isFinite, lineSpacing >= 0 else { return nil }
     if let measurement {guard measurement.maximumContextUnits>0,measurement.maximumCoordinates>0,measurement.maximumFragments>0 else {return nil}}
     let string = NSString(string:projection.text)
-    var utf16ToByte = [0: 0]
-    var byteToUTF16 = [0: 0]
+    // Keep coordinates needed while constructing styles, attachments and
+    // cells. Other input/hit-test queries use the projection's exact sparse
+    // index; two hash entries per scalar would duplicate it for every preview.
+    var required: Set<Int> = [0, projection.textIndex.byteCount]
+    let maximumCoordinates = measurement?.maximumCoordinates ?? Int.max
+    guard required.count <= maximumCoordinates else { return nil }
+    var overflow = false
+    func includePoint(_ point: Int) {
+      guard !overflow else { return }
+      guard required.count < maximumCoordinates || required.contains(point) else { overflow = true; return }
+      required.insert(point)
+    }
+    func include(_ range: Range<Int>) { includePoint(range.lowerBound); includePoint(range.upperBound) }
+    for font in fonts { include(font.display) }
+    for attachment in attachments { include(attachment.display) }
+    for paragraph in paragraphs { include(paragraph.display) }
+    for item in hanging { include(item.display); includePoint(item.contentStart) }
+    for table in tables {
+      for row in table.table.rows {
+        include(row.display)
+        for cell in row.cells { if let range = cell.display { include(range) } }
+      }
+    }
+    guard !overflow else { return nil }
+    let coordinates = required.sorted()
+    guard coordinates.first == 0, coordinates.last == projection.textIndex.byteCount else { return nil }
+    var utf16ToByte = [0: 0], byteToUTF16 = [0: 0], nextCoordinate = 1
+    utf16ToByte.reserveCapacity(coordinates.count); byteToUTF16.reserveCapacity(coordinates.count)
     var byte = 0, unit = 0, paragraphStart = 0
     var hasLongParagraph = false
     for scalar in projection.text.unicodeScalars {
       byte += scalar.utf8.count
       unit += scalar.utf16.count
-      if measurement == nil {utf16ToByte[unit] = byte;byteToUTF16[byte] = unit}
+      if nextCoordinate < coordinates.count {
+        let point = coordinates[nextCoordinate]
+        // A style/cell/attachment endpoint inside a UTF-8 scalar is invalid,
+        // just as a missing entry in the former complete maps was invalid.
+        guard point >= byte else { return nil }
+        if point == byte {
+          utf16ToByte[unit] = byte; byteToUTF16[byte] = unit; nextCoordinate += 1
+        }
+      }
       if !hasLongParagraph {
         // LF-delimited runs overestimate the length for other newline kinds.
         // This cheap rejection avoids another scan on ordinary short prose;
@@ -401,27 +435,7 @@ public final class ComposeTextLayout {
         if scalar.value == 0x0a { paragraphStart = unit }
       }
     }
-    if let measurement {
-      var required:Set<Int>=[0,byte]
-      guard required.count<=measurement.maximumCoordinates else {return nil}
-      var overflow=false
-      func includePoint(_ point:Int) {
-        guard !overflow else {return}
-        guard required.count<measurement.maximumCoordinates || required.contains(point) else {overflow=true;return}
-        required.insert(point)
-      }
-      func include(_ range:Range<Int>) {includePoint(range.lowerBound);includePoint(range.upperBound)}
-      for font in fonts {include(font.display)}
-      for attachment in attachments {include(attachment.display)}
-      for paragraph in paragraphs {include(paragraph.display)}
-      for item in hanging {include(item.display);includePoint(item.contentStart)}
-      for table in tables {for row in table.table.rows {include(row.display);for cell in row.cells {if let range=cell.display {include(range)}}}}
-      guard !overflow else {return nil}
-      for point in required {
-        guard let unit=projection.textIndex.unit(forByte:point) else {return nil}
-        byteToUTF16[point]=unit;utf16ToByte[unit]=point
-      }
-    }
+    guard nextCoordinate == coordinates.count else { return nil }
     let attributed = NSMutableAttributedString(string: projection.text,
       attributes: [NSAttributedString.Key(kCTFontAttributeName as String): font,
         NSAttributedString.Key(kCTForegroundColorFromContextAttributeName as String): true])
