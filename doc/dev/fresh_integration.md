@@ -1336,6 +1336,10 @@ equality alone cannot certify byte-addressed style ranges. Missing or malformed
 delivered metadata still fails validation. Fonts are checked before aggregate
 reuse; available-width resolution and source maps belong to the new pane.
 Hints do not change request identity or permit an old result to publish.
+Request capture hashes the remaining wire/geometry metadata with measurement
+presence intact and compares complete measurement values separately. That
+comparison includes unknown protocol fields and literal sample bytes, avoiding
+two full sample encodings for each request without weakening result ownership.
 
 While changed glyphs are pending, the prior frame retains its original owner.
 Logical source, pending text, complete accessibility text and source actions do

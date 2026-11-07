@@ -703,6 +703,10 @@ release the old pane before worker preparation, compare disjoint source windows
 and font changes with fresh geometry, and reject foreign lifetimes, changed
 inputs, absent metadata and UTF-8-invalid styles. Canonically equal strings with
 different literal bytes cannot reuse validation or stale span boundaries.
+A separate preview-identity regression covers fresh decodes, canonical Unicode
+aliases, sample/image/minimum/style changes, column counts, measurement IDs,
+absent versus present-empty metadata and unknown protocol fields. Each changed
+input must fail both geometry equivalence and prepared-result ownership.
 The private-backend held-preview workflow exercises complete accessibility text,
 selection/replacement, IME input, exact CRLF save and undo before any visible
 preview is published. Render-dependent tests await matching geometry; pending

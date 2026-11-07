@@ -12,6 +12,7 @@ func profilePreviews(input: URL, output: URL) async throws {
   let code = CTFontCreateWithName("Menlo" as CFString, 18, nil)
   var cold: [Double] = [], plain: [Double] = [], shared: [Double] = []
   var capture: [Double] = [], sharedCapture: [Double] = []
+  var identityChecks: [Double] = [], geometryChecks: [Double] = []
   var geometryHash = "", fragmentCount = 0, tableCount = 0
 
   func request(_ width: CGFloat, hints: [ComposeTableMeasurements] = []) throws -> (ComposePreviewRequest, Double) {
@@ -35,7 +36,10 @@ func profilePreviews(input: URL, output: URL) async throws {
     let (base, coldMS) = try await prepare(baseRequest)
     let (plainRequest, captureMS) = try request(640)
     let (sharedRequest, sharedCaptureMS) = try request(640, hints: [base.tableMeasurements])
-    guard plainRequest.isEquivalent(to: sharedRequest) else { throw ProfileFailure.layout("hint changed request identity") }
+    let (sameIdentity, identityMS) = milliseconds { plainRequest.isEquivalent(to: sharedRequest) }
+    let (sameGeometry, geometryMS) = milliseconds { plainRequest.hasSameGeometry(as: sharedRequest) }
+    guard sameIdentity, sameGeometry else { throw ProfileFailure.layout("hint changed request identity") }
+    identityChecks.append(identityMS); geometryChecks.append(geometryMS)
     let independent: ComposePaneLayout, reused: ComposePaneLayout
     let plainMS: Double, sharedMS: Double
     // Interleave the controls to reduce systematic first-run ordering effects.
@@ -73,6 +77,7 @@ func profilePreviews(input: URL, output: URL) async throws {
     "body_font": "Helvetica 18", "code_font": "Menlo 18", "initial_width": 960, "changed_width": 640,
     "cold_worker_ms": cold, "resized_without_hints_ms": plain, "resized_with_hints_ms": shared,
     "capture_without_hints_ms": capture, "capture_with_hints_ms": sharedCapture,
+    "identity_check_ms": identityChecks, "geometry_check_ms": geometryChecks,
     "fragments": fragmentCount, "tables": tableCount, "geometry_sha256": geometryHash,
     "geometry_equal_each_sample": true, "process_peak_rss_bytes": peakRSS(),
     "rss_scope": "process high-water mark including full geometry JSON comparisons",

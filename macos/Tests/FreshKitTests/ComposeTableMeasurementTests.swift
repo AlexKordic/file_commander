@@ -213,6 +213,50 @@ final class ComposeTableMeasurementTests: XCTestCase {
     }
   }
 
+  @MainActor
+  func testPreviewIdentityRetainsLiteralSamplesStylesPresenceAndUnknownWireFields() async throws {
+    var pane = try fixture()
+    pane.tables[0].measurement.columns[0].samples = [.with { $0.text = "ée\u{301}" }]
+    func request(_ value: WireComposePane) throws -> ComposePreviewRequest {
+      try XCTUnwrap(ComposePreviewRequest(pane: value, body: body, monospace: code, width: 620))
+    }
+    let original = try request(pane)
+    let prepared = try await Task.detached { try original.prepare() }.value
+    let separate = try request(WireComposePane(serializedBytes: pane.serializedData()))
+    XCTAssertTrue(original.isEquivalent(to: separate)); XCTAssertTrue(original.hasSameGeometry(as: separate))
+    XCTAssertNotNil(prepared.layout(matching: separate))
+    for mutation in 0..<9 {
+      var changed = pane
+      switch mutation {
+      case 0:
+        changed.tables[0].measurement.columns[0].samples[0].text = "e\u{301}é"
+        XCTAssertEqual(changed.tables[0].measurement, pane.tables[0].measurement,
+          "canonical equality must not hide literal encoding differences")
+      case 1: changed.tables[0].measurement.columns[0].samples[0].minimumOnly = true
+      case 2: changed.tables[0].measurement.columns[0].samples[0].image = true
+      case 3:
+        changed.tables[0].measurement.columns[0].samples[0].spans = [.with { $0.end = 2; $0.flags = 1 }]
+      case 4: changed.tables[0].measurement.columns.append(.init())
+      case 5: changed.tables[0].clearMeasurement()
+      case 6: changed.tables[0].measurement = .init() // Present empty and absent are different.
+      case 7:
+        var encoded = try changed.tables[0].measurement.serializedData()
+        encoded.append(contentsOf: [0xa0, 0x1f, 1]) // Unknown varint field 500.
+        changed.tables[0].measurement = try WireComposeTableMeasurement(serializedBytes: encoded)
+      default: changed.tables[0].measurementID += 1
+      }
+      let different = try request(changed)
+      XCTAssertFalse(original.isEquivalent(to: different), "mutation \(mutation)")
+      XCTAssertFalse(original.hasSameGeometry(as: different), "mutation \(mutation)")
+      XCTAssertNil(prepared.layout(matching: different), "mutation \(mutation) cannot claim the old result")
+    }
+    var absent = pane; absent.tables[0].clearMeasurement()
+    var empty = absent; empty.tables[0].measurement = .init()
+    let absentRequest = try request(absent), emptyRequest = try request(empty)
+    XCTAssertFalse(absentRequest.isEquivalent(to: emptyRequest))
+    XCTAssertFalse(absentRequest.hasSameGeometry(as: emptyRequest))
+  }
+
   func testWorkerHintsRequireScopeLiteralInputsAndCompleteValidDeliveredMetadata() throws {
     let pane = try fixture(), original = try XCTUnwrap(ComposeTableModel(pane: pane))
     let hints = [original.measurements]

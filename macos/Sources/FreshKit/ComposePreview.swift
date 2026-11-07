@@ -21,18 +21,25 @@ public struct ComposePreviewRequest: @unchecked Sendable {
                typography: ComposeTypography = .init(), images: [UInt64: ComposeImageState] = [:],
                composition: ComposeComposition? = nil, virtualInsertion: ComposeVirtualInsertion? = nil,
                tableMeasurements: [ComposeTableMeasurements] = []) {
-    guard width.isFinite, width > 0, typography.isValid,
-          let wire = try? pane.serializedData() else { return nil }
+    guard width.isFinite, width > 0, typography.isValid else { return nil }
     self.pane = pane; self.body = body; self.monospace = monospace
     self.width = width; self.typography = typography; self.images = images
     self.tableMeasurements = tableMeasurements
     self.composition = composition.map(ComposePlainComposition.init)
     insertion = virtualInsertion.map(ComposeVirtualInsertion.Plain.init)
+    // Complete column samples can dominate the pane. Keep their presence in
+    // the digests, but compare their full values/literal text independently;
+    // do not encode the same large inputs twice on each main-actor capture.
+    var identity = pane
+    for index in identity.tables.indices where identity.tables[index].hasMeasurement {
+      identity.tables[index].measurement = .init()
+    }
+    guard let wire = try? identity.serializedData() else { return nil }
     wireDigest = Data(SHA256.hash(data: wire))
     let geometry = WireComposePane.with {
       $0.sourceStart = pane.sourceStart; $0.sourceEnd = pane.sourceEnd; $0.documentLen = pane.documentLen
       $0.text = pane.text; $0.segments = pane.segments; $0.spans = pane.spans
-      $0.images = pane.images; $0.tables = pane.tables; $0.hangingContexts = pane.hangingContexts
+      $0.images = pane.images; $0.tables = identity.tables; $0.hangingContexts = pane.hangingContexts
       $0.assetAuthority = pane.assetAuthority; $0.assetDocument = pane.assetDocument
     }
     guard let bytes = try? geometry.serializedData() else { return nil }
@@ -72,18 +79,26 @@ public struct ComposePreviewRequest: @unchecked Sendable {
     }
   }
 
+  private func sameTableInputs(as other: Self) -> Bool {
+    guard pane.tables.count == other.pane.tables.count else { return false }
+    return zip(pane.tables, other.pane.tables).allSatisfy { a, b in
+      a.hasMeasurement == b.hasMeasurement
+        && (!a.hasMeasurement || ComposeTableMeasurement.sameInputs(a.measurement, b.measurement))
+    }
+  }
+
   public func isEquivalent(to other: Self) -> Bool {
     // Measurement hints affect only cost, never request identity. The worker
     // validates each hint against this request's complete delivered inputs.
     wireDigest == other.wireDigest && sameEnvironment(as: other)
-      && sameDraft(as: other, selection: true) && sameImages(as: other)
+      && sameDraft(as: other, selection: true) && sameImages(as: other) && sameTableInputs(as: other)
   }
 
   /// A hint for a main-actor reuse-only constructor, never permission to attach
   /// an old source map to a new pane. That constructor still validates inputs.
   public func hasSameGeometry(as other: Self) -> Bool {
     guard geometryDigest == other.geometryDigest, sameEnvironment(as: other), sameDraft(as: other, selection: false),
-          images.keys == other.images.keys else { return false }
+          images.keys == other.images.keys, sameTableInputs(as: other) else { return false }
     func intrinsic(_ state: ComposeImageState) -> CGSize? {
       if case .deferred(let size) = state { return size }
       return state.asset?.originalSize

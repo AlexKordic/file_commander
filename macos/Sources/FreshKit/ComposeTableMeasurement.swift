@@ -42,8 +42,12 @@ public final class ComposeTableMeasurement: @unchecked Sendable {
   /// Protobuf's String equality is canonical Unicode equality. Style ranges
   /// are UTF-8 offsets, so a cached validation also requires literal bytes.
   func matches(_ other: WireComposeTableMeasurement) -> Bool {
-    guard wire == other else { return false }
-    return zip(wire.columns, other.columns).allSatisfy { column, otherColumn in
+    Self.sameInputs(wire, other)
+  }
+
+  static func sameInputs(_ lhs: WireComposeTableMeasurement, _ rhs: WireComposeTableMeasurement) -> Bool {
+    guard lhs == rhs else { return false }
+    return zip(lhs.columns, rhs.columns).allSatisfy { column, otherColumn in
       zip(column.samples, otherColumn.samples).allSatisfy { sample, otherSample in
         sample.text.utf8.elementsEqual(otherSample.text.utf8)
       }
