@@ -107,7 +107,7 @@ public struct ComposeTableModel {
         guard !table.hasMeasurement else { return nil }; measurement = nil
       } else {
         guard table.hasMeasurement, table.measurement.columns.count == alignments.count else { return nil }
-        if let old = cached[table.measurementID]?.first(where: { $0.wire == table.measurement }) { measurement = old }
+        if let old = cached[table.measurementID]?.first(where: { $0.matches(table.measurement) }) { measurement = old }
         else { measurement = ComposeTableMeasurement(id: table.measurementID, wire: table.measurement, columns: alignments.count) }
         guard measurement != nil else { return nil }
       }

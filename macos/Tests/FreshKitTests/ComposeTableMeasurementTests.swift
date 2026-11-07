@@ -132,6 +132,26 @@ final class ComposeTableMeasurementTests: XCTestCase {
       "a repeated ID cannot bypass UTF-8 style validation")
   }
 
+  func testCanonicalSampleAliasesCannotReuseOldValidationOrSpanBoundaries() throws {
+    var pane = try fixture()
+    pane.tables[0].measurement.columns[0].samples = [.with {
+      $0.text = "ée\u{301}"; $0.spans = [.with { $0.end = 2; $0.flags = 1 }]
+    }]
+    let original = try XCTUnwrap(ComposeTableModel(pane: pane))
+    var invalid = pane
+    invalid.tables[0].measurement.columns[0].samples[0].text = "e\u{301}é"
+    XCTAssertEqual(pane.tables[0].measurement, invalid.tables[0].measurement)
+    XCTAssertNil(ComposeTableModel(pane: invalid, reuse: original),
+      "a canonical alias must not bypass validation of a span ending inside UTF-8")
+    pane.tables[0].measurement.columns[0].samples[0].spans = []
+    let valid = try XCTUnwrap(ComposeTableModel(pane: pane))
+    var changed = pane; changed.tables[0].measurement.columns[0].samples[0].text = "e\u{301}é"
+    let next = try XCTUnwrap(ComposeTableModel(pane: changed, reuse: valid))
+    XCTAssertFalse(valid.tables[0].measurement === next.tables[0].measurement)
+    XCTAssertEqual(Array(try XCTUnwrap(next.tables[0].measurement).wire.columns[0].samples[0].text.utf8),
+      Array("e\u{301}é".utf8))
+  }
+
   func testCachedMetricsMatchFreshGeometryThroughResizingFontChangesAndChangedInputs() throws {
     var pane = try fixture()
     pane.tables[0].measurement.columns[0].samples.append(.with {
