@@ -1276,6 +1276,14 @@ buffer lifetime or filesystem authority has gone away. Obsolete parser jobs are
 cancelled; a running slot remains owned until its completion is consumed, and
 that completion cannot restore a closed document. Private cache tests verify
 source/semantic ownership release, live-tab reuse and a late cancelled result.
+Clearing the cache after the last rich client disconnects also preserves the
+worker and its occupied slots until cancelled results are consumed. Reconnects
+use that same queue: one parse runs and one waits, with each buffer's newer
+snapshots coalesced before submission. A quiescent clear releases the worker,
+allowing a later request to start it again; dropping the cache closes its
+channels. Controlled regressions
+cover repeated resets, stale results, source release and retry after a stopped
+worker.
 This entry-count policy still needs the general retained-byte and transient
 allocation audit. Native pending-text literal checks compare UTF-16 sequences
 without materializing a pair of temporary arrays; canonical equivalence cannot
