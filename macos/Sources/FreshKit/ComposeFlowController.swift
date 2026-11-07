@@ -13,6 +13,10 @@ public final class ComposeFlowController {
   /// Logical text is published before shaping and survives same-document
   /// geometry/source refreshes with its original owner, never a cropped value.
   public private(set) var presentation: ComposeDocumentPresentation?
+  /// Opaque UI-side action capture associated with the prepared logical value.
+  /// It carries no text and is not an editor/wire identity.
+  public private(set) var presentationContext: UUID?
+  public var targetContext: UUID? { target?.context }
   public var onChange: (() -> Void)?
 
   public typealias Measure = @Sendable (ComposeDocumentSnapshot, ComposeFlowMeasurement.Environment,
@@ -22,12 +26,14 @@ public final class ComposeFlowController {
     let environment: ComposeFlowMeasurement.Environment
     let overlay: ComposeDocumentOverlay?
     let prepared: ComposeDocumentPresentation?
+    let context: UUID?
   }
   private let measure: Measure
   private var target: Target?
   private var previous: ComposeFlowMeasurement?
   private var worker: Task<Void, Never>?
   private var workerID: UUID?
+  private var selectionHold: UUID?
 
   public init(measure: @escaping Measure = { snapshot, environment, previous, overlay, presentation in
     try ComposeFlowMeasurement.measure(snapshot, environment: environment, overlay: overlay, reusing: previous, presentation: presentation)
@@ -37,7 +43,8 @@ public final class ComposeFlowController {
   /// A missing snapshot withholds geometry while retaining the logical value
   /// and one same-document geometry candidate. Hide/disconnect/source replacement
   /// must use reset to release these as well.
-  public func update(snapshot: ComposeDocumentSnapshot?, environment: ComposeFlowMeasurement.Environment?, overlay: ComposeDocumentOverlay? = nil) {
+  public func update(snapshot: ComposeDocumentSnapshot?, environment: ComposeFlowMeasurement.Environment?, overlay: ComposeDocumentOverlay? = nil,
+                     context: UUID? = nil) {
     func sameOverlay(_ old: ComposeDocumentOverlay?) -> Bool {
       switch (old,overlay) {
       case (nil,nil): return true
@@ -56,17 +63,18 @@ public final class ComposeFlowController {
     generation = UUID(); flow = nil; worker?.cancel()
     if let snapshot, let environment {
       let prepared = presentation?.updatingSelection(snapshot, overlay: overlay)
-      target = .init(snapshot: snapshot, environment: environment, overlay: overlay, prepared: prepared)
+      target = .init(snapshot: snapshot, environment: environment, overlay: overlay, prepared: prepared, context: context)
       if let previous, !previous.document.owner.isSameDocument(as: snapshot.document.owner) { self.previous = nil }
-      if let presentation, !presentation.document.owner.isSameDocument(as: snapshot.document.owner) { self.presentation = nil }
-      if let prepared { presentation = prepared }
+      if let presentation, !presentation.document.owner.isSameDocument(as: snapshot.document.owner) { self.presentation = nil; presentationContext = nil }
+      if let prepared, selectionHold == nil { presentation = prepared; presentationContext = context }
       status = .waiting; beginIfPossible()
     } else { target = nil; status = .idle }
     onChange?()
   }
 
   public func reset() {
-    generation = UUID(); target = nil; previous = nil; flow = nil; presentation = nil; status = .idle
+    generation = UUID(); target = nil; previous = nil; flow = nil; presentation = nil; presentationContext = nil; status = .idle
+    selectionHold = nil
     worker?.cancel()
     // Keep the slot until the actual worker terminates; IDs can repeat after
     // reconnect, and a cancelled task can still return a result.
@@ -78,8 +86,30 @@ public final class ComposeFlowController {
     generation = UUID(); status = .waiting; beginIfPossible(); onChange?()
   }
 
+  /// A queued global selection keeps its proposed group in the same frozen
+  /// value until Fresh confirms that input. Later logical/geometry targets
+  /// are retained, but cannot overwrite the proposal with an older selection.
+  @discardableResult
+  public func select(_ ranges: [NSRange], in original: ComposeDocumentPresentation, context: UUID, until token: UUID) -> Bool {
+    guard presentation === original, let next = original.selecting(ranges) else { return false }
+    generation = UUID(); worker?.cancel(); selectionHold = token
+    presentation = next; presentationContext = context; flow = flow?.selecting(next)
+    if target != nil { status = .waiting }
+    onChange?(); return true
+  }
+
+  public func confirmSelection(_ token: UUID) {
+    guard selectionHold == token else { return }
+    selectionHold = nil; beginIfPossible(); onChange?()
+  }
+
+  public func retainSelection(while tokens: Set<UUID>) {
+    guard let token = selectionHold, !tokens.contains(token) else { return }
+    confirmSelection(token)
+  }
+
   private func beginIfPossible() {
-    guard worker == nil, let target, status != .failed else { return }
+    guard worker == nil, let target, status != .failed, selectionHold == nil else { return }
     let id = UUID(), generation = generation, measure = measure, previous = previous
     workerID = id; status = .measuring
     let work = Task.detached(priority: .userInitiated) { [weak self] in
@@ -100,7 +130,7 @@ public final class ComposeFlowController {
   private func prepared(_ value: ComposeDocumentPresentation, generation: UUID) {
     guard self.generation == generation, let target,
           value.document === target.snapshot.document, value.overlay?.id == target.overlay?.id else { return }
-    presentation = value; onChange?()
+    presentation = value; presentationContext = target.context; onChange?()
   }
 
   private func finished(id: UUID, generation: UUID, target: Target, result: Result<ComposeFlowMeasurement, Error>) {

@@ -106,6 +106,35 @@ final class ComposeFlowControllerTests: XCTestCase {
     XCTAssertEqual(controller.presentation?.document.owner.buffer, fixture.pane.buffer)
   }
 
+  func testProposedGlobalSelectionKeepsOneValueUntilItsExactTokenIsConfirmedOrRetired() async throws {
+    var fixture = fixture(); let initial = try fixture.snapshot(), controller = ComposeFlowController()
+    defer { controller.reset() }
+    let originalContext = UUID(), selectionContext = UUID(), nextContext = UUID(), token = UUID()
+    controller.update(snapshot: initial, environment: environment(), context: originalContext)
+    try await eventually { controller.status == .ready }
+    let original = try XCTUnwrap(controller.presentation), geometry = controller.flow?.geometryGeneration
+    XCTAssertTrue(controller.select([NSRange(location: 1, length: 2)], in: original, context: selectionContext, until: token))
+    let proposal = try XCTUnwrap(controller.presentation)
+    XCTAssertEqual(proposal.text, original.text); XCTAssertTrue(proposal.document === original.document)
+    XCTAssertEqual(proposal.selectedRanges, [NSRange(location: 1, length: 2)])
+    XCTAssertTrue(controller.flow?.presentation === proposal); XCTAssertEqual(controller.flow?.geometryGeneration, geometry)
+    fixture.pane.compose.selectionRevision += 1; fixture.pane.compose.cursors[0].position = 2
+    let next = try fixture.snapshot(id: 2)
+    controller.update(snapshot: next, environment: environment(150), context: nextContext)
+    controller.confirmSelection(UUID())
+    try await Task.sleep(nanoseconds: 20_000_000)
+    XCTAssertTrue(controller.presentation === proposal); XCTAssertEqual(controller.presentationContext, selectionContext)
+    XCTAssertNil(controller.flow)
+    controller.confirmSelection(token)
+    try await eventually { controller.status == .ready }
+    XCTAssertTrue(controller.presentation?.document === next.document); XCTAssertEqual(controller.presentationContext, nextContext)
+    let again = try XCTUnwrap(controller.presentation), dropped = UUID()
+    XCTAssertTrue(controller.select([NSRange(location: 0, length: 0)], in: again, context: UUID(), until: dropped))
+    controller.retainSelection(while: [])
+    try await eventually { controller.status == .ready }
+    XCTAssertTrue(controller.presentation?.document === next.document)
+  }
+
   func testHeaderUpdatesReuseCoordinatesButReplaceOwnershipAndEnvironmentChangesRemeasure() async throws {
     var fixture = fixture(); let initial = try fixture.snapshot(), controller = ComposeFlowController(), env = environment()
     defer { controller.reset() }

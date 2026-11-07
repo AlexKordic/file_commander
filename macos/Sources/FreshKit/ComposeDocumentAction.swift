@@ -4,6 +4,33 @@ import Foundation
 /// retains its origin until a correlated receipt binds it to real source.
 /// The owner of this value must also enforce its connection and queue tokens.
 public struct ComposeDocumentAction {
+  /// Compact accepted history: no pane text, source map, image data or UI
+  /// layout is retained after the queue has consumed the original receipt.
+  public struct Transition: Sendable {
+    public let owner: WireComposeIndexOwner
+    public let scope: WireComposeScope
+    let proof: ComposeAcceptedEdits?
+    let selectedIDs: [UInt64]?
+
+    public init?(_ receipt: WireComposeEditReceipt, original: WireComposeScope, epoch: UInt64,
+                 selectedIDs: [UInt64]? = nil) {
+      guard receipt.matches(original, epoch: epoch) else { return nil }
+      let supplied = receipt.hasSourceRevision || receipt.hasSourceLength || !receipt.anchors.isEmpty
+      proof = supplied ? ComposeAcceptedEdits(receipt, original: original, epoch: epoch) : nil
+      guard !supplied || proof != nil else { return nil }
+      if let selectedIDs {
+        guard selectedIDs.count <= 1024, Set(selectedIDs).count == selectedIDs.count,
+              selectedIDs.count == receipt.pane.cursors.count,
+              Set(selectedIDs) == Set(receipt.pane.cursors.map(\.id)) else { return nil }
+      }
+      self.selectedIDs = selectedIDs; scope = receipt.scope
+      owner = .with {
+        $0.window = receipt.window; $0.leaf = receipt.leaf; $0.buffer = receipt.buffer; $0.epoch = receipt.epoch
+        $0.revision = receipt.pane.bufferRevision; $0.length = receipt.pane.documentLen
+        $0.authority = receipt.pane.assetAuthority; $0.document = receipt.pane.assetDocument
+      }
+    }
+  }
   public enum Cursor {
     case known(UInt64)
     case selectedGroup(UUID, ordinal: Int)
@@ -51,14 +78,16 @@ public struct ComposeDocumentAction {
   /// `selectedIDs` comes from the acknowledged selector's actual cursor group,
   /// in its target order. Proposed secondary identities never go on the wire.
   public func resolving(_ receipt: WireComposeEditReceipt, token: UUID, selectedIDs: [UInt64]? = nil) -> Self? {
-    guard receipt.matches(scope,epoch: owner.epoch), receipt.pane.assetAuthority == owner.authority,
-          receipt.pane.assetDocument == owner.document else { return nil }
-    let supplied = receipt.hasSourceRevision || receipt.hasSourceLength || !receipt.anchors.isEmpty
-    let proof = supplied ? ComposeAcceptedEdits(receipt,original: scope,epoch: owner.epoch) : nil
-    guard !supplied || proof != nil else { return nil }
-    let sameSource = receipt.pane.bufferRevision == owner.revision && receipt.pane.documentLen == owner.length
+    guard let transition = Transition(receipt, original: scope, epoch: owner.epoch, selectedIDs: selectedIDs) else { return nil }
+    return resolving(transition, token: token)
+  }
+
+  public func resolving(_ transition: Transition, token: UUID) -> Self? {
+    guard transition.owner.isSameDocument(as: owner), transition.owner.revision >= owner.revision else { return nil }
+    let proof = transition.proof
+    let sameSource = transition.owner.revision == owner.revision && transition.owner.length == owner.length
     let rebase = proof.map { $0.sourceRevision == owner.revision && UInt64($0.sourceLength) == owner.length } ?? false
-    let selected = selectedIDs.flatMap { Set($0).count == $0.count ? $0 : nil }
+    let selected = transition.selectedIDs
     func cursor(_ captured: Cursor) -> Cursor? {
       if case .selectedGroup(let selector,let index) = captured, selector == token {
         guard let selected, selected.indices.contains(index) else { return nil }
@@ -88,9 +117,19 @@ public struct ComposeDocumentAction {
     if case .replacement(let text,let original) = kind {
       guard let bound = cursor(original) else { return nil }; next.kind = .replacement(text,cursor: bound)
     }
-    next.bounds = resolved; next.scope = receipt.scope
-    next.owner.revision = receipt.pane.bufferRevision; next.owner.length = receipt.pane.documentLen
+    next.bounds = resolved; next.scope = transition.scope; next.owner = transition.owner
     return next
+  }
+
+  public func depends(on token: UUID) -> Bool {
+    func cursor(_ cursor: Cursor) -> Bool {
+      if case .selectedGroup(let predecessor, _) = cursor { return predecessor == token }; return false
+    }
+    if case .replacement(_, let id) = kind, cursor(id) { return true }
+    return bounds.contains { range in [range.start, range.end].contains { point in
+      if case .inserted(let predecessor, let id, _, _) = point { return predecessor == token || cursor(id) }
+      return false
+    } }
   }
 
   public func ready() -> Ready? {

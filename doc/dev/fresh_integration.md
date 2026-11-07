@@ -846,7 +846,8 @@ renew a previously failed witness. Missing proof rejects the entire following
 group into recovery. Expansion outside a preserved selection still requires
 exact surrounding source and consistent source-byte/UTF-16 caret coordinates.
 
-For explicit native replacements, `ComposeEditReceipt.anchors` (field 8)
+For explicit native replacements and ordinary native text,
+`ComposeEditReceipt.anchors` (field 8)
 contains the entire disjoint batch in source order. Each `ComposeEditAnchor`
 names a genuine edited `cursor`, its resulting UTF-8 `start`/`end`, a 32-byte
 SHA-256 `digest`, and the rebased `before_start`/`before_end`. The optional
@@ -865,9 +866,9 @@ rebase through that exact accepted batch; replaced interiors have no inferred
 correspondence, and empty insertion boundaries respect affinity. Pending
 pointer capture hashes its own delta, rather than a retained earlier prefix.
 Older receipts retain the bounded-context proof path. Missing or inconsistent
-evidence cannot produce a guessed pointer or source selection. General global
-provisional selection/replacement still needs queue integration; these edit
-anchors alone do not complete public AX actions.
+evidence cannot produce a guessed pointer or source selection. Queue integration
+binds the anchors to their exact input tokens and the captured complete value
+before using them for public AX actions.
 
 `ComposePendingText` keeps committed prefixes visible before their replies.
 Drawing, selected ranges, substring queries and hit/candidate geometry use the
@@ -1209,12 +1210,32 @@ source selection, consecutive pending edits, IME clause selection, primary-only
 replacement with another caret, allocator history and recovery.
 
 This development cutover still needs interactive and resource qualification.
-A retained logical value can outlive its action owner during the complete
-snapshot refresh interval. Actions against that retired owner are refused;
-receipt history for frozen logical endpoints remains follow-up work. Proposed
-caret groups across successive pending conversions, broader control-range/EOF
-coverage and actual GUI/IME/VoiceOver/macOS 14/SSH behavior remain unqualified.
-Current certified formatting coverage skips redundant source-window preparation;
+Complete logical values retain action provenance across the snapshot refresh
+interval. Each requested logical generation captures the queue's delta origins
+and its normalization/composition context before a worker or an ACK can remove
+them. A compact history retains 64 acknowledged transitions;
+up to four published binding generations remain available, alongside the active
+request/presentation. History contains verified edit anchors and scope/cursor
+identities, not receipt pane text, source maps, layouts or bitmaps. Ordinary
+native text uses the same insertion path and now supplies a proof only when its
+actual resulting bytes and genuine caret ends verify. Empty native input does
+not claim a deletion. Virtual raw contexts cannot become original source
+coordinates merely because their byte length matches the source document.
+
+An action against retained text replays those exact transitions before joining
+the current queue. Draft positions retain their owning input token and literal
+normalized payload proof, including after the original queue node is gone.
+Unknown changes, overwritten interiors, changed draft payloads, expired history
+or retired lifetimes refuse the whole action. Retaining the same owner numbers
+after hide/show cannot revive an older logical object. A proposed selection is
+published immediately in its original complete value; later preparation waits
+for that selector's exact receipt. A following selected-text setter binds the
+proposed group's actual primary identity. Cancellation also releases this
+publication hold and recovers dependent replacement text once.
+
+Successive pending conversions with proposed caret groups, broader control-range/
+EOF coverage and actual GUI/IME/VoiceOver/macOS 14/SSH behavior still require
+qualification. Current certified formatting coverage skips redundant source-window preparation;
 formatter/parser caches, transient allocations and the full native flow still
 require the general resource audit.
 

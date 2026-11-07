@@ -306,10 +306,42 @@ public struct ComposePendingText {
   /// insertion binds to a genuine cursor and exact payload; an unchanged
   /// position stays on the preceding provisional axis, without reading a gap
   /// between bounded raw chunks or manufacturing a source byte offset.
-  public func origin(atProvisionalUTF16 point: Int, affinity: ComposeProjection.Affinity = .downstream) -> PointOrigin? {
-    guard committedEdits != nil, point >= 0 else { return nil }
-    struct Delta { let cursor: UInt64; let before, after: NSRange; let text: String }
-    var deltas: [Delta] = []
+  public struct Origins {
+    fileprivate struct Delta { let cursor: UInt64; let before, after: NSRange; let text: String }
+    fileprivate let deltas: [Delta]
+    fileprivate let contexts: [ComposeTextContext]
+    public var retainedTextBytes: Int { deltas.reduce(0) { $0 + $1.text.utf8.count } }
+
+    public func origin(atProvisionalUTF16 point: Int, affinity: ComposeProjection.Affinity = .downstream) -> PointOrigin? {
+      guard point >= 0 else { return nil }
+      let candidates = affinity == .upstream ? deltas : Array(deltas.reversed())
+      for delta in candidates where delta.after.location <= point && point <= NSMaxRange(delta.after) {
+        guard let inserted = ComposeAcceptedEdits.InsertedPosition(text: delta.text,offsetUTF16: point-delta.after.location) else { return nil }
+        return .inserted(cursor: delta.cursor,position: inserted)
+      }
+      var shift = 0
+      for delta in deltas {
+        if point < delta.after.location { break }
+        shift += delta.after.length-delta.before.length
+      }
+      let (before, overflow) = point.subtractingReportingOverflow(shift)
+      return overflow || before < 0 ? nil : .before(before)
+    }
+
+    public func sourcePosition(beforePendingAtUTF16 point: Int, documentLength: UInt64) -> Int? {
+      guard let length = Int(exactly: documentLength) else { return nil }
+      return contexts.lazy.compactMap { context in
+        context.documentLength == length
+          ? context.sourceRange(forUTF16: NSRange(location: point, length: 0))?.lowerBound : nil
+      }.first
+    }
+  }
+
+  /// Freeze just this delta and bounded raw contexts, without retaining all
+  /// earlier cumulative prefixes or attributed input values in a queue node.
+  public func origins() -> Origins? {
+    guard committedEdits != nil else { return nil }
+    var deltas: [Origins.Delta] = []
     for id in ordered {
       let value = presentation.values[id]!
       let before: NSRange, text: String, display: Int
@@ -340,22 +372,15 @@ public struct ComposePendingText {
             previous.map({ NSMaxRange($0) <= delta.before.location && $0.location != delta.before.location }) ?? true else { return nil }
       shift += delta.after.length-delta.before.length; previous = delta.before
     }
-    let candidates = affinity == .upstream ? deltas : Array(deltas.reversed())
-    for delta in candidates where delta.after.location <= point && point <= NSMaxRange(delta.after) {
-      guard let inserted = ComposeAcceptedEdits.InsertedPosition(text: delta.text,offsetUTF16: point-delta.after.location) else { return nil }
-      return .inserted(cursor: delta.cursor,position: inserted)
-    }
-    shift = 0
-    for delta in deltas {
-      if point < delta.after.location { break }
-      shift += delta.after.length-delta.before.length
-    }
-    let (before, overflow) = point.subtractingReportingOverflow(shift)
-    return overflow || before < 0 ? nil : .before(before)
+    return Origins(deltas: deltas, contexts: requiresActionResult ? [] : presentation.values.values.map(\.context))
+  }
+
+  public func origin(atProvisionalUTF16 point: Int, affinity: ComposeProjection.Affinity = .downstream) -> PointOrigin? {
+    origins()?.origin(atProvisionalUTF16: point, affinity: affinity)
   }
 
   public func sourcePosition(beforePendingAtUTF16 point: Int, documentLength: UInt64) -> Int? {
-    guard let length = Int(exactly: documentLength) else { return nil }
+    guard !requiresActionResult, let length = Int(exactly: documentLength) else { return nil }
     return presentation.values.values.lazy.compactMap { value in
       value.context.documentLength == length
         ? value.context.sourceRange(forUTF16: NSRange(location: point,length: 0))?.lowerBound : nil

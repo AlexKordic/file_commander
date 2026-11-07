@@ -22,9 +22,10 @@ protocol CellGridDelegate: AnyObject {
   func grid(_ grid: CellGridView, replaceSource range: Range<Int>, with text: String, in pane: ComposePresentation)
   func grid(_ grid: CellGridView, pendingTextFor pane: WirePane) -> ComposePendingPreview?
   func grid(_ grid: CellGridView, commit text: ComposePendingText, initial: ComposePendingText,
-            after: UUID?, afterAction: Bool, virtualPrefix: ComposeVirtualSelections?, in pane: ComposePresentation)
+            token: UUID, after: UUID?, afterAction: Bool, virtualPrefix: ComposeVirtualSelections?, in pane: ComposePresentation)
   func grid(_ grid: CellGridView, recover text: String)
   func gridAccessibility(_ grid: CellGridView, activate: Bool) -> ComposeCompleteAccessibility?
+  func grid(_ grid: CellGridView, documentActionsAvailable model: ComposeDocumentPresentation) -> Bool
   func grid(_ grid: CellGridView, selectDocument ranges: [NSRange], in model: ComposeDocumentPresentation) -> Bool
   func grid(_ grid: CellGridView, replaceDocumentSelection text: String, in model: ComposeDocumentPresentation) -> Bool
   var optionAsAlt: Bool { get }
@@ -32,6 +33,7 @@ protocol CellGridDelegate: AnyObject {
 
 extension CellGridDelegate {
   func gridAccessibility(_ grid: CellGridView, activate: Bool) -> ComposeCompleteAccessibility? { nil }
+  func grid(_ grid: CellGridView, documentActionsAvailable model: ComposeDocumentPresentation) -> Bool { false }
   func grid(_ grid: CellGridView, selectDocument ranges: [NSRange], in model: ComposeDocumentPresentation) -> Bool { false }
   func grid(_ grid: CellGridView, replaceDocumentSelection text: String, in model: ComposeDocumentPresentation) -> Bool { false }
 }
@@ -81,6 +83,7 @@ final class CellGridView: NSView, @preconcurrency NSTextInputClient {
   private var marked = ""
   private struct Composition {
     let target: ComposePresentation
+    var token = UUID()
     var text: ComposePendingText
     let initial: ComposePendingText
     let after: UUID?
@@ -88,6 +91,9 @@ final class CellGridView: NSView, @preconcurrency NSTextInputClient {
     var virtualPrefix: ComposeVirtualSelections? = nil
   }
   private var composition: Composition?
+  var pendingComposition: (token: UUID, text: ComposePendingText, after: UUID?)? {
+    composition.map { ($0.token, $0.text, $0.after) }
+  }
   private var compositionDragAnchor: Int?
   private var lastDragCell: (Int, Int)?
   private var lastHoverCell: (Int, Int)?
@@ -668,13 +674,13 @@ final class CellGridView: NSView, @preconcurrency NSTextInputClient {
       if selector == #selector(setAccessibilitySelectedTextRange(_:)) || selector == #selector(setAccessibilitySelectedTextRanges(_:)) {
         guard let value = completeAccessibility else { return false }
         return delegate?.connected == true && store.composeSourceSelections
-          && value.model.document.owns(window: value.pane.identity.window, pane: value.pane.pane)
+          && delegate?.grid(self, documentActionsAvailable: value.model) == true
       }
       if selector == #selector(setAccessibilitySelectedText(_:)) {
         guard let value = completeAccessibility else { return false }
         return delegate?.connected == true && store.composeSourceSelections && value.pane.pane.compose.editable
           && value.model.selectedRanges?.first != nil
-          && value.model.document.owns(window: value.pane.identity.window, pane: value.pane.pane)
+          && delegate?.grid(self, documentActionsAvailable: value.model) == true
       }
     }
     if selector == #selector(setAccessibilitySelectedTextRange(_:)) || selector == #selector(setAccessibilitySelectedTextRanges(_:)) {
@@ -1080,7 +1086,7 @@ final class CellGridView: NSView, @preconcurrency NSTextInputClient {
     composition = nil
     compositionDragAnchor = nil
     if let committed = current.text.committed(nativeNewline: current.target.pane.compose.nativeNewline) {
-      delegate?.grid(self, commit: committed, initial: current.initial, after: current.after, afterAction: current.afterAction, virtualPrefix: current.virtualPrefix, in: current.target)
+      delegate?.grid(self, commit: committed, initial: current.initial, token: current.token, after: current.after, afterAction: current.afterAction, virtualPrefix: current.virtualPrefix, in: current.target)
     } else {
       for text in current.text.recoveryTexts { delegate?.grid(self, recover: text) }
     }
@@ -1107,7 +1113,7 @@ final class CellGridView: NSView, @preconcurrency NSTextInputClient {
     guard let next = composeSnapshot(pane) else {
       composition = current; cancelComposition(recover: true); return
     }
-    composition = Composition(target: next, text: text, initial: text, after: nil, afterAction: false)
+    composition = Composition(target: next, token: current.token, text: text, initial: text, after: nil, afterAction: false)
     rebuildCompose(); revealCompositionCaret(); needsDisplay = true
     inputContext?.invalidateCharacterCoordinates()
   }

@@ -41,6 +41,7 @@ public final class ComposeDocumentPresentation: Sendable {
     }
   }
   private let imageInventory: ImageInventory
+  private let selectionOverride: Bool
   public var text: String { projection.text }
   public var characterCount: Int { projection.textIndex.utf16Count }
   public var images: [WireComposeImage] { plan.images }
@@ -55,7 +56,24 @@ public final class ComposeDocumentPresentation: Sendable {
        imageInventory: ImageInventory? = nil) {
     document = snapshot.document; self.overlay = overlay; plan = prepared; projection = prepared.projection
     self.imageInventory = imageInventory ?? ImageInventory(prepared.images, projection: prepared.projection)
+    selectionOverride = false
     selectedRanges = Self.selections(snapshot, overlay: overlay, plan: prepared)
+  }
+
+  private init(selecting previous: ComposeDocumentPresentation, ranges: [NSRange]) {
+    document = previous.document; overlay = previous.overlay; projection = previous.projection; plan = previous.plan
+    imageInventory = previous.imageInventory; selectedRanges = ranges; selectionOverride = true
+  }
+
+  public func selecting(_ ranges: [NSRange]) -> ComposeDocumentPresentation? {
+    guard !ranges.isEmpty, ranges.count <= 1024, ranges.allSatisfy(contains) else { return nil }
+    let sorted = ranges.sorted { ($0.location, $0.length) < ($1.location, $1.length) }
+    guard zip(sorted, sorted.dropFirst()).allSatisfy({ NSMaxRange($0) <= $1.location && $0.location != $1.location }) else { return nil }
+    return .init(selecting: self, ranges: ranges)
+  }
+
+  func sharesLayout(with other: ComposeDocumentPresentation) -> Bool {
+    document === other.document && imageInventory === other.imageInventory
   }
 
   private static func prepare(_ snapshot: ComposeDocumentSnapshot, overlay: ComposeDocumentOverlay?) -> ComposeProjectionPlan? {
@@ -98,8 +116,8 @@ public final class ComposeDocumentPresentation: Sendable {
   func updatingSelection(_ snapshot: ComposeDocumentSnapshot, overlay next: ComposeDocumentOverlay?) -> ComposeDocumentPresentation? {
     guard document === snapshot.document, next?.owns(document) ?? true else { return nil }
     switch (overlay, next) {
-    case (nil, nil): return self
-    case (let a?, let b?) where a.id == b.id: return self
+    case (nil, nil): if !selectionOverride { return self }
+    case (let a?, let b?) where a.id == b.id: if !selectionOverride { return self }
     case (let a?, let b?) where a.isEquivalent(to: b): break
     case (nil, let b?) where b.sourceComposition == nil: break
     case (let a?, nil) where a.sourceComposition == nil: break

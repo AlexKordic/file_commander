@@ -29,13 +29,22 @@ extension NSPasteboard: EditorPasteboard {
 @MainActor
 final class NativeEditor: NSObject, CellGridDelegate {
   let store = SceneStore()
-  /// Internal complete model; public AX switches only when its global
-  /// line/style/geometry APIs can change to the same coordinate system.
-  lazy var composeDocument = ComposeDocumentController { [weak self] request in
+  /// Complete logical value shared by every rich accessibility query family.
+  lazy var composeDocument = ComposeDocumentController(quietNanoseconds: documentQuietNanoseconds) { [weak self] request in
     self?.socket?.send(.composeDocument(request))
   }
   let composeFlow = ComposeFlowController()
   private var accessibilitySnapshot: ComposeCompleteAccessibility?
+  private var documentBindings: [UUID: ComposeDocumentBinding] = [:]
+  private var publishedBindings: [UUID: UUID] = [:]
+  private var publishedBindingOrder: [UUID] = []
+  private struct SourceTransition {
+    let sequence: UInt64
+    let token: UUID
+    let value: ComposeDocumentAction.Transition?
+  }
+  private var sourceTransitions: [SourceTransition] = []
+  private var transitionSequence: UInt64 = 0
   private var composeFlowOwner: WireComposeIndexOwner?
   private(set) var view: EditorHostView?
   var grid: CellGridView? { view?.grid }
@@ -62,6 +71,7 @@ final class NativeEditor: NSObject, CellGridDelegate {
   // Development gate until measured navigation, images and recovery pass the
   // plan's end-to-end checks. The shipped path remains the existing grid.
   private let richCompose, measuredTables: Bool
+  private let documentQuietNanoseconds: UInt64
   private enum PendingInput {
     case message(SceneInput)
     case pointer(ComposePointer)
@@ -85,12 +95,13 @@ final class NativeEditor: NSObject, CellGridDelegate {
     let afterAction: Bool
   }
   private struct QueuedInput {
-    let token = UUID()
+    let token: UUID
     var input: PendingInput
     var scrollGeneration: UInt64
     var target: InputTarget?
     var chain: CompositionChain?
-    var preview: ComposePendingText?
+    var preview: ComposePendingText? { didSet { origins = preview?.origins() } }
+    var origins: ComposePendingText.Origins?
     var snapshot: ComposePresentation?
     var pointerPreview: ComposePointer.Preview?
     var virtualPrefix: ComposeVirtualSelections?
@@ -142,8 +153,10 @@ final class NativeEditor: NSObject, CellGridDelegate {
   override convenience init() { self.init(pasteboard: NSPasteboard.general) }
 
   init(pasteboard: any EditorPasteboard, environment: [String: String] = ProcessInfo.processInfo.environment,
+       documentQuietNanoseconds: UInt64 = 80_000_000,
        decodeComposeImage: @escaping @Sendable (Data, Int) throws -> ComposeImageAsset = { try ComposeImageAsset.decode($0, maximumDimension: $1) }) {
     self.pasteboard = pasteboard
+    self.documentQuietNanoseconds = documentQuietNanoseconds
     self.decodeComposeImage = decodeComposeImage
     richCompose = environment["FC_NATIVE_RICH_COMPOSE"] == "1"
     measuredTables = richCompose && environment["FC_NATIVE_MEASURED_TABLES"] == "1"
@@ -151,6 +164,7 @@ final class NativeEditor: NSObject, CellGridDelegate {
     composeDocument.onChange = { [weak self] in self?.updateCompleteFlow() }
     composeFlow.onChange = { [weak self] in
       self?.accessibilitySnapshot = nil
+      self?.recordPublishedDocumentBinding()
       self?.grid?.completeAccessibilityChanged()
     }
     composeImages.onChange = { [weak self] in
@@ -277,6 +291,7 @@ final class NativeEditor: NSObject, CellGridDelegate {
   }
 
   private func disconnect() {
+    resetDocumentBindings()
     composeFlow.reset(); composeFlowOwner = nil
     composeDocument.reset()
     recoverPendingText()
@@ -303,6 +318,7 @@ final class NativeEditor: NSObject, CellGridDelegate {
   }
 
   private func connectionEnded(_ reason: String?) {
+    resetDocumentBindings()
     composeFlow.reset(); composeFlowOwner = nil
     composeDocument.reset()
     let failedToAttach = !receivedHello && pendingShow
@@ -393,6 +409,7 @@ final class NativeEditor: NSObject, CellGridDelegate {
       defer { completingComposeInput = false }
       let reply = message.frame.inputReply
       if reply.accepted || reply.cancelled {
+        let completedToken = composeQueue.first?.token
         let identity = pendingComposePane
         if reply.accepted { grid?.applyComposeCarets(reply.carets, identity: identity) }
         if reply.accepted, let identity, let queued = composeQueue.first, let target = queued.target,
@@ -414,6 +431,8 @@ final class NativeEditor: NSObject, CellGridDelegate {
           result: reply.accepted && reply.hasResult ? reply.result : nil)
         if !composeQueue.isEmpty { composeQueue.removeFirst() }
         grid?.refreshComposeImages()
+        if let completedToken { composeFlow.confirmSelection(completedToken) }
+        composeFlow.retainSelection(while: Set(composeQueue.map(\.token)))
         pendingComposeID = nil
         pendingComposePane = nil
         pendingComposeLayout = false
@@ -550,7 +569,7 @@ final class NativeEditor: NSObject, CellGridDelegate {
       }
     }
     let sameDocument = owner.map { composeFlowOwner?.isSameDocument(as: $0) == true } ?? false
-    if !sameDocument { composeFlow.reset() }
+    if !sameDocument { resetDocumentBindings(); composeFlow.reset() }
     composeFlowOwner = owner
     composeDocument.update(window: UInt64(store.windowID), pane: pane, supported: store.composeDocumentUpdates)
     updateCompleteFlow()
@@ -577,7 +596,77 @@ final class NativeEditor: NSObject, CellGridDelegate {
       images[image.start] = composeImages.state(scope: pane.scope, image: image,
         authority: snapshot.pane.assetAuthority, document: snapshot.pane.assetDocument)
     }
-    composeFlow.update(snapshot: snapshot, environment: pane.layout.measurementEnvironment(images: images), overlay: overlay)
+    let context = captureDocumentBinding(snapshot, overlay: overlay, pane: pane)
+    composeFlow.update(snapshot: snapshot, environment: pane.layout.measurementEnvironment(images: images), overlay: overlay,
+      context: context)
+    trimDocumentBindings()
+  }
+
+  private func resetDocumentBindings() {
+    documentBindings.removeAll(); publishedBindings.removeAll(); publishedBindingOrder.removeAll()
+    sourceTransitions.removeAll(); transitionSequence = 0
+  }
+
+  private func trimDocumentBindings() {
+    while publishedBindingOrder.count > 4 {
+      publishedBindings.removeValue(forKey: publishedBindingOrder.removeFirst())
+    }
+    var keep = Set(publishedBindings.values)
+    if let id = composeFlow.targetContext { keep.insert(id) }
+    if let id = composeFlow.presentationContext { keep.insert(id) }
+    documentBindings = documentBindings.filter { keep.contains($0.key) }
+  }
+
+  private func recordPublishedDocumentBinding() {
+    guard let model = composeFlow.presentation, let context = composeFlow.presentationContext,
+          documentBindings[context] != nil else { return }
+    if publishedBindings[model.id] == nil { publishedBindingOrder.append(model.id) }
+    publishedBindings[model.id] = context
+    trimDocumentBindings()
+  }
+
+  private func captureDocumentBinding(_ snapshot: ComposeDocumentSnapshot, overlay: ComposeDocumentOverlay?, pane: ComposePresentation) -> UUID? {
+    let nodes = composeQueue.filter { $0.target?.identity == pane.identity && $0.target?.epoch == pane.pane.compose.viewport.epoch }
+    let active = grid?.pendingComposition
+    let actual = store.panes.first { $0.leaf == pane.identity.leaf && $0.hasBuffer && $0.buffer == pane.identity.buffer }
+    let ownsActual = actual.map { snapshot.document.owns(window: pane.identity.window, pane: $0) } ?? false
+    for id in [composeFlow.targetContext, composeFlow.presentationContext].compactMap({ $0 }) {
+      guard let binding = documentBindings[id], binding.matches(snapshot, overlay: overlay) else { continue }
+      if !ownsActual || binding.nodes.map(\.token) == nodes.map(\.token) && binding.active?.token == active?.token { return id }
+    }
+    guard ownsActual, let primary = pane.cursor?.id else { return nil }
+    let captured = nodes.map { node -> ComposeDocumentBinding.Node in
+      let group = node.preview.map { text in text.presentation.values.keys.sorted {
+        if ($0 == text.presentation.primaryID) != ($1 == text.presentation.primaryID) { return $0 == text.presentation.primaryID }
+        return $0 < $1
+      } } ?? []
+      return .init(token: node.token, revision: node.target?.scope.bufferRevision ?? pane.scope.bufferRevision,
+        predecessor: node.chain?.predecessor, selector: node.isSourceSelection, origins: node.origins, hasText: node.preview != nil, cursors: group)
+    }
+    let id = UUID()
+    documentBindings[id] = .init(document: ObjectIdentifier(snapshot.document), overlay: overlay, scope: pane.scope,
+      marker: transitionSequence, nodes: captured, latest: nodes.last(where: { $0.preview != nil })?.preview,
+      active: active, displayed: pane.layout.composition, primary: primary, newline: pane.pane.compose.nativeNewline)
+    return id
+  }
+
+  private func recordSourceTransition(first: QueuedInput, edit: WireComposeEditReceipt?, result: WireComposeEditReceipt?) {
+    guard let target = first.target, let owner = composeFlowOwner,
+          target.identity.window == owner.window, target.identity.leaf == owner.leaf, target.identity.buffer == owner.buffer,
+          target.epoch == owner.epoch else { return }
+    let receipt = edit ?? result
+    var ids: [UInt64]?
+    if case .selection(let selector) = first.input, let receipt {
+      let count = selector.input(id: 0).selectionTargets.count
+      if receipt.pane.cursors.count == count, receipt.pane.cursors.filter(\.primary).count == 1,
+         Set(receipt.pane.cursors.map(\.id)).count == count {
+        ids = receipt.pane.cursors.sorted { a,b in a.primary != b.primary ? a.primary : a.id < b.id }.map(\.id)
+      }
+    }
+    transitionSequence += 1
+    sourceTransitions.append(.init(sequence: transitionSequence, token: first.token,
+      value: receipt.flatMap { .init($0, original: target.scope, epoch: target.epoch, selectedIDs: ids) }))
+    if sourceTransitions.count > 64 { sourceTransitions.removeFirst(sourceTransitions.count - 64) }
   }
 
   func gridAccessibility(_ grid: CellGridView, activate: Bool) -> ComposeCompleteAccessibility? {
@@ -596,6 +685,10 @@ final class NativeEditor: NSObject, CellGridDelegate {
 
   func grid(_ grid: CellGridView, replaceDocumentSelection text: String, in model: ComposeDocumentPresentation) -> Bool {
     replaceDocumentSelection(text, in: model)
+  }
+
+  func grid(_ grid: CellGridView, documentActionsAvailable model: ComposeDocumentPresentation) -> Bool {
+    documentActionsAvailable(model)
   }
 
   private func updateImageDemands(revalidate: Bool = false) {
@@ -782,7 +875,7 @@ final class NativeEditor: NSObject, CellGridDelegate {
 
   private func enqueueDocumentAction(_ ranges: [NSRange], in model: ComposeDocumentPresentation, replacement: String?) -> Bool {
     guard receivedHello, store.composeSourceSelections, let grid, let pane = grid.focusedCompose,
-          model.document.owns(window: UInt64(store.windowID),pane: pane.pane),
+          composeDocument.snapshot?.document === model.document || publishedBindings[model.id] != nil,
           replacement == nil || pane.pane.compose.editable,
           !ranges.isEmpty, ranges.count <= 1024 else { return false }
     let capturedOverlay: ComposeDocumentOverlay?
@@ -791,10 +884,17 @@ final class NativeEditor: NSObject, CellGridDelegate {
         composition: pane.layout.composition,virtualInsertion: pane.layout.virtualInsertion,virtualSelections: pane.virtualSelections) else { return false }
       capturedOverlay = captured
     } else { capturedOverlay = nil }
+    let sameOverlay: Bool
     switch (model.overlay,capturedOverlay) {
-    case (nil,nil): break
-    case (let a?,let b?) where a.isEquivalent(to:b): break
-    default: return false
+    case (nil,nil): sameOverlay = true
+    case (let a?,let b?): sameOverlay = a.isEquivalent(to:b)
+    default: sameOverlay = false
+    }
+    let actual = store.panes.first { $0.leaf == pane.identity.leaf && $0.hasBuffer && $0.buffer == pane.identity.buffer }
+    let current = sameOverlay && model.document.owns(window: pane.identity.window, pane: pane.pane)
+      && actual.map { model.document.owns(window: pane.identity.window, pane: $0) } == true
+    if !current {
+      return enqueueRetainedDocumentAction(ranges, in: model, replacement: replacement, pane: pane)
     }
     let sorted = ranges.sorted { ($0.location,$0.length) < ($1.location,$1.length) }
     guard ranges.allSatisfy({ $0.location >= 0 && $0.location != NSNotFound && $0.length >= 0
@@ -878,6 +978,77 @@ final class NativeEditor: NSObject, CellGridDelegate {
     return true
   }
 
+  private func replayDocumentHistory(_ original: ComposeDocumentAction, after marker: UInt64) -> ComposeDocumentAction? {
+    guard marker <= transitionSequence,
+          sourceTransitions.first.map({ marker >= $0.sequence - 1 }) ?? (marker == transitionSequence) else { return nil }
+    var action = original
+    for event in sourceTransitions where event.sequence > marker {
+      if let value = event.value {
+        guard let next = action.resolving(value, token: event.token) else { return nil }; action = next
+      } else if action.depends(on: event.token) { return nil }
+    }
+    return action
+  }
+
+  private func currentDocumentOwner(_ model: ComposeDocumentPresentation) -> WirePane? {
+    guard connected, shown, let owner = composeFlowOwner, owner.isSameDocument(as: model.document.owner),
+          composeDocument.snapshot?.document === model.document || publishedBindings[model.id] != nil,
+          UInt64(store.windowID) == owner.window else { return nil }
+    return store.panes.first { $0.leaf == owner.leaf && $0.hasBuffer && $0.buffer == owner.buffer && $0.hasCompose
+      && $0.compose.hasViewport && $0.compose.viewport.epoch == owner.epoch
+      && $0.compose.assetAuthority == owner.authority && $0.compose.assetDocument == owner.document }
+  }
+
+  private func action(_ action: ComposeDocumentAction, owns pane: WirePane) -> Bool {
+    action.owner.revision == pane.compose.bufferRevision && action.owner.length == pane.compose.documentLen
+      && action.scope.selectionRevision == pane.compose.selectionRevision
+      && action.owner.epoch == pane.compose.viewport.epoch && action.owner.authority == pane.compose.assetAuthority
+      && action.owner.document == pane.compose.assetDocument
+  }
+
+  func documentActionsAvailable(_ model: ComposeDocumentPresentation) -> Bool {
+    guard let pane = currentDocumentOwner(model) else { return false }
+    if model.document.owns(window: UInt64(store.windowID), pane: pane) { return true }
+    guard let id = publishedBindings[model.id], let binding = documentBindings[id], let length = Int(exactly: model.document.owner.length),
+          let captured = ComposeDocumentAction(owner: model.document.owner, scope: binding.scope,
+            bounds: [.init(start: .source(length, affinity: .upstream), end: .source(length, affinity: .upstream))], kind: .selection),
+          let rebased = replayDocumentHistory(captured, after: binding.marker) else { return false }
+    return action(rebased, owns: pane)
+  }
+
+  private func enqueueRetainedDocumentAction(_ ranges: [NSRange], in model: ComposeDocumentPresentation,
+                                            replacement: String?, pane: ComposePresentation) -> Bool {
+    guard let actual = currentDocumentOwner(model), let id = publishedBindings[model.id], let binding = documentBindings[id],
+          let captured = binding.action(ranges, in: model, replacement: replacement), let grid else { return false }
+    grid.finishComposition()
+    guard let rebased = replayDocumentHistory(captured, after: binding.marker), action(rebased, owns: actual) else { return false }
+    let target = grid.composeSnapshot(actual) ?? pane
+    let token = UUID()
+    if let barrier = composeQueue.last?.token {
+      enqueueCompose(.document(rebased, after: barrier), target: target, token: token)
+      if replacement == nil { publishRetainedSelection(ranges, in: model, binding: binding, token: token) }
+      return true
+    }
+    guard let ready = rebased.ready() else { return false }
+    switch ready {
+    case .selection(let change):
+      enqueueCompose(.selection(change), target: target, token: token)
+      publishRetainedSelection(ranges, in: model, binding: binding, token: token)
+    case .replacement(let change): enqueueCompose(.replacement(change), target: target, token: token)
+    }
+    return true
+  }
+
+  private func publishRetainedSelection(_ ranges: [NSRange], in model: ComposeDocumentPresentation,
+                                        binding: ComposeDocumentBinding, token: UUID) {
+    guard composeFlow.presentation === model else { return }
+    let context = UUID()
+    var selected = binding; selected.selectedBy = token
+    documentBindings[context] = selected
+    _ = composeFlow.select(ranges, in: model, context: context, until: token)
+    trimDocumentBindings()
+  }
+
   private func reportDocumentActionCancellation() {
     let message = "The editor selection changed before it could be confirmed. Select the text again."
     guard lastComposeCancellation != message else { return }
@@ -934,7 +1105,7 @@ final class NativeEditor: NSObject, CellGridDelegate {
   }
 
   func grid(_ grid: CellGridView, commit text: ComposePendingText, initial: ComposePendingText,
-            after: UUID?, afterAction: Bool, virtualPrefix: ComposeVirtualSelections?, in pane: ComposePresentation) {
+            token: UUID, after: UUID?, afterAction: Bool, virtualPrefix: ComposeVirtualSelections?, in pane: ComposePresentation) {
     guard receivedHello else { for value in text.recoveryTexts { self.grid(grid, recover: value) }; return }
     let chain = after.map { CompositionChain(predecessor: $0, initial: initial, text: text, afterAction: afterAction) }
     if let after, !composeQueue.contains(where: { $0.token == after }) {
@@ -944,7 +1115,7 @@ final class NativeEditor: NSObject, CellGridDelegate {
     if after != nil { input = .pendingText(text) }
     else if let replacement = text.replacement(scope: pane.scope, epoch: pane.pane.compose.viewport.epoch) { input = .replacement(replacement) }
     else { for value in text.recoveryTexts { self.grid(grid, recover: value) }; return }
-    enqueueCompose(input, target: pane, chain: chain, preview: text, virtualPrefix: virtualPrefix)
+    enqueueCompose(input, target: pane, chain: chain, preview: text, virtualPrefix: virtualPrefix, token: token)
   }
 
   /// Rebase only descendants of this acknowledged native edit. Its immutable
@@ -957,6 +1128,7 @@ final class NativeEditor: NSObject, CellGridDelegate {
       return receipt
     }
     let edit = valid(edit), result = valid(result ?? edit)
+    recordSourceTransition(first: first, edit: edit, result: result)
     var failed: Set<UUID> = edit == nil && result == nil ? [first.token] : []
     var retained = [first]
     var prediction = result?.pane
@@ -1243,11 +1415,11 @@ final class NativeEditor: NSObject, CellGridDelegate {
   private func enqueueCompose(_ input: PendingInput, target: ComposePresentation?, chain: CompositionChain? = nil,
                               preview: ComposePendingText? = nil, pointerPreview: ComposePointer.Preview? = nil,
                               virtualPrefix: ComposeVirtualSelections? = nil, selectionPredecessor: UUID? = nil,
-                              documentSelectionPreview: ComposeVirtualSelections? = nil) {
+                              documentSelectionPreview: ComposeVirtualSelections? = nil, token: UUID = UUID()) {
     if composeQueue.isEmpty { lastComposeCancellation = nil }
-    composeQueue.append(.init(input: input, scrollGeneration: composeViewports.userScrollGeneration,
+    composeQueue.append(.init(token: token, input: input, scrollGeneration: composeViewports.userScrollGeneration,
       target: target.map(InputTarget.init), chain: chain,
-      preview: preview, snapshot: target, pointerPreview: pointerPreview, virtualPrefix: virtualPrefix,
+      preview: preview, origins: preview?.origins(), snapshot: target, pointerPreview: pointerPreview, virtualPrefix: virtualPrefix,
       selectionPredecessor: selectionPredecessor,documentSelectionPreview: documentSelectionPreview))
     grid?.refreshComposeImages()
     pumpComposeInput()

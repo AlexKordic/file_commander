@@ -129,6 +129,176 @@ final class ComposeBackendTests: XCTestCase {
   }
 
   @MainActor
+  func testRetainedCompleteSourceSelectionRebasesThroughAcknowledgedOrdinaryText() async throws {
+    let backend = try backend(); defer { backend.captureDiagnostics("retained-source"); backend.stop() }
+    let editor = editor(BackendPasteboard(), documentQuietNanoseconds: 1_000_000_000); defer { editor.detachAll() }
+    let original = "alpha café tail\n", file = backend.root.appendingPathComponent("retained-source.md")
+    try Data(original.utf8).write(to: file)
+    try await attach(backend, file: file, editor: editor, requireTables: false)
+    let model = try await completeModel(editor), grid = try XCTUnwrap(editor.grid)
+    let selected = (model.text as NSString).range(of: "café", options: .literal)
+    grid.insertText("P", replacementRange: NSRange(location: NSNotFound, length: 0))
+    try await eventually(editor, "ordinary text acknowledged before the complete snapshot refresh") {
+      editor.store.panes.first?.compose.bufferRevision != model.document.owner.revision
+    }
+    XCTAssertTrue(editor.documentActionsAvailable(model))
+    XCTAssertTrue(editor.selectDocument([selected], in: model))
+    grid.insertText("新", replacementRange: NSRange(location: NSNotFound, length: 0))
+    editor.send(.action(name: "save", argsJson: ""))
+    try await eventually(editor, "retained source range shifts through its actual native insertion proof") {
+      (try? Data(contentsOf: file)) == Data("Palpha 新 tail\n".utf8)
+    }
+    XCTAssertEqual(model.text, original); XCTAssertTrue(editor.uninsertedText.isEmpty)
+    editor.send(.action(name: "undo", argsJson: "")); editor.send(.action(name: "save", argsJson: ""))
+    try await eventually(editor, "selection replacement undoes separately") { (try? Data(contentsOf: file)) == Data(("P" + original).utf8) }
+    editor.send(.action(name: "undo", argsJson: "")); editor.send(.action(name: "save", argsJson: ""))
+    try await eventually(editor, "ordinary native insertion keeps its original undo boundary") { (try? Data(contentsOf: file)) == Data(original.utf8) }
+  }
+
+  @MainActor
+  func testRetainedPublicSelectionImmediatelyOwnsTheFollowingSelectedTextSetter() async throws {
+    let backend = try backend(); defer { backend.captureDiagnostics("retained-public-setters"); backend.stop() }
+    let editor = editor(BackendPasteboard(), documentQuietNanoseconds: 1_000_000_000); defer { editor.detachAll() }
+    let original = "Tail café\n", file = backend.root.appendingPathComponent("retained-public-setters.md")
+    try Data(original.utf8).write(to: file)
+    try await attach(backend, file: file, editor: editor, requireTables: false)
+    _ = try await completeModel(editor)
+    let grid = try XCTUnwrap(editor.grid)
+    grid.setMarkedText("日本abc", selectedRange: NSRange(location: 0, length: 1), replacementRange: NSRange(location: NSNotFound, length: 0))
+    let marked = try await completeModel(editor, provisional: true)
+    grid.unmarkText()
+    try await eventually(editor, "marked text leaves the input queue") { editor.store.panes.first?.compose.bufferRevision != marked.document.owner.revision }
+    let current = try XCTUnwrap(grid.completeAccessibility?.model)
+    XCTAssertNotEqual(current.document.owner.revision, editor.store.panes.first?.compose.bufferRevision)
+    grid.setAccessibilitySelectedTextRange(NSRange(location: 1, length: 3))
+    XCTAssertEqual(grid.accessibilitySelectedTextRange(), NSRange(location: 1, length: 3))
+    XCTAssertEqual(grid.accessibilitySelectedText(), "本ab")
+    grid.setAccessibilitySelectedText("X")
+    editor.send(.action(name: "save", argsJson: ""))
+    try await eventually(editor, "the second AX setter replaces the proposed clause, not an old selection or current caret") {
+      (try? Data(contentsOf: file)) == Data(("日Xc" + original).utf8)
+    }
+    XCTAssertTrue(editor.uninsertedText.isEmpty)
+  }
+
+  @MainActor
+  func testRetainedCompleteMarkedEndpointsBindAfterTheirCommitHasLeftTheQueue() async throws {
+    let backend = try backend(); defer { backend.captureDiagnostics("retained-ime"); backend.stop() }
+    let editor = editor(BackendPasteboard(), documentQuietNanoseconds: 1_000_000_000); defer { editor.detachAll() }
+    let original = "Tail café\n", phrase = "日本abc " + String(repeating: "café 東京\n", count: 1000)
+    let file = backend.root.appendingPathComponent("retained-ime.md"); try Data(original.utf8).write(to: file)
+    try await attach(backend, file: file, editor: editor, requireTables: false)
+    _ = try await completeModel(editor)
+    let grid = try XCTUnwrap(editor.grid), unspecified = NSRange(location: NSNotFound, length: 0)
+    grid.setMarkedText(phrase, selectedRange: NSRange(location: 0, length: 2), replacementRange: unspecified)
+    let model = try await completeModel(editor, provisional: true)
+    grid.unmarkText()
+    try await eventually(editor, "marked commit acknowledged before its full projection refresh") {
+      editor.store.panes.first?.compose.bufferRevision != model.document.owner.revision
+    }
+    let retained = try XCTUnwrap(grid.completeAccessibility?.model)
+    XCTAssertNotEqual(retained.document.owner.revision, editor.store.panes.first?.compose.bufferRevision)
+    XCTAssertEqual(grid.accessibilityString(for: NSRange(location: 1, length: 3)), "本ab")
+    XCTAssertTrue(grid.isAccessibilitySelectorAllowed(#selector(grid.setAccessibilitySelectedTextRange(_:))))
+    grid.setAccessibilitySelectedTextRange(NSRange(location: 1, length: 3))
+    grid.insertText("Z", replacementRange: unspecified); editor.send(.action(name: "save", argsJson: ""))
+    let expected = (phrase as NSString).replacingCharacters(in: NSRange(location: 1, length: 3), with: "Z") + original
+    try await eventually(editor, "draft endpoints resolve through a compact receipt after the queue node is gone") {
+      (try? Data(contentsOf: file)) == Data(expected.utf8)
+    }
+    XCTAssertTrue(editor.uninsertedText.isEmpty)
+    editor.send(.action(name: "undo", argsJson: "")); editor.send(.action(name: "save", argsJson: ""))
+    try await eventually(editor, "undo only the replacement within the old marked value") { (try? Data(contentsOf: file)) == Data((phrase + original).utf8) }
+    editor.send(.action(name: "undo", argsJson: "")); editor.send(.action(name: "save", argsJson: ""))
+    try await eventually(editor, "undo the original marked transaction") { (try? Data(contentsOf: file)) == Data(original.utf8) }
+  }
+
+  @MainActor
+  func testRetainedMarkedPrimaryReplacementUsesItsOwnSelectionAfterAcknowledgment() async throws {
+    let backend = try backend(); defer { backend.captureDiagnostics("retained-primary"); backend.stop() }
+    let editor = editor(BackendPasteboard(), documentQuietNanoseconds: 1_000_000_000); defer { editor.detachAll() }
+    let original = "Tail café\n", file = backend.root.appendingPathComponent("retained-primary.md")
+    try Data(original.utf8).write(to: file)
+    try await attach(backend, file: file, editor: editor, requireTables: false)
+    _ = try await completeModel(editor)
+    let grid = try XCTUnwrap(editor.grid)
+    grid.setMarkedText("日本", selectedRange: NSRange(location: 0, length: 1), replacementRange: NSRange(location: NSNotFound, length: 0))
+    let model = try await completeModel(editor, provisional: true)
+    XCTAssertEqual(model.selectedRanges?.first, NSRange(location: 0, length: 1))
+    grid.unmarkText()
+    try await eventually(editor, "primary insertion accepted") { editor.store.panes.first?.compose.bufferRevision != model.document.owner.revision }
+    XCTAssertTrue(editor.replaceDocumentSelection("X", in: model))
+    editor.send(.action(name: "save", argsJson: ""))
+    try await eventually(editor, "retained primary selection replaces its captured clause, not the current caret") {
+      (try? Data(contentsOf: file)) == Data(("X本" + original).utf8)
+    }
+    XCTAssertTrue(editor.uninsertedText.isEmpty)
+  }
+
+  @MainActor
+  func testRetainedCompleteActionsRefuseAnUnmodelledUndoAndRecoverReplacementOnce() async throws {
+    let backend = try backend(); defer { backend.captureDiagnostics("retained-unknown"); backend.stop() }
+    let editor = editor(BackendPasteboard(), documentQuietNanoseconds: 1_000_000_000); defer { editor.detachAll() }
+    let original = "Tail café\n", file = backend.root.appendingPathComponent("retained-unknown.md")
+    try Data(original.utf8).write(to: file)
+    try await attach(backend, file: file, editor: editor, requireTables: false)
+    let model = try await completeModel(editor), grid = try XCTUnwrap(editor.grid)
+    grid.setMarkedText("日本", selectedRange: NSRange(location: 2, length: 0), replacementRange: NSRange(location: NSNotFound, length: 0)); grid.unmarkText()
+    editor.send(.action(name: "save", argsJson: ""))
+    try await eventually(editor, "first edit saved") { (try? Data(contentsOf: file)) == Data(("日本" + original).utf8) }
+    editor.send(.action(name: "undo", argsJson: "")); editor.send(.action(name: "save", argsJson: ""))
+    try await eventually(editor, "undo returns identical bytes at another unknown source revision") { (try? Data(contentsOf: file)) == Data(original.utf8) }
+    XCTAssertFalse(editor.documentActionsAvailable(model))
+    XCTAssertFalse(editor.replaceDocumentSelection("recover me", in: model))
+    XCTAssertEqual(editor.uninsertedText, ["recover me"])
+    editor.detachAll(); editor.detachAll()
+    XCTAssertEqual(editor.uninsertedText, ["recover me"])
+    XCTAssertEqual(try Data(contentsOf: file), Data(original.utf8))
+  }
+
+  @MainActor
+  func testRetainedDraftMismatchCancelsDependentReplacementAndReleasesLogicalSelection() async throws {
+    let backend = try backend(); defer { backend.captureDiagnostics("retained-mismatch"); backend.stop() }
+    let editor = editor(BackendPasteboard(), documentQuietNanoseconds: 300_000_000); defer { editor.detachAll() }
+    let original = "Tail café\n", file = backend.root.appendingPathComponent("retained-mismatch.md")
+    try Data(original.utf8).write(to: file)
+    try await attach(backend, file: file, editor: editor, requireTables: false)
+    _ = try await completeModel(editor)
+    let grid = try XCTUnwrap(editor.grid), unspecified = NSRange(location: NSNotFound, length: 0)
+    grid.setMarkedText("日本", selectedRange: NSRange(location: 0, length: 1), replacementRange: unspecified)
+    let old = try await completeModel(editor, provisional: true)
+    grid.setMarkedText("新しい", selectedRange: NSRange(location: 3, length: 0), replacementRange: unspecified)
+    XCTAssertTrue(editor.selectDocument([NSRange(location: 0, length: 1)], in: old))
+    let proposed = try XCTUnwrap(grid.completeAccessibility?.model)
+    XCTAssertTrue(editor.replaceDocumentSelection("recover replacement", in: proposed))
+    editor.send(.action(name: "save", argsJson: ""))
+    try await eventually(editor, "changed IME payload is accepted, dependent stale actions are refused") {
+      (try? Data(contentsOf: file)) == Data(("新しい" + original).utf8) && editor.uninsertedText == ["recover replacement"]
+    }
+    _ = try await completeModel(editor)
+    XCTAssertEqual(grid.accessibilityValue() as? String, "新しい" + original)
+    XCTAssertTrue(editor.uninsertedText == ["recover replacement"])
+  }
+
+  @MainActor
+  func testRetiredCompleteModelCannotRegainActionsWhenShowingReusesEveryOwnerNumber() async throws {
+    let backend = try backend(); defer { backend.captureDiagnostics("retained-lifetime"); backend.stop() }
+    let editor = editor(BackendPasteboard()); defer { editor.detachAll() }
+    let original = "Tail café\n", file = backend.root.appendingPathComponent("retained-lifetime.md")
+    try Data(original.utf8).write(to: file)
+    try await attach(backend, file: file, editor: editor, requireTables: false)
+    let retired = try await completeModel(editor)
+    editor.switchBack(); editor.show()
+    let current = try await completeModel(editor)
+    XCTAssertEqual(retired.document.owner, current.document.owner)
+    XCTAssertFalse(retired.document === current.document)
+    XCTAssertFalse(editor.documentActionsAvailable(retired))
+    XCTAssertFalse(editor.selectDocument([NSRange(location: 0, length: 1)], in: retired))
+    XCTAssertTrue(editor.documentActionsAvailable(current))
+    XCTAssertEqual(try Data(contentsOf: file), Data(original.utf8))
+  }
+
+  @MainActor
   func testCompleteValueSelectsOffscreenSourceAndKeepsRapidFollowingTextInQueueOrder() async throws {
     let backend = try backend(); defer { backend.captureDiagnostics("document-action-offscreen"); backend.stop() }
     let editor = editor(BackendPasteboard()); defer { editor.detachAll() }
@@ -761,11 +931,12 @@ final class ComposeBackendTests: XCTestCase {
   }
 
   @MainActor
-  private func editor(_ pasteboard: BackendPasteboard,
+  private func editor(_ pasteboard: BackendPasteboard, documentQuietNanoseconds: UInt64 = 80_000_000,
                       decodeImage: @escaping @Sendable (Data, Int) throws -> ComposeImageAsset = { try ComposeImageAsset.decode($0, maximumDimension: $1) }) -> NativeEditor {
     _ = NSApplication.shared; NSApp.setActivationPolicy(.prohibited)
     return NativeEditor(pasteboard: pasteboard,
-      environment: ["FC_NATIVE_RICH_COMPOSE": "1", "FC_NATIVE_MEASURED_TABLES": "1"], decodeComposeImage: decodeImage)
+      environment: ["FC_NATIVE_RICH_COMPOSE": "1", "FC_NATIVE_MEASURED_TABLES": "1"],
+      documentQuietNanoseconds: documentQuietNanoseconds, decodeComposeImage: decodeImage)
   }
 
   @MainActor

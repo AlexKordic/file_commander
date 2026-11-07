@@ -73,6 +73,13 @@ public struct ComposeFlowMeasurement: Sendable {
     attachmentIndices[source].map {attachments[$0]}
   }
 
+  func selecting(_ value:ComposeDocumentPresentation) -> Self? {
+    guard value.sharesLayout(with:presentation) else {return nil}
+    return .init(document:document,presentation:value,environment:environment,lines:lines,fonts:fonts,styles:styles,
+      tables:tables,attachments:attachments,size:size,usage:usage,textIndex:textIndex,geometryGeneration:geometryGeneration,
+      plan:plan,inputDigest:inputDigest,admission:admission,attachmentIndices:attachmentIndices)
+  }
+
   /// Serialize only layout inputs, with literal protobuf string bytes. Swift
   /// String equality can equate differently encoded marker/table samples.
   /// This temporary encoding is hashed on the worker and is never retained.

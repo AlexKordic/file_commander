@@ -36,6 +36,7 @@ final class ComposeDocumentActionTests: XCTestCase {
   func testSelectionCanSpanAnEarlierRetainedPrefixAndALaterNormalizedInsertion() throws {
     let first = try pending("abc"), second = try pending("\nYZ",following: first,replacement: NSRange(location: 1,length: 1))
     XCTAssertEqual(second.presentation.primary.draft.string,"a\r\nYZc")
+    XCTAssertEqual(second.origins()?.retainedTextBytes, 4, "only this delta is retained, not the earlier abc prefix")
     guard case .inserted(let secondID,let selected)? = second.origin(atProvisionalUTF16: 3),
           case .before(let old)? = second.origin(atProvisionalUTF16: 6),
           case .inserted(let firstID,let retained)? = first.origin(atProvisionalUTF16: old) else { return XCTFail("origins must survive the later replacement") }
@@ -63,7 +64,8 @@ final class ComposeDocumentActionTests: XCTestCase {
         end: .inserted(text,cursor: .selectedGroup(selector,ordinal: 0),position: a,affinity: .downstream)),
       .init(start: .inserted(text,cursor: .selectedGroup(selector,ordinal: 1),position: a,affinity: .downstream),
         end: .inserted(text,cursor: .selectedGroup(selector,ordinal: 1),position: a,affinity: .downstream))],kind: .selection))
-    let selected = receipt([],before: 4,length: 4,after: 4,resultLength: 4)
+    var selected = receipt([],before: 4,length: 4,after: 4,resultLength: 4)
+    selected.pane.cursors = [.with { $0.id = 42; $0.primary = true }, .with { $0.id = 107 }]
     XCTAssertNil(action.resolving(selected,token: selector))
     XCTAssertNil(action.resolving(selected,token: selector,selectedIDs: [42,42]))
     let bound = try XCTUnwrap(action.resolving(selected,token: selector,selectedIDs: [42,107]))
@@ -92,6 +94,24 @@ final class ComposeDocumentActionTests: XCTestCase {
     XCTAssertEqual(replacement.input(id: 2).replacementStart,1); XCTAssertEqual(replacement.input(id: 2).replacementEnd,4)
   }
 
+  func testCompactTransitionsReplayAfterTheirOriginalPaneBodyIsReleased() throws {
+    let token = UUID(), secondToken = UUID()
+    var first = receipt([anchor(1, before: 0..<0, after: 0..<2, text: "é")], before: 4, length: 4, after: 5, resultLength: 6)
+    first.pane.text = String(repeating: "unneeded receipt body", count: 20_000)
+    let compact = try XCTUnwrap(ComposeDocumentAction.Transition(first, original: scope, epoch: 7))
+    first.pane.text = "retired"; first.pane.bufferRevision = 200
+    let captured = try XCTUnwrap(ComposeDocumentAction(owner: owner, scope: scope, bounds: [
+      .init(start: .source(0, affinity: .upstream), end: .source(4, affinity: .upstream))], kind: .selection))
+    let once = try XCTUnwrap(captured.resolving(compact, token: token))
+    let second = receipt([anchor(1, before: 2..<3, after: 2..<3, text: "X")], before: 5, length: 6, after: 6, resultLength: 6)
+    let another = try XCTUnwrap(ComposeDocumentAction.Transition(second, original: once.scope, epoch: 7))
+    XCTAssertNil(captured.resolving(another, token: secondToken), "a skipped source version is not guessed")
+    guard case .selection(let selection)? = once.resolving(another, token: secondToken)?.ready() else { return XCTFail("compact history should bind copied bounds") }
+    XCTAssertEqual(selection.input(id: 1).selectionTargets[0].anchor, 0)
+    XCTAssertEqual(selection.input(id: 1).selectionTargets[0].position, 6)
+    XCTAssertFalse(captured.depends(on: token))
+  }
+
   func testOriginBoundariesAndOriginalContextNeverInventMissingRawText() throws {
     let inserted = try pending("日本")
     guard case .inserted(let id,let point)? = inserted.origin(atProvisionalUTF16: 1) else { return XCTFail("scalar point owns its insertion") }
@@ -107,6 +127,24 @@ final class ComposeDocumentActionTests: XCTestCase {
     guard case .selection(let change)? = root.resolving(receipt,token: token)?.ready() else { return XCTFail("a copied endpoint rebases through an insertion it does not own") }
     XCTAssertEqual(change.input(id: 2).selectionTargets[0].anchor,3)
     XCTAssertEqual(change.input(id: 2).selectionTargets[0].position,10)
+  }
+
+  func testVirtualRawContextsCannotBecomeSourceJustBecauseTheirByteLengthMatches() throws {
+    let pane = WireComposePane.with {
+      $0.documentLen = 4; $0.bufferRevision = 4; $0.viewport.epoch = 7; $0.nativeNewline = 1
+      $0.textContext.text = "éab"; $0.cursors = [.with { $0.id = 1; $0.primary = true; $0.utf16Position = 0 }]
+    }
+    let prefix = try XCTUnwrap(ComposePendingText(pane: pane, text: NSAttributedString(string: "XY"),
+      selected: NSRange(location: 2, length: 0), replacement: NSRange(location: 0, length: 1))?.committed(nativeNewline: 1))
+    let selections = try XCTUnwrap(ComposeVirtualSelections(prefix: prefix.presentation,
+      cursors: [1: .init(position: 1)]))
+    XCTAssertEqual(selections.actionPane(like: pane)?.documentLen, pane.documentLen)
+    let next = try XCTUnwrap(ComposePendingText(afterAction: selections, pane: pane, text: NSAttributedString(string: "Z"),
+      selected: NSRange(location: 1, length: 0), replacement: NSRange(location: NSNotFound, length: 0))?.committed(nativeNewline: 1))
+    XCTAssertNil(next.sourcePosition(beforePendingAtUTF16: 1, documentLength: pane.documentLen))
+    let origins = try XCTUnwrap(next.origins())
+    XCTAssertNil(origins.sourcePosition(beforePendingAtUTF16: 1, documentLength: pane.documentLen))
+    guard case .inserted? = origins.origin(atProvisionalUTF16: 1) else { return XCTFail("the owned insertion still binds through its future receipt") }
   }
 
   func testPointNormalizationChangesOnlyTheCurrentDeltaAndKeepsRetainedMixedEndings() throws {
