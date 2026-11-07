@@ -449,10 +449,18 @@ python3 macos/tools/profile_compose.py --fresh ../editor-fresh \
   --profile release --output build-xcode-evidence/compose-resources-release
 ```
 
+The default `--window-policy paragraph` uses the complete-paragraph contract
+negotiated by capable native clients. Use `--window-policy legacy` for an explicit
+older-client comparison. The requested and exported policy must agree; both are
+recorded in the artifacts. Each run needs a new artifact directory so old binary
+panes cannot be mixed with new results.
+
 The tool runs an ignored Fresh parser/projection profile, exports actual binary
 Compose panes, then measures protobuf decoding and Core Text layout with the
 native consumer. Fixtures cover small and large prose, nested quotes/lists/code,
-an image-heavy paragraph, and a large table with unique cells. Each records
+single-line and multiline image-heavy paragraphs, and a large table with unique
+cells. The multiline paragraph checks that capable windows contain all 4,000
+images rather than ending at an intermediate physical line. Each records
 three samples, unchanged-layout reuse and four simultaneous pane layouts.
 It also records a resize from 960 to 640 points and a return to 960, retaining
 the preceding pane so complete table measurements can be reused. Returning
@@ -464,7 +472,7 @@ rectangles and table columns must match. Timing excludes those extra decodes
 and geometry comparisons; process peak memory includes both retained sets.
 Construction and first reuse are timed separately; reuse can also materialize
 lazy quote/code ornament geometry that the fresh layout has not requested yet.
-Artifacts include hardware/compiler/repository metadata, fixture SHA-256s,
+Artifacts include hardware/compiler/repository metadata, source and fixture SHA-256s,
 source/window/payload sizes, timings and process peak RSS. RSS is a cumulative
 process high-water mark, not the allocation cost of an individual case.
 

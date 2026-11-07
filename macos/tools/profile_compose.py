@@ -27,12 +27,17 @@ def main():
     parser.add_argument("--fresh", type=Path, required=True, help="matching Fresh source checkout")
     parser.add_argument("--output", type=Path, required=True, help="artifact directory")
     parser.add_argument("--profile", choices=("debug", "release"), default="debug")
+    parser.add_argument("--window-policy", choices=("paragraph", "legacy"), default="paragraph",
+                        help="Use capable native paragraph windows (default), or the older source window contract.")
     args = parser.parse_args()
     fresh, output = args.fresh.resolve(), args.output.resolve()
     output.mkdir(parents=True, exist_ok=True)
+    if any(output.glob("*.pb")) or any((output / name).exists() for name in ("backend.json", "native.json", "environment.json")):
+        parser.error("Choose a new artifact directory; existing profile data must not be mixed or overwritten.")
     metadata = {
         "started": datetime.datetime.now(datetime.timezone.utc).isoformat(),
         "profile": args.profile,
+        "window_policy": args.window_policy,
         "os": platform.platform(),
         "machine": platform.machine(),
         "fc_head": capture(["git", "rev-parse", "HEAD"]),
@@ -67,7 +72,11 @@ def main():
                   "--config", 'profile.fc-release.inherits="release"',
                   "--config", "profile.fc-release.opt-level=3"]
     cargo += ["profile_rich_compose_document_workloads", "--", "--ignored", "--nocapture"]
-    run(cargo, "backend.log", cwd=fresh, env=dict(os.environ, FC_COMPOSE_PROFILE_OUTPUT=str(output)))
+    run(cargo, "backend.log", cwd=fresh, env=dict(os.environ, FC_COMPOSE_PROFILE_OUTPUT=str(output),
+        FC_COMPOSE_PROFILE_PARAGRAPH_WINDOWS="1" if args.window_policy == "paragraph" else "0"))
+    backend = json.loads((output / "backend.json").read_text())
+    if backend.get("window_policy") != args.window_policy:
+        raise RuntimeError("Fresh did not report the requested window policy; use the matching resource profiler.")
     metadata["fixture_sha256"] = {path.name: hashlib.sha256(path.read_bytes()).hexdigest() for path in sorted(output.glob("*.pb"))}
     build = ["swift", "build", "--package-path", str(ROOT / "macos"), "-c", args.profile]
     run(build + ["--product", "fc-compose-profile"], "native-build.log")
