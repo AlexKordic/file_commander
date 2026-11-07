@@ -26,9 +26,10 @@ func geometry(_ layout: ComposePaneLayout) throws -> Data {
   let fragments: [[String: Any]] = layout.text.fragments.map { fragment in
     let runs: [[String: Any]] = (CTLineGetGlyphRuns(fragment.line) as! [CTRun]).map { run in
       let count = CTRunGetGlyphCount(run)
-      var indices = [CFIndex](repeating: 0, count: count), glyphs = [CGGlyph](repeating: 0, count: count)
+      let indices = fragment.shaped.indices(of:run)
+      var glyphs = [CGGlyph](repeating: 0, count: count)
       var positions = [CGPoint](repeating: .zero, count: count)
-      CTRunGetStringIndices(run, CFRange(), &indices); CTRunGetGlyphs(run, CFRange(), &glyphs)
+      CTRunGetGlyphs(run, CFRange(), &glyphs)
       CTRunGetPositions(run, CFRange(), &positions)
       let font = (CTRunGetAttributes(run) as NSDictionary)[kCTFontAttributeName] as! CTFont
       return ["font": CTFontCopyPostScriptName(font) as String, "font_size": CTFontGetSize(font),

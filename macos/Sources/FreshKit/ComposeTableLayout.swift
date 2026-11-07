@@ -14,7 +14,7 @@ extension ComposeTextLayout {
     }
   }
 
-  public struct TablePosition: Equatable {
+  public struct TablePosition: Equatable, Sendable {
     public let table: Int
     public let row: Range<Int>
     /// nil identifies a structural source row spanning all columns.
@@ -22,7 +22,7 @@ extension ComposeTextLayout {
     public let source: Range<Int>
   }
 
-  public struct TableCell {
+  public struct TableCell: Sendable {
     public let source: Range<Int>?
     public let display: NSRange?
     public let rect, content: CGRect
@@ -30,7 +30,7 @@ extension ComposeTextLayout {
     public var missing: Bool { source == nil }
   }
 
-  public struct TableRow {
+  public struct TableRow: Sendable {
     public let source: Range<Int>
     public let contentEnd: Int
     public let rect: CGRect
@@ -38,7 +38,7 @@ extension ComposeTextLayout {
     public let cells: [TableCell]
   }
 
-  public struct Table {
+  public struct Table: Sendable {
     public let source: Range<Int>
     public let rect: CGRect
     public let columns: [CGFloat]
@@ -61,7 +61,7 @@ struct ComposeMeasuredTable {
   let indent: CGFloat
   var width: CGFloat { columns.reduce(0, +) }
 
-  init?(run: ComposeTextLayout.TableRun, attributed: NSAttributedString, typesetter: CTTypesetter?, font: CTFont,
+  init?(run: ComposeTextLayout.TableRun, attributed: NSAttributedString, typesetter: ComposeShapingContexts?, font: CTFont,
         width: CGFloat, indices: [Int: Int], attachments: [ComposeTextLayout.Attachment]) {
     guard [run.indent, run.before, run.after].allSatisfy({ $0.isFinite && $0 >= 0 }),
           !run.table.alignments.isEmpty else { return nil }

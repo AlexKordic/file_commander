@@ -771,10 +771,11 @@ final class ComposeInputTests: XCTestCase {
     var checked = 0
     for fragment in fragments {
       for run in CTLineGetGlyphRuns(fragment.line) as! [CTRun] {
-        let count = CTRunGetGlyphCount(run), source = CTRunGetStringRange(run)
-        var indices = [CFIndex](repeating: 0, count: count), positions = [CGPoint](repeating: .zero, count: count)
+        let count = CTRunGetGlyphCount(run), source = fragment.shaped.range(of:run)
+        let indices = fragment.shaped.indices(of:run)
+        var positions = [CGPoint](repeating: .zero, count: count)
         var advances = [CGSize](repeating: .zero, count: count)
-        CTRunGetStringIndices(run, CFRange(), &indices); CTRunGetPositions(run, CFRange(), &positions)
+        CTRunGetPositions(run, CFRange(), &positions)
         CTRunGetAdvances(run, CFRange(), &advances)
         let boundaries = Array(Set(indices + [source.location + source.length])).sorted()
         for index in 0..<count where advances[index].width > 1 {

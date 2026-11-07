@@ -25,16 +25,41 @@ public final class ComposePaneLayout {
   public let draftDisplayRanges: [UInt64: NSRange]
   public let virtualInsertion: ComposeVirtualInsertion?
   private let contextDisplayRanges: [UInt64: NSRange]
+  let maximumAuxiliaryContextUnits: Int
 
   public init?(pane: WireComposePane, body: CTFont, monospace: CTFont, width: CGFloat,
                typography: ComposeTypography = .init(),
                images: [UInt64: ComposeImageState] = [:], reuse: ComposePaneLayout? = nil,
                sharingMeasurementsWith peers: [ComposePaneLayout] = [],
                measuredBase: ComposePaneLayout? = nil,
-               preedit: ComposeMarkedText? = nil, composition: ComposeComposition? = nil, virtualInsertion: ComposeVirtualInsertion? = nil) {
+               preedit: ComposeMarkedText? = nil, composition: ComposeComposition? = nil, virtualInsertion: ComposeVirtualInsertion? = nil,
+               measurement: ComposeTextLayout.MeasurementOptions? = nil, record: ((ComposeTextLayout.Fragment)->Bool)? = nil) {
     guard typography.isValid, width.isFinite, width > 0,
           let sourceStart = Int(exactly: pane.sourceStart), let sourceEnd = Int(exactly: pane.sourceEnd), sourceStart <= sourceEnd else { return nil }
     guard pane.images.allSatisfy({ !($0.rendered && $0.sourcePreview) }) else { return nil }
+    // Complete table samples and offscreen list markers are shaped before the
+    // main text layout. Admit them before either a cache miss or a cache hit;
+    // a previously measured sample cannot bypass this generation's budget.
+    var auxiliaryUnits = 0
+    if let measurement {
+      guard measurement.maximumContextUnits > 0, measurement.maximumCoordinates > 0,
+            measurement.maximumFragments > 0 else { return nil }
+      for context in pane.hangingContexts {
+        let units = context.text.utf16.count
+        guard units <= measurement.maximumContextUnits else { return nil }
+        auxiliaryUnits = max(auxiliaryUnits, units)
+      }
+      for table in pane.tables where table.hasMeasurement {
+        for column in table.measurement.columns {
+          for sample in column.samples {
+            let units = sample.text.utf16.count
+            guard units <= measurement.maximumContextUnits else { return nil }
+            auxiliaryUnits = max(auxiliaryUnits, units)
+          }
+        }
+      }
+    }
+    maximumAuxiliaryContextUnits = auxiliaryUnits
     let composition = composition ?? preedit.flatMap { ComposeComposition(primary: 0, values: [0: $0]) }
     let preedit = composition?.primary
     self.composition = composition; self.preedit = preedit; self.virtualInsertion = virtualInsertion
@@ -72,6 +97,7 @@ public final class ComposePaneLayout {
     // table measurements, but retain their own complete text layouts.
     // Virtual insertion has additional placement maps and uses the full path.
     for reuse in (reuse.map { [$0] } ?? []) + (measuredBase.map { [$0] } ?? []) {
+      guard measurement == nil,reuse.text.measurementUsage.retainedGlyphs else {continue}
       let sameComposition: Bool
       switch (composition, reuse.composition) {
       case (nil, nil): sameComposition = true
@@ -292,7 +318,8 @@ public final class ComposePaneLayout {
         columns: columns, adaptiveMinimum: composition != nil)
     }
     guard let layout = ComposeTextLayout(projection: projection, font: body, width: width,
-      lineSpacing: typography.lineSpacing, fonts: fonts, attachments: attachments, paragraphs: paragraphs, hanging: hanging, tables: tableRuns) else { return nil }
+      lineSpacing: typography.lineSpacing, fonts: fonts, attachments: attachments, paragraphs: paragraphs, hanging: hanging, tables: tableRuns,
+      measurement:measurement,record:record) else { return nil }
     text = layout
     links = ComposeLink.resolving(pane, text: layout, excluding: linkEdits)
     linkRanges = ComposeIntervalIndex(links.map { $0.range.location..<NSMaxRange($0.range) })
@@ -309,6 +336,21 @@ public final class ComposePaneLayout {
       a.start == b.start && a.end == b.end && a.role == b.role && a.flags == b.flags
         && a.hasContentStart == b.hasContentStart && a.contentStart == b.contentStart
     }
+  }
+
+  func matchesMeasurement(body:CTFont,monospace:CTFont,width:CGFloat,typography:ComposeTypography,imageSizes:[UInt64:CGSize]) -> Bool {
+    guard self.width==width,self.typography==typography,CFEqual(self.body,body),CFEqual(self.monospace,monospace) else {return false}
+    for image in pane.images where image.rendered || image.sourcePreview {
+      let state=images[image.start] ?? .loading
+      let actual:CGSize?
+      if case .deferred(let size)=state {actual=size} else {actual=state.asset?.originalSize}
+      guard actual==imageSizes[image.start] else {return false}
+    }
+    return true
+  }
+
+  public func measurementEnvironment(images:[UInt64:ComposeImageState]?=nil) -> ComposeFlowMeasurement.Environment {
+    .init(body:body,monospace:monospace,width:width,typography:typography,images:images ?? self.images)
   }
 
   public struct Palette {

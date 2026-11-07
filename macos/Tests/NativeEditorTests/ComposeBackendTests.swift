@@ -120,6 +120,48 @@ private final class ComposeBackend {
 
 final class ComposeBackendTests: XCTestCase {
   @MainActor
+  func testCompleteMeasuredFlowCertifiesFreshDrawingAtTheStartAndAtAnOffscreenSecondTable() async throws {
+    let backend = try backend(); defer { backend.captureDiagnostics("complete-flow"); backend.stop() }
+    let editor = editor(BackendPasteboard()); defer { editor.detachAll() }
+    let table = "| Key | Value |\r\n| --- | --- |\r\n| café | 東京 |\r\n\r\n"
+    let tail = "## Final heading\r\n\r\n" + table + "![picture](missing.png)\r\n"
+    let source = "# Complete flow\r\n\r\n" + table
+      + String(repeating: "Paragraph **bold** café 👩🏽‍💻 العربية אבג and a [link](target.md).\r\n\r\n", count: 1800) + tail
+    let file = backend.root.appendingPathComponent("flow.md"); try Data(source.utf8).write(to: file)
+    try await attach(backend, file: file, editor: editor)
+    let controller = editor.composeDocument; controller.activate()
+    try await eventually(editor, "complete projection for measured flow", timeout: 20) { controller.status == .ready }
+    let snapshot = try XCTUnwrap(controller.snapshot), grid = try XCTUnwrap(editor.grid)
+    let first = try XCTUnwrap(grid.focusedCompose), environment = first.layout.measurementEnvironment()
+    let flow = try await Task.detached { try ComposeFlowMeasurement.measure(snapshot, environment: environment) }.value
+    XCTAssertFalse(flow.usage.retainedGlyphs); XCTAssertGreaterThan(flow.lines.count, 1800)
+    XCTAssertLessThanOrEqual(flow.usage.maximumContextUnits, 16_384)
+    XCTAssertEqual(flow.tables.count, 2); XCTAssertFalse(flow.attachments.isEmpty)
+    XCTAssertTrue(flow.fonts.contains { $0.size > 20 }); XCTAssertFalse(flow.styles.isEmpty)
+    XCTAssertEqual(flow.correspondence(window: UInt64(editor.store.windowID), pane: first.pane, layout: first.layout), .zero)
+    XCTAssertEqual(first.pane.compose.viewport.position, 0, "measurement must not move the drawing viewport")
+    // The same real producer payload is also the serial old/new renderer fixture.
+    try snapshot.baseline.data.write(to: backend.root.appendingPathComponent("complete-flow.pb"))
+    let anchor = UInt64(source.utf8.count-tail.utf8.count)
+    editor.send(.composeViewport(.with {
+      $0.id = 90_001; $0.scope = first.scope; $0.position = anchor; $0.epoch = first.pane.compose.viewport.epoch
+    }))
+    try await eventually(editor, "drawing crop containing the offscreen second table", timeout: 20) {
+      guard let current = grid.focusedCompose else { return false }
+      return current.pane.compose.viewport.position == anchor && current.pane.compose.sourceStart > 0
+        && current.pane.compose.formattingReady && !current.layout.text.tables.isEmpty
+    }
+    let current = try XCTUnwrap(grid.focusedCompose)
+    let visible = try XCTUnwrap(snapshot.document.range(of: UInt64(editor.store.windowID), pane: current.pane))
+    XCTAssertGreaterThan(visible.location, 16_384)
+    let translation = try XCTUnwrap(flow.correspondence(window: UInt64(editor.store.windowID), pane: current.pane, layout: current.layout))
+    XCTAssertLessThan(translation.y, 0)
+    let heading = (snapshot.document.text as NSString).range(of: "Final heading", options: .literal)
+    XCTAssertNotEqual(heading.location, NSNotFound); XCTAssertNotNil(flow.bounds(for: heading))
+    XCTAssertEqual(try Data(contentsOf: file), Data(source.utf8))
+  }
+
+  @MainActor
   func testCompleteDocumentCoordinatorKeepsCaretAndEditUpdatesIncrementalAcrossFreshUndo() async throws {
     let backend = try backend(); defer { backend.captureDiagnostics("document-updates"); backend.stop() }
     let editor = editor(BackendPasteboard()); defer { editor.detachAll() }

@@ -236,7 +236,7 @@ public final class ComposeTextLayout {
     public var attachment: Range<Int>? = nil
   }
 
-  public struct Attachment {
+  public struct Attachment: Sendable {
     public let source: Range<Int>
     public let display: Range<Int>
     public let size: CGSize
@@ -248,7 +248,7 @@ public final class ComposeTextLayout {
       self.preview = preview
     }
   }
-  public struct PlacedAttachment {
+  public struct PlacedAttachment: Sendable {
     public let attachment: Attachment
     public let rect: CGRect
   }
@@ -258,17 +258,17 @@ public final class ComposeTextLayout {
   }
   static let attachmentKey = NSAttributedString.Key("fc.compose.attachment")
 
-  static func hangingPrefixWidth(_ line: CTLine, start: Int, content: Int) -> CGFloat {
+  static func hangingPrefixWidth(_ line: CTLine, start: Int, content: Int, origin: Int = 0) -> CGFloat {
     guard start < content else { return 0 }
     let runs = (CTLineGetGlyphRuns(line) as! [CTRun]).filter { run in
       let range = CTRunGetStringRange(run)
-      return range.location < content && range.location + range.length > start
+      return range.location+origin < content && range.location+origin+range.length > start
     }
     // The body caret is a visual coordinate. In a reordered prefix it can
     // include most of the RTL body, so measure the marker's logical glyphs.
     // Keep the contextual caret for LTR markers, including body-side kerning.
     guard runs.contains(where: { CTRunGetStatus($0).contains(.rightToLeft) }) else {
-      return CTLineGetOffsetForStringIndex(line, content, nil)
+      return CTLineGetOffsetForStringIndex(line, content-origin, nil)
     }
     var width: CGFloat = 0
     for run in runs {
@@ -278,7 +278,7 @@ public final class ComposeTextLayout {
       var advances = Array(repeating: CGSize.zero, count: count)
       CTRunGetStringIndices(run, CFRange(location: 0, length: 0), &indices)
       CTRunGetAdvances(run, CFRange(location: 0, length: 0), &advances)
-      for glyph in 0..<count where indices[glyph] >= start && indices[glyph] < content {
+      for glyph in 0..<count where indices[glyph]+origin >= start && indices[glyph]+origin < content {
         width += advances[glyph].width
       }
     }
@@ -335,7 +335,9 @@ public final class ComposeTextLayout {
   }
 
   public struct Fragment {
-    public let line: CTLine
+    public let shaped: ComposeShapedLine
+    public var line: CTLine { shaped.line }
+    public var indexOrigin: Int { shaped.origin }
     /// Global projection UTF-16 range, including a consumed line ending.
     /// An empty cell retains its global index even though its CTLine is empty.
     public let range: NSRange
@@ -345,6 +347,10 @@ public final class ComposeTextLayout {
     /// A caret may reach this index, but not enter a line ending's interior.
     public let contentEnd: Int
     public let table: TablePosition?
+    init(line: CTLine, range: NSRange, rect: CGRect, baseline: CGFloat, contentEnd: Int, table: TablePosition?, indexOrigin: Int = 0,context:NSString?=nil) {
+      shaped = .init(line:line,origin:indexOrigin,context:context);self.range=range;self.rect=rect
+      self.baseline=baseline;self.contentEnd=contentEnd;self.table=table
+    }
   }
 
   public let projection: ComposeProjection
@@ -352,6 +358,20 @@ public final class ComposeTextLayout {
   public let size: CGSize
   public let attachments: [PlacedAttachment]
   public let tables: [Table]
+  public struct MeasurementOptions: Sendable {
+    public var maximumContextUnits: Int
+    public var maximumCoordinates: Int
+    public var maximumFragments: Int
+    public init(maximumContextUnits:Int=65_536,maximumCoordinates:Int=262_144,maximumFragments:Int=262_144) {
+      self.maximumContextUnits=maximumContextUnits;self.maximumCoordinates=maximumCoordinates;self.maximumFragments=maximumFragments
+    }
+  }
+  public struct MeasurementUsage: Sendable {
+    public let maximumContextUnits,contexts,coordinateEntries,fragments: Int
+    public let retainedGlyphs: Bool
+  }
+  public let measurementUsage: MeasurementUsage
+  let measurementPlan: ComposeShapingContexts.Plan?
   let utf16ToByte: [Int: Int]
   let byteToUTF16: [Int: Int]
   let string: NSString
@@ -360,9 +380,11 @@ public final class ComposeTextLayout {
   /// takes place. Invalid font ranges fail instead of quietly mis-styling text.
   public init?(projection: ComposeProjection, font: CTFont, width: CGFloat,
                lineSpacing: CGFloat = 3, fonts: [FontRun] = [], attachments: [Attachment] = [],
-               paragraphs: [ParagraphRun] = [], hanging: [HangingRun] = [], tables: [TableRun] = []) {
+               paragraphs: [ParagraphRun] = [], hanging: [HangingRun] = [], tables: [TableRun] = [],
+               measurement: MeasurementOptions? = nil, record: ((Fragment)->Bool)? = nil) {
     guard width.isFinite, width > 0, lineSpacing.isFinite, lineSpacing >= 0 else { return nil }
-    let string = projection.text as NSString
+    if let measurement {guard measurement.maximumContextUnits>0,measurement.maximumCoordinates>0,measurement.maximumFragments>0 else {return nil}}
+    let string = NSString(string:projection.text)
     var utf16ToByte = [0: 0]
     var byteToUTF16 = [0: 0]
     var byte = 0, unit = 0, paragraphStart = 0
@@ -370,8 +392,7 @@ public final class ComposeTextLayout {
     for scalar in projection.text.unicodeScalars {
       byte += scalar.utf8.count
       unit += scalar.utf16.count
-      utf16ToByte[unit] = byte
-      byteToUTF16[byte] = unit
+      if measurement == nil {utf16ToByte[unit] = byte;byteToUTF16[byte] = unit}
       if !hasLongParagraph {
         // LF-delimited runs overestimate the length for other newline kinds.
         // This cheap rejection avoids another scan on ordinary short prose;
@@ -380,10 +401,26 @@ public final class ComposeTextLayout {
         if scalar.value == 0x0a { paragraphStart = unit }
       }
     }
-    let wrapping = hasLongParagraph ? ComposeWrappingBreaks(string) : nil
-    func suggest(_ typesetter: CTTypesetter, from: Int, width: Double) -> Int {
-      wrapping?.suggest(typesetter, from: from, width: width)
-        ?? CTTypesetterSuggestLineBreak(typesetter, from, width)
+    if let measurement {
+      var required:Set<Int>=[0,byte]
+      guard required.count<=measurement.maximumCoordinates else {return nil}
+      var overflow=false
+      func includePoint(_ point:Int) {
+        guard !overflow else {return}
+        guard required.count<measurement.maximumCoordinates || required.contains(point) else {overflow=true;return}
+        required.insert(point)
+      }
+      func include(_ range:Range<Int>) {includePoint(range.lowerBound);includePoint(range.upperBound)}
+      for font in fonts {include(font.display)}
+      for attachment in attachments {include(attachment.display)}
+      for paragraph in paragraphs {include(paragraph.display)}
+      for item in hanging {include(item.display);includePoint(item.contentStart)}
+      for table in tables {for row in table.table.rows {include(row.display);for cell in row.cells {if let range=cell.display {include(range)}}}}
+      guard !overflow else {return nil}
+      for point in required {
+        guard let unit=projection.textIndex.unit(forByte:point) else {return nil}
+        byteToUTF16[point]=unit;utf16ToByte[unit]=point
+      }
     }
     let attributed = NSMutableAttributedString(string: projection.text,
       attributes: [NSAttributedString.Key(kCTFontAttributeName as String): font,
@@ -403,7 +440,8 @@ public final class ComposeTextLayout {
     // image delegates are installed. Fixed column inputs need no extra shaper.
     let measuresText = hanging.contains { $0.measuredPrefix == nil }
       || tables.contains { $0.columns == nil || $0.adaptiveMinimum }
-    let measurementTypesetter = measuresText ? ComposeShaping.typesetter(attributed) : nil
+    let measurementTypesetter = measuresText ? ComposeShapingContexts(attributed,wrapping:hasLongParagraph,
+      maximumUnits:measurement?.maximumContextUnits) : nil
     var hangs: [(range: NSRange, content: Int, prefix: CGFloat, indent: CGFloat, physicalStart: Bool)] = []
     for item in hanging {
       guard let start = byteToUTF16[item.display.lowerBound], let end = byteToUTF16[item.display.upperBound],
@@ -420,15 +458,15 @@ public final class ComposeTextLayout {
       // Include at least the first complete body grapheme: cutting at the
       // marker changes kerning ("1) An"), even when a narrow pane wraps there.
       let measure = max(1, width - min(item.indent, width * 0.6))
-      let count = suggest(measurementTypesetter, from: start, width: Double(measure))
+      guard let count = measurementTypesetter.suggest(from:start,width:Double(measure)) else {return nil}
       let bodyEnd = NSMaxRange(string.rangeOfComposedCharacterSequence(at: content))
       var contextEnd = min(end, max(start + max(0, count), bodyEnd))
       if contextEnd < end {
         let cluster = string.rangeOfComposedCharacterSequence(at: contextEnd)
         if cluster.location < contextEnd { contextEnd = min(end, NSMaxRange(cluster)) }
       }
-      let prefix = CTTypesetterCreateLine(measurementTypesetter, CFRange(location: start, length: contextEnd - start))
-      let measured = Self.hangingPrefixWidth(prefix, start: start, content: content)
+      guard let prefix = measurementTypesetter.line(NSRange(location:start,length:contextEnd-start)) else {return nil}
+      let measured = Self.hangingPrefixWidth(prefix.line, start: start, content: content,origin:prefix.origin)
       guard measured.isFinite, measured >= 0 else { return nil }
       hangs.append((NSRange(location: start, length: end - start), content, measured, item.indent, false))
     }
@@ -504,16 +542,17 @@ public final class ComposeTextLayout {
     }
     // Non-preview images added run delegates after marker/cell measurement. Their
     // final typesetter must see those new attributes instead of reusing it.
-    guard let typesetter = (attachments.contains(where: { !$0.preview })
-      ? ComposeShaping.typesetter(attributed)
-      : (measurementTypesetter ?? ComposeShaping.typesetter(attributed))) else { return nil }
+    let typesetter = attachments.contains(where: { !$0.preview })
+      ? ComposeShapingContexts(attributed,wrapping:hasLongParagraph,maximumUnits:measurement?.maximumContextUnits)
+      : (measurementTypesetter ?? ComposeShapingContexts(attributed,wrapping:hasLongParagraph,maximumUnits:measurement?.maximumContextUnits))
     var lines: [Fragment] = []
     var from = 0
     var top: CGFloat = 0
     var placed: [PlacedAttachment] = []
     var placedRows = Array(repeating: [TableRow](), count: measuredTables.count)
     previews.sort { $0.end == $1.end ? $0.index < $1.index : $0.end < $1.end }
-    var nextPreview = 0
+    var nextPreview = 0, shapingFailed = false,fragmentCount=0
+    var rightExtent:CGFloat?
     let baseHeight = CTFontGetAscent(font) + CTFontGetDescent(font) + CTFontGetLeading(font)
     let blockIndex = ComposeIntervalIndex(blocks.map { $0.range.location..<NSMaxRange($0.range) })
     func block(at position: Int) -> (range: NSRange, style: ParagraphRun)? {
@@ -523,10 +562,11 @@ public final class ComposeTextLayout {
     }
     func append(_ range: NSRange, block: (range: NSRange, style: ParagraphRun)?, indent: CGFloat,
                 measure: CGFloat? = nil, table: TablePosition? = nil, alignment: ComposeTableModel.Alignment = .left) {
+      guard measurement.map({fragmentCount<$0.maximumFragments}) ?? true else {shapingFailed=true;return}
       if let block, range.location == block.range.location { top += block.style.before }
       // Core Text interprets length zero as "to the end", not an empty cell.
-      let line = range.length == 0 ? CTLineCreateWithAttributedString(NSAttributedString(string: ""))
-        : CTTypesetterCreateLine(typesetter, CFRange(location: range.location, length: range.length))
+      guard let shaped = typesetter.line(range) else {shapingFailed=true;return}
+      let line=shaped.line
       var ascent: CGFloat = 0, descent: CGFloat = 0, leading: CGFloat = 0
       let natural = CGFloat(CTLineGetTypographicBounds(line, &ascent, &descent, &leading))
       if range.length == 0 {
@@ -544,9 +584,14 @@ public final class ComposeTextLayout {
       let measure = measure ?? max(1, width - indent - (block?.style.trailing ?? 0))
       let shift = max(0, measure - natural) * (alignment == .center ? 0.5 : alignment == .right ? 1 : 0)
       let left = indent + shift
-      lines.append(Fragment(line: line, range: range,
+      let fragment=Fragment(line: line, range: range,
         rect: CGRect(x: left, y: top, width: max(1, measure - shift), height: height),
-        baseline: top + ascent, contentEnd: contentEnd, table: table))
+        baseline: top + ascent, contentEnd: contentEnd, table: table,indexOrigin:shaped.origin,context:shaped.context)
+      fragmentCount+=1
+      let right=left+max(natural,CTLineGetBoundsWithOptions(line,.useGlyphPathBounds).maxX)
+      rightExtent=rightExtent.map {max($0,right)} ?? right
+      if measurement == nil {lines.append(fragment)}
+      if record?(fragment) == false {shapingFailed=true;return}
       for run in CTLineGetGlyphRuns(line) as! [CTRun] {
         let attributes = CTRunGetAttributes(run) as NSDictionary
         guard let index = attributes[Self.attachmentKey] as? Int, attachments.indices.contains(index) else { continue }
@@ -572,8 +617,9 @@ public final class ComposeTextLayout {
     func wrapped(_ range: NSRange, indent: CGFloat, measure: CGFloat, table: TablePosition, alignment: ComposeTableModel.Alignment) -> Bool {
       var at = range.location
       if range.length == 0 { append(range, block: nil, indent: indent, measure: measure, table: table, alignment: alignment) }
+      guard !shapingFailed else {return false}
       while at < NSMaxRange(range) {
-        let suggestion = suggest(typesetter, from: at, width: Double(measure))
+        guard let suggestion = typesetter.suggest(from:at,width:Double(measure)) else {return false}
         var count = min(suggestion > 0 ? suggestion : string.rangeOfComposedCharacterSequence(at: at).length, NSMaxRange(range) - at)
         if at + count < NSMaxRange(range) {
           let cluster = string.rangeOfComposedCharacterSequence(at: at + count)
@@ -583,14 +629,15 @@ public final class ComposeTextLayout {
         // advance extends beyond the measure. Carry it onto the next line;
         // every source character and its caret still belongs to this cell.
         while count > 0 {
-          let line = CTTypesetterCreateLine(typesetter, CFRange(location: at, length: count))
-          guard CGFloat(CTLineGetTypographicBounds(line, nil, nil, nil)) > measure + 0.001 else { break }
+          guard let shaped = typesetter.line(NSRange(location:at,length:count)) else {return false}
+          guard CGFloat(CTLineGetTypographicBounds(shaped.line, nil, nil, nil)) > measure + 0.001 else { break }
           let last = string.rangeOfComposedCharacterSequence(at: at + count - 1)
           guard last.location > at else { break }
           count = last.location - at
         }
         guard count > 0, count <= NSMaxRange(range) - at else { return false }
         append(NSRange(location: at, length: count), block: nil, indent: indent, measure: measure, table: table, alignment: alignment)
+        guard !shapingFailed else {return false}
         at += count
       }
       return true
@@ -653,14 +700,14 @@ public final class ComposeTextLayout {
           }
           var existing: CGFloat = 0
           if whitespace > from {
-            let prefix = CTTypesetterCreateLine(typesetter, CFRange(location: from, length: whitespace - from))
-            existing = CGFloat(CTLineGetTypographicBounds(prefix, nil, nil, nil))
+            guard let prefix = typesetter.line(NSRange(location:from,length:whitespace-from)) else {return nil}
+            existing = CGFloat(CTLineGetTypographicBounds(prefix.line, nil, nil, nil))
           }
           desired += max(0, item.prefix - existing)
         }
       }
       let indent = min(desired, width * 0.6)
-      let suggested = suggest(typesetter, from: from, width: Double(max(1, width - indent - (paragraph?.style.trailing ?? 0))))
+      guard let suggested = typesetter.suggest(from:from,width:Double(max(1,width-indent-(paragraph?.style.trailing ?? 0)))) else {return nil}
       var count = suggested > 0 ? suggested : string.rangeOfComposedCharacterSequence(at: from).length
       if nextRow < tableRows.count { count = min(count, tableRows[nextRow].range.location - from) }
       guard count > 0, count <= string.length - from else { return nil }
@@ -671,11 +718,13 @@ public final class ComposeTextLayout {
         if cluster.location < from + count { count = NSMaxRange(cluster) - from }
       }
       append(NSRange(location: from, length: count), block: paragraph, indent: indent)
+      guard !shapingFailed else {return nil}
       from += count
     }
     if !emptyTableEOF && (string.length == 0 || string.character(at: string.length - 1) == 10 || string.character(at: string.length - 1) == 13) {
       append(NSRange(location: string.length, length: 0), block: nil, indent: 0)
     }
+    guard !shapingFailed else {return nil}
     self.projection = projection
     self.fragments = lines
     self.tables = measuredTables.enumerated().compactMap { index, table in
@@ -685,24 +734,28 @@ public final class ComposeTextLayout {
     }
     // A complete grapheme can exceed a narrow measure. Its real shaped
     // advance/ink and caret must remain reachable by horizontal scrolling.
-    let right = lines.map { fragment in
-      fragment.rect.minX + max(CGFloat(CTLineGetTypographicBounds(fragment.line, nil, nil, nil)),
-        CTLineGetBoundsWithOptions(fragment.line, .useGlyphPathBounds).maxX)
-    }.max() ?? width
+    let right = rightExtent ?? width
     self.size = CGSize(width: max(width, right + 1, self.tables.map(\.rect.maxX).max() ?? width,
       placed.map(\.rect.maxX).max() ?? width), height: top)
     self.utf16ToByte = utf16ToByte
     self.byteToUTF16 = byteToUTF16
     self.string = string
     self.attachments = placed
+    measurementUsage = .init(maximumContextUnits:max(typesetter.usage.maximumUnits,measurementTypesetter?.usage.maximumUnits ?? 0),
+      contexts:typesetter.usage.contexts+(measurementTypesetter === typesetter ? 0 : measurementTypesetter?.usage.contexts ?? 0),
+      coordinateEntries:utf16ToByte.count+byteToUTF16.count,fragments:fragmentCount,retainedGlyphs:measurement == nil)
+    measurementPlan=measurement == nil ? nil : typesetter.plan()
   }
+
+  func byte(forUnit unit:Int) -> Int? {utf16ToByte[unit] ?? projection.textIndex.byte(forUnit:unit)}
+  func unit(forByte byte:Int) -> Int? {byteToUTF16[byte] ?? projection.textIndex.unit(forByte:byte)}
 
   /// A hit returns a source-byte caret, snapping to a complete grapheme. It
   /// never returns the middle of a surrogate pair, CRLF, or composed character.
   public func sourcePosition(at point: CGPoint, affinity: ComposeProjection.Affinity = .downstream) -> Int? {
     if let object = attachmentHit(at: point) { return object.source }
     if let anchor = tableAnchor(at: point) { return anchor }
-    guard let (_, boundary) = hitIndex(at: point), let byte = utf16ToByte[boundary] else { return nil }
+    guard let (_, boundary) = hitIndex(at: point), let byte = byte(forUnit:boundary) else { return nil }
     return projection.sourcePosition(at: byte, affinity: affinity)
   }
 
@@ -711,7 +764,7 @@ public final class ComposeTextLayout {
   public func hit(at point: CGPoint) -> Hit? {
     if let object = attachmentHit(at: point) { return object }
     if let anchor = tableAnchor(at: point) { return Hit(source: anchor, affinity: .downstream) }
-    guard let (fragment, boundary) = hitIndex(at: point), let byte = utf16ToByte[boundary] else { return nil }
+    guard let (fragment, boundary) = hitIndex(at: point), let byte = byte(forUnit:boundary) else { return nil }
     let affinity: ComposeProjection.Affinity = boundary == fragment.contentEnd && boundary > fragment.range.location ? .upstream : .downstream
     guard let source = projection.sourcePosition(at: byte, affinity: affinity) else { return nil }
     return Hit(source: source, affinity: affinity)
@@ -748,14 +801,14 @@ public final class ComposeTextLayout {
     func distance(_ rect: CGRect) -> CGFloat { max(0, rect.minY - point.y, point.y - rect.maxY) }
     guard let fragment = candidates.min(by: { distance($0.rect) < distance($1.rect) }) else { return nil }
     let x = point.x - fragment.rect.minX
-    let raw = CTLineGetStringIndexForPosition(fragment.line, CGPoint(x: x, y: 0))
+    let raw = fragment.shaped.index(at:CGPoint(x:x,y:0))
     let index = min(fragment.contentEnd, max(fragment.range.location, raw == kCFNotFound ? fragment.contentEnd : raw))
     var boundary = index
     if index < string.length {
       let grapheme = string.rangeOfComposedCharacterSequence(at: index)
       if index != grapheme.location {
-        let left = CTLineGetOffsetForStringIndex(fragment.line, grapheme.location, nil)
-        let right = CTLineGetOffsetForStringIndex(fragment.line, NSMaxRange(grapheme), nil)
+        let left = fragment.shaped.offset(for:grapheme.location)
+        let right = fragment.shaped.offset(for:NSMaxRange(grapheme))
         boundary = abs(x - left) <= abs(x - right) ? grapheme.location : NSMaxRange(grapheme)
       }
     }
@@ -775,7 +828,7 @@ public final class ComposeTextLayout {
   }
 
   public func utf16Position(for source: Int, affinity: ComposeProjection.Affinity = .downstream) -> Int? {
-    projection.displayPosition(for: source, affinity: affinity).flatMap { byteToUTF16[$0] }
+    projection.displayPosition(for: source, affinity: affinity).flatMap { unit(forByte:$0) }
   }
 
   /// AppKit ranges address this projection's UTF-16 context. A replacement
@@ -784,18 +837,18 @@ public final class ComposeTextLayout {
   public func sourceRange(forUTF16 range: NSRange, insertion: Int? = nil) -> Range<Int>? {
     guard range.location >= 0, range.location <= string.length, range.length >= 0,
           range.length <= string.length - range.location,
-          let a = utf16ToByte[range.location], let b = utf16ToByte[NSMaxRange(range)] else { return nil }
+          let a = byte(forUnit:range.location), let b = byte(forUnit:NSMaxRange(range)) else { return nil }
     return projection.sourceRange(forDisplayBytes: a..<b, insertion: insertion)
   }
 
   public func caret(atUTF16 position: Int, affinity: ComposeProjection.Affinity = .downstream) -> CGRect? {
     guard let (fragment, index) = caretFragment(atUTF16: position, affinity: affinity) else { return nil }
-    let x = fragment.rect.minX + CTLineGetOffsetForStringIndex(fragment.line, index, nil)
+    let x = fragment.rect.minX + fragment.shaped.offset(for:index)
     return CGRect(x: x, y: fragment.rect.minY, width: 1, height: fragment.rect.height)
   }
 
   private func caretFragment(atUTF16 position: Int, affinity: ComposeProjection.Affinity = .downstream) -> (Fragment, Int)? {
-    guard utf16ToByte[position] != nil else { return nil }
+    guard byte(forUnit:position) != nil else { return nil }
     var index = position
     var matches = fragments.filter { index >= $0.range.location && index <= $0.contentEnd }
     if matches.isEmpty, let ending = fragments.first(where: { index > $0.contentEnd && index < NSMaxRange($0.range) }) {
@@ -808,10 +861,10 @@ public final class ComposeTextLayout {
 
   public func firstRect(forUTF16 range: NSRange) -> (rect: CGRect, range: NSRange)? {
     guard range.location >= 0, range.length >= 0, range.location <= string.length,
-          range.length <= string.length - range.location, utf16ToByte[NSMaxRange(range)] != nil,
+          range.length <= string.length - range.location, byte(forUnit:NSMaxRange(range)) != nil,
           let (fragment, _) = caretFragment(atUTF16: range.location) else { return nil }
     let start = min(range.location, fragment.contentEnd), end = max(start, min(NSMaxRange(range), fragment.contentEnd))
-    let a = CTLineGetOffsetForStringIndex(fragment.line, start, nil), b = CTLineGetOffsetForStringIndex(fragment.line, end, nil)
+    let a = fragment.shaped.offset(for:start), b = fragment.shaped.offset(for:end)
     return (CGRect(x: fragment.rect.minX + min(a, b), y: fragment.rect.minY, width: max(1, abs(b-a)), height: fragment.rect.height),
       NSRange(location: start, length: end-start))
   }
@@ -823,22 +876,22 @@ public final class ComposeTextLayout {
     guard !source.isEmpty,
           let start = projection.displayPosition(for: max(source.lowerBound, projection.source.lowerBound), affinity: .downstream),
           let end = projection.displayPosition(for: min(source.upperBound, projection.source.upperBound), affinity: .upstream),
-          let a = byteToUTF16[start], let b = byteToUTF16[end], a <= b else { return [] }
+          let a = unit(forByte:start), let b = unit(forByte:end), a <= b else { return [] }
     return selectionRects(forUTF16: NSRange(location: a, length: b - a))
   }
 
   public func selectionRects(forUTF16 range: NSRange) -> [CGRect] {
     guard range.location >= 0, range.length >= 0, range.location <= string.length,
           range.length <= string.length - range.location,
-          utf16ToByte[range.location] != nil, utf16ToByte[NSMaxRange(range)] != nil else { return [] }
+          byte(forUnit:range.location) != nil, byte(forUnit:NSMaxRange(range)) != nil else { return [] }
     let a = range.location, b = NSMaxRange(range)
     return fragments.compactMap { fragment in
       let from = max(a, fragment.range.location)
       let to = min(b, fragment.contentEnd)
       let newline = b > fragment.contentEnd && b >= NSMaxRange(fragment.range)
       guard from < to || (newline && from <= fragment.contentEnd) else { return nil }
-      let x0 = fragment.rect.minX + CTLineGetOffsetForStringIndex(fragment.line, from, nil)
-      let x1 = newline ? fragment.rect.maxX : fragment.rect.minX + CTLineGetOffsetForStringIndex(fragment.line, to, nil)
+      let x0 = fragment.rect.minX + fragment.shaped.offset(for:from)
+      let x1 = newline ? fragment.rect.maxX : fragment.rect.minX + fragment.shaped.offset(for:to)
       return CGRect(x: min(x0, x1), y: fragment.rect.minY, width: max(1, abs(x1 - x0)), height: fragment.rect.height)
     }
   }

@@ -11,7 +11,7 @@ extension ComposeTextLayout {
     for fragment in fragments where fragment.table == nil {
       let start = fragment.range.location
       guard start == 0 || [10, 13].contains(string.character(at: start - 1)),
-            let display = utf16ToByte[start] else { continue }
+            let display = byte(forUnit:start) else { continue }
       if fragment.range.length == 0 {
         guard UInt64(projection.source.upperBound) == documentLength,
               let source = projection.sourcePosition(at: display, affinity: .upstream) else { continue }
@@ -24,12 +24,12 @@ extension ComposeTextLayout {
       while segmentIndex < mapped.count && mapped[segmentIndex].display.upperBound <= display { segmentIndex += 1 }
       guard segmentIndex < mapped.count else { continue }
       let segment = mapped[segmentIndex], mappedDisplay = max(display, segment.display.lowerBound)
-      guard let unit = byteToUTF16[mappedDisplay], unit < NSMaxRange(fragment.range) else { continue }
+      guard let unit = unit(forByte:mappedDisplay), unit < NSMaxRange(fragment.range) else { continue }
       let source: Int, end: Int
       if segment.kind == .copy {
         source = segment.source.lowerBound + mappedDisplay - segment.display.lowerBound
         let next = NSMaxRange(string.rangeOfComposedCharacterSequence(at: unit))
-        guard let boundary = utf16ToByte[next] else { return nil }
+        guard let boundary = byte(forUnit:next) else { return nil }
         end = min(segment.source.upperBound, source + boundary - mappedDisplay)
       } else {
         source = segment.source.lowerBound; end = segment.source.upperBound

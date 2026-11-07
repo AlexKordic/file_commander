@@ -2,7 +2,7 @@ import Foundation
 
 /// Presentation geometry shared by drawing, hit testing and Fresh navigation.
 /// Source Markdown and the terminal client's layout do not depend on it.
-public struct ComposeTypography: Equatable {
+public struct ComposeTypography: Equatable, Sendable {
   public var headingScales: [CGFloat]
   public var lineSpacing, paragraphSpacing, indent: CGFloat
 

@@ -122,11 +122,12 @@ struct ComposeColumnConstraints {
     minimum = Array(repeating: emptyWidth, count: count); natural = minimum; glyphMinimum = minimum
   }
   @discardableResult
-  mutating func include(_ text: NSAttributedString, range: NSRange, column: Int, preferred: Bool, imageWidth: CGFloat = 0, typesetter: CTTypesetter? = nil) -> Bool {
+  mutating func include(_ text: NSAttributedString, range: NSRange, column: Int, preferred: Bool, imageWidth: CGFloat = 0, typesetter: ComposeShapingContexts? = nil) -> Bool {
     if preferred { natural[column] = max(natural[column], min(available, imageWidth)) }
     guard range.length > 0 else { return true }
-    guard let typesetter = typesetter ?? ComposeShaping.typesetter(text) else { return false }
-    let line = CTTypesetterCreateLine(typesetter, CFRange(location: range.location, length: range.length))
+    let typesetter = typesetter ?? ComposeShapingContexts(text)
+    guard let shaped = typesetter.line(range) else {return false}
+    let line=shaped.line
     let string = text.string as NSString
     // A point query enumerates the shaped line internally. Asking at every
     // cluster boundary is quadratic for long source/URI samples. Collect both
@@ -135,7 +136,7 @@ struct ComposeColumnConstraints {
     // run; those jumps are not the width of the adjacent source character.
     var edges = Array(repeating: SIMD2<Double>(.infinity, -.infinity), count: range.length)
     CTLineEnumerateCaretOffsets(line) { offset, index, _, _ in
-      let at = index - range.location
+      let at = index + shaped.origin - range.location
       guard at >= 0, at < edges.count else { return }
       edges[at].x = min(edges[at].x, offset); edges[at].y = max(edges[at].y, offset)
     }
@@ -155,13 +156,14 @@ struct ComposeColumnConstraints {
     natural[column] = max(natural[column], min(available, CGFloat(CTLineGetTypographicBounds(line, nil, nil, nil))))
     let share = max(emptyWidth, available / CGFloat(natural.count) - ComposeMeasuredTable.padding * 2)
     var wordMinimum = minimum[column]
+    var failed=false
     if wordMinimum < share { breaks.forEach(in: string, range: range) { word in
-      let line = CTTypesetterCreateLine(typesetter, CFRange(location: word.location, length: word.length))
-      wordMinimum = max(wordMinimum, min(share, ceil(CGFloat(CTLineGetTypographicBounds(line, nil, nil, nil))) + 0.5))
+      guard let line = typesetter.line(word) else {failed=true;return false}
+      wordMinimum = max(wordMinimum, min(share, ceil(CGFloat(CTLineGetTypographicBounds(line.line, nil, nil, nil))) + 0.5))
       return wordMinimum < share
     } }
     minimum[column] = wordMinimum
-    return true
+    return !failed
   }
   var widths: [CGFloat] {
     let minimum = minimum.map { $0 + ComposeMeasuredTable.padding * 2 }

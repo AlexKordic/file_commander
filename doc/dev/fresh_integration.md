@@ -1088,6 +1088,33 @@ selection generations, using literal UTF-8 and exact map comparisons.
 These are transport and retention bounds, not total/peak-memory or input-latency
 qualification. Fresh still constructs and encodes complete candidate projections;
 edits that shift many absolute map positions can resend substantial metadata.
+
+`ComposeFlowMeasurement` measures a complete verified snapshot through the same
+`ComposePaneLayout`/`ComposeTextLayout` path as drawing. It retains numeric line,
+font, style, table and image geometry plus immutable attributed-text context;
+Core Text lines and typesetters remain temporary. Partial range bounds reshape
+their boundary lines. Sparse source/display coordinates replace per-scalar
+dictionaries in this measurement mode.
+
+Both drawing and measurement shape groups of whole Unicode paragraphs, targeting
+16,384 UTF-16 units. Boundaries preserve CRLF and bidirectional paragraph context;
+U+2028 does not split that context. Longer paragraphs remain whole. Measurement
+explicitly rejects a context over 65,536 units, more than 262,144 coordinate
+boundaries, or more than 262,144 fragments/style runs, without publishing a
+prefix. Admission also checks complete table samples and offscreen list-marker
+contexts before their preliminary shaping or cache reuse. Drawing retains its
+existing complete-paragraph fallback. These are
+resource admission limits, not fixed columns or a Markdown page width: wrapping
+continues to use the native pane's available point width.
+
+A crop receives a translation into the complete flow only after its literal
+projection/map, source/selection/formatter owner, fonts, image dimensions, actual
+glyph runs, global indices and line geometry agree. A changed width or owner
+retires the proof; no estimated prefix height is used. This remains an internal
+geometry foundation. Public AX value, selection, styles, visual-line ownership,
+visible ranges, bounds and provisional actions still require a coordinated
+document-wide integration. In particular, table gaps and empty cells cannot
+inherit a guessed accessibility line policy from the fragment array.
 Current certified formatting coverage skips redundant source-window preparation.
 Formatter/parser caches, transient allocations and the full native flow still
 require the general resource audit. The coordinator is integrated with the native

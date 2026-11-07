@@ -47,25 +47,7 @@ struct ComposeAccessibilityText {
   }
 
   private func glyphs(in fragment: ComposeTextLayout.Fragment) -> [(range: NSRange, rect: CGRect)] {
-    var result: [(NSRange, CGRect)] = []
-    for run in CTLineGetGlyphRuns(fragment.line) as! [CTRun] {
-      let count = CTRunGetGlyphCount(run)
-      var positions = [CGPoint](repeating: .zero, count: count), advances = [CGSize](repeating: .zero, count: count)
-      var indices = [CFIndex](repeating: 0, count: count)
-      CTRunGetPositions(run, CFRange(), &positions); CTRunGetAdvances(run, CFRange(), &advances)
-      CTRunGetStringIndices(run, CFRange(), &indices)
-      let source = CTRunGetStringRange(run)
-      let boundaries = Array(Set(indices + [source.location + source.length])).sorted()
-      let ends = Dictionary(uniqueKeysWithValues: zip(boundaries, boundaries.dropFirst()))
-      for index in 0..<count {
-        guard let end = ends[indices[index]], indices[index] >= 0, end <= text.length, indices[index] < end else { continue }
-        let range = text.rangeOfComposedCharacterSequences(for: NSRange(location: indices[index], length: end - indices[index]))
-        let a = positions[index].x + fragment.rect.minX, b = a + advances[index].width
-        result.append((range, CGRect(x: min(a, b), y: fragment.rect.minY,
-          width: max(1, abs(b - a)), height: fragment.rect.height)))
-      }
-    }
-    return result
+    ComposeGlyphGeometry.glyphs(in:fragment,text:text).map {($0.range,$0.rect)}
   }
 
   func bounds(for range: NSRange) -> CGRect? {
@@ -97,7 +79,7 @@ struct ComposeAccessibilityText {
     let result = NSMutableAttributedString(string: text.substring(with: range))
     for fragment in pane.layout.text.fragments {
       for run in CTLineGetGlyphRuns(fragment.line) as! [CTRun] {
-        let raw = CTRunGetStringRange(run), overlap = NSIntersectionRange(range, NSRange(location: raw.location, length: raw.length))
+        let overlap = NSIntersectionRange(range,fragment.shaped.range(of:run))
         guard overlap.length > 0, let font = (CTRunGetAttributes(run) as NSDictionary)[kCTFontAttributeName] as! CTFont? else { continue }
         let attributes: [NSAccessibility.FontAttributeKey: Any] = [
           .fontName: CTFontCopyPostScriptName(font) as String,

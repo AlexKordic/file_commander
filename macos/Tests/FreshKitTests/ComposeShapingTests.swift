@@ -6,19 +6,19 @@ final class ComposeShapingTests: XCTestCase {
   private let body = CTFontCreateUIFontForLanguage(.system, 16, nil)!
   private let code = CTFontCreateWithName("Menlo" as CFString, 16, nil)
 
-  private func glyphs(_ line: CTLine, in range: NSRange) -> [CGGlyph] {
+  private func glyphs(_ line: CTLine, in range: NSRange, origin: Int = 0) -> [CGGlyph] {
     var result: [CGGlyph] = []
     for run in CTLineGetGlyphRuns(line) as! [CTRun] {
       let count = CTRunGetGlyphCount(run)
       var indices = [CFIndex](repeating: 0, count: count), glyphs = [CGGlyph](repeating: 0, count: count)
       CTRunGetStringIndices(run, CFRange(), &indices); CTRunGetGlyphs(run, CFRange(), &glyphs)
-      result += indices.indices.filter { NSLocationInRange(indices[$0], range) }.map { glyphs[$0] }
+      result += indices.indices.filter { indices[$0] != kCFNotFound && NSLocationInRange(indices[$0]+origin, range) }.map { glyphs[$0] }
     }
     return result
   }
 
   private func glyphs(_ text: ComposeTextLayout, in range: NSRange) -> [CGGlyph] {
-    text.fragments.filter { NSIntersectionRange($0.range, range).length > 0 }.flatMap { glyphs($0.line, in: range) }
+    text.fragments.filter { NSIntersectionRange($0.range, range).length > 0 }.flatMap { glyphs($0.line, in: range,origin:$0.indexOrigin) }
   }
 
   private func pane(_ source: String) -> WireComposePane {

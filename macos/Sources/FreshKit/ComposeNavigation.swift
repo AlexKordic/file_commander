@@ -41,7 +41,7 @@ extension ComposeTextLayout {
           guard let index = utf16Position(for: row.contentEnd) else { return nil }
           all.append(Fragment(line: empty, range: NSRange(location: index, length: 0), rect: cell.content,
             baseline: cell.content.minY, contentEnd: index,
-            table: TablePosition(table: table.source.lowerBound, row: row.source, column: cell.column, source: row.contentEnd..<row.contentEnd)))
+            table: TablePosition(table: table.source.lowerBound, row: row.source, column: cell.column, source: row.contentEnd..<row.contentEnd),indexOrigin:index))
         }
       }
     }
@@ -64,7 +64,7 @@ extension ComposeTextLayout {
       guard nearby(fragment.rect) || (edge && rowKey.map { selected.contains($0) } == true) else { continue }
       func sameFlow(_ other: Fragment) -> Bool { fragment.table.map(ComposeCellAxis.init) == other.table.map(ComposeCellAxis.init) }
       func source(_ index: Int, _ affinity: ComposeProjection.Affinity) -> Int? {
-        guard let display = utf16ToByte[index] else { return nil }
+        guard let display = byte(forUnit:index) else { return nil }
         let candidate: Int
         if let position = fragment.table, fragment.range.length == 0 { candidate = position.source.lowerBound }
         else if let mapped = projection.sourcePosition(at: display, affinity: affinity) { candidate = mapped }
@@ -80,7 +80,7 @@ extension ComposeTextLayout {
            all[number + 1].range.location == index { return nil }
         return WireComposeStop.with {
           $0.source = UInt64(source)
-          $0.x = Double(fragment.rect.minX + CTLineGetOffsetForStringIndex(fragment.line, index, nil))
+          $0.x = Double(fragment.rect.minX + fragment.shaped.offset(for:index))
           $0.affinity = affinity == .upstream ? 1 : 0
         }
       }
@@ -96,7 +96,7 @@ extension ComposeTextLayout {
       }
       guard let first = stop(fragment.range.location, .downstream) ?? stop(fragment.range.location, .upstream) ?? stops.first,
             let last = stop(fragment.contentEnd, .upstream) ?? stop(fragment.contentEnd, .downstream) ?? stops.last,
-            let a = utf16ToByte[fragment.range.location], let b = utf16ToByte[NSMaxRange(fragment.range)],
+            let a = byte(forUnit:fragment.range.location), let b = byte(forUnit:NSMaxRange(fragment.range)),
             let mappedStart = projection.sourcePosition(at: a, affinity: .upstream),
             let mappedEnd = projection.sourcePosition(at: b, affinity: .downstream) else { return nil }
       let sourceStart = fragment.table.map { min($0.source.upperBound, max($0.source.lowerBound, mappedStart)) } ?? mappedStart
