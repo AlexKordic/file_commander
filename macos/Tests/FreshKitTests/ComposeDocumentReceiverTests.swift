@@ -83,10 +83,15 @@ final class ComposeDocumentReceiverTests: XCTestCase {
     XCTAssertTrue(try WireComposeDocumentRequest(serializedBytes: input.payload()).hasAppliedSequence)
     XCTAssertNil(SceneMessage(kind: 5, payload: ArraySlice(try chunk(Data([1])).serializedData())))
     let store = SceneStore()
-    let hello = try WireServerHello.with { $0.composeDocumentText = true }.serializedData()
+    let hello = try WireServerHello.with { $0.composeDocumentText = true; $0.composeDocumentUpdates = true }.serializedData()
     store.apply(try XCTUnwrap(SceneMessage(kind: 1, payload: ArraySlice(hello))))
     XCTAssertTrue(store.composeDocumentText)
+    XCTAssertTrue(store.composeDocumentUpdates)
     store.apply(try XCTUnwrap(SceneMessage(kind: 2, payload: []))); XCTAssertTrue(store.composeDocumentText)
     store.apply(try XCTUnwrap(SceneMessage(kind: 1, payload: []))); XCTAssertFalse(store.composeDocumentText)
+    XCTAssertFalse(store.composeDocumentUpdates)
+    let retained = SceneInput.composeDocument(.with { $0.id = 1; $0.baseID = 0 })
+    XCTAssertEqual(retained.payload(),[8,1,48,0])
+    XCTAssertTrue(try WireComposeDocumentRequest(serializedBytes: retained.payload()).hasBaseID)
   }
 }

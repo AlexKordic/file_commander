@@ -126,4 +126,22 @@ final class ComposeAccessibleDocumentTests: XCTestCase {
     full.compose.cursors[0].primary = true; full.compose.cursors[1].id = full.compose.cursors[0].id
     XCTAssertNil(doc.selectedRanges(window: 1, pane: full))
   }
+
+  func testUnchangedCompleteCoordinatesAcceptANewSelectionButNeverAnotherLiteralMapOrSource() throws {
+    let original=pane(), old=try XCTUnwrap(ComposeAccessibleDocument(window:1,pane:original))
+    var next=original;next.compose.selectionRevision += 1;next.compose.decorationRevision += 1
+    next.compose.cursors[0].position=16;next.compose.cursors[0].clearAnchor()
+    let updated=try XCTUnwrap(old.reusingCoordinates(window:1,pane:next))
+    XCTAssertFalse(updated === old);XCTAssertFalse(old.owns(window:1,pane:next));XCTAssertTrue(updated.owns(window:1,pane:next))
+    XCTAssertEqual(updated.selectedRanges(window:1,pane:next)?.first,NSRange(location:7,length:0))
+    XCTAssertEqual(updated.string(for:NSRange(location:0,length:10)),old.string(for:NSRange(location:0,length:10)))
+    let mutations:[(inout WirePane)->Void] = [{$0.compose.bufferRevision += 1},{$0.compose.segments[2].sourceEnd -= 1},
+      {$0.compose.segments[2].kind=0},{$0.compose.sourceStart=1},{$0.compose.text="different"},{$0.compose.assetAuthority += 1}]
+    for mutation in mutations {var bad=next;mutation(&bad);XCTAssertNil(old.reusingCoordinates(window:1,pane:bad))}
+    var composed=original;composed.compose.text="é e\u{301}";composed.compose.sourceEnd=6;composed.compose.documentLen=6
+    composed.compose.segments=[segment(0,6,0,6,0)]
+    let literal=try XCTUnwrap(ComposeAccessibleDocument(window:1,pane:composed))
+    composed.compose.text="e\u{301} é"
+    XCTAssertNil(literal.reusingCoordinates(window:1,pane:composed),"canonical String equality cannot certify scalar coordinates")
+  }
 }

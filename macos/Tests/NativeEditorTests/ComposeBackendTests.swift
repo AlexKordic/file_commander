@@ -120,6 +120,57 @@ private final class ComposeBackend {
 
 final class ComposeBackendTests: XCTestCase {
   @MainActor
+  func testCompleteDocumentCoordinatorKeepsCaretAndEditUpdatesIncrementalAcrossFreshUndo() async throws {
+    let backend = try backend(); defer { backend.captureDiagnostics("document-updates"); backend.stop() }
+    let editor = editor(BackendPasteboard()); defer { editor.detachAll() }
+    let source = "# Complete document\r\n\r\n| Key | Value |\r\n| --- | --- |\r\n| one | two |\r\n\r\n"
+      + String(repeating: "Paragraph with **bold** café 👩🏽‍💻 and a [link](target.md).\r\n\r\n",count:1800)
+      + "## Final heading\r\n\r\n![picture](missing.png)\r\n"
+    let file = backend.root.appendingPathComponent("incremental.md");try Data(source.utf8).write(to:file)
+    try await attach(backend,file:file,editor:editor)
+    XCTAssertTrue(editor.store.composeDocumentUpdates)
+    let controller = editor.composeDocument;controller.activate()
+    try await eventually(editor,"initial complete generation",timeout:20) {controller.status == .ready}
+    let first = try XCTUnwrap(controller.snapshot), initialBytes = controller.lastTransferBytes
+    XCTAssertGreaterThan(initialBytes,64 << 10);XCTAssertFalse(first.pane.tables.isEmpty);XCTAssertFalse(first.pane.images.isEmpty)
+    XCTAssertEqual(initialBytes,first.baseline.data.count)
+    editor.send(.key(.with {$0.key="ArrowRight"}))
+    try await eventually(editor,"caret movement updates the complete model",timeout:20) {
+      controller.status == .ready && controller.snapshot?.baseline.id != first.baseline.id
+    }
+    let moved = try XCTUnwrap(controller.snapshot), caretBytes = controller.lastTransferBytes
+    XCTAssertEqual(controller.lastEncoding,1);XCTAssertLessThan(caretBytes,2048,"unchanged projected text must stay off the wire")
+    XCTAssertEqual(moved.document.owner.revision,first.document.owner.revision)
+    XCTAssertEqual(moved.pane.cursors.first(where:\.primary)?.position,1)
+    XCTAssertEqual(moved.document.text,first.document.text)
+    editor.send(.text("X"))
+    try await eventually(editor,"an edit updates the same complete stream",timeout:20) {
+      controller.status == .ready && (controller.snapshot?.document.owner.revision ?? 0)>moved.document.owner.revision
+    }
+    let edited = try XCTUnwrap(controller.snapshot), editBytes = controller.lastTransferBytes
+    XCTAssertEqual(controller.lastEncoding,1);XCTAssertLessThan(editBytes,edited.baseline.data.count)
+    XCTAssertEqual(edited.document.owner.length,UInt64(source.utf8.count+1))
+    XCTAssertFalse(edited.document.text.contains("**bold**"),"an edit must keep offscreen formatting in the complete value")
+    let pane = try XCTUnwrap(editor.store.panes.first(where:{$0.hasCompose && $0.compose.focused}))
+    XCTAssertNotNil(edited.document.range(of:UInt64(editor.store.windowID),pane:pane))
+    XCTAssertEqual(pane.compose.viewport.position,0,"complete reads and updates must not scroll the native view")
+    editor.send(.action(name:"save",argsJson:""))
+    let expected = Data(source.utf8.prefix(1))+Data("X".utf8)+Data(source.utf8.dropFirst(1))
+    try await eventually(editor,"the normal Fresh save retains exact CRLF bytes") {(try? Data(contentsOf:file))==expected}
+    editor.send(.action(name:"undo",argsJson:""));editor.send(.action(name:"save",argsJson:""))
+    try await eventually(editor,"one Fresh undo restores the original source and complete projection",timeout:20) {
+      controller.status == .ready && controller.snapshot?.document.text == first.document.text
+        && (try? Data(contentsOf:file)) == Data(source.utf8)
+    }
+    XCTAssertEqual(controller.lastEncoding,1)
+    let metrics:[String:Any] = ["source_bytes":source.utf8.count,"initial_body_bytes":initialBytes,
+      "caret_delta_bytes":caretBytes,"edit_delta_bytes":editBytes,"undo_delta_bytes":controller.lastTransferBytes,
+      "caret_encoding":1,"source_bytes_restored":true]
+    try JSONSerialization.data(withJSONObject:metrics,options:.prettyPrinted).write(to:backend.root.appendingPathComponent("update-metrics.json"))
+    editor.switchBack();XCTAssertNil(controller.snapshot);XCTAssertEqual(controller.status,.idle)
+  }
+
+  @MainActor
   func testIndependentCompleteReadUsesFreshFormattingAndCertifiesTheUnmovedDrawingCrop() async throws {
     let backend = try backend(); defer { backend.captureDiagnostics("complete-document-stream"); backend.stop() }
     let editor = editor(BackendPasteboard()); defer { editor.detachAll() }

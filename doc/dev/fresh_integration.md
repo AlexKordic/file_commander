@@ -1027,8 +1027,8 @@ when both literal UTF-8 content and conceal/replacement ownership agree.
 Partial atomic replacements, canonically equal but differently spelled text,
 changed source owners and changed selection/reveal revisions are refused.
 Primary selections retain their full ranges rather than clipping to a crop.
-This model is not yet the public AX value: incremental updates, measured
-line/geometry integration and provisional actions remain required.
+This model is not yet the public AX value: measured line/geometry integration
+and provisional actions remain required.
 
 Development peers advertise `ServerHello.compose_document_text` (field 7).
 `ComposeDocumentRequest` (TLV 32) captures the same eight source-owner fields
@@ -1049,16 +1049,50 @@ all ownership, sequence, length and formatter fields, then decodes and
 validates the completed body away from the UI thread. It never exposes a
 prefix as a document value.
 
-Initial complete reads admit at most 16 MiB of source and 32 MiB of encoded
-projection. Two shared reader permits bound retained encoded snapshots to
-64 MiB per scene bridge, including all connections. Cancellation, disconnect,
-the final chunk, a 30-second preparation timeout or a 10-second acknowledgment
-timeout releases the permit. These limits do not establish total or peak
-process memory or input latency; formatter preparation, projection metadata,
-normal scene caches and transient encoding allocations still require the
-general resource audit. Admission failure preserves source editing. This is
-an initial snapshot service; automatic coalesced/incremental updates and
-public accessibility adoption remain separate work.
+Complete reads admit at most 16 MiB of source and 32 MiB of encoded projection.
+Two reader permits are shared across the scene bridge. A one-shot read releases
+its encoded body after the final chunk; preparation and acknowledgment timeouts
+are 30 and 10 seconds. Admission failure preserves source editing.
+
+`ServerHello.compose_document_updates` (field 8) negotiates retained baselines.
+Presence of `ComposeDocumentRequest.base_id` (field 6) opts in: zero requests a
+fresh baseline, otherwise it names the last completely received body. Only the
+final chunk ACK promotes a new baseline. Updates retain at most the prior body
+and one candidate, each at most 32 MiB: the two shared permits therefore bound
+retained encoded bodies to 128 MiB across connections. Idle baselines expire
+after 30 seconds; cancellation, disconnect and missing final ACKs also release
+their owned storage. Expiration runs before new requests and under output
+backpressure. An evicted or foreign-lifetime base falls back to a full read.
+
+Updating chunks bind baseline/result SHA-256 digests and result length. Encoding
+0 carries a complete body; encoding 1 carries at most 64 ordered, nonoverlapping
+binary splices over the old encoded body. Each protobuf field group retains its
+common byte prefix/suffix, so a changed header cannot resend unchanged prose.
+Literal ranges borrow the candidate body rather than retaining a third encoded
+copy. A delta no smaller than its complete result uses full delivery instead.
+All hashes, lengths, source owners, selection/formatter revisions and the
+complete map are verified on a worker before publication. Raw input-method
+context remains in ordinary input frames and is omitted from value snapshots;
+global cursor coordinates and full span/table/image semantics are retained.
+
+The native coordinator activates on demand and coalesces target changes over
+80 ms. Formatting preparation may change its own revision without canceling
+the read. Source/selection changes cancel obsolete transport; hiding or a
+connection/source replacement also releases its base. One decode worker lives
+at a time, including across reset and noncooperative cancellation. A stale
+success can seed a binary base only in the same live document; it cannot
+publish a retired value. A 35-second inactivity timeout releases a silent read.
+Unchanged complete text/maps share immutable scalar coordinates across new
+selection generations, using literal UTF-8 and exact map comparisons.
+
+These are transport and retention bounds, not total/peak-memory or input-latency
+qualification. Fresh still constructs and encodes complete candidate projections;
+edits that shift many absolute map positions can resend substantial metadata.
+Current certified formatting coverage skips redundant source-window preparation.
+Formatter/parser caches, transient allocations and the full native flow still
+require the general resource audit. The coordinator is integrated with the native
+editor lifecycle; complete public AX adoption remains separate work so all text,
+line, style and geometry APIs can switch to one coordinate system together.
 
 Projection boundary validation and this model share a sparse UTF-8/UTF-16
 index with checkpoints about every 1,024 bytes. It retains literal bytes and

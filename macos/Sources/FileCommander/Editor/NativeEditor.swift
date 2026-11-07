@@ -29,6 +29,11 @@ extension NSPasteboard: EditorPasteboard {
 @MainActor
 final class NativeEditor: NSObject, CellGridDelegate {
   let store = SceneStore()
+  /// Internal complete model; public AX switches only when its global
+  /// line/style/geometry APIs can change to the same coordinate system.
+  lazy var composeDocument = ComposeDocumentController { [weak self] request in
+    self?.socket?.send(.composeDocument(request))
+  }
   private(set) var view: EditorHostView?
   var grid: CellGridView? { view?.grid }
   private var chrome: ChromeView? { view?.chrome }
@@ -176,6 +181,10 @@ final class NativeEditor: NSObject, CellGridDelegate {
       guard let self, let socket, self.socket === socket else { return }
       self.grid?.composeNavigation.controller.receive(chunk)
     }
+    socket.onDocumentChunk = { [weak self, weak socket] chunk in
+      guard let self, let socket, self.socket === socket else { return }
+      self.composeDocument.receive(chunk)
+    }
     socket.onSent = { number, type, kind, bytes, at in
       var fields: [String: Any] = ["ev": "send", "t": EditorTelemetry.ms(at), "n": number, "type": type, "bytes": bytes]
       if let kind { fields["kind"] = kind }
@@ -214,6 +223,7 @@ final class NativeEditor: NSObject, CellGridDelegate {
     pendingShow = false
     grid?.showingEvent = NSApp.currentEvent.flatMap { $0.type == .keyDown ? $0.timestamp : nil }
     shown = true
+    updateDocumentDemand()
     grid?.composeNavigation.update()
     updateImageDemands(revalidate: true)
     scheduleViewportContinuation()
@@ -239,6 +249,7 @@ final class NativeEditor: NSObject, CellGridDelegate {
     guard shown else { return }
     grid?.finishComposition()
     shown = false
+    updateDocumentDemand()
     grid?.composeNavigation.update()
     composeImages.update([])
     onPresent?(false)
@@ -253,6 +264,7 @@ final class NativeEditor: NSObject, CellGridDelegate {
   }
 
   private func disconnect() {
+    composeDocument.reset()
     recoverPendingText()
     composeImages.reset()
     composeViewports.reset()
@@ -277,6 +289,7 @@ final class NativeEditor: NSObject, CellGridDelegate {
   }
 
   private func connectionEnded(_ reason: String?) {
+    composeDocument.reset()
     let failedToAttach = !receivedHello && pendingShow
     recoverPendingText()
     composeImages.reset()
@@ -506,6 +519,12 @@ final class NativeEditor: NSObject, CellGridDelegate {
       clipboardSequence = store.clipboard?.sequence ?? 0
     }
     updateImageDemands()
+    updateDocumentDemand()
+  }
+
+  private func updateDocumentDemand() {
+    let pane = shown && richCompose ? store.panes.first(where: { $0.hasCompose && $0.compose.focused }) : nil
+    composeDocument.update(window: UInt64(store.windowID), pane: pane, supported: store.composeDocumentUpdates)
   }
 
   private func updateImageDemands(revalidate: Bool = false) {

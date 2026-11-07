@@ -41,6 +41,31 @@ public final class ComposeAccessibleDocument: @unchecked Sendable {
       && (pane.compose.hasDecorationRevision ? pane.compose.decorationRevision : nil) == decorationRevision
   }
 
+  /// A new selection/formatting generation can share its immutable scalar
+  /// index only after complete literal text and every source-map segment agree.
+  /// This shares data, not action or connection ownership; callers still bind
+  /// publication/actions to their current coordinator generation.
+  public func reusingCoordinates(window: UInt64, pane: WirePane) -> ComposeAccessibleDocument? {
+    guard pane.hasBuffer, pane.hasCompose, pane.compose.projectionUsable,
+          Self.owner(window: window,pane: pane) == owner,
+          pane.compose.sourceStart == 0, pane.compose.sourceEnd == owner.length,
+          projection.text.utf8.elementsEqual(pane.compose.text.utf8),
+          pane.compose.segments.count == projection.segments.count else { return nil }
+    for (wire, known) in zip(pane.compose.segments,projection.segments) {
+      let kind: UInt32
+      switch known.kind {case .copy: kind=0;case .hidden: kind=1;case .replacement: kind=2;case .insertion: kind=3}
+      guard wire.kind == kind, wire.sourceStart == UInt64(known.source.lowerBound), wire.sourceEnd == UInt64(known.source.upperBound),
+            wire.displayStart == UInt64(known.display.lowerBound), wire.displayEnd == UInt64(known.display.upperBound) else { return nil }
+    }
+    return .init(sharing:self,selection:pane.compose.selectionRevision,
+      decoration:pane.compose.hasDecorationRevision ? pane.compose.decorationRevision : nil)
+  }
+
+  private init(sharing previous: ComposeAccessibleDocument, selection: UInt64, decoration: UInt64?) {
+    owner=previous.owner;selectionRevision=selection;decorationRevision=decoration
+    projection=previous.projection;value=previous.value
+  }
+
   public func string(for range: NSRange) -> String? {
     guard projection.textIndex.bytes(for: range) != nil else { return nil }
     return value.substring(with: range)

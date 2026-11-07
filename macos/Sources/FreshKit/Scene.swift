@@ -174,6 +174,7 @@ public struct SceneMessage: @unchecked Sendable {
   public let composeSourceSelections: Bool
   public let composeSemanticIndex: Bool
   public let composeDocumentText: Bool
+  public let composeDocumentUpdates: Bool
   public let sequence: Int
   /// What changed (everything, for a hello).
   public let frame: WireFrame
@@ -206,6 +207,7 @@ public struct SceneMessage: @unchecked Sendable {
       composeSourceSelections = hello.composeSourceSelections
       composeSemanticIndex = hello.composeSemanticIndex
       composeDocumentText = hello.composeDocumentText
+      composeDocumentUpdates = hello.composeDocumentUpdates
       frame = hello.scene
     case .frame:
       guard let decoded = try? WireFrame(serializedBytes: Array(payload)) else { return nil }
@@ -216,6 +218,7 @@ public struct SceneMessage: @unchecked Sendable {
       composeSourceSelections = false
       composeSemanticIndex = false
       composeDocumentText = false
+      composeDocumentUpdates = false
       frame = decoded
     default:
       return nil
@@ -273,6 +276,7 @@ public final class SceneStore {
   @ObservationIgnored public private(set) var composeSourceSelections = false
   @ObservationIgnored public private(set) var composeSemanticIndex = false
   @ObservationIgnored public private(set) var composeDocumentText = false
+  @ObservationIgnored public private(set) var composeDocumentUpdates = false
   @ObservationIgnored public private(set) var palette: WirePaletteView?
   @ObservationIgnored public private(set) var trustDialog: WireTrustDialogView?
   @ObservationIgnored public private(set) var contextMenu: WireContextMenuView?
@@ -293,6 +297,7 @@ public final class SceneStore {
       composeSourceSelections = message.composeSourceSelections
       composeSemanticIndex = message.composeSemanticIndex
       composeDocumentText = message.composeDocumentText
+      composeDocumentUpdates = message.composeDocumentUpdates
     }
     let previousWindow = windowID
     var change = SceneChange()
