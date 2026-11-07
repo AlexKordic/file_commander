@@ -714,8 +714,11 @@ fixed-width formatting do not constrain native layout.
 - A point within a provisional insert records the draft owner, its UTF-16
   offset and expected text, and depends on that prefix's queue token. No
   virtual source position travels on the wire. The matching native edit
-  receipt must prove the edited or preserved caret owner, its source/UTF-16
-  coordinates and the exact source between the point and that caret. A nearby
+  receipt must prove the edited or preserved caret owner. For a point inside
+  that transaction's insertion, a verified binary edit anchor proves its exact
+  normalized bytes and resulting source range, including points outside the
+  bounded raw context. Otherwise the receipt must supply source/UTF-16
+  coordinates and the exact text between the point and caret. A nearby
   point can be proved without echoing the whole paste in the receipt. Only then
   can the click become a source pointer at that receipt's revision. The point survives font
   reflow, secondary-caret inserts and chained prefix replacements. Captured
@@ -842,6 +845,29 @@ Rebinding carries only proven owners forward; a later scene cannot silently
 renew a previously failed witness. Missing proof rejects the entire following
 group into recovery. Expansion outside a preserved selection still requires
 exact surrounding source and consistent source-byte/UTF-16 caret coordinates.
+
+For explicit native replacements, `ComposeEditReceipt.anchors` (field 8)
+contains the entire disjoint batch in source order. Each `ComposeEditAnchor`
+names a genuine edited `cursor`, its resulting UTF-8 `start`/`end`, a 32-byte
+SHA-256 `digest`, and the rebased `before_start`/`before_end`. The optional
+receipt `source_revision` and `source_length` (fields 9/10) own those before
+coordinates; the resulting pane owns the after coordinates. Fresh verifies
+the actual buffer bytes in bounded reads and compares actual cursor ends
+before publishing. A subsequent formatter gather cannot relabel that proof
+with another source revision. Immediate input retries repeat the same receipt.
+The metadata does not echo inserted text or grow with insertion byte length.
+
+`ComposeAcceptedEdits` validates the complete group, genuine cursor identities,
+source/result lengths, ordering and actual receipt caret ends before using
+an anchor. An inserted point also needs the exact normalized payload digest,
+byte length and a scalar-valid UTF-16 offset. Original source endpoints can
+rebase through that exact accepted batch; replaced interiors have no inferred
+correspondence, and empty insertion boundaries respect affinity. Pending
+pointer capture hashes its own delta, rather than a retained earlier prefix.
+Older receipts retain the bounded-context proof path. Missing or inconsistent
+evidence cannot produce a guessed pointer or source selection. General global
+provisional selection/replacement still needs queue integration; these edit
+anchors alone do not complete public AX actions.
 
 `ComposePendingText` keeps committed prefixes visible before their replies.
 Drawing, selected ranges, substring queries and hit/candidate geometry use the

@@ -10,15 +10,16 @@ public struct ComposePendingPointer {
   private let affinity: ComposeProjection.Affinity
   private let extend: Bool
   private let count: Int
+  private let inserted: ComposeAcceptedEdits.InsertedPosition?
 
   init?(scope: WireComposeScope, epoch: UInt64, cursor: UInt64, text: String,
-        caretOffset: Int, offset: Int, affinity: ComposeProjection.Affinity, extend: Bool, count: Int) {
-    let local = WireComposeTextContext.with { $0.text = text }
-    guard epoch != 0, let context = ComposeTextContext(local, documentLength: UInt64(text.utf8.count)),
-          context.sourceRange(forUTF16: NSRange(location: caretOffset, length: 0)) != nil,
-          context.sourceRange(forUTF16: NSRange(location: offset, length: 0)) != nil else { return nil }
+        caretOffset: Int, offset: Int, affinity: ComposeProjection.Affinity, extend: Bool, count: Int,
+        inserted: ComposeAcceptedEdits.InsertedPosition? = nil) {
+    let index = ComposeTextIndex(text)
+    guard epoch != 0, index.byte(forUnit: caretOffset) != nil, index.byte(forUnit: offset) != nil else { return nil }
     self.scope = scope; self.epoch = epoch; self.cursor = cursor; self.text = text
     self.caretOffset = caretOffset; self.offset = offset; self.affinity = affinity; self.extend = extend; self.count = count
+    self.inserted = inserted
   }
 
   /// Evaluate the same captured point in the current provisional document.
@@ -50,8 +51,17 @@ public struct ComposePendingPointer {
     guard receipt.matches(scope, epoch: epoch),
           receipt.cursors.contains(cursor) || receipt.preservedCursors.contains(cursor),
           receipt.pane.cursors.filter({ $0.id == cursor }).count == 1,
-          let owner = receipt.pane.cursors.first(where: { $0.id == cursor }), owner.hasUtf16Position,
-          !owner.hasAnchor || owner.anchor == owner.position,
+          let owner = receipt.pane.cursors.first(where: { $0.id == cursor }),
+          !owner.hasAnchor || owner.anchor == owner.position else { return nil }
+    if receipt.hasSourceRevision || receipt.hasSourceLength || !receipt.anchors.isEmpty {
+      guard let proof = ComposeAcceptedEdits(receipt,original: scope,epoch: epoch) else { return nil }
+      if let inserted, proof.contains(cursor: cursor) {
+        guard let position = proof.position(inserted,cursor: cursor) else { return nil }
+        return ComposePointer(scope: receipt.scope,epoch: receipt.epoch,
+          hit: .init(source: position,affinity: affinity),extend: extend,count: count)
+      }
+    }
+    guard owner.hasUtf16Position,
           let unit = Int(exactly: owner.utf16Position),
           let byte = Int(exactly: owner.position) else { return nil }
     // Only the source between the clicked point and its proven caret owns

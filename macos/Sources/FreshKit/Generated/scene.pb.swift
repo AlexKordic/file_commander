@@ -2126,11 +2126,58 @@ public nonisolated struct WireComposeEditReceipt: Sendable {
 
   public var preservedCursors: [UInt64] = []
 
+  public var anchors: [WireComposeEditAnchor] = []
+
+  public var sourceRevision: UInt64 {
+    get {_sourceRevision ?? 0}
+    set {_sourceRevision = newValue}
+  }
+  /// Returns true if `sourceRevision` has been explicitly set.
+  public var hasSourceRevision: Bool {self._sourceRevision != nil}
+  /// Clears the value of `sourceRevision`. Subsequent reads from it will return its default value.
+  public mutating func clearSourceRevision() {self._sourceRevision = nil}
+
+  public var sourceLength: UInt64 {
+    get {_sourceLength ?? 0}
+    set {_sourceLength = newValue}
+  }
+  /// Returns true if `sourceLength` has been explicitly set.
+  public var hasSourceLength: Bool {self._sourceLength != nil}
+  /// Clears the value of `sourceLength`. Subsequent reads from it will return its default value.
+  public mutating func clearSourceLength() {self._sourceLength = nil}
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
 
   fileprivate var _pane: WireComposePane? = nil
+  fileprivate var _sourceRevision: UInt64? = nil
+  fileprivate var _sourceLength: UInt64? = nil
+}
+
+/// Verified accepted UTF-8 insertions (empty for deletion), in source order.
+/// Before ranges belong to the receipt's source_revision/source_length.
+/// Post ranges and SHA-256 belong to its resulting pane's source owner.
+public nonisolated struct WireComposeEditAnchor: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var cursor: UInt64 = 0
+
+  public var start: UInt64 = 0
+
+  public var end: UInt64 = 0
+
+  public var digest: Data = Data()
+
+  public var beforeStart: UInt64 = 0
+
+  public var beforeEnd: UInt64 = 0
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
 }
 
 public nonisolated struct WireComposeCaret: Sendable {
@@ -8208,7 +8255,7 @@ nonisolated extension WireInputReply: SwiftProtobuf.Message, SwiftProtobuf._Mess
 
 nonisolated extension WireComposeEditReceipt: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".ComposeEditReceipt"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}window\0\u{1}leaf\0\u{1}buffer\0\u{1}epoch\0\u{1}pane\0\u{1}cursors\0\u{3}preserved_cursors\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}window\0\u{1}leaf\0\u{1}buffer\0\u{1}epoch\0\u{1}pane\0\u{1}cursors\0\u{3}preserved_cursors\0\u{1}anchors\0\u{3}source_revision\0\u{3}source_length\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -8223,6 +8270,9 @@ nonisolated extension WireComposeEditReceipt: SwiftProtobuf.Message, SwiftProtob
       case 5: try { try decoder.decodeSingularMessageField(value: &self._pane) }()
       case 6: try { try decoder.decodeRepeatedUInt64Field(value: &self.cursors) }()
       case 7: try { try decoder.decodeRepeatedUInt64Field(value: &self.preservedCursors) }()
+      case 8: try { try decoder.decodeRepeatedMessageField(value: &self.anchors) }()
+      case 9: try { try decoder.decodeSingularUInt64Field(value: &self._sourceRevision) }()
+      case 10: try { try decoder.decodeSingularUInt64Field(value: &self._sourceLength) }()
       default: break
       }
     }
@@ -8254,6 +8304,15 @@ nonisolated extension WireComposeEditReceipt: SwiftProtobuf.Message, SwiftProtob
     if !self.preservedCursors.isEmpty {
       try visitor.visitPackedUInt64Field(value: self.preservedCursors, fieldNumber: 7)
     }
+    if !self.anchors.isEmpty {
+      try visitor.visitRepeatedMessageField(value: self.anchors, fieldNumber: 8)
+    }
+    try { if let v = self._sourceRevision {
+      try visitor.visitSingularUInt64Field(value: v, fieldNumber: 9)
+    } }()
+    try { if let v = self._sourceLength {
+      try visitor.visitSingularUInt64Field(value: v, fieldNumber: 10)
+    } }()
     try unknownFields.traverse(visitor: &visitor)
   }
 
@@ -8265,6 +8324,64 @@ nonisolated extension WireComposeEditReceipt: SwiftProtobuf.Message, SwiftProtob
     if lhs._pane != rhs._pane {return false}
     if lhs.cursors != rhs.cursors {return false}
     if lhs.preservedCursors != rhs.preservedCursors {return false}
+    if lhs.anchors != rhs.anchors {return false}
+    if lhs._sourceRevision != rhs._sourceRevision {return false}
+    if lhs._sourceLength != rhs._sourceLength {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension WireComposeEditAnchor: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".ComposeEditAnchor"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}cursor\0\u{1}start\0\u{1}end\0\u{1}digest\0\u{3}before_start\0\u{3}before_end\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularUInt64Field(value: &self.cursor) }()
+      case 2: try { try decoder.decodeSingularUInt64Field(value: &self.start) }()
+      case 3: try { try decoder.decodeSingularUInt64Field(value: &self.end) }()
+      case 4: try { try decoder.decodeSingularBytesField(value: &self.digest) }()
+      case 5: try { try decoder.decodeSingularUInt64Field(value: &self.beforeStart) }()
+      case 6: try { try decoder.decodeSingularUInt64Field(value: &self.beforeEnd) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if self.cursor != 0 {
+      try visitor.visitSingularUInt64Field(value: self.cursor, fieldNumber: 1)
+    }
+    if self.start != 0 {
+      try visitor.visitSingularUInt64Field(value: self.start, fieldNumber: 2)
+    }
+    if self.end != 0 {
+      try visitor.visitSingularUInt64Field(value: self.end, fieldNumber: 3)
+    }
+    if !self.digest.isEmpty {
+      try visitor.visitSingularBytesField(value: self.digest, fieldNumber: 4)
+    }
+    if self.beforeStart != 0 {
+      try visitor.visitSingularUInt64Field(value: self.beforeStart, fieldNumber: 5)
+    }
+    if self.beforeEnd != 0 {
+      try visitor.visitSingularUInt64Field(value: self.beforeEnd, fieldNumber: 6)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: WireComposeEditAnchor, rhs: WireComposeEditAnchor) -> Bool {
+    if lhs.cursor != rhs.cursor {return false}
+    if lhs.start != rhs.start {return false}
+    if lhs.end != rhs.end {return false}
+    if lhs.digest != rhs.digest {return false}
+    if lhs.beforeStart != rhs.beforeStart {return false}
+    if lhs.beforeEnd != rhs.beforeEnd {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }

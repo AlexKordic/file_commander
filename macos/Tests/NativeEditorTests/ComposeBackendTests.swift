@@ -1283,6 +1283,16 @@ final class ComposeBackendTests: XCTestCase {
 
   @MainActor
   func testRealBackendClickWithinUnacknowledgedTextKeepsBothNativeUndoTransactions() async throws {
+    try await pendingInsertionClick(prefix: "日café 👩🏽‍💻 ")
+  }
+
+  @MainActor
+  func testFarClickWithinALargeUnacknowledgedInsertKeepsFollowingInputAndBothUndoTransactions() async throws {
+    try await pendingInsertionClick(prefix: "日"+String(repeating: "café 東京 e\u{301} 👩🏽‍💻\n",count: 2000))
+  }
+
+  @MainActor
+  private func pendingInsertionClick(prefix: String) async throws {
     let backend = try backend(); defer { backend.stop() }
     let pasteboard = BackendPasteboard(), editor = editor(pasteboard)
     defer { editor.detachAll() }
@@ -1292,7 +1302,7 @@ final class ComposeBackendTests: XCTestCase {
     try await attach(backend, file: file, editor: editor)
     let position = original[..<original.range(of: "Tail")!.lowerBound].utf8.count
     try await click(UInt64(position), editor: editor)
-    let grid = try XCTUnwrap(editor.grid), prefix = "日café 👩🏽‍💻 ", unspecified = NSRange(location: NSNotFound, length: 0)
+    let grid = try XCTUnwrap(editor.grid), unspecified = NSRange(location: NSNotFound, length: 0)
     grid.insertText(prefix, replacementRange: unspecified)
     let pending = try XCTUnwrap(grid.focusedCompose), id = try XCTUnwrap(pending.cursor?.id)
     let display = try XCTUnwrap(pending.layout.draftDisplayRanges[id])
@@ -1307,10 +1317,10 @@ final class ComposeBackendTests: XCTestCase {
     let candidate = try XCTUnwrap(converted.textServiceRect(for: grid.selectedRange()))
     XCTAssertEqual(candidate.range, grid.selectedRange()); XCTAssertGreaterThan(candidate.rect.height, 0)
     grid.insertText("X", replacementRange: unspecified)
-    let prefixWithX = "日Xcafé 👩🏽‍💻 "
+    let prefixWithX = "日X"+prefix.dropFirst()
     let expected = Data(original.utf8.prefix(position)) + Data(prefixWithX.utf8) + Data(original.utf8.dropFirst(position))
     editor.send(.action(name: "save", argsJson: ""))
-    try await eventually(editor, "save at the point inside an unacknowledged insert") { (try? Data(contentsOf: file)) == expected }
+    try await eventually(editor, "save at the point inside an unacknowledged insert", timeout: 20) { (try? Data(contentsOf: file)) == expected }
     editor.send(.action(name: "undo", argsJson: "")); editor.send(.action(name: "save", argsJson: ""))
     let firstOnly = Data(original.utf8.prefix(position)) + Data(prefix.utf8) + Data(original.utf8.dropFirst(position))
     try await eventually(editor, "undo only the following insertion") { (try? Data(contentsOf: file)) == firstOnly }

@@ -217,21 +217,23 @@ public struct ComposePendingText {
       let start = displayed.virtualStart(for: id), end = start + shown.draft.length
       if start <= point && point <= end {
         let offset = point - start
-        guard let local = ComposeTextContext(.with { $0.text = shown.draft.string }, documentLength: UInt64(shown.draft.string.utf8.count)),
-              local.sourceRange(forUTF16: NSRange(location: offset, length: 0)) != nil,
-              let prefix = Self.normalize(NSAttributedString(string: (shown.draft.string as NSString).substring(to: offset)), policy: nativeNewline) else { return nil }
-        normalizedPoint = presentation.virtualStart(for: id) + prefix.length
+        guard let normalizedOffset = Self.normalizedOffset(offset,in: shown.draft,policy: nativeNewline) else { return nil }
+        normalizedPoint = presentation.virtualStart(for: id) + normalizedOffset
         break
       }
       if end < point { normalizedPoint += value.draft.length - shown.draft.length }
     }
-    let owners = ordered.compactMap { id -> (UInt64, Int)? in basis.cursors[id].map { (id, $0.position) } }
-      .sorted { abs($0.1 - normalizedPoint) < abs($1.1 - normalizedPoint) }
-    for (id, caret) in owners {
+    let owners = ordered.compactMap { id -> (UInt64, Int, ComposeAcceptedEdits.InsertedPosition?)? in
+      basis.cursors[id].map { (id, $0.position, insertedPosition(cursor: id,offset: normalizedPoint-presentation.virtualStart(for: id))) }
+    }.sorted {
+      if ($0.2 == nil) != ($1.2 == nil) { return $0.2 != nil }
+      return abs($0.1-normalizedPoint) < abs($1.1-normalizedPoint)
+    }
+    for (id, caret, inserted) in owners {
       let low = min(caret, normalizedPoint), length = abs(caret - normalizedPoint)
       guard let raw = basis.substring(for: NSRange(location: low, length: length)) else { continue }
       return ComposePendingPointer(scope: scope, epoch: epoch, cursor: id, text: raw.string,
-        caretOffset: caret - low, offset: normalizedPoint - low, affinity: affinity, extend: extend, count: count)
+        caretOffset: caret - low, offset: normalizedPoint - low, affinity: affinity, extend: extend, count: count,inserted: inserted)
     }
     return nil
   }
@@ -246,11 +248,29 @@ public struct ComposePendingText {
           value.source == shown.source, value.originalRange == shown.originalRange, value.selected.length == 0,
           let normalized = Self.normalize(shown.draft, policy: nativeNewline),
           normalized.string.utf16.elementsEqual(value.draft.string.utf16),
-          let local = ComposeTextContext(.with { $0.text = shown.draft.string }, documentLength: UInt64(shown.draft.string.utf8.count)),
-          local.sourceRange(forUTF16: NSRange(location: offset, length: 0)) != nil,
-          let prefix = Self.normalize(NSAttributedString(string: (shown.draft.string as NSString).substring(to: offset)), policy: nativeNewline) else { return nil }
+          let normalizedOffset = Self.normalizedOffset(offset,in: shown.draft,policy: nativeNewline) else { return nil }
     return ComposePendingPointer(scope: scope, epoch: epoch, cursor: cursor, text: value.draft.string,
-      caretOffset: value.selected.location, offset: prefix.length, affinity: affinity, extend: extend, count: count)
+      caretOffset: value.selected.location, offset: normalizedOffset, affinity: affinity, extend: extend, count: count,
+      inserted: insertedPosition(cursor: cursor,offset: normalizedOffset))
+  }
+
+  private func insertedPosition(cursor: UInt64, offset: Int) -> ComposeAcceptedEdits.InsertedPosition? {
+    guard let value = presentation.values[cursor], offset >= 0, offset <= value.draft.length else { return nil }
+    if baseline == nil { return .init(text: value.draft.string,offsetUTF16: offset) }
+    guard let edit = committedEdits?[cursor], offset >= edit.display.location,
+          offset-edit.display.location <= edit.inserted.length else { return nil }
+    return .init(text: edit.inserted.string,offsetUTF16: offset-edit.display.location)
+  }
+
+  private static func normalizedOffset(_ offset: Int, in text: NSAttributedString, policy: UInt32) -> Int? {
+    guard ComposeTextIndex(text.string).byte(forUnit: offset) != nil else { return nil }
+    let value = text.string as NSString
+    guard let prefix = normalize(NSAttributedString(string: value.substring(to: offset)),policy: policy) else { return nil }
+    // A point between an existing CR/LF pair keeps that scalar boundary in a
+    // CRLF buffer. Normalizing the truncated prefix alone adds a spurious LF.
+    let splitPair = policy == 2 && offset > 0 && offset < value.length
+      && value.character(at: offset-1) == 13 && value.character(at: offset) == 10
+    return prefix.length-(splitPair ? 1:0)
   }
 
   /// Only real, receipt-bound ranges can become wire replacements.

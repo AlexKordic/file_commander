@@ -79,4 +79,51 @@ final class ComposePendingPointerTests: XCTestCase {
     let result = receipt(pane("aXYcdTail", position: 3, unit: 3), edited: [1])
     XCTAssertEqual(try XCTUnwrap(pointer.resolved(result)).input(id: 3).position, 4)
   }
+
+  func testFarInsertedPointUsesAcceptedBinaryProofAndRejectsMismatchedTransactions() throws {
+    let inserted = "日"+String(repeating: "café 👩🏽‍💻 東京\r\n",count: 5000)
+    let capture = try XCTUnwrap(ComposeAcceptedEdits.InsertedPosition(text: inserted,offsetUTF16: 1))
+    let pointer = try XCTUnwrap(ComposePendingPointer(scope: scope,epoch: 7,cursor: 1,text: inserted,
+      caretOffset: inserted.utf16.count,offset: 1,affinity: .upstream,extend: true,count: 2,inserted: capture))
+    var current = pane("Q"+inserted+"Tail",position: 1+inserted.utf8.count,unit: 1+inserted.utf16.count)
+    current.textContext.text = "Tail"; current.textContext.sourceStart = UInt64(1+inserted.utf8.count)
+    current.textContext.utf16Start = UInt64(1+inserted.utf16.count)
+    var result = receipt(current,edited: [1]); result.sourceRevision = 4; result.sourceLength = 5
+    result.anchors = [.with {
+      $0.cursor = 1; $0.start = 1; $0.end = UInt64(1+inserted.utf8.count); $0.beforeStart = 1; $0.beforeEnd = 1
+      $0.digest = ComposeAcceptedEdits.digest(inserted)
+    }]
+    let resolved = try XCTUnwrap(pointer.resolved(result)).input(id: 9)
+    XCTAssertEqual(resolved.position,4); XCTAssertEqual(resolved.sourceRevision,5)
+    XCTAssertEqual(resolved.affinity,1); XCTAssertTrue(resolved.extend); XCTAssertEqual(resolved.clickCount,2)
+    var changed = result; changed.anchors[0].digest = Data(repeating: 0,count: 32)
+    XCTAssertNil(pointer.resolved(changed))
+    changed = result; changed.anchors[0].end -= 1
+    XCTAssertNil(pointer.resolved(changed))
+    changed = result; changed.clearSourceRevision()
+    XCTAssertNil(pointer.resolved(changed))
+  }
+
+  func testFollowingNormalizedDeltaUsesItsOwnDigestAndExpandedCommittedLength() throws {
+    var initial = pane("Tail",position: 0,unit: 0); initial.bufferRevision = 4; initial.nativeNewline = 2
+    let unspecified = NSRange(location: NSNotFound,length: 0)
+    let first = try XCTUnwrap(ComposePendingText(pane: initial,text: NSAttributedString(string: "abc"),
+      selected: NSRange(location: 3,length: 0),replacement: unspecified)?.committed(nativeNewline: 2))
+    let input = String(repeating: "\n",count: 1000), normalized = String(repeating: "\r\n",count: 1000)
+    let next = try XCTUnwrap(ComposePendingText(following: first,pane: initial,text: NSAttributedString(string: input),
+      selected: NSRange(location: input.utf16.count,length: 0),replacement: unspecified)?.committed(nativeNewline: 2))
+    let point = 3+normalized.utf16.count-1
+    let captured = try XCTUnwrap(next.pointer(scope: scope,epoch: 7,displayed: next.presentation,
+      cursor: 1,offset: point,affinity: .downstream,extend: false,count: 1,nativeNewline: 2))
+    var current = pane("abc"+normalized+"Tail",position: 3+normalized.utf8.count,unit: 3+normalized.utf16.count)
+    current.bufferRevision = 6; current.textContext.text = "Tail"
+    current.textContext.sourceStart = UInt64(3+normalized.utf8.count)
+    current.textContext.utf16Start = UInt64(3+normalized.utf16.count)
+    var result = receipt(current,edited: [1]); result.sourceRevision = 5; result.sourceLength = 7
+    result.anchors = [.with {
+      $0.cursor = 1; $0.beforeStart = 3; $0.beforeEnd = 3; $0.start = 3; $0.end = UInt64(3+normalized.utf8.count)
+      $0.digest = ComposeAcceptedEdits.digest(normalized)
+    }]
+    XCTAssertEqual(try XCTUnwrap(captured.resolved(result)).input(id: 9).position,UInt64(point))
+  }
 }

@@ -1,5 +1,6 @@
 [
   "FreshKitTests.ComposeAcceptanceTests",
+  "FreshKitTests.ComposeAcceptedEditsTests",
   "FreshKitTests.ComposeAccessibleDocumentTests",
   "FreshKitTests.ComposeAssetTests",
   "FreshKitTests.ComposeCodeTests",
