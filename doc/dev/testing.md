@@ -484,6 +484,16 @@ the JSON and image artifacts, allowing the exact input to be replayed by
 `fc-compose-profile`. These correctness checks do not qualify the resource
 cost of complete shaping when Core Text refuses its default bounded policy.
 
+The dense inline-image backend workflows cover single-line and multiline CRLF
+source with 4,000 references to the same decoded image. They check whole-paragraph
+delivery, native soft-break joining, paging, resize, exact Unicode save/undo and
+complete accessibility elements. With `FC_COMPOSE_ARTIFACT_DIR` set, each exports
+its actual initial pane and a source/projection report. `FC_COMPOSE_TEST_TIMING=1`
+also records phase timings in separate directories. These observe editor/source
+states; the fixtures open no GUI and do not measure painted frames. The formatter
+can join source line breaks, so compare exported projections before attributing
+a standalone raw-projection cost to the app.
+
 Set `FC_COMPOSE_PROFILE_GEOMETRY=1` when running `fc-compose-profile` to export
 each final layout beside the report as `REPORT-CASE.geometry.json`. Its hash
 is recorded in the case result. The artifact includes projection text, source bounds,

@@ -1,5 +1,6 @@
 import AppKit
 import ImageIO
+import CryptoKit
 import XCTest
 import FreshKit
 @testable import FileCommander
@@ -1334,15 +1335,27 @@ final class ComposeBackendTests: XCTestCase {
 
   @MainActor
   func testRealBackendDenseInlineImagesKeepMeasuredPagingResizeAndEditSaveUndo() async throws {
+    try await denseInlineImageWorkflow(multiline: false)
+  }
+
+  @MainActor
+  func testRealBackendMultilineInlineImagesKeepMeasuredPagingResizeAndEditSaveUndo() async throws {
+    try await denseInlineImageWorkflow(multiline: true)
+  }
+
+  @MainActor
+  private func denseInlineImageWorkflow(multiline: Bool) async throws {
+    let fixture = multiline ? "dense-multiline-images" : "dense-images"
     let backend = try backend(); defer {
-      backend.captureDiagnostics("dense-inline-images")
+      backend.captureDiagnostics(multiline ? "dense-multiline-inline-images" : "dense-inline-images")
       backend.stop()
     }
     let editor = editor(BackendPasteboard()); defer { editor.detachAll() }
     let timing = ProcessInfo.processInfo.environment["FC_COMPOSE_TEST_TIMING"] == "1"
     if timing {
       let path = try XCTUnwrap(ProcessInfo.processInfo.environment["FC_COMPOSE_ARTIFACT_DIR"])
-      EditorTelemetry.shared.start(directory: URL(fileURLWithPath: path).appendingPathComponent("dense-image-timing"))
+      EditorTelemetry.shared.start(directory: URL(fileURLWithPath: path)
+        .appendingPathComponent(multiline ? "dense-multiline-image-timing" : "dense-image-timing"))
       EditorTelemetry.shared.record(["ev": "compose_backend", "pid": backend.server.processIdentifier,
         "owner": ProcessInfo.processInfo.processIdentifier])
     }
@@ -1357,9 +1370,11 @@ final class ComposeBackendTests: XCTestCase {
     let png = try XCTUnwrap(CGImageDestinationCreateWithURL(image as CFURL, "public.png" as CFString, 1, nil))
     CGImageDestinationAddImage(png, try XCTUnwrap(pixels.makeImage()), nil); XCTAssertTrue(CGImageDestinationFinalize(png))
     let header = "| A | B |\r\n|---|---|\r\n| one | two |\r\n\r\n# Dense images\r\n\r\n"
-    let body = (0..<4000).map { "word\($0) café ![tiny](tiny.png) more text. " }.joined()
+    let body = (0..<4000).map { index in
+      "word\(index) café ![tiny](tiny.png) more text. " + (multiline && index % 40 == 39 ? "\r\n" : "")
+    }.joined()
     let original = header + body + "\r\n\r\nTail\r\n"
-    let file = backend.root.appendingPathComponent("dense-images.md")
+    let file = backend.root.appendingPathComponent(fixture + ".md")
     try Data(original.utf8).write(to: file)
     phase("open", "begin")
     try await attach(backend, file: file, editor: editor)
@@ -1371,10 +1386,13 @@ final class ComposeBackendTests: XCTestCase {
     }
     phase("open", "observed")
     let initial = try XCTUnwrap(grid.focusedCompose)
+    XCTAssertEqual(initial.pane.compose.text.utf8.filter { $0 == 10 }.count, 6,
+      "native formatting joins the paragraph's source soft breaks without fixed-width line substitutions")
+    let initialBytes = try initial.pane.compose.serializedData()
     if let path = ProcessInfo.processInfo.environment["FC_COMPOSE_ARTIFACT_DIR"] {
       let output = URL(fileURLWithPath: path)
       try FileManager.default.createDirectory(at: output, withIntermediateDirectories: true)
-      try initial.pane.compose.serializedData().write(to: output.appendingPathComponent("dense-images.pb"))
+      try initialBytes.write(to: output.appendingPathComponent(fixture + ".pb"))
     }
     XCTAssertGreaterThan(original.utf8.count, 128 << 10)
     XCTAssertLessThanOrEqual(initial.pane.compose.sourceStart, UInt64(header.utf8.count))
@@ -1427,8 +1445,17 @@ final class ComposeBackendTests: XCTestCase {
     phase("document_start", "observed")
     XCTAssertTrue(editor.uninsertedText.isEmpty); XCTAssertTrue(backend.server.isRunning)
     let report: [String: Any] = ["source_bytes": original.utf8.count, "attachments": 4000, "page_positions": positions,
+      "multiline": multiline, "source_sha256": SHA256.hash(data: Data(original.utf8)).map { String(format: "%02x", $0) }.joined(),
+      "initial_pane_sha256": SHA256.hash(data: initialBytes).map { String(format: "%02x", $0) }.joined(),
+      "source_line_feeds": original.utf8.filter { $0 == 10 }.count,
+      "projection_line_feeds": initial.pane.compose.text.utf8.filter { $0 == 10 }.count,
+      "initial_projection_bytes": initial.pane.compose.text.utf8.count,
+      "initial_source_window_bytes": initial.pane.compose.sourceEnd - initial.pane.compose.sourceStart,
+      "initial_layout_width": Double(initial.layout.width), "decoded_image_width": Double(try XCTUnwrap(initial.layout.text.attachments.first?.rect.width)),
       "initial_width": Double(width), "resized_width": Double(try XCTUnwrap(grid.focusedCompose?.layout.width))]
-    try JSONSerialization.data(withJSONObject: report, options: [.sortedKeys]).write(to: backend.root.appendingPathComponent("dense-image-report.json"))
+    try JSONSerialization.data(withJSONObject: report, options: [.sortedKeys])
+      .write(to: backend.root.appendingPathComponent(multiline ? "dense-multiline-image-report.json" : "dense-image-report.json"))
+    phase("accessibility", "begin")
     _ = grid.accessibilityValue()
     try await eventually(editor, "dense document logical accessibility value", timeout: 20) {
       guard let model = editor.composeFlow.presentation, let pane = grid.focusedCompose else { return false }
@@ -1439,6 +1466,7 @@ final class ComposeBackendTests: XCTestCase {
     XCTAssertTrue(firstAccessibility === grid.completeAccessibility, "one crop certificate is shared by all immutable-generation image queries")
     XCTAssertEqual(accessible.count, 4000, "every attachment remains available to accessibility")
     XCTAssertEqual(accessible.compactMap { $0.accessibilityLabel() }, Array(repeating: "tiny", count: 4000))
+    phase("accessibility", "observed")
   }
 
   @MainActor
