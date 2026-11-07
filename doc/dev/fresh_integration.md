@@ -1045,6 +1045,9 @@ selection queue and measured caret reveal. It does not open a link or rewrite
 Markdown. Source, focus and connection changes retire tokens and elements,
 even if a restarted backend reuses the same numeric IDs. Heading elements use
 a group role with a heading-level description, avoiding newer OS-only roles.
+Retained preview geometry cannot authorize old semantic ranges: navigation
+also checks the current scene's complete source owner and pending native text.
+A source selection by itself preserves the current navigation generation.
 
 These are direct AppKit and private-backend contracts. Actual VoiceOver,
 macOS 14 runtime behavior, accessibility actions across provisional

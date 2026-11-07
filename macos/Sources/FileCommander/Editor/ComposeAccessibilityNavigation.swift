@@ -23,18 +23,33 @@ final class ComposeAccessibilityNavigation: NSObject, @preconcurrency NSAccessib
   }
 
   static func owner(_ pane: ComposePresentation) -> WireComposeIndexOwner {
+    owner(window: pane.identity.window, pane: pane.pane)
+  }
+
+  private static func owner(window: UInt64, pane: WirePane) -> WireComposeIndexOwner {
     .with {
-      $0.window = pane.identity.window; $0.leaf = pane.identity.leaf; $0.buffer = pane.identity.buffer
-      $0.epoch = pane.pane.compose.viewport.epoch; $0.revision = pane.pane.compose.bufferRevision
-      $0.authority = pane.pane.compose.assetAuthority; $0.document = pane.pane.compose.assetDocument
-      $0.length = pane.pane.compose.documentLen
+      $0.window = window; $0.leaf = pane.leaf; $0.buffer = pane.buffer
+      $0.epoch = pane.compose.viewport.epoch; $0.revision = pane.compose.bufferRevision
+      $0.authority = pane.compose.assetAuthority; $0.document = pane.compose.assetDocument
+      $0.length = pane.compose.documentLen
     }
   }
 
+  // A previous preview may remain painted while current source or a native
+  // edit awaits layout. Its semantic ranges cannot authorize navigation.
+  private var currentOwner: WireComposeIndexOwner? {
+    guard let grid, let displayed = grid.focusedCompose,
+          displayed.layout.composition == nil, !grid.hasMarkedText(),
+          grid.delegate?.grid(grid, pendingTextFor: displayed.pane)?.text == nil,
+          let current = grid.store.panes.first(where: {
+            $0.hasBuffer && $0.hasCompose && $0.leaf == displayed.identity.leaf && $0.buffer == displayed.identity.buffer
+          }) else { return nil }
+    let owner = Self.owner(window: UInt64(grid.store.windowID), pane: current)
+    return owner == Self.owner(displayed) ? owner : nil
+  }
+
   func update() {
-    let pane = grid?.focusedCompose
-    let owner = pane.flatMap { $0.layout.composition == nil && grid?.hasMarkedText() == false ? Self.owner($0) : nil }
-    controller.update(owner: owner, supported: grid?.delegate?.connected == true
+    controller.update(owner: currentOwner, supported: grid?.delegate?.connected == true
       && grid?.delegate?.shown == true
       && grid?.store.composeSemanticIndex == true && grid?.store.composeSourceSelections == true)
     if let loaded, loaded.isAccessibilityElement() {
@@ -86,7 +101,7 @@ final class ComposeAccessibilityNavigation: NSObject, @preconcurrency NSAccessib
     guard let token = token as? String, token.utf8.count <= 44, token.hasPrefix(controller.generation.uuidString + ":"),
           let ordinal = Int(token.dropFirst(37)), token == "\(controller.generation.uuidString):\(ordinal)",
           let index = controller.index, index.entries.indices.contains(ordinal),
-          let pane = grid?.focusedCompose, Self.owner(pane) == index.owner,
+          currentOwner == index.owner,
           grid?.delegate?.connected == true, grid?.delegate?.shown == true else { return nil }
     return ordinal
   }
@@ -123,8 +138,8 @@ final class ComposeAccessibilityNavigation: NSObject, @preconcurrency NSAccessib
 
   func entry(_ ordinal: Int, generation: UUID) -> ComposeSemanticIndex.Entry? {
     guard generation == controller.generation, let index = controller.index,
-          index.entries.indices.contains(ordinal), let pane = grid?.focusedCompose,
-          Self.owner(pane) == index.owner, grid?.delegate?.connected == true, grid?.delegate?.shown == true else { return nil }
+          index.entries.indices.contains(ordinal), currentOwner == index.owner,
+          grid?.delegate?.connected == true, grid?.delegate?.shown == true else { return nil }
     return index.entries[ordinal]
   }
 

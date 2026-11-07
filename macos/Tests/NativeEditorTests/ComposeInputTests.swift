@@ -514,6 +514,56 @@ final class ComposeInputTests: XCTestCase {
   }
 
   @MainActor
+  func testSemanticElementsRetireBeforePendingEditsAndAcceptedSourceReachThePaint() async throws {
+    for pendingEdit in [true, false] {
+      var scene = pane("# Heading\n"); scene.compose.editable = true
+      let peer = try ScenePeer(pane: scene, semanticIndex: true); defer { peer.close() }
+      let editor = richEditor(); defer { editor.detachAll() }
+      editor.attach(socketPath: peer.path, app: nil)
+      try await eventually { editor.grid?.focusedCompose != nil && editor.shown }
+      let grid = try XCTUnwrap(editor.grid)
+      _ = grid.accessibilityCustomRotors()
+      try await eventually { peer.indexes.contains { $0.hasOwner } }
+      let request = try XCTUnwrap(peer.indexes.first { $0.hasOwner })
+      peer.index(.with {
+        $0.id = request.id; $0.owner = request.owner; $0.totalEntries = 1; $0.labelBytes = 7; $0.done = true
+        $0.parts = [.with { $0.start = 0; $0.end = 10; $0.kind = 1; $0.label = "Heading"; $0.labelLength = 7; $0.labelDone = true }]
+      })
+      try await eventually { grid.composeNavigation.controller.status == .ready }
+      let rotor = try XCTUnwrap(grid.accessibilityCustomRotors().first)
+      let parameters = NSAccessibilityCustomRotor.SearchParameters(); parameters.searchDirection = .next
+      let result = try XCTUnwrap(grid.composeNavigation.rotor(rotor, resultFor: parameters))
+      let token = try XCTUnwrap(result.itemLoadingToken)
+      let element = try XCTUnwrap(grid.composeNavigation.accessibilityElement(withToken: token) as? NSAccessibilityElement)
+      XCTAssertTrue(element.isAccessibilityElement(), "a queued source selection alone keeps navigation valid")
+      let painted = try XCTUnwrap(grid.focusedCompose)
+      if pendingEdit {
+        grid.insertText("## Replacement\n", replacementRange: NSRange(location: NSNotFound, length: 0))
+        XCTAssertNotNil(editor.grid(grid, pendingTextFor: scene)?.text)
+      } else {
+        // Apply authoritative source without letting an asynchronous preview
+        // publish. Retained paint must never keep a previous source token alive.
+        scene.compose.bufferRevision += 1
+        let frame = WireFrame.with {
+          $0.seq = 2; $0.windowID = 1; $0.width = 80; $0.height = 35
+          $0.paneLen = 1; $0.panes = [.with { $0.pane = scene }]
+        }
+        let bytes: [UInt8] = try frame.serializedBytes()
+        let message = try XCTUnwrap(SceneMessage(kind: SceneWire.Kind.frame.rawValue, payload: bytes[...]))
+        let onChange = editor.store.onChange
+        editor.store.onChange = nil
+        editor.store.apply(message)
+        editor.store.onChange = onChange
+      }
+      XCTAssertTrue(grid.focusedCompose === painted, "the check precedes replacement paint")
+      XCTAssertFalse(element.isAccessibilityElement(), "retained paint is not a current source owner")
+      XCTAssertNil(element.accessibilityLabel())
+      XCTAssertFalse(element.accessibilityPerformPress())
+      XCTAssertNil(grid.composeNavigation.accessibilityElement(withToken: token))
+    }
+  }
+
+  @MainActor
   func testSemanticRotorsSearchOffscreenSourceAndRetireArchivedTokensOnSourceAndConnectionChanges() async throws {
     var scene = pane("# Visible\n")
     scene.compose.documentLen = 1_000_000; scene.compose.assetAuthority = 8; scene.compose.assetDocument = 9

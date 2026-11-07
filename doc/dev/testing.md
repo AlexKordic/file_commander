@@ -679,6 +679,12 @@ background-parser threshold while its first inline PNG decode is held, then
 checks native image geometry, exact save and one undo. These checks do not
 qualify a remote connection or an actual input method.
 
+Semantic-navigation checks retain a painted heading while a native text edit
+is queued, and separately while the scene store advances ahead of the view.
+Old elements lose their label, validity and source-selection action immediately;
+a queued selection alone remains valid. The real-backend rotor workflow also
+checks exact save and one undo after replacing an offscreen heading.
+
 Image-stream checks reject no-progress nonfinal chunks at the beginning and
 after partial data, require immediate request-slot release, and ignore late
 replies for that failed ID. A full-width opaque resource-identity case preserves
