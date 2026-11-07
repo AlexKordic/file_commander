@@ -1177,8 +1177,17 @@ This remains an internal generation until public AX value, selection, styles,
 lines, visible ranges, bounds and provisional actions can switch together.
 The public AX implementation still uses its existing cropped presentation;
 it does not switch between cropped and complete values as measurement runs.
-Receipt-bound global selection/replacement, independent logical publication
-while geometry is pending and complete public image elements remain required.
+The internal native action path now queues complete-value selection and primary
+replacement through the existing ordered input queue. Draft endpoints bind to
+their actual predecessor's accepted insertion proof; copied endpoints rebase
+only through a verified source transition. A proposed caret ordinal binds to
+the genuine Fresh selection receipt before any edit is sent. The whole action
+is cancelled on unknown source changes, lifetime changes or replaced interiors,
+and a waiting replacement is recovered once on disconnect. Backend regressions
+cover distant source selection, consecutive pending edits, IME clause selection,
+primary-only replacement with another caret, allocator history and recovery.
+Independent logical publication while geometry is pending and complete public
+image elements remain required before public adoption.
 Current certified formatting coverage skips redundant source-window preparation.
 Formatter/parser caches, transient allocations and the full native flow still
 require the general resource audit. The coordinator is integrated with the native

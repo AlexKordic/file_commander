@@ -81,6 +81,22 @@ public final class ComposeDocumentPresentation: Sendable {
     return projection.certifiedRange(of: part)
   }
 
+  /// The local provisional raw axis used by native input, never a wire source
+  /// position. Region keys stay local; the queue must find the owning genuine
+  /// transaction/cursor and resolve its accepted insertion proof.
+  public func provisionalPosition(of endpoint: Endpoint) -> Int? {
+    guard endpoint.presentation == id, case .draft(let region,let offset) = endpoint.location,
+          let source = overlay?.sourceComposition, let target = source.values[region],
+          ComposeTextIndex(target.text).byte(forUnit: offset) != nil else { return nil }
+    var shift = 0
+    for key in source.values.keys.sorted(by: { source.values[$0]!.source.lowerBound < source.values[$1]!.source.lowerBound }) {
+      let value = source.values[key]!
+      if key == region { return value.original.location+shift+offset }
+      shift += value.text.utf16.count-value.original.length
+    }
+    return nil
+  }
+
   private static func selections(_ snapshot: ComposeDocumentSnapshot, overlay: ComposeDocumentOverlay?,
                                  plan: ComposeProjectionPlan) -> [NSRange]? {
     let cursors = overlay?.cursors ?? snapshot.pane.cursors

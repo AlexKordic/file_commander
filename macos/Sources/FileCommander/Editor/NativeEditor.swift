@@ -68,6 +68,7 @@ final class NativeEditor: NSObject, CellGridDelegate {
     case selection(ComposeSelectionChange)
     case pendingText(ComposePendingText)
     case pendingPointer(ComposePendingPointer, after: UUID)
+    case document(ComposeDocumentAction, after: UUID)
   }
   private struct InputTarget {
     var identity: ComposePresentation.Identity
@@ -93,6 +94,10 @@ final class NativeEditor: NSObject, CellGridDelegate {
     var pointerPreview: ComposePointer.Preview?
     var virtualPrefix: ComposeVirtualSelections?
     var selectionPredecessor: UUID?
+    var documentSelectionPreview: ComposeVirtualSelections?
+    var isSourceSelection: Bool {
+      switch input { case .selection: return true; case .document(let action,_): return action.isSelection; default: return false }
+    }
   }
   private var composeQueue: [QueuedInput] = []
   private var nextComposeID: UInt64 = 0
@@ -729,10 +734,130 @@ final class NativeEditor: NSObject, CellGridDelegate {
           let replacement = ComposeReplacement(scope: pane.scope, epoch: pane.pane.compose.viewport.epoch,
             source: range, cursor: cursor.id, text: text) else { return }
     let predecessor: UUID?
-    if let last = composeQueue.last, case .selection = last.input,
+    if let last = composeQueue.last, last.isSourceSelection,
        last.target?.identity == pane.identity, last.target?.epoch == pane.pane.compose.viewport.epoch { predecessor = last.token }
     else { predecessor = nil }
     enqueueCompose(.replacement(replacement), target: pane, selectionPredecessor: predecessor)
+  }
+
+  /// Complete-value entry points. Publication uses these only when its entire
+  /// AX coordinate family moves together; queue routing never clips a range
+  /// to the drawing crop or sends a temporary region/caret identity.
+  @discardableResult
+  func selectDocument(_ ranges: [NSRange], in model: ComposeDocumentPresentation) -> Bool {
+    let queued = enqueueDocumentAction(ranges,in: model,replacement: nil)
+    if !queued { reportDocumentActionCancellation() }; return queued
+  }
+
+  @discardableResult
+  func replaceDocumentSelection(_ text: String, in model: ComposeDocumentPresentation) -> Bool {
+    let queued = model.selectedRanges?.first.map { enqueueDocumentAction([$0],in: model,replacement: text) } ?? false
+    if !queued { if let grid { self.grid(grid,recover: text) }; reportDocumentActionCancellation() }
+    return queued
+  }
+
+  private func enqueueDocumentAction(_ ranges: [NSRange], in model: ComposeDocumentPresentation, replacement: String?) -> Bool {
+    guard receivedHello, store.composeSourceSelections, let grid, let pane = grid.focusedCompose,
+          model.document.owns(window: UInt64(store.windowID),pane: pane.pane),
+          replacement == nil || pane.pane.compose.editable,
+          !ranges.isEmpty, ranges.count <= 1024 else { return false }
+    let capturedOverlay: ComposeDocumentOverlay?
+    if pane.pendingSelection || pane.layout.composition != nil || pane.layout.virtualInsertion != nil || pane.virtualSelections != nil {
+      guard let captured = ComposeDocumentOverlay(window: UInt64(store.windowID),pane: pane.pane,
+        composition: pane.layout.composition,virtualInsertion: pane.layout.virtualInsertion,virtualSelections: pane.virtualSelections) else { return false }
+      capturedOverlay = captured
+    } else { capturedOverlay = nil }
+    switch (model.overlay,capturedOverlay) {
+    case (nil,nil): break
+    case (let a?,let b?) where a.isEquivalent(to:b): break
+    default: return false
+    }
+    let sorted = ranges.sorted { ($0.location,$0.length) < ($1.location,$1.length) }
+    guard ranges.allSatisfy({ $0.location >= 0 && $0.location != NSNotFound && $0.length >= 0
+      && $0.location <= model.characterCount && $0.length <= model.characterCount-$0.location }),
+      zip(sorted,sorted.dropFirst()).allSatisfy({ NSMaxRange($0) <= $1.location && $0.location != $1.location }) else { return false }
+    var endpoints: [(ComposeDocumentPresentation.Endpoint,ComposeDocumentPresentation.Endpoint)] = []
+    for range in ranges {
+      guard let start = model.endpoint(atUTF16: range.location),
+            let end = model.endpoint(atUTF16: NSMaxRange(range),affinity: range.length == 0 ? .downstream : .upstream) else { return false }
+      endpoints.append((start,end))
+    }
+    let displayed = pane.layout.composition
+    grid.finishComposition()
+    let nodes = composeQueue.filter { $0.target?.identity == pane.identity && $0.target?.epoch == pane.pane.compose.viewport.epoch }
+    let latest = nodes.last(where: { $0.preview != nil })
+    let basis = latest.flatMap { node in node.preview?.provisionalSelections(over: node.virtualPrefix,pane: node.snapshot?.pane.compose) }
+    func cursor(_ id: UInt64, for node: QueuedInput) -> ComposeDocumentAction.Cursor {
+      var current: QueuedInput? = node, visited: Set<UUID> = []
+      while let value = current, visited.insert(value.token).inserted, let chain = value.chain,
+            let predecessor = nodes.first(where: { $0.token == chain.predecessor }) {
+        if predecessor.isSourceSelection, let text = node.preview {
+          let group = text.presentation.values.keys.sorted {
+            if ($0 == text.presentation.primaryID) != ($1 == text.presentation.primaryID) { return $0 == text.presentation.primaryID }
+            return $0 < $1
+          }
+          if let ordinal = group.firstIndex(of: id) { return .selectedGroup(predecessor.token,ordinal: ordinal) }
+        }
+        current = predecessor
+      }
+      return .known(id)
+    }
+    var proposed: [NSRange] = [], bound: [ComposeDocumentAction.Bounds] = []
+    func position(_ endpoint: ComposeDocumentPresentation.Endpoint, affinity: ComposeProjection.Affinity) -> (ComposeDocumentAction.Position,Int?)? {
+      if case .source(let byte) = endpoint.location {
+        return (.source(byte,affinity: affinity),basis?.position(forSource: UInt64(byte)))
+      }
+      guard let original = model.provisionalPosition(of: endpoint), let latest, let text = latest.preview, let displayed,
+            let normalized = text.normalizedPosition(original,displayed: displayed,nativeNewline: pane.pane.compose.nativeNewline) else { return nil }
+      var point = normalized
+      for node in nodes.reversed() {
+        guard let prefix = node.preview else { continue }
+        guard let origin = prefix.origin(atProvisionalUTF16: point,affinity: affinity) else { return nil }
+        switch origin {
+        case .inserted(let id,let inserted): return (.inserted(node.token,cursor: cursor(id,for: node),position: inserted,affinity: affinity),normalized)
+        case .before(let before): point = before
+        }
+      }
+      for node in nodes where node.target?.scope.bufferRevision == model.document.owner.revision {
+        if let byte = node.preview?.sourcePosition(beforePendingAtUTF16: point,documentLength: model.document.owner.length) {
+          return (.source(byte,affinity: affinity),normalized)
+        }
+      }
+      return nil
+    }
+    for (index, pair) in endpoints.enumerated() {
+      guard let a = position(pair.0,affinity: .downstream),
+            let b = position(pair.1,affinity: ranges[index].length == 0 ? .downstream : .upstream) else {
+        reportDocumentActionCancellation(); return false
+      }
+      bound.append(.init(start: a.0,end: b.0))
+      if let start = a.1, let end = b.1, start <= end { proposed.append(NSRange(location: start,length: end-start)) }
+    }
+    let kind: ComposeDocumentAction.Kind
+    if let replacement {
+      guard let primary = pane.cursor else { return false }
+      let owner: ComposeDocumentAction.Cursor = nodes.last.flatMap { $0.isSourceSelection ? .selectedGroup($0.token,ordinal: 0) : nil }
+        ?? latest.map { cursor(primary.id,for: $0) } ?? .known(primary.id)
+      kind = .replacement(replacement,cursor: owner)
+    } else { kind = .selection }
+    guard let action = ComposeDocumentAction(owner: model.document.owner,scope: pane.scope,bounds: bound,kind: kind) else { return false }
+    if let barrier = composeQueue.last?.token {
+      let preview = replacement == nil && proposed.count == ranges.count ? basis?.replacingGroup(with: proposed) : nil
+      enqueueCompose(.document(action,after: barrier),target: pane,documentSelectionPreview: preview)
+      return true
+    }
+    guard let ready = action.ready() else { return false }
+    switch ready {
+    case .selection(let change): enqueueCompose(.selection(change),target: pane)
+    case .replacement(let change): enqueueCompose(.replacement(change),target: pane)
+    }
+    return true
+  }
+
+  private func reportDocumentActionCancellation() {
+    let message = "The editor selection changed before it could be confirmed. Select the text again."
+    guard lastComposeCancellation != message else { return }
+    lastComposeCancellation = message; app?.engine.reportError(message); Trace.write("editor input cancelled: \(message)")
   }
 
   func grid(_ grid: CellGridView, pendingTextFor pane: WirePane) -> ComposePendingPreview? {
@@ -750,6 +875,13 @@ final class NativeEditor: NSObject, CellGridDelegate {
     for queued in composeQueue.dropLast().reversed() {
       guard queued.target?.identity == last.target?.identity, queued.target?.epoch == last.target?.epoch else { break }
       if queued.preview != nil { prefix = queued; break }
+    }
+    if case .document(let action,_) = last.input, action.isSelection {
+      var group: WireComposePane?
+      if prefix == nil, case .selection(let change)? = action.ready() { group = change.preview(in: pane.compose) }
+      return ComposePendingPreview(token: last.token,target: prefix?.snapshot ?? target,text: prefix?.preview,
+        afterAction: true,prefixToken: prefix?.token,virtualSelection: last.documentSelectionPreview,
+        virtualPrefix: prefix?.virtualPrefix,selectionGroup: group,sourceSelection: true)
     }
     var virtualSelection: ComposeVirtualSelections?
     if let prefix, let text = prefix.preview, let basis = text.provisionalSelections(over: prefix.virtualPrefix, pane: prefix.snapshot?.pane.compose),
@@ -773,7 +905,8 @@ final class NativeEditor: NSObject, CellGridDelegate {
         && pane.compose.focused && pane.compose.keyboard ? preview : nil
     }
     return ComposePendingPreview(token: last.token, target: prefix?.snapshot ?? target,
-      text: prefix?.preview, afterAction: true, prefixToken: prefix?.token, selection: selection, virtualSelection: virtualSelection, virtualPrefix: prefix?.virtualPrefix)
+      text: prefix?.preview, afterAction: true, prefixToken: prefix?.token, selection: selection, virtualSelection: virtualSelection,
+      virtualPrefix: prefix?.virtualPrefix,sourceSelection: last.selectionPredecessor != nil)
   }
 
   func grid(_ grid: CellGridView, commit text: ComposePendingText, initial: ComposePendingText,
@@ -805,6 +938,48 @@ final class NativeEditor: NSObject, CellGridDelegate {
     var prediction = result?.pane
     let predictionIdentity = first.target?.identity
     for var queued in composeQueue.dropFirst() {
+      if case .document(let captured,let barrier) = queued.input {
+        var action = captured
+        let owned = first.target?.identity == queued.target?.identity && first.target?.epoch == queued.target?.epoch
+        var invalid = failed.contains(barrier)
+        if owned {
+          if let receipt = edit ?? result {
+            let count: Int?
+            if case .selection(let selector) = first.input { count = selector.input(id: 0).selectionTargets.count }
+            else { count = nil }
+            var selectedIDs: [UInt64]?
+            if let count, receipt.pane.cursors.count == count, receipt.pane.cursors.filter(\.primary).count == 1,
+               Set(receipt.pane.cursors.map(\.id)).count == count {
+              selectedIDs = receipt.pane.cursors.sorted { a,b in a.primary != b.primary ? a.primary : a.id < b.id }.map(\.id)
+            }
+            if let resolved = action.resolving(receipt,token: first.token,selectedIDs: selectedIDs) { action = resolved }
+            else { invalid = true }
+            if receipt.pane.bufferRevision != captured.owner.revision || receipt.pane.documentLen != captured.owner.length {
+              // This preview's raw contexts belong to the preceding source
+              // generation. The bound action survives; stale contexts do not.
+              queued.documentSelectionPreview = nil
+            }
+          } else { invalid = true }
+        }
+        if !invalid, barrier == first.token {
+          if let ready = action.ready() {
+            switch ready {
+            case .selection(let change): queued.input = .selection(change)
+            case .replacement(let change): queued.input = .replacement(change)
+            }
+            queued.target?.scope = action.scope
+            if let receipt = edit ?? result, owned, let original = queued.snapshot {
+              var pane = original.pane; pane.compose = receipt.pane; queued.snapshot = grid?.composeSnapshot(pane)
+            }
+            queued.documentSelectionPreview = nil
+          } else { invalid = true }
+        } else if !invalid { queued.input = .document(action,after: barrier) }
+        if invalid {
+          failed.insert(queued.token); reportDocumentActionCancellation()
+          if let grid { for text in captured.recoveryTexts { self.grid(grid,recover: text) } }
+          continue
+        }
+      }
       if let predecessor = queued.selectionPredecessor, predecessor == first.token || failed.contains(predecessor) {
         let valid = predecessor == first.token && result.map { receipt in
           queued.target.map { receipt.matches($0.scope, epoch: $0.epoch) } ?? false
@@ -833,6 +1008,9 @@ final class NativeEditor: NSObject, CellGridDelegate {
         queued.input = .replacement(replacement)
         queued.target?.scope = replacement.scope
         queued.selectionPredecessor = nil
+        if let result, let original = queued.snapshot {
+          var pane = original.pane; pane.compose = result.pane; queued.snapshot = grid?.composeSnapshot(pane)
+        }
       }
       if case .pendingPointer(let capture, let predecessor) = queued.input,
          predecessor == first.token || failed.contains(predecessor) {
@@ -922,6 +1100,7 @@ final class NativeEditor: NSObject, CellGridDelegate {
     if let preview = queued.preview { return preview.recoveryTexts }
     switch queued.input {
     case .replacement(let replacement): return replacement.texts
+    case .document(let action,_): return action.recoveryTexts
     case .message(.text(let text)), .message(.paste(let text)): return queued.selectionPredecessor != nil ? [text] : []
     default: return []
     }
@@ -1039,12 +1218,13 @@ final class NativeEditor: NSObject, CellGridDelegate {
 
   private func enqueueCompose(_ input: PendingInput, target: ComposePresentation?, chain: CompositionChain? = nil,
                               preview: ComposePendingText? = nil, pointerPreview: ComposePointer.Preview? = nil,
-                              virtualPrefix: ComposeVirtualSelections? = nil, selectionPredecessor: UUID? = nil) {
+                              virtualPrefix: ComposeVirtualSelections? = nil, selectionPredecessor: UUID? = nil,
+                              documentSelectionPreview: ComposeVirtualSelections? = nil) {
     if composeQueue.isEmpty { lastComposeCancellation = nil }
     composeQueue.append(.init(input: input, scrollGeneration: composeViewports.userScrollGeneration,
       target: target.map(InputTarget.init), chain: chain,
       preview: preview, snapshot: target, pointerPreview: pointerPreview, virtualPrefix: virtualPrefix,
-      selectionPredecessor: selectionPredecessor))
+      selectionPredecessor: selectionPredecessor,documentSelectionPreview: documentSelectionPreview))
     grid?.refreshComposeImages()
     pumpComposeInput()
   }
@@ -1054,7 +1234,7 @@ final class NativeEditor: NSObject, CellGridDelegate {
   private func pumpComposeInput() {
     guard receivedHello, let socket, socket.isOpen, !composeInFlight, !completingComposeInput, let queued = composeQueue.first else { return }
     switch queued.input {
-    case .pendingText, .pendingPointer: return // The predecessor must supply real source coordinates.
+    case .pendingText, .pendingPointer, .document: return // The predecessor must supply real source coordinates.
     default: break
     }
     if pendingComposeID == nil {
@@ -1081,7 +1261,7 @@ final class NativeEditor: NSObject, CellGridDelegate {
     var input = WireComposeInput()
     input.id = pendingComposeID ?? 0
     switch queued.input {
-    case .pendingText, .pendingPointer: return
+    case .pendingText, .pendingPointer, .document: return
     case .message(let message):
       input.kind = UInt32(message.kind.rawValue)
       input.payload = Data(message.payload())

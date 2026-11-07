@@ -70,6 +70,22 @@ public struct ComposeVirtualSelections {
 
   public var selection: NSRange { cursors[primaryID]!.selection }
 
+  /// A proposed accessibility group uses local identities for new carets.
+  /// Only the selector's accepted Fresh receipt can bind them to real IDs.
+  public func replacingGroup(with ranges: [NSRange]) -> Self? {
+    guard !ranges.isEmpty, ranges.count <= 1024 else { return nil }
+    var maximum = max(cursors.keys.max() ?? 0,prefix.ordered.max() ?? 0), group: [UInt64: Cursor] = [:]
+    for (index, range) in ranges.enumerated() {
+      guard range.location >= 0, range.location != NSNotFound, range.length >= 0,
+            range.length <= Int.max-range.location else { return nil }
+      let id: UInt64
+      if index == 0 { id = primaryID }
+      else { guard maximum < .max else { return nil }; maximum += 1; id = maximum }
+      group[id] = .init(position: NSMaxRange(range),anchor: range.length == 0 ? nil : range.location)
+    }
+    return Self(prefix: prefix,primary: primaryID,cursors: group)
+  }
+
   public func position(forSource source: UInt64) -> Int? {
     guard let source = Int(exactly: source) else { return nil }
     return prefix.virtualPosition(for: source)

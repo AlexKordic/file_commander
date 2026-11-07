@@ -26,6 +26,10 @@ public struct ComposePendingText {
 
   public var markedRange: NSRange { presentation.markedRange }
   public var selectedRange: NSRange { presentation.selectedRange }
+  public enum PointOrigin {
+    case inserted(cursor: UInt64, position: ComposeAcceptedEdits.InsertedPosition)
+    case before(Int)
+  }
   public var ordered: [UInt64] { presentation.ordered.filter { active.contains($0) } }
   public var recoveryTexts: [String] {
     let texts = baseline == nil ? ordered.map { presentation.values[$0]!.draft.string }
@@ -208,21 +212,7 @@ public struct ComposePendingText {
                       point: Int, basis: ComposeVirtualSelections, affinity: ComposeProjection.Affinity,
                       extend: Bool, count: Int, nativeNewline: UInt32) -> ComposePendingPointer? {
     guard committedEdits != nil else { return nil }
-    var normalizedPoint = point
-    for id in displayed.ordered {
-      guard let shown = displayed.values[id], let value = presentation.values[id], shown.source == value.source,
-            shown.originalRange == value.originalRange,
-            let normalized = Self.normalize(shown.draft, policy: nativeNewline),
-            normalized.string.utf16.elementsEqual(value.draft.string.utf16) else { return nil }
-      let start = displayed.virtualStart(for: id), end = start + shown.draft.length
-      if start <= point && point <= end {
-        let offset = point - start
-        guard let normalizedOffset = Self.normalizedOffset(offset,in: shown.draft,policy: nativeNewline) else { return nil }
-        normalizedPoint = presentation.virtualStart(for: id) + normalizedOffset
-        break
-      }
-      if end < point { normalizedPoint += value.draft.length - shown.draft.length }
-    }
+    guard let normalizedPoint = normalizedPosition(point,displayed: displayed,nativeNewline: nativeNewline) else { return nil }
     let owners = ordered.compactMap { id -> (UInt64, Int, ComposeAcceptedEdits.InsertedPosition?)? in
       basis.cursors[id].map { (id, $0.position, insertedPosition(cursor: id,offset: normalizedPoint-presentation.virtualStart(for: id))) }
     }.sorted {
@@ -238,6 +228,45 @@ public struct ComposePendingText {
     return nil
   }
 
+  public func normalizedPosition(_ point: Int, displayed: ComposeComposition, nativeNewline: UInt32) -> Int? {
+    guard committedEdits != nil, point >= 0 else { return nil }
+    var normalizedPoint = point
+    for id in displayed.ordered {
+      guard let shown = displayed.values[id], let value = presentation.values[id], shown.source == value.source,
+            shown.originalRange == value.originalRange else { return nil }
+      let same = shown.draft.string.utf16.elementsEqual(value.draft.string.utf16)
+      let change: NSRange
+      if same { change = NSRange(location: 0,length: 0) }
+      else if baseline != nil, let edit = committedEdits?[id] {
+        change = edit.display
+        guard ComposeTextIndex(shown.draft.string).bytes(for: change) != nil,
+              (shown.draft.string as NSString).replacingCharacters(in: change,with: edit.inserted.string)
+                .utf16.elementsEqual(value.draft.string.utf16) else { return nil }
+      } else {
+        change = NSRange(location: 0,length: shown.draft.length)
+        guard let normalized = Self.normalize(shown.draft,policy: nativeNewline),
+              normalized.string.utf16.elementsEqual(value.draft.string.utf16) else { return nil }
+      }
+      let start = displayed.virtualStart(for: id), end = start + shown.draft.length
+      if start <= point && point <= end {
+        let offset = point - start
+        guard ComposeTextIndex(shown.draft.string).byte(forUnit: offset) != nil else { return nil }
+        let normalizedOffset: Int
+        if same || offset < change.location { normalizedOffset = offset }
+        else if offset > NSMaxRange(change) { normalizedOffset = offset+value.draft.length-shown.draft.length }
+        else {
+          let inserted = shown.draft.attributedSubstring(from: change)
+          guard let local = Self.normalizedOffset(offset-change.location,in: inserted,policy: nativeNewline) else { return nil }
+          normalizedOffset = change.location+local
+        }
+        normalizedPoint = presentation.virtualStart(for: id)+normalizedOffset
+        break
+      }
+      if end < point { normalizedPoint += value.draft.length - shown.draft.length }
+    }
+    return normalizedPoint
+  }
+
   /// Capture a displayed draft point against this committed prefix. A commit
   /// can normalize newlines, so convert the captured prefix before retaining
   /// its offset. Receipt resolution still proves the actual resulting text.
@@ -246,9 +275,9 @@ public struct ComposePendingText {
                       extend: Bool, count: Int, nativeNewline: UInt32) -> ComposePendingPointer? {
     guard committedEdits != nil, let value = presentation.values[cursor], let shown = displayed.values[cursor],
           value.source == shown.source, value.originalRange == shown.originalRange, value.selected.length == 0,
-          let normalized = Self.normalize(shown.draft, policy: nativeNewline),
-          normalized.string.utf16.elementsEqual(value.draft.string.utf16),
-          let normalizedOffset = Self.normalizedOffset(offset,in: shown.draft,policy: nativeNewline) else { return nil }
+          offset >= 0, offset <= shown.draft.length,
+          let position = normalizedPosition(displayed.virtualStart(for: cursor)+offset,displayed: displayed,nativeNewline: nativeNewline) else { return nil }
+    let normalizedOffset = position-presentation.virtualStart(for: cursor)
     return ComposePendingPointer(scope: scope, epoch: epoch, cursor: cursor, text: value.draft.string,
       caretOffset: value.selected.location, offset: normalizedOffset, affinity: affinity, extend: extend, count: count,
       inserted: insertedPosition(cursor: cursor,offset: normalizedOffset))
@@ -271,6 +300,66 @@ public struct ComposePendingText {
     let splitPair = policy == 2 && offset > 0 && offset < value.length
       && value.character(at: offset-1) == 13 && value.character(at: offset) == 10
     return prefix.length-(splitPair ? 1:0)
+  }
+
+  /// Walk an immutable provisional point back through this transaction. An
+  /// insertion binds to a genuine cursor and exact payload; an unchanged
+  /// position stays on the preceding provisional axis, without reading a gap
+  /// between bounded raw chunks or manufacturing a source byte offset.
+  public func origin(atProvisionalUTF16 point: Int, affinity: ComposeProjection.Affinity = .downstream) -> PointOrigin? {
+    guard committedEdits != nil, point >= 0 else { return nil }
+    struct Delta { let cursor: UInt64; let before, after: NSRange; let text: String }
+    var deltas: [Delta] = []
+    for id in ordered {
+      let value = presentation.values[id]!
+      let before: NSRange, text: String, display: Int
+      if let baseline {
+        guard let edit = committedEdits?[id] else { return nil }
+        text = edit.inserted.string; display = edit.display.location
+        if let original = newlyIncluded[id], let length = edit.selectionLength {
+          guard let start = baseline.virtualPosition(forOriginalUTF16: original.originalRange.location),
+                let range = Self.range(at: start,offset: -edit.leading.utf16.count,
+                  length: length+edit.leading.utf16.count+edit.trailing.utf16.count) else { return nil }
+          before = range
+        } else {
+          guard let previous = baseline.values[id],
+                let range = Self.range(at: baseline.virtualStart(for: id)+NSMaxRange(previous.selected),
+                  offset: edit.offset,length: edit.removed.utf16.count) else { return nil }
+          before = range
+        }
+      } else { before = value.originalRange; text = value.draft.string; display = 0 }
+      if before.length == 0 && text.isEmpty { continue }
+      let after = NSRange(location: presentation.virtualStart(for: id)+display,length: text.utf16.count)
+      deltas.append(.init(cursor: id,before: before,after: after,text: text))
+    }
+    deltas.sort { ($0.before.location, $0.before.length) < ($1.before.location, $1.before.length) }
+    var shift = 0, previous: NSRange?
+    for delta in deltas {
+      let (start, overflow) = delta.before.location.addingReportingOverflow(shift)
+      guard !overflow, start == delta.after.location,
+            previous.map({ NSMaxRange($0) <= delta.before.location && $0.location != delta.before.location }) ?? true else { return nil }
+      shift += delta.after.length-delta.before.length; previous = delta.before
+    }
+    let candidates = affinity == .upstream ? deltas : Array(deltas.reversed())
+    for delta in candidates where delta.after.location <= point && point <= NSMaxRange(delta.after) {
+      guard let inserted = ComposeAcceptedEdits.InsertedPosition(text: delta.text,offsetUTF16: point-delta.after.location) else { return nil }
+      return .inserted(cursor: delta.cursor,position: inserted)
+    }
+    shift = 0
+    for delta in deltas {
+      if point < delta.after.location { break }
+      shift += delta.after.length-delta.before.length
+    }
+    let (before, overflow) = point.subtractingReportingOverflow(shift)
+    return overflow || before < 0 ? nil : .before(before)
+  }
+
+  public func sourcePosition(beforePendingAtUTF16 point: Int, documentLength: UInt64) -> Int? {
+    guard let length = Int(exactly: documentLength) else { return nil }
+    return presentation.values.values.lazy.compactMap { value in
+      value.context.documentLength == length
+        ? value.context.sourceRange(forUTF16: NSRange(location: point,length: 0))?.lowerBound : nil
+    }.first
   }
 
   /// Only real, receipt-bound ranges can become wire replacements.

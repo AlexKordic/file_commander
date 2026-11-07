@@ -239,6 +239,21 @@ public struct ComposeComposition {
     return original + offset
   }
 
+  /// A raw source UTF-16 boundary supplied by Fresh can lie outside all
+  /// retained text chunks. Only unchanged positions have a correspondence.
+  func virtualPosition(forOriginalUTF16 original: Int) -> Int? {
+    guard original >= 0 else { return nil }
+    var shift = 0
+    for id in ordered {
+      let value = values[id]!, range = value.originalRange
+      if original < range.location { break }
+      if original < NSMaxRange(range) { return nil }
+      shift += value.draft.length-range.length
+    }
+    let (result, overflow) = original.addingReportingOverflow(shift)
+    return overflow || result < 0 ? nil : result
+  }
+
   private func shift(before id: UInt64) -> Int {
     starts[id]! - values[id]!.originalRange.location
   }

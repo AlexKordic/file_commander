@@ -120,6 +120,184 @@ private final class ComposeBackend {
 
 final class ComposeBackendTests: XCTestCase {
   @MainActor
+  private func completeModel(_ editor: NativeEditor, provisional: Bool = false) async throws -> ComposeDocumentPresentation {
+    editor.composeDocument.activate()
+    try await eventually(editor,"complete action model",timeout: 20) {
+      editor.composeFlow.status == .ready && (editor.composeFlow.flow?.presentation.overlay != nil) == provisional
+    }
+    return try XCTUnwrap(editor.composeFlow.flow?.presentation)
+  }
+
+  @MainActor
+  func testCompleteValueSelectsOffscreenSourceAndKeepsRapidFollowingTextInQueueOrder() async throws {
+    let backend = try backend(); defer { backend.captureDiagnostics("document-action-offscreen"); backend.stop() }
+    let editor = editor(BackendPasteboard()); defer { editor.detachAll() }
+    let target = "Final café target", original = "Start café\n\n"+String(repeating: "A paragraph 東京 e\u{301}.\n\n",count: 2500)+target+"\n"
+    let file = backend.root.appendingPathComponent("document-action.md"); try Data(original.utf8).write(to: file)
+    try await attach(backend,file: file,editor: editor,requireTables: false)
+    let grid = try XCTUnwrap(editor.grid), model = try await completeModel(editor)
+    let range = (model.text as NSString).range(of: target,options: .literal)
+    XCTAssertNotEqual(range.location,NSNotFound); XCTAssertGreaterThan(range.location,16_384)
+    XCTAssertTrue(editor.selectDocument([range],in: model))
+    grid.insertText("replaced",replacementRange: NSRange(location: NSNotFound,length: 0))
+    grid.insertText("_",replacementRange: NSRange(location: NSNotFound,length: 0))
+    editor.send(.action(name: "save",argsJson: ""))
+    let expected = original.replacingOccurrences(of: target,with: "replaced_")
+    try await eventually(editor,"save rapid text following the offscreen complete-value selection",timeout: 20) { (try? Data(contentsOf: file)) == Data(expected.utf8) }
+    XCTAssertTrue(editor.uninsertedText.isEmpty)
+    editor.send(.action(name: "undo",argsJson: "")); editor.send(.action(name: "save",argsJson: ""))
+    try await eventually(editor,"undo only the second queued literal",timeout: 20) {
+      (try? Data(contentsOf: file)) == Data(original.replacingOccurrences(of: target,with: "replaced").utf8)
+    }
+    editor.send(.action(name: "undo",argsJson: "")); editor.send(.action(name: "save",argsJson: ""))
+    try await eventually(editor,"undo the first literal without altering offscreen source",timeout: 20) { (try? Data(contentsOf: file)) == Data(original.utf8) }
+  }
+
+  @MainActor
+  func testCompleteValueSelectionInsideIMECommitsThenBindsBothEndpointsBeforeTyping() async throws {
+    let backend = try backend(); defer { backend.captureDiagnostics("document-action-insert"); backend.stop() }
+    let editor = editor(BackendPasteboard()); defer { editor.detachAll() }
+    let original = "Tail café\n", phrase = "日本abc "+String(repeating: "café 東京\n",count: 1000)
+    let file = backend.root.appendingPathComponent("document-action-ime.md"); try Data(original.utf8).write(to: file)
+    try await attach(backend,file: file,editor: editor,requireTables: false)
+    _ = try await completeModel(editor)
+    let grid = try XCTUnwrap(editor.grid), unspecified = NSRange(location: NSNotFound,length: 0)
+    grid.setMarkedText(phrase,selectedRange: NSRange(location: 0,length: 2),replacementRange: unspecified)
+    let model = try await completeModel(editor,provisional: true)
+    let selection = NSRange(location: 1,length: 3)
+    XCTAssertEqual(model.string(for: selection),"本ab")
+    XCTAssertTrue(editor.selectDocument([selection],in: model))
+    XCTAssertFalse(grid.hasMarkedText())
+    grid.insertText("Z",replacementRange: unspecified)
+    editor.send(.action(name: "save",argsJson: ""))
+    let expected = (phrase as NSString).replacingCharacters(in: selection,with: "Z")+original
+    try await eventually(editor,"save inside the committed IME payload using its accepted source proof",timeout: 20) { (try? Data(contentsOf: file)) == Data(expected.utf8) }
+    XCTAssertTrue(editor.uninsertedText.isEmpty)
+    editor.send(.action(name: "undo",argsJson: "")); editor.send(.action(name: "save",argsJson: ""))
+    try await eventually(editor,"undo only the insertion after the complete-value selection",timeout: 20) { (try? Data(contentsOf: file)) == Data((phrase+original).utf8) }
+    editor.send(.action(name: "undo",argsJson: "")); editor.send(.action(name: "save",argsJson: ""))
+    try await eventually(editor,"undo the unmarked IME payload once",timeout: 20) { (try? Data(contentsOf: file)) == Data(original.utf8) }
+  }
+
+  @MainActor
+  func testCompleteValueReplacementOfAnIMEClausePreservesTheOtherGenuineCaretAndUndo() async throws {
+    let backend = try backend(); defer { backend.captureDiagnostics("document-action-clause"); backend.stop() }
+    let editor = editor(BackendPasteboard()); defer { editor.detachAll() }
+    let original = "zero\nmiddle\nend\n", file = backend.root.appendingPathComponent("document-action-cursors.md")
+    try Data(original.utf8).write(to: file); try await attach(backend,file: file,editor: editor,requireTables: false)
+    let grid = try XCTUnwrap(editor.grid), model = try await completeModel(editor)
+    let primary = (model.text as NSString).range(of: "end").location, revision = try XCTUnwrap(grid.focusedCompose).pane.compose.selectionRevision
+    XCTAssertTrue(editor.selectDocument([NSRange(location: primary,length: 0),NSRange(location: 0,length: 0)],in: model))
+    try await eventually(editor,"Fresh owns both selected carets") {
+      guard let pane = grid.focusedCompose else { return false }
+      return pane.pane.compose.selectionRevision != revision && pane.pane.compose.cursors.count == 2
+    }
+    _ = try await completeModel(editor)
+    grid.setMarkedText("日本",selectedRange: NSRange(location: 0,length: 1),replacementRange: NSRange(location: NSNotFound,length: 0))
+    let marked = try await completeModel(editor,provisional: true)
+    XCTAssertEqual(marked.selectedRanges?.count,2)
+    XCTAssertTrue(editor.replaceDocumentSelection("X",in: marked))
+    editor.send(.action(name: "save",argsJson: ""))
+    let expected = "日本zero\nmiddle\nX本end\n", both = "日本zero\nmiddle\n日本end\n"
+    try await eventually(editor,"replace the selected primary IME clause while retaining its secondary",timeout: 20) { (try? Data(contentsOf: file)) == Data(expected.utf8) }
+    XCTAssertEqual(grid.focusedCompose?.pane.compose.cursors.count,2); XCTAssertTrue(editor.uninsertedText.isEmpty)
+    editor.send(.action(name: "undo",argsJson: "")); editor.send(.action(name: "save",argsJson: ""))
+    try await eventually(editor,"undo the primary clause replacement",timeout: 20) { (try? Data(contentsOf: file)) == Data(both.utf8) }
+    editor.send(.action(name: "undo",argsJson: "")); editor.send(.action(name: "save",argsJson: ""))
+    try await eventually(editor,"undo both original IME insertions atomically",timeout: 20) { (try? Data(contentsOf: file)) == Data(original.utf8) }
+  }
+
+  @MainActor
+  func testCompleteValueSelectionSpansTwoPendingTransactionsAndRetainedPrefixText() async throws {
+    let backend = try backend(); defer { backend.captureDiagnostics("document-action-prefix-history"); backend.stop() }
+    let editor = editor(BackendPasteboard()); defer { editor.detachAll() }
+    let original = "Tail\n", file = backend.root.appendingPathComponent("document-action-history.md")
+    try Data(original.utf8).write(to: file); try await attach(backend,file: file,editor: editor,requireTables: false)
+    _ = try await completeModel(editor)
+    let baseline = try XCTUnwrap(editor.composeDocument.snapshot), grid = try XCTUnwrap(editor.grid)
+    let unspecified = NSRange(location: NSNotFound,length: 0)
+    // Keep these calls synchronous: neither receipt can update the native
+    // owner before capture. This is the text-only model prepared by the
+    // presentation worker, without waiting for whole-document geometry.
+    grid.setMarkedText("abc",selectedRange: NSRange(location: 3,length: 0),replacementRange: unspecified)
+    grid.insertText("abc",replacementRange: unspecified)
+    grid.setMarkedText("\nYZ",selectedRange: NSRange(location: 3,length: 0),replacementRange: NSRange(location: 1,length: 1))
+    let pane = try XCTUnwrap(grid.focusedCompose)
+    let overlay = try XCTUnwrap(ComposeDocumentOverlay(window: UInt64(editor.store.windowID),pane: pane.pane,
+      composition: pane.layout.composition,virtualInsertion: pane.layout.virtualInsertion,virtualSelections: pane.virtualSelections))
+    let model = try XCTUnwrap(ComposeDocumentPresentation(baseline,overlay: overlay))
+    XCTAssertEqual(model.text,"a\nYZc"+original)
+    XCTAssertTrue(editor.selectDocument([NSRange(location: 2,length: 3)],in: model))
+    grid.insertText("Q",replacementRange: unspecified)
+    editor.send(.action(name: "save",argsJson: ""))
+    try await eventually(editor,"bind a selection from two different pending insertion owners",timeout: 20) { (try? Data(contentsOf: file)) == Data(("a\nQ"+original).utf8) }
+    XCTAssertTrue(editor.uninsertedText.isEmpty)
+    for expected in ["a\nYZc"+original,"abc"+original,original] {
+      editor.send(.action(name: "undo",argsJson: "")); editor.send(.action(name: "save",argsJson: ""))
+      try await eventually(editor,"retain each pending transaction as its own undo step",timeout: 20) { (try? Data(contentsOf: file)) == Data(expected.utf8) }
+    }
+  }
+
+  @MainActor
+  func testDisconnectRecoversAWaitingCompleteValueReplacementExactlyOnce() async throws {
+    let backend = try backend()
+    var stopped = false
+    defer { if stopped { kill(backend.server.processIdentifier,SIGCONT) }; backend.captureDiagnostics("document-action-disconnect"); backend.stop() }
+    let editor = editor(BackendPasteboard()); defer { editor.detachAll() }
+    let original = "Tail\n", file = backend.root.appendingPathComponent("document-action-disconnect.md")
+    try Data(original.utf8).write(to: file); try await attach(backend,file: file,editor: editor,requireTables: false)
+    _ = try await completeModel(editor)
+    let grid = try XCTUnwrap(editor.grid)
+    grid.setMarkedText("日本",selectedRange: NSRange(location: 0,length: 1),replacementRange: NSRange(location: NSNotFound,length: 0))
+    let model = try await completeModel(editor,provisional: true)
+    XCTAssertEqual(kill(backend.server.processIdentifier,SIGSTOP),0); stopped = true
+    XCTAssertTrue(editor.replaceDocumentSelection("replacement",in: model))
+    editor.detachAll()
+    XCTAssertEqual(editor.uninsertedText,["日本","replacement"])
+    editor.detachAll()
+    XCTAssertEqual(editor.uninsertedText,["日本","replacement"])
+    XCTAssertEqual(try Data(contentsOf: file),Data(original.utf8))
+    XCTAssertEqual(kill(backend.server.processIdentifier,SIGCONT),0); stopped = false
+  }
+
+  @MainActor
+  func testCompleteValueActionsBindNewCaretOrdinalsAfterAllocatorHistoryHasAdvanced() async throws {
+    let backend = try backend(); defer { backend.captureDiagnostics("document-action-caret-ordinals"); backend.stop() }
+    let editor = editor(BackendPasteboard()); defer { editor.detachAll() }
+    let original = "zero\nmiddle\nend\n", file = backend.root.appendingPathComponent("document-action-ordinals.md")
+    try Data(original.utf8).write(to: file); try await attach(backend,file: file,editor: editor,requireTables: false)
+    let grid = try XCTUnwrap(editor.grid)
+    for ranges in [[NSRange(location: 12,length: 0),NSRange(location: 0,length: 0),NSRange(location: 5,length: 0)],
+                   [NSRange(location: 12,length: 0)]] {
+      let model = try await completeModel(editor), revision = try XCTUnwrap(grid.focusedCompose).pane.compose.selectionRevision
+      XCTAssertTrue(editor.selectDocument(ranges,in: model))
+      try await eventually(editor,"advance and retire the old secondary cursor identities") {
+        guard let pane = grid.focusedCompose else { return false }
+        return pane.pane.compose.selectionRevision != revision && pane.pane.compose.cursors.count == ranges.count
+      }
+    }
+    let model = try await completeModel(editor), baseline = try XCTUnwrap(editor.composeDocument.snapshot)
+    XCTAssertTrue(editor.selectDocument([NSRange(location: 12,length: 0),NSRange(location: 0,length: 0)],in: model))
+    let unspecified = NSRange(location: NSNotFound,length: 0)
+    grid.setMarkedText("日本",selectedRange: NSRange(location: 0,length: 1),replacementRange: unspecified)
+    let pane = try XCTUnwrap(grid.focusedCompose)
+    let overlay = try XCTUnwrap(ComposeDocumentOverlay(window: UInt64(editor.store.windowID),pane: pane.pane,
+      composition: pane.layout.composition,virtualInsertion: pane.layout.virtualInsertion,virtualSelections: pane.virtualSelections))
+    let marked = try XCTUnwrap(ComposeDocumentPresentation(baseline,overlay: overlay))
+    let ranges = try XCTUnwrap(marked.selectedRanges)
+    XCTAssertEqual(ranges.count,2)
+    XCTAssertTrue(editor.selectDocument(ranges,in: marked))
+    grid.insertText("Q",replacementRange: unspecified)
+    editor.send(.action(name: "save",argsJson: ""))
+    try await eventually(editor,"use the actual new Fresh IDs for both pending insertion endpoints",timeout: 20) {
+      (try? Data(contentsOf: file)) == Data("Q本zero\nmiddle\nQ本end\n".utf8)
+    }
+    let live = try XCTUnwrap(grid.focusedCompose).pane.compose.cursors
+    XCTAssertEqual(live.count,2); XCTAssertFalse(live.contains { $0.id == 1 },"the first proposed secondary ID was already retired")
+    XCTAssertTrue(editor.uninsertedText.isEmpty)
+  }
+
+  @MainActor
   func testCompleteMeasuredFlowCertifiesFreshDrawingAtTheStartAndAtAnOffscreenSecondTable() async throws {
     let backend = try backend(); defer { backend.captureDiagnostics("complete-flow"); backend.stop() }
     let editor = editor(BackendPasteboard()); defer { editor.detachAll() }
@@ -500,7 +678,7 @@ final class ComposeBackendTests: XCTestCase {
   }
 
   @MainActor
-  private func attach(_ backend: ComposeBackend, file: URL, editor: NativeEditor) async throws {
+  private func attach(_ backend: ComposeBackend, file: URL, editor: NativeEditor, requireTables: Bool = true) async throws {
     let control = backend.root.appendingPathComponent("runtime/fresh/\(backend.name).ctrl.sock")
     try await eventually(nil, "private server control socket") { backend.server.isRunning && FileManager.default.fileExists(atPath: control.path) }
     let result = try await backend.command(["ensure", backend.name])
@@ -513,7 +691,7 @@ final class ComposeBackendTests: XCTestCase {
     if editor.grid?.focusedCompose == nil { editor.send(.action(name: "markdownToggleCompose", argsJson: "")) }
     try await eventually(editor, "ready measured Compose") {
       guard let pane = editor.grid?.focusedCompose else { return false }
-      return pane.pane.compose.formattingReady && pane.pane.compose.keyboard && !pane.layout.text.tables.isEmpty
+      return pane.pane.compose.formattingReady && pane.pane.compose.keyboard && (!requireTables || !pane.layout.text.tables.isEmpty)
     }
   }
 
