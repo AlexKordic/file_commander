@@ -485,6 +485,18 @@ from the same binary pane and font environment before and after a layout
 optimization; faster construction must preserve that geometry. This option
 does not measure drawing or image decoding.
 
+The same compiled executable accepts `--memory INPUT.pb OUTPUT.json` for a
+separate live-allocation probe. It constructs one pane, four equal-width panes
+and four differing-width panes in three cycles. Each batch stays alive across
+an autorelease-pool drain and is then explicitly released. Samples record
+current resident memory, physical footprint, live malloc bytes/blocks summed
+across all zones, and process peak RSS before draining, while live afterward,
+and after release. They are outside layout timing. This mode creates no views,
+backend, decoded images or geometry JSON. Compare identical inputs, fonts and
+Release builds in both process orders; resident/high-water memory and live
+malloc allocation measure different things. Stable post-release allocation
+does not by itself establish a total memory budget.
+
 The private backend's many-table regression exports `many-tables.pb` for the
 same profiler. It opens 128 separate tables with Unicode, emphasis, code,
 an image and a hanging marker; checks first/middle/last table source hits and

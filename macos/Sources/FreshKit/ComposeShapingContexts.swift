@@ -29,6 +29,8 @@ public struct ComposeShapedLine {
 /// separators, never a byte/column cutoff inside a bidi paragraph. A long
 /// single paragraph retains its complete context unless explicit admission
 /// rejects it; it is never simplified, clipped or split into different text.
+/// Each request drains its temporary objects while retaining cached shaping
+/// state and any returned line beyond that request's autorelease pool.
 final class ComposeShapingContexts {
   struct Usage { var contexts=0;var maximumUnits=0 }
   private struct Context {
@@ -110,17 +112,23 @@ final class ComposeShapingContexts {
 
   func suggest(from:Int,width:Double) -> Int? {
     guard from>=0,from<text.length else {return nil}
-    guard let context=context(from..<(from+1)) else {return nil}
-    let local=from-context.range.lowerBound
-    return context.wrapping?.suggest(context.typesetter,from:local,width:width)
-      ?? CTTypesetterSuggestLineBreak(context.typesetter,local,width)
+    return autoreleasepool {
+      guard let context=context(from..<(from+1)) else {return nil}
+      let local=from-context.range.lowerBound
+      return context.wrapping?.suggest(context.typesetter,from:local,width:width)
+        ?? CTTypesetterSuggestLineBreak(context.typesetter,local,width)
+    }
   }
 
   func line(_ range:NSRange) -> ComposeShapedLine? {
     guard range.location>=0,range.length>=0,range.location<=text.length,range.length<=text.length-range.location else {return nil}
     if range.length==0 {return .init(line:CTLineCreateWithAttributedString(NSAttributedString(string:"")),origin:range.location)}
-    guard let context=context(range.location..<NSMaxRange(range)) else {return nil}
-    return .init(line:CTTypesetterCreateLine(context.typesetter,
-      CFRange(location:range.location-context.range.lowerBound,length:range.length)),origin:context.range.lowerBound,context:context.string)
+    // Keep Core Text's temporary request objects out of the enclosing pane or
+    // batch pool. The returned line and its immutable context remain retained.
+    return autoreleasepool {
+      guard let context=context(range.location..<NSMaxRange(range)) else {return nil}
+      return .init(line:CTTypesetterCreateLine(context.typesetter,
+        CFRange(location:range.location-context.range.lowerBound,length:range.length)),origin:context.range.lowerBound,context:context.string)
+    }
   }
 }

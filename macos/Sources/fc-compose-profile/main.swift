@@ -194,8 +194,13 @@ func profile() throws {
   print(String(decoding: data, as: UTF8.self))
 }
 
-do { try profile() }
+do {
+  let args = CommandLine.arguments
+  if args.count == 4, args[1] == "--memory" {
+    try profileMemory(input: URL(fileURLWithPath: args[2]), output: URL(fileURLWithPath: args[3]))
+  } else { try profile() }
+}
 catch {
-  FileHandle.standardError.write(Data("Compose resource profile failed: \(error)\nUsage: fc-compose-profile INPUT_DIRECTORY OUTPUT_JSON\n".utf8))
+  FileHandle.standardError.write(Data("Compose resource profile failed: \(error)\nUsage: fc-compose-profile INPUT_DIRECTORY OUTPUT_JSON\n       fc-compose-profile --memory INPUT_PB OUTPUT_JSON\n".utf8))
   exit(1)
 }
