@@ -467,7 +467,8 @@ final class CellGridView: NSView, @preconcurrency NSTextInputClient {
     guard includePending, let controller = composePreviewController else { return make() }
     guard pane.hasCompose, pane.hasBuffer,
           let request = ComposePreviewRequest(pane: pane.compose, body: bodyFont as CTFont, monospace: monoFont as CTFont,
-            width: width, typography: typography, images: images, composition: preedit, virtualInsertion: virtualInsertion) else { return nil }
+            width: width, typography: typography, images: images, composition: preedit, virtualInsertion: virtualInsertion,
+            tableMeasurements: ((reuse.map { [$0] } ?? []) + (peers ?? Array(composePanes.values))).map { $0.layout.tableMeasurements }) else { return nil }
     let owner = ComposePreviewController.Owner(window: UInt64(store.windowID), pane: pane)
     if let published = publishedPreviewRequests[pane.leaf], published.owner == owner,
        request.hasSameGeometry(as: published.request), let value = make(reusingOnly: true) {

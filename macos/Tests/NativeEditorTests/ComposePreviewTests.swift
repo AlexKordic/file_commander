@@ -116,6 +116,39 @@ final class ComposePreviewTests: XCTestCase {
     XCTAssertEqual(prepared.layout(matching: input)?.text.projection.text, "日本source café 👩🏽‍💻")
   }
 
+  func testProductionResizeWorkerSharesMeasurementsWithoutSharingOldGeometry() async throws {
+    _ = NSApplication.shared; NSApp.setActivationPolicy(.prohibited)
+    let previews = ComposePreviewController(), store = SceneStore(), grid = CellGridView(store: store)
+    grid.installComposePreviewController(previews)
+    store.onChange = { [weak grid] in grid?.apply($0) }
+    var wire = pane("a | b\nc | d\n")
+    wire.compose.tables = [.with {
+      $0.end = 12; $0.alignments = [1, 1]; $0.measurementID = 42
+      $0.measurement.columns = [.with { $0.samples = [.with { $0.text = "a c" }] },
+        .with { $0.samples = [.with { $0.text = "b d" }] }]
+      $0.rows = [0, 6].map { start in .with {
+        $0.start = UInt64(start); $0.end = UInt64(start + 6); $0.contentEnd = UInt64(start + 5)
+        $0.cells = [.with { $0.start = UInt64(start); $0.end = UInt64(start + 1) },
+          .with { $0.start = UInt64(start + 4); $0.end = UInt64(start + 5) }]
+      } }
+    }]
+    try show(wire, in: store)
+    try await eventually { grid.focusedCompose.map { grid.composeGeometryIsCurrent($0) } == true }
+    let initial = try XCTUnwrap(grid.focusedCompose)
+    wire.content.w = 100
+    try show(wire, in: store)
+    try await eventually { grid.focusedCompose?.layout.width == CGFloat(100) * grid.cellWidth - 32 }
+    let resized = try XCTUnwrap(grid.focusedCompose)
+    XCTAssertTrue(initial.layout.tableMeasurements.values[0] === resized.layout.tableMeasurements.values[0],
+      "production preview admission must pass measurement hints to the worker")
+    XCTAssertFalse(initial.layout.text === resized.layout.text)
+    XCTAssertNotEqual(initial.layout.text.tables.map(\.columns), resized.layout.text.tables.map(\.columns))
+    let fresh = try XCTUnwrap(ComposePaneLayout(pane: wire.compose, body: NSFont.systemFont(ofSize: 16) as CTFont,
+      monospace: NSFont.monospacedSystemFont(ofSize: 16, weight: .regular) as CTFont, width: resized.layout.width))
+    XCTAssertEqual(resized.layout.text.tables.map(\.columns), fresh.text.tables.map(\.columns))
+    XCTAssertEqual(resized.layout.text.fragments.map(\.rect), fresh.text.fragments.map(\.rect))
+  }
+
   func testReuseOnlyMissCannotShapeAndAHitRebindsCurrentHeaders() throws {
     let wire = pane("café source 👩🏽‍💻")
     let base = try XCTUnwrap(ComposePaneLayout(pane: wire.compose, body: body, monospace: mono, width: 420))

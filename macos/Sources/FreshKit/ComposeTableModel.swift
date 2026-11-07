@@ -27,6 +27,10 @@ public struct ComposeTableModel {
   private let documentLength: Int
   private let authority, document: UInt64
 
+  var measurements: ComposeTableMeasurements {
+    .init(authority: authority, document: document, values: tables.compactMap(\.measurement))
+  }
+
   /// Remap an already validated model after presentation-only replacements.
   /// A draft spanning cells uses shared text flow instead of losing or
   /// repeating that draft in independently shaped cells.
@@ -73,7 +77,8 @@ public struct ComposeTableModel {
   }
 
   public init?(pane: WireComposePane, projection: ComposeProjection? = nil, reuse: ComposeTableModel? = nil,
-               sharingMeasurementsWith peers: [ComposeTableModel] = []) {
+               sharingMeasurementsWith peers: [ComposeTableModel] = [],
+               tableMeasurements: [ComposeTableMeasurements] = []) {
     guard let projection = projection ?? ComposeProjection(pane), let document = Int(exactly: pane.documentLen),
           projection.source.upperBound <= document else { return nil }
     let bytes = Array(projection.text.utf8)
@@ -91,9 +96,10 @@ public struct ComposeTableModel {
     var result: [Table] = [], previousTableEnd = 0
     var cached: [UInt64: [ComposeTableMeasurement]] = [:]
     var seen: Set<ObjectIdentifier> = []
-    for model in (reuse.map { [$0] } ?? []) + peers
-      where model.authority == pane.assetAuthority && model.document == pane.assetDocument {
-      for measurement in model.tables.compactMap(\.measurement) where seen.insert(ObjectIdentifier(measurement)).inserted {
+    let candidates = ((reuse.map { [$0] } ?? []) + peers).map(\.measurements) + tableMeasurements
+    for candidate in candidates
+      where candidate.authority == pane.assetAuthority && candidate.document == pane.assetDocument {
+      for measurement in candidate.values where seen.insert(ObjectIdentifier(measurement)).inserted {
         cached[measurement.id, default: []].append(measurement)
       }
     }

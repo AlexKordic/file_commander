@@ -16,6 +16,7 @@ public final class ComposePaneLayout {
   private let images: [UInt64: ComposeImageState]
   private let imageSizes: [Int: CGSize]
   private let tableModel: ComposeTableModel
+  public var tableMeasurements: ComposeTableMeasurements { tableModel.measurements }
   private struct CodeBlock { var source, display: Range<Int>; var indent: CGFloat }
   private var codeBlocks: [CodeBlock] = []
   private static let codePadding: CGFloat = 8
@@ -31,19 +32,21 @@ public final class ComposePaneLayout {
                typography: ComposeTypography = .init(),
                images: [UInt64: ComposeImageState] = [:], reuse: ComposePaneLayout? = nil,
                sharingMeasurementsWith peers: [ComposePaneLayout] = [],
+               tableMeasurements: [ComposeTableMeasurements] = [],
                measuredBase: ComposePaneLayout? = nil,
                preedit: ComposeMarkedText? = nil, composition: ComposeComposition? = nil, virtualInsertion: ComposeVirtualInsertion? = nil,
                measurement: ComposeTextLayout.MeasurementOptions? = nil, record: ((ComposeTextLayout.Fragment)->Bool)? = nil,
                reusingOnly: Bool = false) {
     self.init(pane: pane, body: body, monospace: monospace, width: width, typography: typography,
-      images: images, reuse: reuse, sharingMeasurementsWith: peers, measuredBase: measuredBase,
+      images: images, reuse: reuse, sharingMeasurementsWith: peers, tableMeasurements: tableMeasurements, measuredBase: measuredBase,
       preedit: preedit, composition: composition, virtualInsertion: virtualInsertion,
       measurement: measurement, record: record, prepared: nil, reusingOnly: reusingOnly)
   }
 
   init?(pane: WireComposePane, body: CTFont, monospace: CTFont, width: CGFloat,
         typography: ComposeTypography = .init(), images: [UInt64: ComposeImageState] = [:], reuse: ComposePaneLayout? = nil,
-        sharingMeasurementsWith peers: [ComposePaneLayout] = [], measuredBase: ComposePaneLayout? = nil,
+        sharingMeasurementsWith peers: [ComposePaneLayout] = [], tableMeasurements: [ComposeTableMeasurements] = [],
+        measuredBase: ComposePaneLayout? = nil,
         preedit: ComposeMarkedText? = nil, composition: ComposeComposition? = nil, virtualInsertion: ComposeVirtualInsertion? = nil,
         measurement: ComposeTextLayout.MeasurementOptions? = nil, record: ((ComposeTextLayout.Fragment)->Bool)? = nil,
         prepared: ComposeProjectionPlan?, reusingOnly: Bool = false) {
@@ -137,7 +140,7 @@ public final class ComposePaneLayout {
       hangingContexts[wire.itemStart] = context
     }
     guard let tableModel = ComposeTableModel(pane: pane, projection: prepared.base, reuse: reuse?.tableModel,
-      sharingMeasurementsWith: peers.map(\.tableModel)) else { return nil }
+      sharingMeasurementsWith: peers.map(\.tableModel), tableMeasurements: tableMeasurements) else { return nil }
     self.tableModel = tableModel
     let projection = prepared.projection, sourceDisplays = prepared.sourceDisplays
     guard let tables = tableModel.remapping(to: projection, drafts: prepared.drafts.map { ($0.source, $0.display) }) else { return nil }

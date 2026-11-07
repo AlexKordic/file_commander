@@ -184,6 +184,59 @@ final class ComposeTableMeasurementTests: XCTestCase {
     XCTAssertNotEqual(changed.text.tables.map(\.columns), original.text.tables.map(\.columns))
   }
 
+  @MainActor
+  func testWorkerHintsOutliveOldLayoutsButKeepFreshRowsFontsAndSourceMaps() async throws {
+    let pane = try fixture()
+    let first = try crop(pane, row: pane.tables[0].rows[0]), last = try crop(pane, row: pane.tables[0].rows[4])
+    weak var old: ComposePaneLayout?
+    let hint: ComposeTableMeasurements = try autoreleasepool {
+      let layout = try XCTUnwrap(ComposePaneLayout(pane: first, body: body, monospace: code, width: 320))
+      old = layout
+      return layout.tableMeasurements
+    }
+    XCTAssertNil(old, "the worker hint must not retain the published pane or its source map")
+    for face in [body, CTFontCreateWithName("Helvetica-Oblique" as CFString, 26, nil)] {
+      let input = try XCTUnwrap(ComposePreviewRequest(pane: last, body: face, monospace: code, width: 620,
+        tableMeasurements: [hint]))
+      let plain = try XCTUnwrap(ComposePreviewRequest(pane: last, body: face, monospace: code, width: 620))
+      XCTAssertTrue(input.isEquivalent(to: plain), "hints cannot change result ownership")
+      let prepared = try await Task.detached { try input.prepare() }.value
+      let result = try XCTUnwrap(prepared.layout(matching: plain))
+      let fresh = try XCTUnwrap(ComposePaneLayout(pane: last, body: face, monospace: code, width: 620))
+      XCTAssertTrue(result.tableMeasurements.values[0] === hint.values[0])
+      XCTAssertEqual(result.text.tables.map(\.columns), fresh.text.tables.map(\.columns))
+      XCTAssertEqual(result.text.fragments.map(\.rect), fresh.text.fragments.map(\.rect))
+      XCTAssertEqual(result.text.fragments.map { ComposeGlyphSignature.digest($0) },
+        fresh.text.fragments.map { ComposeGlyphSignature.digest($0) })
+      XCTAssertEqual(result.text.projection.source, Int(last.sourceStart)..<Int(last.sourceEnd))
+      XCTAssertNil(result.text.caret(for: Int(first.sourceStart)))
+    }
+  }
+
+  func testWorkerHintsRequireScopeLiteralInputsAndCompleteValidDeliveredMetadata() throws {
+    let pane = try fixture(), original = try XCTUnwrap(ComposeTableModel(pane: pane))
+    let hints = [original.measurements]
+    for mutation in 0..<5 {
+      var changed = pane
+      switch mutation {
+      case 0: changed.assetAuthority += 1
+      case 1: changed.assetDocument += 1
+      case 2: changed.tables[0].measurementID += 1
+      case 3: changed.tables[0].measurement.columns[0].samples[0].text += " more"
+      default: changed.tables[0].measurement.columns[0].samples[0].minimumOnly.toggle()
+      }
+      let result = try XCTUnwrap(ComposeTableModel(pane: changed, tableMeasurements: hints))
+      XCTAssertFalse(result.tables[0].measurement === original.tables[0].measurement)
+    }
+    var missing = pane; missing.tables[0].clearMeasurement()
+    XCTAssertNil(ComposeTableModel(pane: missing, tableMeasurements: hints))
+    var malformed = pane
+    malformed.tables[0].measurement.columns[0].samples = [.with {
+      $0.text = "é"; $0.spans = [.with { $0.start = 1; $0.end = 2; $0.flags = 1 }]
+    }]
+    XCTAssertNil(ComposeTableModel(pane: malformed, tableMeasurements: hints))
+  }
+
   func testCachedPreferencesWrapLongWordsWithoutClippingCompleteEmoji() throws {
     let sample = WireComposeTableColumn.with {
       $0.samples = [.with { $0.text = "👩🏽‍💻"; $0.minimumOnly = true },

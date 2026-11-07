@@ -4,7 +4,7 @@ import CoreGraphics
 
 /// Complete parser-owned font inputs, independent of the displayed row subset.
 /// Relative UTF-8 styles are validated before native font measurement.
-public final class ComposeTableMeasurement {
+public final class ComposeTableMeasurement: @unchecked Sendable {
   public let id: UInt64
   let wire: WireComposeTableMeasurement
   private struct FontMetrics {
@@ -13,6 +13,9 @@ public final class ComposeTableMeasurement {
     let emptyWidth: CGFloat
     let images: [Bool]
   }
+  // Wire inputs and Core Text fonts are immutable. The only mutable state is
+  // an immutable aggregate replaced under this lock; shaped views never cross
+  // the worker boundary through this object.
   private let metricsLock = NSLock()
   /// One immutable aggregate per measurement, with no shaped strings/lines
   /// retained. A new font environment replaces this bounded cache entry.
@@ -117,6 +120,14 @@ public final class ComposeTableMeasurement {
     metricsLock.unlock()
     return measured
   }
+}
+
+/// An opaque performance hint captured from a published pane. It retains no
+/// source maps, rows or mutable layouts. Every recipient must validate its own
+/// delivered metadata, document scope and literal inputs before using a value.
+public struct ComposeTableMeasurements: Sendable {
+  let authority, document: UInt64
+  let values: [ComposeTableMeasurement]
 }
 
 struct ComposeColumnConstraints {

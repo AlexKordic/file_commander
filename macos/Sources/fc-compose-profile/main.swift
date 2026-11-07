@@ -196,11 +196,22 @@ func profile() throws {
 
 do {
   let args = CommandLine.arguments
-  if args.count == 4, args[1] == "--memory" {
+  if args.count == 4, args[1] == "--preview" {
+    Task { @MainActor in
+      do {
+        try await profilePreviews(input: URL(fileURLWithPath: args[2]), output: URL(fileURLWithPath: args[3]))
+        exit(0)
+      } catch {
+        FileHandle.standardError.write(Data("Compose preview profile failed: \(error)\n".utf8))
+        exit(1)
+      }
+    }
+    dispatchMain()
+  } else if args.count == 4, args[1] == "--memory" {
     try profileMemory(input: URL(fileURLWithPath: args[2]), output: URL(fileURLWithPath: args[3]))
   } else { try profile() }
 }
 catch {
-  FileHandle.standardError.write(Data("Compose resource profile failed: \(error)\nUsage: fc-compose-profile INPUT_DIRECTORY OUTPUT_JSON\n       fc-compose-profile --memory INPUT_PB OUTPUT_JSON\n".utf8))
+  FileHandle.standardError.write(Data("Compose resource profile failed: \(error)\nUsage: fc-compose-profile INPUT_DIRECTORY OUTPUT_JSON\n       fc-compose-profile --memory INPUT_PB OUTPUT_JSON\n       fc-compose-profile --preview INPUT_PB OUTPUT_JSON\n".utf8))
   exit(1)
 }

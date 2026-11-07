@@ -1327,6 +1327,16 @@ current-source fallback remains drawable before formatting finishes.
 Selection-only updates may reuse geometry through the same fully validated
 constructor, in a mode that cannot start shaping on a cache miss.
 
+Changed-preview workers receive opaque table-measurement hints from active
+panes. These retain only immutable parser inputs and a lock-protected,
+single-font-pair aggregate, not old layouts, rows or source coordinates. Reuse
+requires the delivered authority, document lifetime, measurement ID, column
+count, styles and literal UTF-8 sample bytes to match. Canonical Unicode
+equality alone cannot certify byte-addressed style ranges. Missing or malformed
+delivered metadata still fails validation. Fonts are checked before aggregate
+reuse; available-width resolution and source maps belong to the new pane.
+Hints do not change request identity or permit an old result to publish.
+
 While changed glyphs are pending, the prior frame retains its original owner.
 Logical source, pending text, complete accessibility text and source actions do
 not wait for it. Native composition survives an absent preview. Candidate pixel

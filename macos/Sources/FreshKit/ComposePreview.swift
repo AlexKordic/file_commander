@@ -14,15 +14,18 @@ public struct ComposePreviewRequest: @unchecked Sendable {
   private let composition: ComposePlainComposition?
   private let insertion: ComposeVirtualInsertion.Plain?
   private let wireDigest, geometryDigest: Data
+  private let tableMeasurements: [ComposeTableMeasurements]
 
   @MainActor
   public init?(pane: WireComposePane, body: CTFont, monospace: CTFont, width: CGFloat,
                typography: ComposeTypography = .init(), images: [UInt64: ComposeImageState] = [:],
-               composition: ComposeComposition? = nil, virtualInsertion: ComposeVirtualInsertion? = nil) {
+               composition: ComposeComposition? = nil, virtualInsertion: ComposeVirtualInsertion? = nil,
+               tableMeasurements: [ComposeTableMeasurements] = []) {
     guard width.isFinite, width > 0, typography.isValid,
           let wire = try? pane.serializedData() else { return nil }
     self.pane = pane; self.body = body; self.monospace = monospace
     self.width = width; self.typography = typography; self.images = images
+    self.tableMeasurements = tableMeasurements
     self.composition = composition.map(ComposePlainComposition.init)
     insertion = virtualInsertion.map(ComposeVirtualInsertion.Plain.init)
     wireDigest = Data(SHA256.hash(data: wire))
@@ -70,6 +73,8 @@ public struct ComposePreviewRequest: @unchecked Sendable {
   }
 
   public func isEquivalent(to other: Self) -> Bool {
+    // Measurement hints affect only cost, never request identity. The worker
+    // validates each hint against this request's complete delivered inputs.
     wireDigest == other.wireDigest && sameEnvironment(as: other)
       && sameDraft(as: other, selection: true) && sameImages(as: other)
   }
@@ -96,7 +101,8 @@ public struct ComposePreviewRequest: @unchecked Sendable {
       let draft = composition?.restore(), insertion = self.insertion?.restore()
       guard composition == nil || draft != nil, self.insertion == nil || insertion != nil,
             let layout = ComposePaneLayout(pane: pane, body: body, monospace: monospace, width: width,
-              typography: typography, images: images, composition: draft, virtualInsertion: insertion,
+              typography: typography, images: images, tableMeasurements: tableMeasurements,
+              composition: draft, virtualInsertion: insertion,
               record: { _ in !Task.isCancelled }) else { throw Failure.unavailable }
       try Task.checkCancellation()
       _ = layout.codeFrames; _ = layout.quoteRails; _ = layout.thematicRules

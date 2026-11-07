@@ -506,6 +506,16 @@ from the same binary pane and font environment before and after a layout
 optimization; faster construction must preserve that geometry. This option
 does not measure drawing or image decoding.
 
+Use `fc-compose-profile --preview INPUT.pb OUTPUT.json` to compare the actual
+immutable request capture, detached preparation and exact-request handoff.
+Three serial samples prepare a cold pane at 960 points, then independent
+640-point previews with and without opaque measurement hints. Each input is
+decoded separately; control order alternates. Full glyph/font/position, table,
+attachment and source-map artifacts must agree outside the timing regions.
+The report separates main-actor capture from worker/handoff intervals. This is
+a same-binary control, excluding parser formatting, GUI paint and interactive
+latency. Its RSS high-water mark includes geometry JSON comparisons.
+
 The same compiled executable accepts `--memory INPUT.pb OUTPUT.json` for a
 separate live-allocation probe. It constructs one pane, four equal-width panes
 and four differing-width panes in three cycles. Each batch stays alive across
@@ -687,6 +697,12 @@ A pending-formatting case reflows the frozen old frame, verifies its source
 namespace and stale-geometry refusal, then publishes a usable current-source
 replacement. Accepted text and received-image completion retain their separate
 fallback coverage.
+The production resize case verifies that preview admission actually carries
+measurement hints while creating new geometry. Table measurement tests also
+release the old pane before worker preparation, compare disjoint source windows
+and font changes with fresh geometry, and reject foreign lifetimes, changed
+inputs, absent metadata and UTF-8-invalid styles. Canonically equal strings with
+different literal bytes cannot reuse validation or stale span boundaries.
 The private-backend held-preview workflow exercises complete accessibility text,
 selection/replacement, IME input, exact CRLF save and undo before any visible
 preview is published. Render-dependent tests await matching geometry; pending
