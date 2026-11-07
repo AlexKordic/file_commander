@@ -1284,9 +1284,11 @@ while separate byte-equal allocations count separately. Formatter counters updat
 on capture/rebase; gathering and parse completion recheck the retention targets.
 It evicts older snapshots before
 copying a new revision, then checks actual capacity after index construction.
-The requested document and visible Compose working set remain retained even
-if they exceed either target. Visible panes/workspaces cannot evict and reparse
-each other continually; leaving Compose makes a snapshot eligible for eviction
+The requested document and the active workspace's displayed Compose splits remain
+retained even if they exceed either target. Displayed splits cannot evict and
+reparse each other continually. Saved inactive workspaces remain ordinary LRU
+candidates even when their tabs retain PageView mode; leaving Compose also makes
+a snapshot eligible for eviction
 during polling, without another gather. No source is truncated and no file-size
 restriction is added. Obsolete cached
 source/index ownership is released before the replacement read, while its

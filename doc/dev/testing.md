@@ -569,9 +569,11 @@ LRU eviction below eight entries, index capacity at the
 64 MiB boundary, exact Unicode/CRLF for an oversized current document, and an
 evicted parser job whose real slot and source remain owned until completion.
 The requested document and visible Compose working set are exempt from the soft
-retention targets. A multi-workspace pressure test checks stable snapshot
-identities across repeated gathering, then retirement during polling after a
-workspace leaves Compose. Additional cases exercise complete table samples,
+retention targets within the active scene's workspace. A split pressure test
+checks stable snapshot identities across repeated gathering, then retirement
+during polling after a pane leaves Compose. An inactive-workspace test verifies
+that saved PageView mode does not pin history, actual open buffers survive
+eviction, and source/heading metadata restores when returning. Additional cases exercise complete table samples,
 formatter strings, shared versus separate link allocations, previous/rebased
 formatter ownership and immediate admission of completed parser metadata.
 The opt-in parser profile reports retained-capacity components and a batch of
