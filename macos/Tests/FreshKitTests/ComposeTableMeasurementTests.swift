@@ -6,6 +6,69 @@ import ImageIO
 final class ComposeTableMeasurementTests: XCTestCase {
   private let body = CTFontCreateWithName("Helvetica" as CFString, 18, nil)
   private let code = CTFontCreateWithName("Menlo" as CFString, 18, nil)
+
+  private func manySamples() throws -> ComposeTableMeasurement {
+    let wire = WireComposeTableMeasurement.with {
+      $0.columns = [.with {
+        $0.samples = (0..<512).map { index in
+          let text = "café 東京 👩🏽‍💻 \(index)"
+          return .with {
+            $0.text = text
+            $0.spans = [.with {
+              $0.start = 0; $0.end = UInt64(text.utf8.count)
+              $0.flags = UInt32(index % 4); $0.code = index % 5 == 0
+            }]
+          }
+        }
+      }]
+    }
+    return try XCTUnwrap(ComposeTableMeasurement(id: 1, wire: wire, columns: 1))
+  }
+
+  func testTableSampleCancellationStopsUncachedWorkWithoutPublishingPartialWidths() throws {
+    let measurement = try manySamples()
+    var polls = 0
+    let cancelled = measurement.widths(body: body, monospace: code, available: 1, cancelled: {
+      polls += 1; return polls >= 3
+    })
+    XCTAssertTrue(cancelled.isEmpty)
+    XCTAssertGreaterThanOrEqual(polls, 3, "observe cancellation during the measurement")
+    let expected = try manySamples().widths(body: body, monospace: code, available: 1)
+    XCTAssertFalse(expected.isEmpty)
+    var retryPolls = 0
+    XCTAssertEqual(measurement.widths(body: body, monospace: code, available: 1, cancelled: {
+      retryPolls += 1; return false
+    }), expected)
+    XCTAssertGreaterThan(retryPolls, 0, "the cancelled pass must not have installed a cache entry")
+  }
+
+  func testTableSampleCancellationPreservesThePreviousFontAggregate() throws {
+    let measurement = try manySamples()
+    let previous = measurement.widths(body: body, monospace: code, available: 1)
+    let larger = CTFontCreateCopyWithAttributes(body, 26, nil, nil)
+    var polls = 0
+    XCTAssertTrue(measurement.widths(body: larger, monospace: code, available: 1, cancelled: {
+      polls += 1; return polls >= 3
+    }).isEmpty)
+    XCTAssertEqual(measurement.widths(body: body, monospace: code, available: 1, cancelled: {
+      XCTFail("cancellation must not evict an already measured font environment")
+      return true
+    }), previous)
+    let expected = try manySamples().widths(body: larger, monospace: code, available: 1)
+    XCTAssertEqual(measurement.widths(body: larger, monospace: code, available: 1), expected)
+  }
+
+  func testTableSampleCancellationUsesTheCurrentWorkerTaskByDefault() async throws {
+    let measurement = try manySamples()
+    let stopped = await Task.detached {
+      withUnsafeCurrentTask { $0?.cancel() }
+      let body = CTFontCreateWithName("Helvetica" as CFString, 18, nil)
+      let code = CTFontCreateWithName("Menlo" as CFString, 18, nil)
+      return measurement.widths(body: body, monospace: code, available: 1).isEmpty
+    }.value
+    XCTAssertTrue(stopped)
+  }
+
   func testCJKPreferredMinimumUsesNativeLineBreaksRatherThanDictionaryWords() {
     let text = NSAttributedString(string: "東京都", attributes: [NSAttributedString.Key(kCTFontAttributeName as String): body])
     let glyph = CTLineCreateWithAttributedString(NSAttributedString(string: "東",

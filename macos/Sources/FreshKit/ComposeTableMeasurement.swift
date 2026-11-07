@@ -54,8 +54,9 @@ public final class ComposeTableMeasurement: @unchecked Sendable {
     }
   }
 
-  func widths(body: CTFont, monospace: CTFont, available: CGFloat) -> [CGFloat] {
-    guard let metrics = fontMetrics(body: body, monospace: monospace) else { return [] }
+  func widths(body: CTFont, monospace: CTFont, available: CGFloat,
+              cancelled: () -> Bool = { Task.isCancelled }) -> [CGFloat] {
+    guard let metrics = fontMetrics(body: body, monospace: monospace, cancelled: cancelled) else { return [] }
     guard !metrics.minimum.isEmpty else { return [] }
     var constraints = ComposeColumnConstraints(count: metrics.minimum.count, emptyWidth: metrics.emptyWidth, available: available)
     let share = max(metrics.emptyWidth, available / CGFloat(metrics.minimum.count) - ComposeMeasuredTable.padding * 2)
@@ -67,13 +68,16 @@ public final class ComposeTableMeasurement: @unchecked Sendable {
     return constraints.widths
   }
 
-  private func fontMetrics(body: CTFont, monospace: CTFont) -> FontMetrics? {
+  private func fontMetrics(body: CTFont, monospace: CTFont, cancelled: () -> Bool) -> FontMetrics? {
     metricsLock.lock()
     if let cachedMetrics, CFEqual(cachedMetrics.body, body), CFEqual(cachedMetrics.monospace, monospace) {
       metricsLock.unlock()
       return cachedMetrics
     }
     metricsLock.unlock()
+    // A complete cache hit needs no shaping. Cold or changed-font passes
+    // cooperate with the worker without replacing a valid prior aggregate.
+    guard !cancelled() else { return nil }
     // Collect uncapped native preferences once. Resolving a narrower pane
     // caps only the wrapping preference, never a complete shaped grapheme.
     var constraints = ComposeColumnConstraints(count: wire.columns.count, font: body, available: .greatestFiniteMagnitude)
@@ -87,6 +91,7 @@ public final class ComposeTableMeasurement: @unchecked Sendable {
       // Core Text and Foundation can autorelease per-sample shaping storage.
       // Bound its lifetime independently of the caller's pool and table size.
       for start in stride(from: 0, to: value.samples.count, by: 128) {
+        guard !cancelled() else { return nil }
         let end = min(start + 128, value.samples.count)
         let valid = autoreleasepool {
           for sample in value.samples[start..<end] {
@@ -126,6 +131,7 @@ public final class ComposeTableMeasurement: @unchecked Sendable {
         guard valid else { return nil }
       }
     }
+    guard !cancelled() else { return nil }
     let measured = FontMetrics(body: body, monospace: monospace, minimum: constraints.minimum,
       glyphMinimum: constraints.glyphMinimum, natural: constraints.natural, emptyWidth: constraints.emptyWidth, images: images)
     metricsLock.lock()

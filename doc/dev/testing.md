@@ -516,6 +516,11 @@ For lifetime optimizations, compare matching Release test builds in separate
 scratch directories and keep compilation out of the measurement interval.
 The preview worker interval includes its outer autorelease-pool drain; a
 construction-only timer can exclude cleanup deferred by the control.
+Native table-measurement tests also cancel cold and changed-font passes at
+controlled checkpoints, verify that retry recomputes complete widths without
+losing a prior valid aggregate, and check the default policy inside a cancelled
+Swift task. They establish cooperative cancellation, not a time deadline for an
+individual Core Text call or the entire preview pipeline.
 The report separates main-actor capture from worker/handoff intervals. This is
 a same-binary control, excluding parser formatting, GUI paint and interactive
 latency. Its RSS high-water mark includes geometry JSON comparisons.

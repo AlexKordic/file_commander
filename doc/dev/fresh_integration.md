@@ -1504,6 +1504,12 @@ in batches of at most 128 samples. Font variants remain strongly retained for
 the measurement pass, and the resulting cache holds only aggregate constraints.
 This bounds temporary sample ownership independently of the caller's pool; it
 does not cap source text, sample size, table length or the overall layout graph.
+Uncached and changed-font passes observe worker-task cancellation at entry,
+between batches and before publishing a complete aggregate. Cancellation
+returns no partial widths and preserves an already cached font environment;
+completed cache hits remain immediately usable. Native preview preparation
+reports task cancellation separately from unavailable geometry. An individual
+Core Text operation is not preempted by these cooperative checks.
 
 Visible-pane updates deliver measurement inputs once and then refer to their
 ID. Scene comparison treats the full payload and its reference as the same

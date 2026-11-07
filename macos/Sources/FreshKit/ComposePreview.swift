@@ -118,7 +118,10 @@ public struct ComposePreviewRequest: @unchecked Sendable {
             let layout = ComposePaneLayout(pane: pane, body: body, monospace: monospace, width: width,
               typography: typography, images: images, tableMeasurements: tableMeasurements,
               composition: draft, virtualInsertion: insertion,
-              record: { _ in !Task.isCancelled }) else { throw Failure.unavailable }
+              record: { _ in !Task.isCancelled }) else {
+        try Task.checkCancellation()
+        throw Failure.unavailable
+      }
       try Task.checkCancellation()
       _ = layout.codeFrames; _ = layout.quoteRails; _ = layout.thematicRules
       try Task.checkCancellation()
