@@ -169,6 +169,51 @@ final class ComposePreviewTests: XCTestCase {
     XCTAssertNotNil(previews.result(owner: owner, request: good)); XCTAssertEqual(failures, 1)
   }
 
+  func testUnformattedSourceKeepsReflowInItsOldNamespaceUntilTheReplacementIsUsable() async throws {
+    _ = NSApplication.shared; NSApp.setActivationPolicy(.prohibited)
+    let gate = PreviewGate(), previews = controller(gate), store = SceneStore(), grid = CellGridView(store: store)
+    addTeardownBlock { await gate.releaseAll() }
+    grid.installComposePreviewController(previews)
+    store.onChange = { [weak grid] in grid?.apply($0) }
+    let initial = pane("Original café source 👩🏽‍💻")
+    try show(initial,in: store)
+    try await eventually { await gate.started == 1 }
+    await gate.release(0)
+    try await eventually { grid.focusedCompose.map { grid.composeGeometryIsCurrent($0) } == true }
+    let original = try XCTUnwrap(grid.focusedCompose)
+    var raw = pane("Changed raw source 東京",revision: 5)
+    raw.compose.ready = false; raw.compose.currentProjection = false
+    try show(raw,in: store)
+    let retained = try XCTUnwrap(grid.focusedCompose)
+    XCTAssertEqual(retained.pane.compose.bufferRevision,initial.compose.bufferRevision)
+    XCTAssertFalse(grid.composeGeometryIsCurrent(retained),"a frozen old source cannot drive automatic viewport/input geometry")
+    XCTAssertNil(grid.textServiceGeometry)
+    XCTAssertEqual(grid.composeTextInputBasis?.pane.compose.bufferRevision,5)
+    var actual = NSRange(location: NSNotFound,length: 0)
+    XCTAssertEqual(grid.attributedSubstring(forProposedRange: NSRange(location: 0,length: raw.compose.text.utf16.count),actualRange: &actual)?.string,raw.compose.text)
+    raw.content.w = 100
+    try show(raw,in: store)
+    try await eventually { await gate.started == 2 }
+    XCTAssertFalse(grid.composeGeometryIsCurrent(try XCTUnwrap(grid.focusedCompose)))
+    await gate.release(1)
+    try await eventually { grid.focusedCompose?.layout.width == CGFloat(100) * grid.cellWidth - 32 }
+    let reflowed = try XCTUnwrap(grid.focusedCompose)
+    XCTAssertEqual(reflowed.pane.compose.bufferRevision,initial.compose.bufferRevision)
+    XCTAssertEqual(reflowed.layout.text.projection.text,original.layout.text.projection.text)
+    XCTAssertFalse(grid.composeGeometryIsCurrent(reflowed),"reflowing a frozen frame cannot certify the replacement's geometry")
+    XCTAssertNil(grid.textServiceGeometry)
+    raw.compose.currentProjection = true
+    try show(raw,in: store)
+    try await eventually { await gate.started == 3 }
+    XCTAssertFalse(grid.composeGeometryIsCurrent(try XCTUnwrap(grid.focusedCompose)))
+    await gate.release(2)
+    try await eventually { grid.focusedCompose?.pane.compose.bufferRevision == 5 }
+    let current = try XCTUnwrap(grid.focusedCompose)
+    XCTAssertTrue(grid.composeGeometryIsCurrent(current)); XCTAssertTrue(grid.textServiceGeometry === current)
+    XCTAssertEqual(current.layout.text.projection.text,raw.compose.text)
+    XCTAssertEqual(current.layout.width,CGFloat(raw.content.w) * grid.cellWidth - 32)
+  }
+
   func testLogicalDraftSurvivesHeldGeometryAndSameScopeDraftChangesCannotBorrowPixels() async throws {
     _ = NSApplication.shared; NSApp.setActivationPolicy(.prohibited)
     let gate = PreviewGate(), previews = controller(gate), store = SceneStore(), grid = CellGridView(store: store)

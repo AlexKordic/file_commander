@@ -412,12 +412,14 @@ final class CellGridView: NSView, @preconcurrency NSTextInputClient {
       return value.text.presentation
     }
     let logicalPane = pane
+    var holdingFormatting = false
     if preedit == nil, pane.hasCompose, !pane.compose.projectionUsable, let reuse, reuse.pane.compose.formattingReady,
        reuse.identity == .init(window: UInt64(store.windowID), leaf: pane.leaf, buffer: pane.buffer),
        reuse.pane.compose.viewport.epoch == pane.compose.viewport.epoch,
        store.composeAcceptances[pane.leaf]?.permits(reuse.pane, window: UInt64(store.windowID)) ?? true,
        reuse.pane.compose.assetAuthority == pane.compose.assetAuthority,
        reuse.pane.compose.assetDocument == pane.compose.assetDocument {
+      holdingFormatting = true
       // Retain the whole old source/map pair, including its revision and
       // anchor. Relabeling old coordinates as current would corrupt input.
       pane = reuse.pane
@@ -470,11 +472,13 @@ final class CellGridView: NSView, @preconcurrency NSTextInputClient {
     if let published = publishedPreviewRequests[pane.leaf], published.owner == owner,
        request.hasSameGeometry(as: published.request), let value = make(reusingOnly: true) {
       controller.discard(owner: owner)
-      publishedPreviewRequests[pane.leaf] = (owner, request); currentPreviewGeometry.insert(pane.leaf)
+      publishedPreviewRequests[pane.leaf] = (owner, request)
+      if !holdingFormatting { currentPreviewGeometry.insert(pane.leaf) }
       return value
     }
     if let result = controller.result(owner: owner, request: request), let value = make(result) {
-      publishedPreviewRequests[pane.leaf] = (owner, request); currentPreviewGeometry.insert(pane.leaf)
+      publishedPreviewRequests[pane.leaf] = (owner, request)
+      if !holdingFormatting { currentPreviewGeometry.insert(pane.leaf) }
       return value
     }
     // Keep the complete old frame in its original namespace while measuring.

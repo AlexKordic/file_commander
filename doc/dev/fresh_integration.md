@@ -1320,6 +1320,10 @@ wire bytes, plain draft values, fonts, available pixel width, typography and
 image identities. No arbitrary attributed IME object or published mutable pane
 crosses to the worker. The result returns only to its exact request and lifetime;
 late results cannot publish after a reset even if numeric owners are reused.
+A frozen formatted frame can reflow or finish received images while Fresh
+prepares a replacement; that frame keeps its original source namespace and
+cannot certify the replacement's input or automatic viewport geometry. Accepted
+current-source fallback remains drawable before formatting finishes.
 Selection-only updates may reuse geometry through the same fully validated
 constructor, in a mode that cannot start shaping on a cache miss.
 

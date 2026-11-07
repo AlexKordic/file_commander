@@ -683,6 +683,10 @@ reuse. Prepared glyphs, attachments and ornaments match synchronous construction
 a reuse-only miss cannot shape. Arbitrary attributed objects stay on the main
 actor. A held-preview grid checks immediate raw/IME queries, stale pixel refusal
 and latest-only publication across draft, source and environment changes.
+A pending-formatting case reflows the frozen old frame, verifies its source
+namespace and stale-geometry refusal, then publishes a usable current-source
+replacement. Accepted text and received-image completion retain their separate
+fallback coverage.
 The private-backend held-preview workflow exercises complete accessibility text,
 selection/replacement, IME input, exact CRLF save and undo before any visible
 preview is published. Render-dependent tests await matching geometry; pending
