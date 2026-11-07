@@ -22,6 +22,13 @@ public struct ComposePendingPointer {
     self.inserted = inserted
   }
 
+  /// Change only the receipt-proven owner identity. Captured text, source
+  /// scope and provisional offsets stay in their original namespaces.
+  public func bindingOwner(_ aliases: [UInt64: UInt64]) -> Self? {
+    Self(scope: scope, epoch: epoch, cursor: aliases[cursor] ?? cursor, text: text,
+      caretOffset: caretOffset, offset: offset, affinity: affinity, extend: extend, count: count, inserted: inserted)
+  }
+
   /// Evaluate the same captured point in the current provisional document.
   /// An earlier prefix may already have become real source; relative owner
   /// placement and exact intervening text keep this independent of screen reflow.

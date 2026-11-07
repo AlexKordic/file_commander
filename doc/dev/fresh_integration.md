@@ -1233,9 +1233,26 @@ for that selector's exact receipt. A following selected-text setter binds the
 proposed group's actual primary identity. Cancellation also releases this
 publication hold and recovers dependent replacement text once.
 
-Successive pending conversions with proposed caret groups, broader control-range/
-EOF coverage and actual GUI/IME/VoiceOver/macOS 14/SSH behavior still require
-qualification. Current certified formatting coverage skips redundant source-window preparation;
+Successive pending conversions retain stable proposed caret identities until
+their selector's receipt binds them to Fresh's genuine group. Each later
+conversion replays only its captured delta over the rebound predecessor;
+the active Cocoa clause follows the same path, including its marked subrange.
+An action-created caret joins broadcast input; an explicit replacement still
+uses the resulting primary. A pending secondary pointer binds its proven owner
+without relabelling source regions or raw offsets. Source and virtual selectors,
+advanced cursor allocators, different per-caret expansions, repeated commits,
+active clauses and separate undo boundaries have private-backend coverage.
+
+A distant selector can leave its proposed primary outside every raw context.
+Native input retains the intent against its last real context until the receipt
+supplies actual positions and chunks; it never invents a global raw coordinate.
+Offscreen drafts do not prevent a visible crop adopting newer formatting, while
+intersecting drafts must still fit that crop. Complete provisional selections
+include added and retired local carets without treating them as wire identities.
+
+Broader control-range/EOF coverage and actual GUI/IME/VoiceOver/macOS 14/SSH
+behavior still require qualification. Current certified formatting coverage
+skips redundant source-window preparation;
 formatter/parser caches, transient allocations and the full native flow still
 require the general resource audit.
 

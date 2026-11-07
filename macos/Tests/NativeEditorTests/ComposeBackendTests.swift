@@ -436,6 +436,178 @@ final class ComposeBackendTests: XCTestCase {
   }
 
   @MainActor
+  func testSuccessivePendingConversionsAndActiveClauseKeepNewGenuineCaretIds() async throws {
+    let backend = try backend(); defer { backend.captureDiagnostics("pending-caret-chain"); backend.stop() }
+    let editor = editor(BackendPasteboard()); defer { editor.detachAll() }
+    let original = "zero\nmiddle\nend\n", file = backend.root.appendingPathComponent("pending-caret-chain.md")
+    try Data(original.utf8).write(to: file); try await attach(backend, file: file, editor: editor, requireTables: false)
+    let grid = try XCTUnwrap(editor.grid)
+    for ranges in [[NSRange(location: 12, length: 0), NSRange(location: 0, length: 0), NSRange(location: 5, length: 0)],
+                   [NSRange(location: 12, length: 0)]] {
+      let model = try await completeModel(editor), revision = try XCTUnwrap(grid.focusedCompose).pane.compose.selectionRevision
+      XCTAssertTrue(editor.selectDocument(ranges, in: model))
+      try await eventually(editor, "retire secondary IDs before creating another group") {
+        grid.focusedCompose?.pane.compose.selectionRevision != revision && grid.focusedCompose?.pane.compose.cursors.count == ranges.count
+      }
+    }
+    let model = try await completeModel(editor), unspecified = NSRange(location: NSNotFound, length: 0)
+    XCTAssertTrue(editor.selectDocument([NSRange(location: 12, length: 0), NSRange(location: 0, length: 0)], in: model))
+    for text in ["日", "本"] {
+      grid.setMarkedText(text, selectedRange: NSRange(location: text.utf16.count, length: 0), replacementRange: unspecified)
+      grid.unmarkText()
+    }
+    grid.setMarkedText("語", selectedRange: NSRange(location: 0, length: 1), replacementRange: unspecified)
+    let firstTwo = "日本zero\nmiddle\n日本end\n"
+    try await eventually(editor, "both pending commits reach both actual carets while the third clause stays marked", timeout: 20) {
+      editor.store.panes.first?.compose.documentLen == UInt64(firstTwo.utf8.count) && grid.hasMarkedText()
+    }
+    let active = try await completeModel(editor, provisional: true)
+    XCTAssertEqual(active.selectedRanges?.compactMap { active.string(for: $0) }, ["語", "語"])
+    XCTAssertEqual(grid.focusedCompose?.layout.composition?.values.count, 2)
+    grid.unmarkText(); editor.send(.action(name: "save", argsJson: ""))
+    try await eventually(editor, "save all three transactions at the new group") {
+      (try? Data(contentsOf: file)) == Data("日本語zero\nmiddle\n日本語end\n".utf8)
+    }
+    XCTAssertTrue(editor.uninsertedText.isEmpty)
+    XCTAssertFalse(editor.store.panes.first?.compose.cursors.contains { $0.id == 1 } == true)
+    for expected in [firstTwo, "日zero\nmiddle\n日end\n", original] {
+      editor.send(.action(name: "undo", argsJson: "")); editor.send(.action(name: "save", argsJson: ""))
+      try await eventually(editor, "each broadcast commit has its own undo boundary") { (try? Data(contentsOf: file)) == Data(expected.utf8) }
+    }
+  }
+
+  @MainActor
+  func testSuccessivePendingConversionsAfterASelectorInsideAPrefixKeepEveryCaret() async throws {
+    let backend = try backend(); defer { backend.captureDiagnostics("pending-virtual-caret-chain"); backend.stop() }
+    let editor = editor(BackendPasteboard()); defer { editor.detachAll() }
+    let original = "zero\nmiddle\nend\n", file = backend.root.appendingPathComponent("pending-virtual-caret-chain.md")
+    try Data(original.utf8).write(to: file); try await attach(backend, file: file, editor: editor, requireTables: false)
+    let grid = try XCTUnwrap(editor.grid)
+    for ranges in [[NSRange(location: 12, length: 0), NSRange(location: 0, length: 0), NSRange(location: 5, length: 0)],
+                   [NSRange(location: 12, length: 0)]] {
+      let model = try await completeModel(editor), revision = try XCTUnwrap(grid.focusedCompose).pane.compose.selectionRevision
+      XCTAssertTrue(editor.selectDocument(ranges, in: model))
+      try await eventually(editor, "advance allocator history for a virtual selector") {
+        grid.focusedCompose?.pane.compose.selectionRevision != revision && grid.focusedCompose?.pane.compose.cursors.count == ranges.count
+      }
+    }
+    _ = try await completeModel(editor)
+    let baseline = try XCTUnwrap(editor.composeDocument.snapshot), unspecified = NSRange(location: NSNotFound, length: 0)
+    grid.insertText("base", replacementRange: unspecified)
+    let pane = try XCTUnwrap(grid.focusedCompose)
+    let overlay = try XCTUnwrap(ComposeDocumentOverlay(window: UInt64(editor.store.windowID), pane: pane.pane,
+      composition: pane.layout.composition, virtualInsertion: pane.layout.virtualInsertion, virtualSelections: pane.virtualSelections))
+    let prefix = try XCTUnwrap(ComposeDocumentPresentation(baseline, overlay: overlay))
+    XCTAssertTrue(editor.selectDocument([NSRange(location: 14, length: 0), NSRange(location: 0, length: 0)], in: prefix))
+    for text in ["日", "本"] {
+      grid.setMarkedText(text, selectedRange: NSRange(location: text.utf16.count, length: 0), replacementRange: unspecified)
+      grid.unmarkText()
+    }
+    editor.send(.action(name: "save", argsJson: ""))
+    try await eventually(editor, "virtual selector and both pending broadcasts retain the new secondary", timeout: 20) {
+      (try? Data(contentsOf: file)) == Data("日本zero\nmiddle\nba日本seend\n".utf8)
+    }
+    XCTAssertTrue(editor.uninsertedText.isEmpty)
+    for expected in ["日zero\nmiddle\nba日seend\n", "zero\nmiddle\nbaseend\n", original] {
+      editor.send(.action(name: "undo", argsJson: "")); editor.send(.action(name: "save", argsJson: ""))
+      try await eventually(editor, "virtual broadcast undoes independently of its retained prefix") { (try? Data(contentsOf: file)) == Data(expected.utf8) }
+    }
+  }
+
+  @MainActor
+  func testPendingPointerBindsSecondaryOwnerAndKeepsDistinctCaretExpansionIntents() async throws {
+    let backend = try backend(); defer { backend.captureDiagnostics("pending-caret-pointer"); backend.stop() }
+    let editor = editor(BackendPasteboard()); defer { editor.detachAll() }
+    let original = "zero\nmiddle\nend\n", file = backend.root.appendingPathComponent("pending-caret-pointer.md")
+    try Data(original.utf8).write(to: file); try await attach(backend, file: file, editor: editor, requireTables: false)
+    let grid = try XCTUnwrap(editor.grid)
+    for ranges in [[NSRange(location: 12, length: 0), NSRange(location: 0, length: 0), NSRange(location: 5, length: 0)],
+                   [NSRange(location: 12, length: 0)]] {
+      let model = try await completeModel(editor), revision = try XCTUnwrap(grid.focusedCompose).pane.compose.selectionRevision
+      XCTAssertTrue(editor.selectDocument(ranges, in: model))
+      try await eventually(editor, "retire IDs before the captured secondary pointer") {
+        grid.focusedCompose?.pane.compose.selectionRevision != revision && grid.focusedCompose?.pane.compose.cursors.count == ranges.count
+      }
+    }
+    let model = try await completeModel(editor), unspecified = NSRange(location: NSNotFound, length: 0)
+    XCTAssertTrue(editor.selectDocument([NSRange(location: 12, length: 0), NSRange(location: 0, length: 0)], in: model))
+    grid.setMarkedText("日本", selectedRange: NSRange(location: 2, length: 0), replacementRange: unspecified); grid.unmarkText()
+    let pending = try XCTUnwrap(grid.focusedCompose), primary = try XCTUnwrap(pending.layout.composition?.primaryID)
+    let secondary = try XCTUnwrap(pending.layout.composition?.ordered.first { $0 != primary })
+    let display = try XCTUnwrap(pending.layout.draftDisplayRanges[secondary])
+    let rect = try XCTUnwrap(pending.layout.text.caret(atUTF16: display.location + 1))
+    editor.grid(grid, point: CGPoint(x: pending.origin.x + rect.minX, y: pending.origin.y + rect.midY), in: pending, extend: false, count: 1)
+    grid.setMarkedText("x", selectedRange: NSRange(location: 1, length: 0), replacementRange: unspecified)
+    let start = grid.markedRange().location
+    grid.setMarkedText("Q", selectedRange: NSRange(location: 1, length: 0), replacementRange: NSRange(location: start - 1, length: 2))
+    grid.unmarkText(); editor.send(.action(name: "save", argsJson: ""))
+    try await eventually(editor, "the primary consumes 日 while the secondary consumes 本 in the same old draft region", timeout: 20) {
+      (try? Data(contentsOf: file)) == Data("QQzero\nmiddle\n日本end\n".utf8)
+    }
+    XCTAssertTrue(editor.uninsertedText.isEmpty)
+    for expected in ["日本zero\nmiddle\n日本end\n", original] {
+      editor.send(.action(name: "undo", argsJson: "")); editor.send(.action(name: "save", argsJson: ""))
+      try await eventually(editor, "pointer and per-caret expansion retain both edit undo boundaries") { (try? Data(contentsOf: file)) == Data(expected.utf8) }
+    }
+  }
+
+  @MainActor
+  func testPendingIMEBehindDistantSelectorWaitsForRealRawContextsWithoutLosingCarets() async throws {
+    let backend = try backend(); defer { backend.captureDiagnostics("pending-caret-distant"); backend.stop() }
+    let editor = editor(BackendPasteboard()); defer { editor.detachAll() }
+    let prefix = "Start\n\n" + String(repeating: "Paragraph café 東京 with wrapped prose.\n\n", count: 2000)
+    let original = prefix + "endTail\n", file = backend.root.appendingPathComponent("pending-caret-distant.md")
+    try Data(original.utf8).write(to: file); try await attach(backend, file: file, editor: editor, requireTables: false)
+    let grid = try XCTUnwrap(editor.grid), model = try await completeModel(editor)
+    let target = try XCTUnwrap(model.displayedRange(for: prefix.utf8.count..<prefix.utf8.count))
+    XCTAssertTrue(editor.selectDocument([target, NSRange(location: 0, length: 0)], in: model))
+    XCTAssertFalse(grid.focusedCompose?.cursor?.hasUtf16Position == true, "the first raw chunk cannot locate the distant proposed primary")
+    let unspecified = NSRange(location: NSNotFound, length: 0)
+    for text in ["日", "本"] {
+      grid.setMarkedText(text, selectedRange: NSRange(location: 1, length: 0), replacementRange: unspecified); grid.unmarkText()
+    }
+    grid.setMarkedText("語", selectedRange: NSRange(location: 0, length: 1), replacementRange: unspecified)
+    try await eventually(editor, "distant actual contexts bind both pending commits while keeping the third clause", timeout: 20) {
+      editor.store.panes.first?.compose.documentLen == UInt64(original.utf8.count + "日本".utf8.count * 2) && grid.hasMarkedText()
+    }
+    let active = try await completeModel(editor, provisional: true)
+    XCTAssertEqual(active.selectedRanges?.compactMap { active.string(for: $0) }, ["語", "語"])
+    grid.unmarkText(); editor.send(.action(name: "save", argsJson: ""))
+    try await eventually(editor, "save both caret insertions after receiving real distant raw coordinates", timeout: 20) {
+      (try? Data(contentsOf: file)) == Data(("日本語" + prefix + "日本語endTail\n").utf8)
+    }
+    XCTAssertTrue(editor.uninsertedText.isEmpty)
+  }
+
+  @MainActor
+  func testSuccessivePendingConversionsBehindAddCaretExpandToItsActualGroup() async throws {
+    let backend = try backend(); defer { backend.captureDiagnostics("pending-action-caret-chain"); backend.stop() }
+    let editor = editor(BackendPasteboard()); defer { editor.detachAll() }
+    let original = "one\ntwo\n", file = backend.root.appendingPathComponent("pending-action-caret-chain.md")
+    try Data(original.utf8).write(to: file); try await attach(backend, file: file, editor: editor, requireTables: false)
+    let grid = try XCTUnwrap(editor.grid), unspecified = NSRange(location: NSNotFound, length: 0)
+    editor.send(.action(name: "add_cursor_below", argsJson: ""))
+    for text in ["日", "本"] {
+      grid.setMarkedText(text, selectedRange: NSRange(location: 1, length: 0), replacementRange: unspecified); grid.unmarkText()
+    }
+    grid.setMarkedText("語", selectedRange: NSRange(location: 0, length: 1), replacementRange: unspecified)
+    try await eventually(editor, "successive conversions expand to the action-created group while retaining active preedit", timeout: 20) {
+      editor.store.panes.first?.compose.documentLen == UInt64(original.utf8.count + "日本".utf8.count * 2) && grid.hasMarkedText()
+    }
+    let active = try await completeModel(editor, provisional: true)
+    XCTAssertEqual(active.selectedRanges?.compactMap { active.string(for: $0) }, ["語", "語"])
+    grid.unmarkText(); editor.send(.action(name: "save", argsJson: ""))
+    try await eventually(editor, "save all conversions at both action-created carets") {
+      (try? Data(contentsOf: file)) == Data("日本語one\n日本語two\n".utf8)
+    }
+    XCTAssertTrue(editor.uninsertedText.isEmpty)
+    for expected in ["日本one\n日本two\n", "日one\n日two\n", original] {
+      editor.send(.action(name: "undo", argsJson: "")); editor.send(.action(name: "save", argsJson: ""))
+      try await eventually(editor, "each action-dependent conversion undoes separately") { (try? Data(contentsOf: file)) == Data(expected.utf8) }
+    }
+  }
+
+  @MainActor
   func testCompleteValueActionsBindNewCaretOrdinalsAfterAllocatorHistoryHasAdvanced() async throws {
     let backend = try backend(); defer { backend.captureDiagnostics("document-action-caret-ordinals"); backend.stop() }
     let editor = editor(BackendPasteboard()); defer { editor.detachAll() }

@@ -61,13 +61,14 @@ public struct ComposePendingText {
     guard previous.committedEdits != nil else { return nil }
     let base = previous.presentation
     let broadcast = replacement.location == NSNotFound
-    let targets = broadcast ? Set(pane.cursors.map(\.id)) : [base.primaryID]
+    let sourcePane = previous.requiresActionResult ? virtualBase?.actionPane(like: pane) : pane
+    let group = sourcePane?.cursors.map(\.id) ?? base.ordered
+    let targets = broadcast ? Set(group) : [base.primaryID]
     guard !targets.isEmpty else { return nil }
     var values = base.values
     let missing = targets.subtracting(Set(base.ordered))
     var added: [UInt64: ComposeMarkedText] = [:]
     if !missing.isEmpty {
-      let sourcePane = previous.requiresActionResult ? virtualBase?.actionPane(like: pane) : pane
       guard broadcast, let sourcePane, let raw = ComposeComposition(pane: sourcePane, text: text, selected: selected, replacement: replacement) else { return nil }
       for id in missing {
         guard let value = raw.values[id] else { return nil }
@@ -448,16 +449,78 @@ public struct ComposePendingText {
     committedEdits = committed ? [:] : nil
   }
 
+  /// Rebuild a later conversion over its predecessor's rebound preview. Only
+  /// the captured delta is replayed; source coordinates come from that new
+  /// prefix and its real receipt. A confirmed action can introduce carets that
+  /// were unavailable in the earlier preview, using the broadcast input intent.
+  public func replaying(over previous: ComposePendingText, pane: WireComposePane,
+                        aliases: [UInt64: UInt64], virtualBase: ComposeVirtualSelections? = nil) -> ComposePendingText? {
+    guard baseline != nil, previous.committedEdits != nil, Set(aliases.values).count == aliases.count else { return nil }
+    let inverse = Dictionary(uniqueKeysWithValues: aliases.map { ($0.value, $0.key) })
+    let sourcePane = previous.requiresActionResult ? virtualBase?.actionPane(like: pane) : pane
+    let group = sourcePane?.cursors.map(\.id) ?? previous.presentation.ordered
+    let targets = actionBroadcast ? Set(group) : [previous.presentation.primaryID]
+    guard !targets.isEmpty else { return nil }
+    var values = previous.presentation.values, added: [UInt64: ComposeMarkedText] = [:]
+    let missing = targets.subtracting(Set(values.keys))
+    if !missing.isEmpty {
+      guard let sourcePane, let raw = ComposeComposition(pane: sourcePane, text: NSAttributedString(string: ""),
+        selected: NSRange(location: 0, length: 0), replacement: NSRange(location: NSNotFound, length: 0)) else { return nil }
+      for id in missing {
+        guard let value = raw.values[id] else { return nil }; values[id] = value; added[id] = value
+      }
+    }
+    for id in targets {
+      let mapped = inverse[id].flatMap { active.contains($0) ? $0 : nil }
+      let template = mapped ?? (aliases[id] == nil && active.contains(id) ? id : presentation.primaryID)
+      guard active.contains(template), let intent = committedEdits?[template] ?? edit(for: template), var value = values[id] else { return nil }
+      let range: NSRange
+      if let length = intent.selectionLength {
+        guard let original = added[id], original.originalRange.length == length,
+              let expanded = Self.range(at: original.originalRange.location, offset: -intent.leading.utf16.count,
+                length: length + intent.leading.utf16.count + intent.trailing.utf16.count),
+              intent.leading.isEmpty || Self.exact(original.context.exactText(for: NSRange(location: expanded.location, length: intent.leading.utf16.count)), intent.leading),
+              intent.trailing.isEmpty || Self.exact(original.context.exactText(for: NSRange(location: NSMaxRange(original.originalRange), length: intent.trailing.utf16.count)), intent.trailing) else { return nil }
+        range = expanded
+      } else {
+        guard let capture = Self.range(at: NSMaxRange(value.selectedRange), offset: intent.offset, length: intent.removed.utf16.count),
+              let known = value.substring(for: capture), known.range.location <= capture.location,
+              NSMaxRange(capture) <= NSMaxRange(known.range),
+              Self.exact(known.text.attributedSubstring(from: NSRange(location: capture.location - known.range.location, length: capture.length)).string,
+                intent.removed) else { return nil }
+        range = capture
+      }
+      guard value.update(intent.inserted, selected: intent.selected, replacement: range) else { return nil }
+      guard let marked = Self.range(at: value.marked.location, offset: intent.marked.location, length: intent.marked.length),
+            let updated = ComposeMarkedText(context: value.context, range: value.originalRange, source: value.source,
+              text: value.draft, selected: value.selected, marked: marked) else { return nil }
+      values[id] = updated
+    }
+    guard let composition = ComposeComposition(primary: previous.presentation.primaryID, values: values) else { return nil }
+    let result = ComposePendingText(presentation: composition, baseline: previous.presentation, active: targets,
+      newlyIncluded: added, observed: previous.observedCursors, requiresAction: previous.requiresActionResult, broadcast: actionBroadcast)
+    return committedEdits == nil ? result : result.committed(nativeNewline: pane.nativeNewline)
+  }
+
+  private init(presentation: ComposeComposition, baseline: ComposeComposition, active: Set<UInt64>,
+               newlyIncluded: [UInt64: ComposeMarkedText], observed: [WireComposeCursorAnchor], requiresAction: Bool, broadcast: Bool) {
+    self.presentation = presentation; self.baseline = baseline; self.active = active
+    self.newlyIncluded = newlyIncluded; observedCursors = observed
+    requiresActionResult = requiresAction; actionBroadcast = broadcast
+  }
+
   /// A conversion begun after a queued non-text action follows that action's
   /// resulting selections. Its entered text is retained; expansions outside
   /// the initial conversion still require the same surrounding source. For a
   /// caret created by the action, use the primary conversion's input intent.
   /// Already submitted prefixes are excluded from the resulting replacement.
-  public func afterAction(_ initial: ComposePendingText, pane: WireComposePane) -> ComposePendingText? {
+  public func afterAction(_ initial: ComposePendingText, pane: WireComposePane, aliases: [UInt64: UInt64] = [:]) -> ComposePendingText? {
+    guard Set(aliases.values).count == aliases.count else { return nil }
+    let inverse = Dictionary(uniqueKeysWithValues: aliases.map { ($0.value, $0.key) })
     let observed = Self.anchors(pane)
     var pane = pane
     if !actionBroadcast {
-      pane.cursors = pane.cursors.filter { $0.id == presentation.primaryID }
+      pane.cursors = pane.cursors.filter(\.primary)
       guard pane.cursors.count == 1 else { return nil }
       pane.cursors[0].primary = true
     }
@@ -466,7 +529,8 @@ public struct ComposePendingText {
     let cursors = Dictionary(uniqueKeysWithValues: pane.cursors.map { ($0.id, $0) })
     var values: [UInt64: ComposeMarkedText] = [:]
     for id in fresh.ordered {
-      let template = active.contains(id) ? id : presentation.primaryID
+      let mapped = inverse[id].flatMap { active.contains($0) ? $0 : nil }
+      let template = mapped ?? (aliases[id] == nil && active.contains(id) ? id : presentation.primaryID)
       guard let intent = intent(for: template, initial: initial), let target = fresh.values[id],
             let cursor = cursors[id], cursor.hasUtf16Position,
             let byte = Int(exactly: cursor.position), let unit = Int(exactly: cursor.utf16Position),

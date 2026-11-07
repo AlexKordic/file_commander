@@ -192,7 +192,7 @@ public final class ComposeDocumentPresentation: Sendable {
     }
     let prefix = overlay?.selectionPrefix ?? overlay?.insertion?.regions
     let restored = prefix?.restore()
-    func virtual(_ point: Int, byte: UInt64, raw: UInt64?) -> Int? {
+    func virtual(_ point: Int, byte: UInt64?, raw: UInt64?) -> Int? {
       guard let prefix, let restored else { return nil }
       if let draft = restored.draftPosition(at: point), let value = prefix.values[draft.id] {
         if value.source.isEmpty && value.text.isEmpty {
@@ -212,7 +212,7 @@ public final class ComposeDocumentPresentation: Sendable {
       // Offscreen original caret endpoints can be outside every bounded raw
       // chunk. Use Fresh's global raw coordinate only after proving that the
       // known edits transform exactly to the requested provisional position.
-      guard let raw, let original = Int(exactly: raw) else { return nil }
+      guard let byte, let raw, let original = Int(exactly: raw) else { return nil }
       var shift = 0
       for key in restored.ordered {
         let value = restored.values[key]!, range = value.originalRange
@@ -224,15 +224,24 @@ public final class ComposeDocumentPresentation: Sendable {
       return source(byte, affinity: .downstream)
     }
     var result: [NSRange] = []
+    if let group = overlay?.virtualCursors ?? overlay?.insertion?.cursors {
+      let primary = overlay?.primary ?? cursors.first(where: \.primary)!.id
+      guard group[primary] != nil else { return nil }
+      let known = Dictionary(uniqueKeysWithValues: cursors.map { ($0.id, $0) })
+      for id in group.keys.sorted(by: { ($0 == primary) != ($1 == primary) ? $0 == primary : $0 < $1 }) {
+        let value = group[id]!, cursor = known[id]
+        let a = virtual(value.position, byte: cursor?.position, raw: cursor.flatMap { $0.hasUtf16Position ? $0.utf16Position : nil })
+        let b = value.anchor.map { point in virtual(point,
+          byte: cursor.map { $0.hasAnchor ? $0.anchor : $0.position }, raw: cursor.flatMap { $0.hasUtf16Anchor ? $0.utf16Anchor : nil }) } ?? a
+        guard let a, let b else { return nil }
+        let range = NSRange(location: min(a,b), length: abs(a-b))
+        guard projection.textIndex.bytes(for: range) != nil else { return nil }; result.append(range)
+      }
+      return result
+    }
     for cursor in cursors.sorted(by: { a,b in a.primary != b.primary ? a.primary : a.id < b.id }) {
       let start: Int?, end: Int?
-      if let group = overlay?.virtualCursors ?? overlay?.insertion?.cursors {
-        guard let value = group[cursor.id] else { return nil }
-        let a = virtual(value.position, byte: cursor.position, raw: cursor.hasUtf16Position ? cursor.utf16Position : nil)
-        let b = value.anchor.map { virtual($0, byte: cursor.hasAnchor ? cursor.anchor : cursor.position,
-          raw: cursor.hasUtf16Anchor ? cursor.utf16Anchor : nil) } ?? a
-        start = a.flatMap { x in b.map { min(x,$0) } }; end = a.flatMap { x in b.map { max(x,$0) } }
-      } else if let value = overlay?.composition?.values[cursor.id], let range = plan.draftRanges[cursor.id] {
+      if let value = overlay?.composition?.values[cursor.id], let range = plan.draftRanges[cursor.id] {
         start = range.location+value.selected.location; end = range.location+NSMaxRange(value.selected)
       } else {
         let anchor = cursor.hasAnchor ? cursor.anchor : cursor.position

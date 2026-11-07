@@ -107,6 +107,13 @@ final class NativeEditor: NSObject, CellGridDelegate {
     var virtualPrefix: ComposeVirtualSelections?
     var selectionPredecessor: UUID?
     var documentSelectionPreview: ComposeVirtualSelections?
+    var proposedCursorIDs: [UInt64]?
+    var cursorAliases: [UInt64: UInt64] = [:]
+    var predecessor: UUID? {
+      if let chain { return chain.predecessor }
+      if let selectionPredecessor { return selectionPredecessor }
+      switch input { case .pendingPointer(_, let token), .document(_, let token): return token; default: return nil }
+    }
     var isSourceSelection: Bool {
       switch input { case .selection: return true; case .document(let action,_): return action.isSelection; default: return false }
     }
@@ -392,6 +399,24 @@ final class NativeEditor: NSObject, CellGridDelegate {
         $0.window == window && $0.matches(target.scope, epoch: target.epoch, notBefore: store.composeAcceptances[$0.leaf])
       }
     }
+    // An accepted predecessor can replace a proposed cursor group. Keep the
+    // dependent marked intent through this atomic frame; replay below must
+    // supply actual receipt contexts before normal identity checks resume.
+    var preserveComposition = false
+    if acceptedSource != nil, let first = composeQueue.first, var token = grid?.pendingComposition?.after {
+      var visited: Set<UUID> = []
+      while visited.insert(token).inserted {
+        if token == first.token { preserveComposition = true; break }
+        guard let node = composeQueue.first(where: { $0.token == token }), let predecessor = node.predecessor else { break }
+        token = predecessor
+      }
+    }
+    if preserveComposition { grid?.beginCompositionRebind() }
+    if let receipt = acceptedSource, let first = composeQueue.first, let token = grid?.pendingComposition?.after,
+       nearestSelector(after: token) == first.token {
+      grid?.bindCompositionCursorAliases(confirmedCursorAliases(first, receipt: receipt))
+    }
+    defer { if preserveComposition { grid?.endCompositionRebind() } }
     store.apply(message, acceptedCompose: acceptedSource)
     reportFormattingFailures()
     composeViewports.observe(window: UInt64(store.windowID), panes: store.panes,
@@ -641,7 +666,7 @@ final class NativeEditor: NSObject, CellGridDelegate {
         return $0 < $1
       } } ?? []
       return .init(token: node.token, revision: node.target?.scope.bufferRevision ?? pane.scope.bufferRevision,
-        predecessor: node.chain?.predecessor, selector: node.isSourceSelection, origins: node.origins, hasText: node.preview != nil, cursors: group)
+        predecessor: node.predecessor, selector: node.isSourceSelection, origins: node.origins, hasText: node.preview != nil, cursors: group)
     }
     let id = UUID()
     documentBindings[id] = .init(document: ObjectIdentifier(snapshot.document), overlay: overlay, scope: pane.scope,
@@ -912,9 +937,10 @@ final class NativeEditor: NSObject, CellGridDelegate {
     let latest = nodes.last(where: { $0.preview != nil })
     let basis = latest.flatMap { node in node.preview?.provisionalSelections(over: node.virtualPrefix,pane: node.snapshot?.pane.compose) }
     func cursor(_ id: UInt64, for node: QueuedInput) -> ComposeDocumentAction.Cursor {
+      if let actual = node.cursorAliases[id] { return .known(actual) }
       var current: QueuedInput? = node, visited: Set<UUID> = []
-      while let value = current, visited.insert(value.token).inserted, let chain = value.chain,
-            let predecessor = nodes.first(where: { $0.token == chain.predecessor }) {
+      while let value = current, visited.insert(value.token).inserted, let token = value.predecessor,
+            let predecessor = nodes.first(where: { $0.token == token }) {
         if predecessor.isSourceSelection, let text = node.preview {
           let group = text.presentation.values.keys.sorted {
             if ($0 == text.presentation.primaryID) != ($1 == text.presentation.primaryID) { return $0 == text.presentation.primaryID }
@@ -1064,7 +1090,7 @@ final class NativeEditor: NSObject, CellGridDelegate {
     }
     if case .selection(let change) = last.input {
       return ComposePendingPreview(token: last.token, target: target, text: nil, afterAction: true,
-        prefixToken: nil, selectionGroup: change.preview(in: pane.compose), sourceSelection: true)
+        prefixToken: nil, selectionGroup: change.preview(in: pane.compose, cursorIDs: last.proposedCursorIDs), sourceSelection: true)
     }
     var prefix: QueuedInput?
     for queued in composeQueue.dropLast().reversed() {
@@ -1073,7 +1099,7 @@ final class NativeEditor: NSObject, CellGridDelegate {
     }
     if case .document(let action,_) = last.input, action.isSelection {
       var group: WireComposePane?
-      if prefix == nil, case .selection(let change)? = action.ready() { group = change.preview(in: pane.compose) }
+      if prefix == nil, case .selection(let change)? = action.ready() { group = change.preview(in: pane.compose, cursorIDs: last.proposedCursorIDs) }
       return ComposePendingPreview(token: last.token,target: prefix?.snapshot ?? target,text: prefix?.preview,
         afterAction: true,prefixToken: prefix?.token,virtualSelection: last.documentSelectionPreview,
         virtualPrefix: prefix?.virtualPrefix,selectionGroup: group,sourceSelection: true)
@@ -1104,8 +1130,18 @@ final class NativeEditor: NSObject, CellGridDelegate {
       virtualPrefix: prefix?.virtualPrefix,sourceSelection: last.selectionPredecessor != nil)
   }
 
+  func grid(_ grid: CellGridView, pendingCursorIDsAfter token: UUID, in pane: ComposePresentation) -> Set<UInt64>? {
+    var token = token, visited: Set<UUID> = []
+    while visited.insert(token).inserted, let node = composeQueue.first(where: { $0.token == token }),
+          node.target?.identity == pane.identity, node.target?.epoch == pane.pane.compose.viewport.epoch {
+      if node.isSourceSelection { return node.proposedCursorIDs.map(Set.init) }
+      guard let parent = node.predecessor else { return nil }; token = parent
+    }
+    return nil
+  }
+
   func grid(_ grid: CellGridView, commit text: ComposePendingText, initial: ComposePendingText,
-            token: UUID, after: UUID?, afterAction: Bool, virtualPrefix: ComposeVirtualSelections?, in pane: ComposePresentation) {
+            token: UUID, after: UUID?, afterAction: Bool, virtualPrefix: ComposeVirtualSelections?, aliases: [UInt64: UInt64], in pane: ComposePresentation) {
     guard receivedHello else { for value in text.recoveryTexts { self.grid(grid, recover: value) }; return }
     let chain = after.map { CompositionChain(predecessor: $0, initial: initial, text: text, afterAction: afterAction) }
     if let after, !composeQueue.contains(where: { $0.token == after }) {
@@ -1115,7 +1151,24 @@ final class NativeEditor: NSObject, CellGridDelegate {
     if after != nil { input = .pendingText(text) }
     else if let replacement = text.replacement(scope: pane.scope, epoch: pane.pane.compose.viewport.epoch) { input = .replacement(replacement) }
     else { for value in text.recoveryTexts { self.grid(grid, recover: value) }; return }
-    enqueueCompose(input, target: pane, chain: chain, preview: text, virtualPrefix: virtualPrefix, token: token)
+    enqueueCompose(input, target: pane, chain: chain, preview: text, virtualPrefix: virtualPrefix, token: token, cursorAliases: aliases)
+  }
+
+  private func nearestSelector(after token: UUID) -> UUID? {
+    var token = token, visited: Set<UUID> = []
+    while visited.insert(token).inserted, let node = composeQueue.first(where: { $0.token == token }) {
+      if node.isSourceSelection { return token }
+      guard let predecessor = node.predecessor else { return nil }; token = predecessor
+    }
+    return nil
+  }
+
+  private func confirmedCursorAliases(_ first: QueuedInput, receipt: WireComposeEditReceipt) -> [UInt64: UInt64] {
+    guard case .selection(let selector) = first.input, let proposed = first.proposedCursorIDs else { return [:] }
+    let actual = receipt.pane.cursors.sorted { a,b in a.primary != b.primary ? a.primary : a.id < b.id }
+    guard proposed.count == selector.input(id: 0).selectionTargets.count, actual.count == proposed.count,
+          actual.filter(\.primary).count == 1, Set(actual.map(\.id)).count == actual.count, Set(proposed).count == proposed.count else { return [:] }
+    return Dictionary(uniqueKeysWithValues: zip(proposed, actual.map(\.id)))
   }
 
   /// Rebase only descendants of this acknowledged native edit. Its immutable
@@ -1128,12 +1181,29 @@ final class NativeEditor: NSObject, CellGridDelegate {
       return receipt
     }
     let edit = valid(edit), result = valid(result ?? edit)
+    let selectorAliases = result.map { confirmedCursorAliases(first, receipt: $0) } ?? [:]
     recordSourceTransition(first: first, edit: edit, result: result)
     var failed: Set<UUID> = edit == nil && result == nil ? [first.token] : []
     var retained = [first]
     var prediction = result?.pane
     let predictionIdentity = first.target?.identity
+    struct Rebound {
+      let text: ComposePendingText
+      let aliases: [UInt64: UInt64]
+      let snapshot: ComposePresentation
+      let target: InputTarget
+      let prefix: ComposeVirtualSelections?
+    }
+    var rebound: [UUID: Rebound] = [:]
     for var queued in composeQueue.dropFirst() {
+      let oldPreview = queued.preview
+      if !selectorAliases.isEmpty, nearestSelector(after: queued.token) == first.token,
+         queued.target?.identity == first.target?.identity, queued.target?.epoch == first.target?.epoch {
+        queued.cursorAliases = selectorAliases
+        if case .pendingPointer(let pointer, let after) = queued.input, let bound = pointer.bindingOwner(selectorAliases) {
+          queued.input = .pendingPointer(bound, after: after)
+        }
+      }
       if case .document(let captured,let barrier) = queued.input {
         var action = captured
         let owned = first.target?.identity == queued.target?.identity && first.target?.epoch == queued.target?.epoch
@@ -1235,16 +1305,40 @@ final class NativeEditor: NSObject, CellGridDelegate {
           queued.input = .pointer(rebound); queued.target?.scope = rebound.scope
         }
       }
+      if let chain = queued.chain, !chain.afterAction, let parent = rebound[chain.predecessor] {
+        guard let initial = chain.initial.replaying(over: parent.text, pane: parent.snapshot.pane.compose,
+                aliases: parent.aliases, virtualBase: parent.prefix),
+              let text = chain.text.replaying(over: parent.text, pane: parent.snapshot.pane.compose,
+                aliases: parent.aliases, virtualBase: parent.prefix) else {
+          failed.insert(queued.token)
+          if let grid { for text in chain.text.recoveryTexts { self.grid(grid, recover: text) } }
+          continue
+        }
+        queued.chain = .init(predecessor: chain.predecessor, initial: initial, text: text, afterAction: false)
+        queued.preview = text; queued.snapshot = parent.snapshot; queued.target = parent.target; queued.virtualPrefix = parent.prefix
+        queued.cursorAliases = [:]
+        rebound[queued.token] = .init(text: text, aliases: parent.aliases, snapshot: parent.snapshot, target: parent.target, prefix: parent.prefix)
+      }
       if let chain = queued.chain, chain.predecessor == first.token || failed.contains(chain.predecessor) {
         if let receipt = chain.afterAction ? result : edit, chain.predecessor == first.token, let target = queued.target,
            receipt.matches(target.scope, epoch: target.epoch),
-           let text = chain.afterAction ? chain.text.afterAction(chain.initial, pane: receipt.pane)
+           let text = chain.afterAction ? chain.text.afterAction(chain.initial, pane: receipt.pane, aliases: queued.cursorAliases)
              : chain.text.resolved(pane: receipt.pane, edited: receipt.cursors, preserved: receipt.preservedCursors),
            let replacement = text.replacement(scope: receipt.scope, epoch: receipt.epoch),
            let original = queued.snapshot {
           var pane = original.pane; pane.compose = receipt.pane
           queued.input = .replacement(replacement); queued.target?.scope = receipt.scope; queued.chain = nil
           queued.preview = text; queued.snapshot = grid?.composeSnapshot(pane); queued.virtualPrefix = nil
+          if let oldPreview, let snapshot = queued.snapshot, let target = queued.target {
+            var aliases = queued.cursorAliases
+            if aliases.isEmpty {
+              for id in oldPreview.presentation.values.keys where text.presentation.values[id] != nil { aliases[id] = id }
+              if aliases[oldPreview.presentation.primaryID] == nil,
+                 !aliases.values.contains(text.presentation.primaryID) { aliases[oldPreview.presentation.primaryID] = text.presentation.primaryID }
+            }
+            rebound[queued.token] = .init(text: text, aliases: aliases, snapshot: snapshot, target: target, prefix: nil)
+          }
+          queued.cursorAliases = [:]
         } else {
           failed.insert(queued.token)
           if let grid { for text in chain.text.recoveryTexts { self.grid(grid, recover: text) } }
@@ -1259,7 +1353,10 @@ final class NativeEditor: NSObject, CellGridDelegate {
       retained.append(queued)
     }
     composeQueue = retained
-    grid?.resolveComposition(after: first.token, edit: edit, result: result)
+    for (token, parent) in rebound {
+      grid?.replayComposition(after: token, prefix: parent.text, pane: parent.snapshot, aliases: parent.aliases, virtualPrefix: parent.prefix)
+    }
+    grid?.resolveComposition(after: first.token, edit: edit, result: result, aliases: selectorAliases)
     for token in failed where token != first.token { grid?.resolveComposition(after: token, edit: nil, result: nil) }
   }
 
@@ -1415,12 +1512,26 @@ final class NativeEditor: NSObject, CellGridDelegate {
   private func enqueueCompose(_ input: PendingInput, target: ComposePresentation?, chain: CompositionChain? = nil,
                               preview: ComposePendingText? = nil, pointerPreview: ComposePointer.Preview? = nil,
                               virtualPrefix: ComposeVirtualSelections? = nil, selectionPredecessor: UUID? = nil,
-                              documentSelectionPreview: ComposeVirtualSelections? = nil, token: UUID = UUID()) {
+                              documentSelectionPreview: ComposeVirtualSelections? = nil, token: UUID = UUID(), cursorAliases: [UInt64: UInt64] = [:]) {
     if composeQueue.isEmpty { lastComposeCancellation = nil }
+    var proposedCursorIDs: [UInt64]?
+    if let group = documentSelectionPreview {
+      proposedCursorIDs = group.cursors.keys.sorted {
+        if ($0 == group.primaryID) != ($1 == group.primaryID) { return $0 == group.primaryID }; return $0 < $1
+      }
+    } else if let target {
+      let selector: ComposeSelectionChange?
+      switch input {
+      case .selection(let value): selector = value
+      case .document(let action, _): if case .selection(let value)? = action.ready() { selector = value } else { selector = nil }
+      default: selector = nil
+      }
+      proposedCursorIDs = selector?.preview(in: target.pane.compose)?.cursors.map(\.id)
+    }
     composeQueue.append(.init(token: token, input: input, scrollGeneration: composeViewports.userScrollGeneration,
       target: target.map(InputTarget.init), chain: chain,
       preview: preview, origins: preview?.origins(), snapshot: target, pointerPreview: pointerPreview, virtualPrefix: virtualPrefix,
-      selectionPredecessor: selectionPredecessor,documentSelectionPreview: documentSelectionPreview))
+      selectionPredecessor: selectionPredecessor,documentSelectionPreview: documentSelectionPreview,proposedCursorIDs: proposedCursorIDs,cursorAliases: cursorAliases))
     grid?.refreshComposeImages()
     pumpComposeInput()
   }

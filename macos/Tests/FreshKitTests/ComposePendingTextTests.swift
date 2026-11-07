@@ -38,6 +38,52 @@ final class ComposePendingTextTests: XCTestCase {
       selected: NSRange(location: text.utf16.count, length: 0), replacement: range ?? unspecified))
   }
 
+  func testLaterDeltasAndMarkedClausesReplayOverConfirmedDifferentCursorIds() throws {
+    let source = pane("cat dog", [NSRange(location: 0, length: 3), NSRange(location: 4, length: 3)])
+    let initial = try draft(source, "日"), first = try XCTUnwrap(initial.committed(nativeNewline: 1))
+    var second = try following(first, pane: source, text: "abc")
+    XCTAssertTrue(second.update(NSAttributedString(string: "本"), selected: NSRange(location: 1, length: 0),
+      replacement: NSRange(location: second.markedRange.location + 1, length: 1)))
+    var result = source; result.cursors[0].id = 17; result.cursors[1].id = 42
+    let aliases: [UInt64: UInt64] = [1: 17, 2: 42]
+    let bound = try XCTUnwrap(first.afterAction(initial, pane: result, aliases: aliases))
+    let replayed = try XCTUnwrap(second.replaying(over: bound, pane: result, aliases: aliases))
+    XCTAssertEqual(Set(replayed.presentation.values.keys), [17, 42])
+    XCTAssertEqual(replayed.presentation.primaryID, 42)
+    XCTAssertEqual(replayed.substring(for: NSRange(location: 0, length: 100))?.text.string, "日a本c 日a本c")
+    XCTAssertEqual(replayed.markedRange, NSRange(location: 7, length: 1))
+    let committed = try XCTUnwrap(replayed.committed(nativeNewline: 1))
+    var receipt = pane("日 日", [NSRange(location: 1, length: 0), NSRange(location: 3, length: 0)])
+    receipt.cursors[0].id = 17; receipt.cursors[1].id = 42
+    let ready = try XCTUnwrap(committed.resolved(pane: receipt, edited: [17, 42]))
+    let input = try XCTUnwrap(ready.replacement(scope: .init(), epoch: 7)).input(id: 1)
+    XCTAssertEqual(input.replacementCursor, 42); XCTAssertEqual(input.replacements.map(\.cursor), [17])
+    XCTAssertEqual(try WirePaste(serializedBytes: input.payload).text, "a本c")
+  }
+
+  func testReplayExpandsBroadcastToAnActionCreatedCaretAndKeepsExplicitTextOnTheNewPrimary() throws {
+    let source = pane("one\ntwo\n", [NSRange(location: 0, length: 0)])
+    let initial = try draft(source, "日"), first = try XCTUnwrap(initial.committed(nativeNewline: 1))
+    let broadcast = try following(first, pane: source, text: "本")
+    let primaryOnly = try following(first, pane: source, text: "本", range: NSRange(location: 1, length: 0))
+    let action = pane("one\ntwo\n", [NSRange(location: 0, length: 0), NSRange(location: 4, length: 0)])
+    let bound = try XCTUnwrap(first.afterAction(initial, pane: action))
+    let all = try XCTUnwrap(broadcast.replaying(over: bound, pane: action, aliases: [1: 1]))
+    XCTAssertEqual(all.substring(for: NSRange(location: 0, length: 100))?.text.string, "日本one\n日本two\n")
+    let primary = try XCTUnwrap(primaryOnly.replaying(over: bound, pane: action, aliases: [1: 1]))
+    XCTAssertEqual(primary.substring(for: NSRange(location: 0, length: 100))?.text.string, "日one\n日本two\n")
+    XCTAssertEqual(primary.ordered, [2]); XCTAssertEqual(primary.presentation.primaryID, 2)
+  }
+
+  func testReplayRefusesAChangedRemovedLiteralAndAnAmbiguousCursorMap() throws {
+    let source = pane("Tail", [NSRange(location: 0, length: 0)])
+    let first = try XCTUnwrap(try draft(source, "日").committed(nativeNewline: 1))
+    let next = try following(first, pane: source, text: "本", range: NSRange(location: 0, length: 1))
+    let changed = try XCTUnwrap(try draft(source, "X").committed(nativeNewline: 1))
+    XCTAssertNil(next.replaying(over: changed, pane: source, aliases: [:]))
+    XCTAssertNil(next.replaying(over: first, pane: source, aliases: [1: 2, 3: 2]))
+  }
+
   func testCommittedPrefixIsVisibleAndQueryableBeforeReceiptAndIsSentOnlyOnce() throws {
     let source = pane("alpha Tail", [NSRange(location: 0, length: 5)])
     let first = try XCTUnwrap(try draft(source, "日本").committed(nativeNewline: 1))

@@ -78,6 +78,29 @@ final class ComposeDocumentPresentationTests: XCTestCase {
     XCTAssertEqual(flow.presentation.characterCount,drawing.text.projection.text.utf16.count)
   }
 
+  func testProposedGroupCanAddAndDropCaretsWithoutRekeyingSourceRegions() throws {
+    var fixture = fixture("aa BB cc")
+    fixture.pane.compose.cursors = [.with { $0.id = 30; $0.primary = true }, .with { $0.id = 40; $0.position = 3 }]
+    let raw = try context(fixture.pane.compose.text)
+    let prefix = try XCTUnwrap(ComposeComposition(primary: 30, values: [
+      30: try draft(raw, range: NSRange(location: 0, length: 0), text: "日本"),
+      40: try draft(raw, range: NSRange(location: 3, length: 0), text: "日本")]))
+    let group = try XCTUnwrap(ComposeVirtualSelections(prefix: prefix)?.replacingGroup(with: [
+      NSRange(location: 1, length: 0), NSRange(location: 5, length: 0), NSRange(location: 10, length: 0)]))
+    let snapshot = try fixture.snapshot()
+    let selected = try XCTUnwrap(ComposeDocumentPresentation(snapshot, overlay: overlay(fixture.pane, prefix, selections: group)))
+    XCTAssertEqual(selected.selectedRanges, [NSRange(location: 1, length: 0), NSRange(location: 5, length: 0), NSRange(location: 10, length: 0)])
+    XCTAssertEqual(selected.text, "日本aa 日本BB cc")
+    let insertion = try XCTUnwrap(ComposeVirtualInsertion(selections: group, text: NSAttributedString(string: "X"), selected: NSRange(location: 1, length: 0)))
+    let full = try XCTUnwrap(ComposeDocumentPresentation(snapshot, overlay: overlay(fixture.pane, insertion: insertion)))
+    XCTAssertEqual(full.text, "日X本aa X日本BB Xcc")
+    XCTAssertEqual(full.selectedRanges, [NSRange(location: 2, length: 0), NSRange(location: 7, length: 0), NSRange(location: 13, length: 0)])
+    XCTAssertEqual(snapshot.document.text, "aa BB cc")
+    let one = try XCTUnwrap(group.replacingGroup(with: [NSRange(location: 1, length: 0)]))
+    let reduced = try XCTUnwrap(ComposeDocumentPresentation(snapshot, overlay: overlay(fixture.pane, prefix, selections: one)))
+    XCTAssertEqual(reduced.selectedRanges, [NSRange(location: 1, length: 0)])
+  }
+
   func testImageReplacementAndDraftingInsideItsMarkdownShareTheRendererPlan() throws {
     var fixture = fixture("before ![alt](image.png) after")
     let raw = fixture.pane.compose.text, image = (raw as NSString).range(of: "![alt](image.png)")

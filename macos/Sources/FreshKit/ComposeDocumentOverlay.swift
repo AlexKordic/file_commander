@@ -25,8 +25,8 @@ public struct ComposeDocumentOverlay: Sendable {
     let ids = Set(pane.compose.cursors.map(\.id)), primary = pane.compose.cursors.first(where: \.primary)!.id
     guard ids.count == pane.compose.cursors.count,
           composition == nil || virtualInsertion != nil || Set(composition!.values.keys).isSubset(of: ids),
-          virtualInsertion == nil || Set(virtualInsertion!.cursors.keys) == ids && virtualInsertion!.primaryID == primary,
-          virtualSelections == nil || Set(virtualSelections!.cursors.keys) == ids && virtualSelections!.primaryID == primary else { return nil }
+          virtualInsertion == nil || virtualInsertion!.cursors.count <= 1024 && virtualInsertion!.primaryID == primary,
+          virtualSelections == nil || virtualSelections!.cursors.count <= 1024 && virtualSelections!.primaryID == primary else { return nil }
     owner = .with {
       $0.window = window; $0.leaf = pane.leaf; $0.buffer = pane.buffer; $0.epoch = pane.compose.viewport.epoch
       $0.revision = pane.compose.bufferRevision; $0.authority = pane.compose.assetAuthority

@@ -26,10 +26,13 @@ public struct ComposeSelectionChange {
 
   /// Display feedback only. Fresh supplies real secondary IDs in its accepted
   /// action receipt before any dependent text can use them.
-  public func preview(in pane: WireComposePane) -> WireComposePane? {
+  public func preview(in pane: WireComposePane, cursorIDs: [UInt64]? = nil) -> WireComposePane? {
     guard pane.bufferRevision == captured.sourceRevision, pane.hasViewport,
           pane.viewport.epoch == captured.bufferEpoch,
           let primary = pane.cursors.first(where: \.primary) ?? pane.cursors.first else { return nil }
+    if let cursorIDs {
+      guard cursorIDs.count == captured.selectionTargets.count, Set(cursorIDs).count == cursorIDs.count else { return nil }
+    }
     let context = pane.hasTextContext ? ComposeTextContext(pane.textContext, documentLength: pane.documentLen) : nil
     let chunks = pane.textChunks.compactMap { chunk in ComposeTextContext(.with {
       $0.text = chunk.text; $0.sourceStart = chunk.sourceStart; $0.utf16Start = chunk.utf16Start
@@ -44,7 +47,8 @@ public struct ComposeSelectionChange {
     for (index, target) in captured.selectionTargets.enumerated() {
       guard target.position <= pane.documentLen, !target.hasAnchor || target.anchor <= pane.documentLen else { return nil }
       let id: UInt64
-      if index == 0 { id = primary.id }
+      if let cursorIDs { id = cursorIDs[index] }
+      else if index == 0 { id = primary.id }
       else { guard maximum < UInt64.max else { return nil }; maximum += 1; id = maximum }
       cursors.append(.with {
         $0.id = id; $0.primary = index == 0; $0.position = target.position
