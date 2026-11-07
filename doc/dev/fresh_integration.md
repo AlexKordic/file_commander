@@ -1638,6 +1638,14 @@ the authority's filesystem; the SSH helper computes the hash on the host, so
 verification does not download unchanged image bytes. The native client skips
 decoding unchanged responses and retains previews while refresh is in flight.
 
+Each nonfinal image chunk must contain data. An empty nonfinal chunk fails and
+releases its request slot, including after earlier bytes arrived. Cancellation
+errors and final unchanged responses retain their separate termination rules.
+Filesystem authority/document identifiers are opaque unsigned values and keep
+all 64 bits; the signed-native scene counter restriction does not apply to
+these resource identities. Requests bind source coordinates to the document
+authority before I/O, while already received pixels retain their resource key.
+
 Transient errors carry `retryable` and retain the last valid preview with an
 explanation. Missing, denied or invalid resources use an editable fallback.
 Retry scheduling survives source-edit cancellation and temporary formatting

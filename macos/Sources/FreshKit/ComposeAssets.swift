@@ -67,6 +67,7 @@ public struct ComposeAssetReceiver {
       }
       return .unchanged(request: state.request, version: chunk.version, digest: chunk.digest)
     }
+    guard chunk.done || !chunk.data.isEmpty else { return failed("Image stream made no progress") }
     guard chunk.done ? chunk.digest.count == 32 : chunk.version.isEmpty && chunk.digest.isEmpty else {
       return failed("Invalid image validator")
     }

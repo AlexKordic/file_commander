@@ -1,7 +1,45 @@
 import XCTest
+import CryptoKit
 import FreshKit
 
 final class ComposeAssetTests: XCTestCase {
+  func testOpaqueResourceIdentityRetainsAllUnsignedBits() {
+    var input = request()
+    input.authority = UInt64.max; input.document = UInt64.max - 1
+    var receiver = ComposeAssetReceiver(); XCTAssertTrue(receiver.register(input))
+    let bytes = Data([0x89, 0x50, 0x4e, 0x47])
+    let chunk = WireComposeAssetChunk.with {
+      $0.id = input.id; $0.total = UInt64(bytes.count); $0.data = bytes; $0.done = true
+      $0.digest = Data(SHA256.hash(data: bytes))
+    }
+    guard case .loaded(let original, let loaded, _, _) = receiver.receive(chunk) else {
+      return XCTFail("opaque resource identities are not signed native counters")
+    }
+    XCTAssertEqual(original, input); XCTAssertEqual(loaded, bytes)
+  }
+
+  func testEmptyNonfinalChunksFailAndReleaseTheRequestSlot() {
+    for partial in [false, true] {
+      var receiver = ComposeAssetReceiver()
+      let input = request()
+      XCTAssertTrue(receiver.register(input))
+      if partial {
+        XCTAssertNil(receiver.receive(.with { $0.id = input.id; $0.total = 2; $0.data = Data([1]) }))
+      }
+      let empty = WireComposeAssetChunk.with {
+        $0.id = input.id; $0.total = 2; $0.offset = partial ? 1 : 0
+      }
+      guard case .failed(let original, _, let retryable) = receiver.receive(empty) else {
+        XCTFail("an image stream must make progress before its final chunk")
+        continue
+      }
+      XCTAssertEqual(original, input); XCTAssertFalse(retryable)
+      XCTAssertTrue(receiver.activeRequests.isEmpty)
+      XCTAssertNil(receiver.receive(.with { $0.id = input.id; $0.error = "late"; $0.done = true }))
+      XCTAssertTrue(receiver.register(request(2)))
+    }
+  }
+
   private func request(_ id: UInt64 = 1) -> WireComposeAssetRequest {
     .with {
       $0.id = id

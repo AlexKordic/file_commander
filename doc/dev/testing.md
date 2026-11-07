@@ -679,6 +679,12 @@ background-parser threshold while its first inline PNG decode is held, then
 checks native image geometry, exact save and one undo. These checks do not
 qualify a remote connection or an actual input method.
 
+Image-stream checks reject no-progress nonfinal chunks at the beginning and
+after partial data, require immediate request-slot release, and ignore late
+replies for that failed ID. A full-width opaque resource-identity case preserves
+the authority/document bits through reassembly. Existing conditional-response
+tests retain final empty unchanged replies with matching cached digests.
+
 Image-identity checks keep canonically equivalent but byte-distinct targets
 separate through out-of-order decodes, validation and cancellation. Identical
 bytes from bridged strings still share work, while mutating a destination
