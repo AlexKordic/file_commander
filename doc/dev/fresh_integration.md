@@ -1311,7 +1311,13 @@ limit, parsed/formatter metadata pressure, shared-target accounting, sparse-inde
 capacity at the boundary, exact Unicode/CRLF in a current
 oversized snapshot, and cancellation without releasing a real parser slot or
 publishing its evicted late result. These are retention weights, not allocator-live
-or resident-memory measurements. Allocator rounding and unreported container
+or resident-memory measurements. Table font-sample deduplication owns each
+sample's text/styles once. A randomized fingerprint index holds sample offsets;
+collisions require full sample equality, including literal UTF-8, styles and
+image/minimum-only flags. Samples retain first-occurrence order, so measurement
+identities and wire contents do not depend on randomized hashes. The index is
+released when the final columns are assembled.
+Allocator rounding and unreported container
 bookkeeping, editor buffers, protected working sources, parser jobs, external
 snapshot owners, native caches and transient allocations still need combined
 resource admission. Native pending-text literal checks compare UTF-16 sequences

@@ -579,6 +579,14 @@ formatter ownership and immediate admission of completed parser metadata.
 The opt-in parser profile reports retained-capacity components and a batch of
 10,000 cached weight queries separately from parsing/projection/encoding. Those
 weights and query intervals are not resident memory or interactive latency.
+Table-sample tests force fingerprint collisions and compare randomized
+deduplication with the previous full-value set, including byte-distinct Unicode,
+style, image and minimum-only differences and first-occurrence storage. The
+opt-in parser profile also reconstructs both deduplication indexes over complete
+parser samples and reports their element/string/style capacity weights. These
+exclude final samples, allocator/hash bookkeeping and construction temporaries;
+they do not measure live or peak memory. Compare binary panes separately to
+check that deduplication preserves complete measurement contents and identities.
 These checks do not bound editor buffers, protected working sets, external
 snapshot owners, parser transients or native input history.
 
