@@ -1717,10 +1717,20 @@ scalar constructor. No source, Markdown context or display width is shortened.
 Source capture and index construction still scan a changed revision; this is
 not incremental source/semantic parsing or an application latency guarantee.
 
+### Scene connection lifetime
+
+A native scene socket instance is one-use. Closing it before or during connect
+prevents the completed descriptor from becoming active, and a duplicate open
+cannot replace a live descriptor. Descriptor installation and initial hello
+admission share one critical section, so concurrent ordinary input follows the
+hello. Pre-open and post-close sends are ignored. Requested-message counts and
+serial queue insertion move together. These guarantees do not establish an OS
+connect timeout or complete transport/decode resource budgets.
+
 ### Scene frame admission
 
 The native model stores scene sequence, window, clipboard and timing counters
-as `Int`. Every supplied unsigned wire counter must be exactly representable
+as `Int`. Each of those supplied counters must be exactly representable
 before a hello or frame is published. A value outside that range ends the
 scene connection through the ordinary recovery path; pending native text
 remains available through Copy Uninserted Text. The largest representable

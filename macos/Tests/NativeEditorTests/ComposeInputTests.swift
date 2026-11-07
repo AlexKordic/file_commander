@@ -23,6 +23,7 @@ private final class ScenePeer: @unchecked Sendable {
   private var received: [WireComposeInput] = []
   private var receivedHellos: [WireClientHello] = []
   private var receivedKeys: [WireKey] = []
+  private var receivedKinds: [UInt64] = []
   private var receivedViewports: [WireComposeViewportRequest] = []
   private var receivedAssets: [WireComposeAssetRequest] = []
   private var receivedIndexes: [WireComposeIndexRequest] = []
@@ -32,6 +33,7 @@ private final class ScenePeer: @unchecked Sendable {
   var hellos: [WireClientHello] { lock.lock(); defer { lock.unlock() }; return receivedHellos }
   var inputs: [WireComposeInput] { lock.lock(); defer { lock.unlock() }; return received }
   var keys: [WireKey] { lock.lock(); defer { lock.unlock() }; return receivedKeys }
+  var kinds: [UInt64] { lock.lock(); defer { lock.unlock() }; return receivedKinds }
   var viewports: [WireComposeViewportRequest] { lock.lock(); defer { lock.unlock() }; return receivedViewports }
   var assets: [WireComposeAssetRequest] { lock.lock(); defer { lock.unlock() }; return receivedAssets }
   var indexes: [WireComposeIndexRequest] { lock.lock(); defer { lock.unlock() }; return receivedIndexes }
@@ -67,6 +69,7 @@ private final class ScenePeer: @unchecked Sendable {
       setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &noSignal, socklen_t(MemoryLayout<Int32>.size))
       while let kind = Self.varint(fd), let size = Self.varint(fd), size <= UInt64(SceneWire.maxPayload),
             let payload = Self.read(fd, count: Int(size)) {
+        lock.lock(); receivedKinds.append(kind); lock.unlock()
         if kind == SceneWire.Kind.clientHello.rawValue {
           if let hello = try? WireClientHello(serializedBytes: payload) {
             lock.lock(); receivedHellos.append(hello); lock.unlock()
@@ -188,6 +191,55 @@ private final class ScenePeer: @unchecked Sendable {
 }
 
 final class ComposeInputTests: XCTestCase {
+  @MainActor
+  func testSceneSocketRejectsDuplicateOpenAndIgnoresSendsAfterClose() async throws {
+    let peer = try ScenePeer(pane: pane("Tail")); defer { peer.close() }
+    let socket = SceneSocket(path: peer.path); defer { socket.close() }
+    var closes = 0
+    socket.onClose = { _ in closes += 1 }
+    try socket.open(telemetry: false)
+    try await eventually { peer.hellos.count == 1 }
+    XCTAssertThrowsError(try socket.open(telemetry: false))
+    XCTAssertTrue(socket.isOpen); XCTAssertEqual(socket.requested, 1)
+    socket.close()
+    try await eventually { closes == 1 }
+    socket.send(.paste("must not be queued")); socket.close()
+    XCTAssertEqual(socket.requested, 1)
+    XCTAssertEqual(peer.hellos.count, 1)
+    XCTAssertEqual(closes, 1)
+  }
+
+  @MainActor
+  func testSceneSocketAlwaysQueuesHelloBeforeConcurrentInput() async throws {
+    let peer = try ScenePeer(pane: pane("Tail")); defer { peer.close() }
+    let socket = SceneSocket(path: peer.path); defer { socket.close() }
+    socket.send(.key(.with { $0.key = "before-open" }))
+    XCTAssertEqual(socket.requested, 0)
+    let opening = Task.detached { try socket.open(telemetry: false) }
+    for _ in 0..<128 { socket.send(.key(.with { $0.key = "x" })) }
+    try await opening.value
+    socket.send(.key(.with { $0.key = "after-open" }))
+    try await eventually { peer.kinds.count == socket.requested }
+    XCTAssertGreaterThanOrEqual(socket.requested, 2)
+    XCTAssertEqual(peer.kinds.first, SceneWire.Kind.clientHello.rawValue)
+    XCTAssertEqual(peer.hellos.count, 1)
+    XCTAssertEqual(peer.keys.last?.key, "after-open")
+    XCTAssertFalse(peer.keys.contains { $0.key == "before-open" })
+  }
+
+  @MainActor
+  func testClosedSceneSocketCannotStartALateConnectionOrQueueMoreWrites() async throws {
+    let peer = try ScenePeer(pane: pane("Tail")); defer { peer.close() }
+    let socket = SceneSocket(path: peer.path); defer { socket.close() }
+    socket.close()
+    socket.send(.paste("must not be queued"))
+    XCTAssertEqual(socket.requested, 0)
+    XCTAssertThrowsError(try socket.open(telemetry: false))
+    try await Task.sleep(nanoseconds: 50_000_000)
+    XCTAssertTrue(peer.hellos.isEmpty)
+    XCTAssertEqual(socket.requested, 0)
+  }
+
   @MainActor
   func testUnadmittedSceneCountsCloseTheConnectionAndRecoverPendingText() async throws {
     for gridCount in [true, false] {

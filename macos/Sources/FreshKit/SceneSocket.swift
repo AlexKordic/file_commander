@@ -15,11 +15,15 @@ public final class SceneSocket: @unchecked Sendable {
   public enum Failure: Error, CustomStringConvertible {
     case path(String)
     case system(String, Int32)
+    case closed
+    case alreadyOpen
 
     public var description: String {
       switch self {
       case .path(let path): return "Scene socket path is too long: \(path)"
       case .system(let call, let code): return "\(call) failed: \(String(cString: strerror(code)))"
+      case .closed: return "The editor connection was cancelled."
+      case .alreadyOpen: return "The editor is already connected."
       }
     }
   }
@@ -57,14 +61,21 @@ public final class SceneSocket: @unchecked Sendable {
 
   /// Connects and says hello; `telemetry` asks Fresh for frame timing. Blocks
   /// briefly for the connect; call it off the main thread when that matters.
+  /// An instance is one-use. Closing before/during connect prevents ownership
+  /// of the completed descriptor; duplicate opens do not replace a live one.
   public func open(telemetry: Bool, richCompose: Bool = false, measuredTables: Bool = false, paragraphWindows: Bool = false) throws {
+    state.lock()
+    let failure: Failure? = closed ? .closed : (fd >= 0 ? .alreadyOpen : nil)
+    state.unlock()
+    if let failure { throw failure }
     let fd = socket(AF_UNIX, SOCK_STREAM, 0)
     guard fd >= 0 else { throw Failure.system("socket", errno) }
+    var installed = false
+    defer { if !installed { Darwin.close(fd) } }
     var address = sockaddr_un()
     address.sun_family = sa_family_t(AF_UNIX)
     let bytes = Array(path.utf8)
     guard bytes.count < MemoryLayout.size(ofValue: address.sun_path) else {
-      Darwin.close(fd)
       throw Failure.path(path)
     }
     withUnsafeMutableBytes(of: &address.sun_path) { raw in
@@ -76,7 +87,6 @@ public final class SceneSocket: @unchecked Sendable {
     }
     guard connected == 0 else {
       let code = errno
-      Darwin.close(fd)
       throw Failure.system("connect", code)
     }
     var on: Int32 = 1
@@ -87,30 +97,49 @@ public final class SceneSocket: @unchecked Sendable {
     var size = SceneSocket.bufferSize
     setsockopt(fd, SOL_SOCKET, SO_RCVBUF, &size, socklen_t(MemoryLayout<Int32>.size))
     setsockopt(fd, SOL_SOCKET, SO_SNDBUF, &size, socklen_t(MemoryLayout<Int32>.size))
+    let hello = SceneInput.hello(telemetry: telemetry, richCompose: richCompose, measuredTables: measuredTables,
+      paragraphWindows: paragraphWindows, nativePopupProjection: richCompose)
+    let payload = hello.payload()
+    let helloBytes = SceneWire.message(hello.kind, payload: payload)
+    state.lock()
+    guard !closed else { state.unlock(); throw Failure.closed }
+    guard self.fd < 0 else { state.unlock(); throw Failure.alreadyOpen }
     self.fd = fd
-    send(.hello(telemetry: telemetry, richCompose: richCompose, measuredTables: measuredTables, paragraphWindows: paragraphWindows, nativePopupProjection: richCompose))
+    installed = true
+    // Commit ownership and the first queued message together. A concurrent
+    // resize/key cannot get ahead of the hello after observing an open fd.
+    enqueue(helloBytes, payloadCount: payload.count, name: hello.telemetryName)
+    state.unlock()
     let thread = Thread { [weak self] in self?.readLoop(requireRegionProbes: richCompose) }
     thread.name = "fc.scene.read"
     thread.qualityOfService = .userInteractive
     thread.start()
   }
 
-  /// Sends one message.
+  /// Queues a message only while connected. Initial hello admission is atomic
+  /// with publishing the descriptor, and queue order matches requested order.
   public func send(_ input: SceneInput) {
+    guard isOpen else { return }
     let payload = input.payload()
     let bytes = SceneWire.message(input.kind, payload: payload)
     let name = input.telemetryName
     state.lock()
-    requestedCount += 1
+    guard !closed, fd >= 0 else { state.unlock(); return }
+    enqueue(bytes, payloadCount: payload.count, name: name)
     state.unlock()
+  }
+
+  /// Called with state locked so requested order is also queue order.
+  private func enqueue(_ bytes: [UInt8], payloadCount: Int, name: (type: String, kind: String?)) {
+    requestedCount += 1
     writes.async { [weak self] in
       guard let self, (try? self.writeAll(bytes)) != nil else { return }
       self.written += 1
-      self.onSent?(self.written, name.type, name.kind, payload.count, ProcessInfo.processInfo.systemUptime)
+      self.onSent?(self.written, name.type, name.kind, payloadCount, ProcessInfo.processInfo.systemUptime)
     }
   }
 
-  /// Messages handed to `send` so far. They are written in this order, so a
+  /// Messages admitted to the write queue so far. They are written in this order, so a
   /// frame whose `ack` reaches this number shows all of them.
   public var requested: Int {
     state.lock()
@@ -118,13 +147,15 @@ public final class SceneSocket: @unchecked Sendable {
     return requestedCount
   }
 
-  /// Ends the connection. `onClose` follows on the main queue.
+  /// Ends an active connection; `onClose` follows when its reader exits.
+  /// Closing an unopened instance prevents a later open.
   public func close() {
     state.lock()
     let wasClosed = closed
     closed = true
+    let descriptor = fd
     state.unlock()
-    if !wasClosed, fd >= 0 { shutdown(fd, SHUT_RDWR) }
+    if !wasClosed, descriptor >= 0 { shutdown(descriptor, SHUT_RDWR) }
   }
 
   public var isOpen: Bool {

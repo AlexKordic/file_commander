@@ -788,6 +788,10 @@ lookups and EOF, and retain the existing raw-context/caret-window contracts.
 All six parser profile panes also remain byte-identical to their prior controls.
 Constructor timings exclude buffer extraction, parsing, transport and GUI paint.
 
+Scene-socket lifecycle cases close before opening, reject duplicate opens,
+ignore sends outside an open connection, and race ordinary input with startup.
+The peer records actual wire kinds and must receive the hello first.
+
 Scene-frame validation tests exercise signed-native/unsigned-wire counter
 boundaries for hellos and frames, including optional timing values. A private
 socket peer sends an unrepresentable window counter while text awaits a reply;
