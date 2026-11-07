@@ -1126,16 +1126,33 @@ The native `ComposeFlowController` measures complete snapshots on one worker,
 including across cancellation and connection reset. Late successful work cannot
 publish retired ownership. A caret/header update can reuse geometry only when
 fonts, image dimensions, admission policy and a literal protobuf digest of all
-layout inputs agree. Canonically equal strings cannot alias different table or
-marker encodings. Reuse always substitutes the current document owner. Source,
+layout inputs and source-bound local drafts agree. Canonically equal strings
+cannot alias different table, marker or draft encodings. Clause selection can
+reuse glyphs while publishing a new logical presentation. Reuse always
+substitutes the current document owner. Source,
 focus, font/width and image changes update or retire the candidate; hiding and
 disconnect release it. Reading known image dimensions starts no offscreen I/O.
 
+`ComposeDocumentPresentation` derives complete provisional text from that
+verified baseline through the renderer's shared `ComposeProjectionPlan`.
+Image replacements, image-source editing, captured composition and layered
+virtual insertions use the same transformations for drawing and complete
+measurement. The baseline remains unchanged. A text-only overlay capture
+keeps arbitrary attributed values and AppKit objects outside the worker;
+selection-only changes retain geometry without retaining retired ownership.
+Complete selections remain primary-first, including offscreen secondaries.
+Provisional endpoints identify a presentation and either an original source
+byte or a local draft region/UTF-16 offset. Deletions still own their pending
+boundary. Region keys cannot be sent as Fresh cursor IDs, and draft offsets
+need accepted predecessor receipts before becoming wire action coordinates.
+Superseded overlays cannot publish through a still-current transport baseline.
+
 This remains an internal generation until public AX value, selection, styles,
 lines, visible ranges, bounds and provisional actions can switch together.
-Pending local selections and composition/virtual insertion withhold the
-authoritative-only flow;
-it does not relabel its old coordinates as the new provisional document.
+The public AX implementation still uses its existing cropped presentation;
+it does not switch between cropped and complete values as measurement runs.
+Receipt-bound global selection/replacement, independent logical publication
+while geometry is pending and complete public image elements remain required.
 Current certified formatting coverage skips redundant source-window preparation.
 Formatter/parser caches, transient allocations and the full native flow still
 require the general resource audit. The coordinator is integrated with the native

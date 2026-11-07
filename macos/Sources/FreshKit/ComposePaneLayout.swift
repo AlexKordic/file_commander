@@ -27,13 +27,25 @@ public final class ComposePaneLayout {
   private let contextDisplayRanges: [UInt64: NSRange]
   let maximumAuxiliaryContextUnits: Int
 
-  public init?(pane: WireComposePane, body: CTFont, monospace: CTFont, width: CGFloat,
+  public convenience init?(pane: WireComposePane, body: CTFont, monospace: CTFont, width: CGFloat,
                typography: ComposeTypography = .init(),
                images: [UInt64: ComposeImageState] = [:], reuse: ComposePaneLayout? = nil,
                sharingMeasurementsWith peers: [ComposePaneLayout] = [],
                measuredBase: ComposePaneLayout? = nil,
                preedit: ComposeMarkedText? = nil, composition: ComposeComposition? = nil, virtualInsertion: ComposeVirtualInsertion? = nil,
                measurement: ComposeTextLayout.MeasurementOptions? = nil, record: ((ComposeTextLayout.Fragment)->Bool)? = nil) {
+    self.init(pane: pane, body: body, monospace: monospace, width: width, typography: typography,
+      images: images, reuse: reuse, sharingMeasurementsWith: peers, measuredBase: measuredBase,
+      preedit: preedit, composition: composition, virtualInsertion: virtualInsertion,
+      measurement: measurement, record: record, prepared: nil)
+  }
+
+  init?(pane: WireComposePane, body: CTFont, monospace: CTFont, width: CGFloat,
+        typography: ComposeTypography = .init(), images: [UInt64: ComposeImageState] = [:], reuse: ComposePaneLayout? = nil,
+        sharingMeasurementsWith peers: [ComposePaneLayout] = [], measuredBase: ComposePaneLayout? = nil,
+        preedit: ComposeMarkedText? = nil, composition: ComposeComposition? = nil, virtualInsertion: ComposeVirtualInsertion? = nil,
+        measurement: ComposeTextLayout.MeasurementOptions? = nil, record: ((ComposeTextLayout.Fragment)->Bool)? = nil,
+        prepared: ComposeProjectionPlan?) {
     guard typography.isValid, width.isFinite, width > 0,
           let sourceStart = Int(exactly: pane.sourceStart), let sourceEnd = Int(exactly: pane.sourceEnd), sourceStart <= sourceEnd else { return nil }
     guard pane.images.allSatisfy({ !($0.rendered && $0.sourcePreview) }) else { return nil }
@@ -65,20 +77,11 @@ public final class ComposePaneLayout {
     self.composition = composition; self.preedit = preedit; self.virtualInsertion = virtualInsertion
     let sourceComposition = virtualInsertion?.regions ?? composition
     let linkEdits = sourceComposition?.values.values.filter { !$0.source.isEmpty || $0.draft.length > 0 }.map(\.source) ?? []
-    let visible = pane.images.filter { image in
-      guard image.rendered || image.sourcePreview else { return false }
-      guard let sourceComposition else { return true }
-      return !sourceComposition.values.values.contains { value in
-        guard !value.source.isEmpty || value.draft.length > 0 else { return false }
-        return value.source.overlaps(Int(image.start)..<Int(image.end))
-          || (value.source.isEmpty && Int(image.start) < value.source.lowerBound && value.source.lowerBound < Int(image.end))
-      }
-    }
-    var sourceRanges: [Range<Int>] = [], sizes: [Int: CGSize] = [:]
+    guard let visible = ComposeProjectionPlan.visibleImages(pane: pane, editing: sourceComposition) else { return nil }
+    var sizes: [Int: CGSize] = [:]
     for image in visible {
       guard let start = Int(exactly: image.start), let end = Int(exactly: image.end), start < end,
             start >= sourceStart, end <= sourceEnd else { return nil }
-      if image.rendered { sourceRanges.append(start..<end) }
       let containers = pane.spans.filter { ($0.role == 9 || $0.role == 10) && $0.start <= image.start && image.start < $0.end }.count
       let available = width - min(CGFloat(containers) * typography.indent, width * 0.6)
       var size = (images[image.start] ?? .loading).size(body: CTFontGetSize(body),
@@ -122,7 +125,8 @@ public final class ComposePaneLayout {
       codeBlocks = reuse.codeBlocks; codeFrames = reuse.codeFrames
       return
     }
-    guard let baseProjection = ComposeProjection(pane) else { return nil }
+    guard let prepared = prepared ?? ComposeProjectionPlan(pane: pane, composition: composition,
+      virtualInsertion: virtualInsertion, visibleImages: visible) else { return nil }
     let items = Dictionary(grouping: pane.spans.filter { $0.role == 13 }, by: \.start)
     var hangingContexts: [UInt64: ComposeHangingContext] = [:]
     for wire in pane.hangingContexts {
@@ -130,35 +134,16 @@ public final class ComposePaneLayout {
             let context = ComposeHangingContext(wire, item: owners[0]) else { return nil }
       hangingContexts[wire.itemStart] = context
     }
-    let objects = baseProjection.replacingObjects(sourceRanges)
-    let base = objects?.projection ?? baseProjection
-    guard let tableModel = ComposeTableModel(pane: pane, projection: base, reuse: reuse?.tableModel,
+    guard let tableModel = ComposeTableModel(pane: pane, projection: prepared.base, reuse: reuse?.tableModel,
       sharingMeasurementsWith: peers.map(\.tableModel)) else { return nil }
     self.tableModel = tableModel
-    let layered = virtualInsertion?.projected(over: base)
-    let replacement: (projection: ComposeProjection, displays: [UInt64: Range<Int>])? = layered.map { ($0.projection, $0.drafts) }
-      ?? (virtualInsertion == nil ? composition?.project(over: base) : nil)
-    let sourceDisplays = layered?.contexts ?? replacement?.displays ?? [:]
-    guard preedit == nil || replacement != nil else { return nil }
-    let projection = replacement?.projection ?? base
-    let drafts = sourceDisplays.compactMap { id, display -> (source: Range<Int>, display: Range<Int>)? in
-      sourceComposition?.values[id].flatMap { value in
-        value.source.isEmpty && value.draft.length == 0 ? nil : (value.source, display)
-      }
-    }
-    guard let tables = tableModel.remapping(to: projection, drafts: drafts) else { return nil }
+    let projection = prepared.projection, sourceDisplays = prepared.sourceDisplays
+    guard let tables = tableModel.remapping(to: projection, drafts: prepared.drafts.map { ($0.source, $0.display) }) else { return nil }
     let displayBytes = Array(projection.text.utf8)
-    let displayRanges = (replacement?.displays ?? [:]).mapValues {
-      NSRange(location: String(decoding: displayBytes[..<$0.lowerBound], as: UTF8.self).utf16.count,
-        length: String(decoding: displayBytes[$0], as: UTF8.self).utf16.count)
-    }
-    contextDisplayRanges = sourceDisplays.mapValues {
-      NSRange(location: String(decoding: displayBytes[..<$0.lowerBound], as: UTF8.self).utf16.count,
-        length: String(decoding: displayBytes[$0], as: UTF8.self).utf16.count)
-    }
-    draftDisplayRanges = displayRanges
-    draftDisplayRange = composition.flatMap { displayRanges[$0.primaryID] }
-    var attachments = (objects?.objects ?? []).compactMap { object -> ComposeTextLayout.Attachment? in
+    contextDisplayRanges = prepared.contextRanges
+    draftDisplayRanges = prepared.draftRanges
+    draftDisplayRange = composition.flatMap { prepared.draftRanges[$0.primaryID] }
+    var attachments = prepared.objects.compactMap { object -> ComposeTextLayout.Attachment? in
       guard let size = sizes[object.source.lowerBound],
             let a = projection.displayPosition(for: object.source.lowerBound),
             let b = projection.displayPosition(for: object.source.upperBound, affinity: .upstream), a < b else { return nil }

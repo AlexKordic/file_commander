@@ -8,6 +8,7 @@
   "FreshKitTests.ComposeDocumentReceiverTests",
   "FreshKitTests.ComposeDocumentUpdateTests",
   "FreshKitTests.ComposeDocumentControllerTests",
+  "FreshKitTests.ComposeDocumentPresentationTests",
   "FreshKitTests.ComposeFlowTests",
   "FreshKitTests.ComposeFlowMeasurementTests",
   "FreshKitTests.ComposeFlowControllerTests",

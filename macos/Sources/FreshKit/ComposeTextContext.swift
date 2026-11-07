@@ -2,7 +2,7 @@ import Foundation
 
 /// A bounded snapshot of Fresh's raw Markdown for native text services. UTF-16
 /// indices are document-wide, independent of viewport and syntax concealment.
-public struct ComposeTextContext {
+public struct ComposeTextContext: Sendable {
   public let text: String
   public let source: Range<Int>
   public let range: NSRange

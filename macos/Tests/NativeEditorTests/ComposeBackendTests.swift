@@ -170,18 +170,42 @@ final class ComposeBackendTests: XCTestCase {
     XCTAssertNotEqual(localHeading.location, NSNotFound)
     let selection = zoomed.document.selectionRevision
     grid.setAccessibilitySelectedTextRange(localHeading)
-    XCTAssertNil(editor.composeFlow.flow, "pending local selections cannot publish an authoritative-only selection generation")
+    XCTAssertNil(editor.composeFlow.flow, "a pending local selection retires the previous logical generation")
     try await eventually(editor, "current source selection and complete geometry", timeout: 20) {
       editor.composeFlow.status == .ready && editor.composeFlow.flow?.document.selectionRevision != selection
     }
     let selected = try XCTUnwrap(editor.composeFlow.flow), selectedPane = try XCTUnwrap(grid.focusedCompose)
     XCTAssertTrue(selected.document.owns(window: UInt64(editor.store.windowID), pane: selectedPane.pane))
     XCTAssertNotNil(selected.correspondence(window: UInt64(editor.store.windowID), pane: selectedPane.pane, layout: selectedPane.layout))
+    let selectedCursor = try XCTUnwrap(selectedPane.cursor)
+    let selectedSource = Int(min(selectedCursor.position,selectedCursor.anchor))..<Int(max(selectedCursor.position,selectedCursor.anchor))
+    let replacementRange = try XCTUnwrap(selected.presentation.displayedRange(for: selectedSource))
+    XCTAssertEqual(selected.presentation.string(for: replacementRange),"Final heading")
+    let phrase = "日本 👩🏽‍💻 العربية", unspecified = NSRange(location: NSNotFound, length: 0)
+    grid.setMarkedText(phrase, selectedRange: NSRange(location: 0, length: 2), replacementRange: unspecified)
+    try await eventually(editor, "complete provisional flow over the offscreen Fresh selection", timeout: 20) {
+      editor.composeFlow.status == .ready && editor.composeFlow.flow?.presentation.overlay != nil
+    }
+    let marked = try XCTUnwrap(editor.composeFlow.flow), markedPane = try XCTUnwrap(grid.focusedCompose)
+    XCTAssertEqual(markedPane.layout.composition?.primary.source,selectedSource)
+    let expected = (selected.presentation.text as NSString).replacingCharacters(in: replacementRange, with: phrase)
+    XCTAssertTrue(marked.presentation.text.utf8.elementsEqual(expected.utf8))
+    XCTAssertEqual(marked.presentation.selectedRanges?.first, NSRange(location: replacementRange.location, length: 2))
+    XCTAssertNotNil(marked.correspondence(window: UInt64(editor.store.windowID), pane: markedPane.pane, layout: markedPane.layout))
+    let endpoint = try XCTUnwrap(marked.presentation.endpoint(atUTF16: replacementRange.location+1))
+    guard case .draft = endpoint.location else { return XCTFail("a complete provisional endpoint must not be a Fresh source byte") }
+    grid.doCommand(by: #selector(NSResponder.cancelOperation(_:)))
+    try await eventually(editor, "cancelled draft restores the complete Fresh baseline", timeout: 20) {
+      editor.composeFlow.status == .ready && editor.composeFlow.flow?.presentation.overlay == nil
+    }
+    XCTAssertTrue(editor.composeFlow.flow?.presentation.text.utf8.elementsEqual(selected.presentation.text.utf8) == true)
     XCTAssertEqual(try Data(contentsOf: file), Data(source.utf8))
     let metrics: [String: Any] = ["source_bytes": source.utf8.count, "projection_utf16": snapshot.document.characterCount,
       "measured_lines": flow.textIndex.lineCount, "normalized_styles": flow.textIndex.styles.count,
       "offscreen_crop_utf16_start": visible.location, "start_and_tail_certified": true,
-      "zoom_remeasured": true, "source_selection_replaced_ownership": true, "source_bytes_unchanged": true]
+      "zoom_remeasured": true, "source_selection_replaced_ownership": true, "source_bytes_unchanged": true,
+      "complete_provisional_text_and_clause_selection": true, "provisional_crop_glyphs_certified": true,
+      "cancel_restored_complete_baseline": true]
     try JSONSerialization.data(withJSONObject: metrics, options: .prettyPrinted).write(to: backend.root.appendingPathComponent("flow-metrics.json"))
     editor.switchBack(); XCTAssertNil(editor.composeFlow.flow); XCTAssertEqual(editor.composeFlow.status, .idle)
   }

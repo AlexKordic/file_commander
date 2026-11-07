@@ -12,10 +12,11 @@ public final class ComposeFlowController {
   public var onChange: (() -> Void)?
 
   public typealias Measure = @Sendable (ComposeDocumentSnapshot, ComposeFlowMeasurement.Environment,
-    ComposeFlowMeasurement?) async throws -> ComposeFlowMeasurement
+    ComposeFlowMeasurement?, ComposeDocumentOverlay?) async throws -> ComposeFlowMeasurement
   private struct Target {
     let snapshot: ComposeDocumentSnapshot
     let environment: ComposeFlowMeasurement.Environment
+    let overlay: ComposeDocumentOverlay?
   }
   private let measure: Measure
   private var target: Target?
@@ -23,26 +24,33 @@ public final class ComposeFlowController {
   private var worker: Task<Void, Never>?
   private var workerID: UUID?
 
-  public init(measure: @escaping Measure = { snapshot, environment, previous in
-    try ComposeFlowMeasurement.measure(snapshot, environment: environment, reusing: previous)
+  public init(measure: @escaping Measure = { snapshot, environment, previous, overlay in
+    try ComposeFlowMeasurement.measure(snapshot, environment: environment, overlay: overlay, reusing: previous)
   }) { self.measure = measure }
   deinit { worker?.cancel() }
 
   /// A missing snapshot withholds the public generation while retaining one
   /// same-document geometry candidate. Hide/disconnect/source replacement
   /// must use reset to release the candidate as well.
-  public func update(snapshot: ComposeDocumentSnapshot?, environment: ComposeFlowMeasurement.Environment?) {
+  public func update(snapshot: ComposeDocumentSnapshot?, environment: ComposeFlowMeasurement.Environment?, overlay: ComposeDocumentOverlay? = nil) {
+    func sameOverlay(_ old: ComposeDocumentOverlay?) -> Bool {
+      switch (old,overlay) {
+      case (nil,nil): return true
+      case (let a?,let b?): return a.isEquivalent(to:b)
+      default: return false
+      }
+    }
     if let snapshot, let environment, let target,
        target.snapshot.baseline.id == snapshot.baseline.id,
        target.snapshot.baseline.digest == snapshot.baseline.digest,
        target.snapshot.document.owner == snapshot.document.owner,
        target.snapshot.document.selectionRevision == snapshot.document.selectionRevision,
        target.snapshot.document.decorationRevision == snapshot.document.decorationRevision,
-       target.environment.isEquivalent(to: environment) { return }
+       target.environment.isEquivalent(to: environment), sameOverlay(target.overlay) { return }
     if snapshot == nil, target == nil, flow == nil { return }
     generation = UUID(); flow = nil; worker?.cancel()
     if let snapshot, let environment {
-      target = .init(snapshot: snapshot, environment: environment)
+      target = .init(snapshot: snapshot, environment: environment, overlay: overlay)
       if let previous, !previous.document.owner.isSameDocument(as: snapshot.document.owner) { self.previous = nil }
       status = .waiting; beginIfPossible()
     } else { target = nil; status = .idle }
@@ -67,7 +75,7 @@ public final class ComposeFlowController {
     let id = UUID(), generation = generation, measure = measure, previous = previous
     workerID = id; status = .measuring
     let work = Task.detached(priority: .userInitiated) {
-      try await measure(target.snapshot, target.environment, previous)
+      try await measure(target.snapshot, target.environment, previous, target.overlay)
     }
     worker = Task { [weak self] in
       let result = await withTaskCancellationHandler(operation: { await work.result }, onCancel: { work.cancel() })
@@ -85,7 +93,7 @@ public final class ComposeFlowController {
     switch result {
     case .success(let value):
       guard value.document === current.snapshot.document,
-            value.environment.isEquivalent(to: current.environment) else {
+            value.environment.isEquivalent(to: current.environment), value.presentation.overlay?.id == current.overlay?.id else {
         status = .failed; onChange?(); return
       }
       previous = value; flow = value; status = .ready

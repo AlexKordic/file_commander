@@ -15,9 +15,34 @@ public struct ComposeVirtualInsertion {
   public let marked: [UInt64: NSRange]
   public let drafts: [UInt64: NSRange]
   private let placements: [UInt64: Placement]
-  private struct Placement { let region: UInt64; let range, marked: NSRange }
+  fileprivate struct Placement: Equatable, Sendable { let region: UInt64; let range, marked: NSRange }
   private struct Edit { let range: NSRange; let text: NSAttributedString; let marked, selected: NSRange }
   private struct Group { var original: NSRange; var source: Range<Int> }
+
+  struct Plain: Sendable {
+    let regions: ComposePlainComposition
+    let primary: UInt64
+    let cursors: [UInt64: ComposeVirtualSelections.Cursor]
+    let marked, drafts: [UInt64: NSRange]
+    fileprivate let placements: [UInt64: Placement]
+    init(_ insertion: ComposeVirtualInsertion) {
+      regions = .init(insertion.regions); primary = insertion.primaryID
+      cursors = insertion.cursors; marked = insertion.marked; drafts = insertion.drafts; placements = insertion.placements
+    }
+    func restore() -> ComposeVirtualInsertion? {
+      guard let regions = regions.restore() else { return nil }
+      return .init(regions: regions, plain: self)
+    }
+    func isEquivalent(to other: Self) -> Bool {
+      primary == other.primary && cursors == other.cursors && marked == other.marked && drafts == other.drafts
+        && placements == other.placements && regions.isEquivalent(to: other.regions)
+    }
+  }
+
+  private init(regions: ComposeComposition, plain: Plain) {
+    self.regions = regions; primaryID = plain.primary; cursors = plain.cursors
+    marked = plain.marked; drafts = plain.drafts; placements = plain.placements
+  }
 
   public init?(selections: ComposeVirtualSelections, text: NSAttributedString, selected: NSRange) {
     self.init(selections: selections, edits: selections.cursors.mapValues {

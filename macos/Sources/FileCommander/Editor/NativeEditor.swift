@@ -548,9 +548,16 @@ final class NativeEditor: NSObject, CellGridDelegate {
 
   private func updateCompleteFlow() {
     guard shown, richCompose, let snapshot = composeDocument.snapshot, let pane = grid?.focusedCompose,
-          snapshot.document.owns(window: UInt64(store.windowID), pane: pane.pane),
-          !pane.pendingSelection, pane.layout.composition == nil, pane.layout.virtualInsertion == nil, pane.virtualSelections == nil else {
+          snapshot.document.owns(window: UInt64(store.windowID), pane: pane.pane) else {
       composeFlow.update(snapshot: nil, environment: nil); return
+    }
+    var overlay: ComposeDocumentOverlay?
+    if pane.pendingSelection || pane.layout.composition != nil || pane.layout.virtualInsertion != nil || pane.virtualSelections != nil {
+      guard let value = ComposeDocumentOverlay(window: UInt64(store.windowID), pane: pane.pane,
+        composition: pane.layout.composition, virtualInsertion: pane.layout.virtualInsertion, virtualSelections: pane.virtualSelections) else {
+        composeFlow.update(snapshot: nil, environment: nil); return
+      }
+      overlay = value
     }
     // Read already known dimensions for the whole document without demanding
     // offscreen bytes or retaining decoded pixels in the measurement worker.
@@ -559,7 +566,7 @@ final class NativeEditor: NSObject, CellGridDelegate {
       images[image.start] = composeImages.state(scope: pane.scope, image: image,
         authority: snapshot.pane.assetAuthority, document: snapshot.pane.assetDocument)
     }
-    composeFlow.update(snapshot: snapshot, environment: pane.layout.measurementEnvironment(images: images))
+    composeFlow.update(snapshot: snapshot, environment: pane.layout.measurementEnvironment(images: images), overlay: overlay)
   }
 
   private func updateImageDemands(revalidate: Bool = false) {

@@ -135,7 +135,7 @@ public struct ComposeProjection: Sendable {
     return low
   }
 
-  public struct Object {
+  public struct Object: Sendable {
     public let source: Range<Int>
     public let display: Range<Int>
   }

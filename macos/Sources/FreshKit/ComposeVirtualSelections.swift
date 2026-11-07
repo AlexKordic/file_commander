@@ -4,7 +4,7 @@ import Foundation
 /// are document-wide UTF-16 for native presentation, never wire source bytes.
 /// Cursor IDs deliberately need not be the owners of the underlying drafts.
 public struct ComposeVirtualSelections {
-  public struct Cursor: Equatable {
+  public struct Cursor: Equatable, Sendable {
     public let position: Int
     public let anchor: Int?
     public let affinity: ComposeProjection.Affinity

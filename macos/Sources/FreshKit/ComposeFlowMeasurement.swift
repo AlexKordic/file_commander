@@ -53,6 +53,7 @@ public struct ComposeFlowMeasurement: Sendable {
     let signature:Data
   }
   public let document:ComposeAccessibleDocument
+  public let presentation:ComposeDocumentPresentation
   public let environment:Environment
   public let lines:[Line]
   public let fonts:[Font]
@@ -79,26 +80,39 @@ public struct ComposeFlowMeasurement: Sendable {
     return try autoreleasepool {Data(SHA256.hash(data:try inputs.serializedData()))}
   }
 
-  public static func measure(_ snapshot:ComposeDocumentSnapshot,environment:Environment,
+  public static func measure(_ snapshot:ComposeDocumentSnapshot,environment:Environment,overlay:ComposeDocumentOverlay? = nil,
                              options:ComposeTextLayout.MeasurementOptions = .init(),reusing previous:Self?=nil) throws -> Self {
     try Task.checkCancellation()
     let inputDigest=try layoutDigest(snapshot.pane)
     try Task.checkCancellation()
+    guard overlay?.owns(snapshot.document) ?? true else {throw Failure.unavailable}
+    func sameOverlayLayout(_ old:ComposeDocumentOverlay?) -> Bool {
+      switch (old,overlay) {
+      case (nil,nil): return true
+      case (let a?,let b?): return a.hasSameLayout(as:b)
+      case (nil,let b?): return b.sourceComposition == nil
+      case (let a?,nil): return a.sourceComposition == nil
+      }
+    }
     if let previous,previous.document.owner.isSameDocument(as:snapshot.document.owner),
-       previous.environment.isEquivalent(to:environment),previous.inputDigest==inputDigest,previous.admission==options {
+       previous.environment.isEquivalent(to:environment),previous.inputDigest==inputDigest,previous.admission==options,
+       sameOverlayLayout(previous.presentation.overlay) {
       // Coordinates can survive a caret/selection header update. Ownership
       // cannot: every returned model contains the new complete document.
-      return .init(document:snapshot.document,environment:environment,lines:previous.lines,fonts:previous.fonts,
+      let presentation=ComposeDocumentPresentation(snapshot,overlay:overlay,prepared:previous.presentation.plan)
+      return .init(document:snapshot.document,presentation:presentation,environment:environment,lines:previous.lines,fonts:previous.fonts,
         styles:previous.styles,tables:previous.tables,attachments:previous.attachments,size:previous.size,
         usage:previous.usage,textIndex:previous.textIndex,geometryGeneration:previous.geometryGeneration,
         plan:previous.plan,inputDigest:inputDigest,admission:options)
     }
-    let text=snapshot.document.text as NSString
+    guard let presentation=ComposeDocumentPresentation(snapshot,overlay:overlay) else {throw Failure.unavailable}
+    let text=presentation.text as NSString
     var lines:[Line]=[],fonts:[Font]=[Font(environment.body)],styles:[Style]=[]
     var fontIDs:[Font:Int]=[fonts[0]:0],lastEnd=0
     let images=environment.imageSizes.mapValues {ComposeImageState.deferred(originalSize:$0)}
     let layout=ComposePaneLayout(pane:snapshot.pane,body:environment.body,monospace:environment.monospace,
-      width:environment.width,typography:environment.typography,images:images,measurement:options) {fragment in
+      width:environment.width,typography:environment.typography,images:images,
+      composition:overlay?.composition?.restore(),virtualInsertion:overlay?.insertion?.restore(),measurement:options,record: {fragment in
       guard !Task.isCancelled,fragment.range.location>=lastEnd,
             [fragment.rect.minX,fragment.rect.minY,fragment.rect.width,fragment.rect.height,fragment.baseline].allSatisfy(\.isFinite),
             fragment.rect.width>0,fragment.rect.height>0 else {return false}
@@ -123,16 +137,16 @@ public struct ComposeFlowMeasurement: Sendable {
           flags:(attributes[ComposeTextLayout.flagsKey] as? UInt32) ?? 0))
       }
       return true
-    }
+    },prepared:presentation.plan)
     try Task.checkCancellation()
     guard let layout,let plan=layout.text.measurementPlan,layout.text.fragments.isEmpty,
-          layout.text.projection.text.utf8.elementsEqual(snapshot.document.text.utf8),
+          layout.text.projection.text.utf8.elementsEqual(presentation.text.utf8),
           let textIndex=ComposeFlowTextIndex(projection:layout.text.projection,fragments:lines,styles:styles,attachments:layout.text.attachments) else {throw Failure.unavailable}
     let measured=layout.text.measurementUsage
     let usage=ComposeTextLayout.MeasurementUsage(
       maximumContextUnits:max(measured.maximumContextUnits,layout.maximumAuxiliaryContextUnits),
       contexts:measured.contexts,coordinateEntries:measured.coordinateEntries,fragments:measured.fragments,retainedGlyphs:false)
-    return .init(document:snapshot.document,environment:environment,lines:lines,fonts:fonts,styles:styles,
+    return .init(document:snapshot.document,presentation:presentation,environment:environment,lines:lines,fonts:fonts,styles:styles,
       tables:layout.text.tables,attachments:layout.text.attachments,size:layout.text.size,usage:usage,textIndex:textIndex,
       geometryGeneration:UUID(),plan:plan,inputDigest:inputDigest,admission:options)
   }
@@ -140,7 +154,7 @@ public struct ComposeFlowMeasurement: Sendable {
   /// Exact range bounds use stored whole-line geometry and shape only partial
   /// boundary lines, with their original bounded paragraph context.
   public func bounds(for range:NSRange,affinity:ComposeProjection.Affinity = .downstream) -> CGRect? {
-    guard document.projection.textIndex.bytes(for:range) != nil else {return nil}
+    guard presentation.projection.textIndex.bytes(for:range) != nil else {return nil}
     func caret(_ line:Line,at position:Int) -> CGRect? {
       guard let shaped=plan.line(line.range) else {return nil}
       let position=min(line.contentEnd,max(line.range.location,position))
@@ -151,7 +165,7 @@ public struct ComposeFlowMeasurement: Sendable {
       return caret(lines[i],at:range.location)
     }
     var result=CGRect.null
-    let text=document.text as NSString
+    let text=presentation.text as NSString
     guard let indices=textIndex.lines(intersecting:range) else {return nil}
     for i in indices {
       let line=lines[i]
@@ -175,7 +189,7 @@ public struct ComposeFlowMeasurement: Sendable {
       }
     }
     for placed in attachments where placed.attachment.preview {
-      if let own=document.displayedRange(for:placed.attachment.source),NSIntersectionRange(own,range).length>0 {result=result.union(placed.rect)}
+      if let own=presentation.displayedRange(for:placed.attachment.source),NSIntersectionRange(own,range).length>0 {result=result.union(placed.rect)}
     }
     return result.isNull ? nil:result
   }
@@ -183,10 +197,9 @@ public struct ComposeFlowMeasurement: Sendable {
   /// A drawing crop gets a translation only when actual glyphs, fonts and line
   /// geometry match the complete flow. A guessed prefix height is never used.
   public func correspondence(window:UInt64,pane:WirePane,layout:ComposePaneLayout) -> CGPoint? {
-    guard layout.composition==nil,layout.virtualInsertion==nil,
-          layout.matchesMeasurement(body:environment.body,monospace:environment.monospace,width:environment.width,
+    guard layout.matchesMeasurement(body:environment.body,monospace:environment.monospace,width:environment.width,
             typography:environment.typography,imageSizes:environment.imageSizes),
-          let range=document.range(of:window,pane:pane) else {return nil}
+          let range=presentation.range(window:window,pane:pane,projection:layout.text.projection) else {return nil}
     var translation:CGPoint?
     for fragment in layout.text.fragments {
       if fragment.range.length==0,fragment.table==nil,fragment.range.location==layout.text.projection.textIndex.utf16Count,
