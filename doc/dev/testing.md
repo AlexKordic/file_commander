@@ -587,6 +587,12 @@ parser samples and reports their element/string/style capacity weights. These
 exclude final samples, allocator/hash bookkeeping and construction temporaries;
 they do not measure live or peak memory. Compare binary panes separately to
 check that deduplication preserves complete measurement contents and identities.
+Table-finalization cancellation tests start with two parser-built tables,
+interrupt work during the larger second table, refuse its completed measurement
+and compare an uninterrupted retry's complete samples and identities. Another
+case cancels before any font inputs are built. The existing worker/cache tests
+separately verify slot ownership, source retirement and stale-result rejection;
+these checks do not establish a cancellation latency deadline.
 These checks do not bound editor buffers, protected working sets, external
 snapshot owners, parser transients or native input history.
 

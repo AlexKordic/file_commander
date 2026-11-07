@@ -1298,6 +1298,13 @@ buffer lifetime or filesystem authority has gone away. Obsolete parser jobs are
 cancelled; a running slot remains owned until its completion is consumed, and
 that completion cannot restore a closed document. Private cache tests verify
 source/semantic ownership release, live-tab reuse and a late cancelled result.
+Table font-input finalization also observes cancellation while collecting style
+batches and processing rows, cells, inline parts and raw-style boundaries, plus
+around final measurement hashing. Cancellation discards the whole parse; earlier
+completed tables are not independently publishable. A cancelled table can be
+rebuilt without changing complete samples or their identities. These cooperative
+checks do not impose a hard time/memory bound on an individual allocation, sort,
+hash operation or the remaining parser phases.
 Clearing the cache after the last rich client disconnects also preserves the
 worker and its occupied slots until cancelled results are consumed. Reconnects
 use that same queue: one parse runs and one waits, with each buffer's newer
