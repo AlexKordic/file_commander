@@ -54,7 +54,7 @@ public final class ComposeImageAsset: @unchecked Sendable {
   }
 }
 
-public enum ComposeImageState {
+public enum ComposeImageState: Sendable {
   case loading
   case ready(ComposeImageAsset)
   /// A transient refresh failure retains the last valid preview and explains

@@ -11,6 +11,19 @@ private final class BackendPasteboard: EditorPasteboard {
   func replaceEditorText(_ text: String) { editorText = text }
 }
 
+private actor BackendPreviewHold {
+  private var open = false
+  private var waiters: [CheckedContinuation<Void, Never>] = []
+  func wait() async {
+    if !open { await withCheckedContinuation { waiters.append($0) } }
+  }
+  func release() {
+    open = true
+    let pending = waiters; waiters.removeAll()
+    for continuation in pending { continuation.resume() }
+  }
+}
+
 /// Owns one foreground Fresh process and private filesystem/runtime directories.
 /// Explicit opt-in keeps ordinary Swift tests independent of a development binary.
 private final class ComposeBackend {
@@ -120,6 +133,60 @@ private final class ComposeBackend {
 }
 
 final class ComposeBackendTests: XCTestCase {
+  @MainActor
+  func testRealBackendLogicalAccessibilityAndSaveContinueWhilePreviewIsHeld() async throws {
+    let backend = try backend(); defer { backend.captureDiagnostics("held-preview"); backend.stop() }
+    let hold = BackendPreviewHold(); addTeardownBlock { await hold.release() }
+    let editor = editor(BackendPasteboard(), preparePreview: { request in
+      let prepared = try request.prepare(); await hold.wait(); return prepared
+    })
+    defer { editor.detachAll() }
+    let original = "Plain café 👩🏽‍💻\r\n\r\nTail\r\n"
+    let file = backend.root.appendingPathComponent("held-preview.md")
+    try Data(original.utf8).write(to: file)
+    try await attach(backend, file: file, editor: editor, requireTables: false, requirePreview: false)
+    let grid = try XCTUnwrap(editor.grid)
+    XCTAssertNil(grid.focusedCompose)
+    _ = grid.accessibilityValue()
+    try await eventually(editor, "logical complete value before visible glyphs") {
+      (grid.accessibilityValue() as? String)?.hasPrefix("Plain café") == true
+    }
+    XCTAssertNil(grid.focusedCompose)
+    let unspecified = NSRange(location: NSNotFound, length: 0)
+    grid.setMarkedText("日本", selectedRange: NSRange(location: 2, length: 0), replacementRange: unspecified)
+    XCTAssertTrue(grid.hasMarkedText()); XCTAssertEqual(grid.selectedRange(), NSRange(location: 2, length: 0))
+    try await eventually(editor, "provisional complete value before visible glyphs") {
+      (grid.accessibilityValue() as? String)?.hasPrefix("日本Plain café") == true
+    }
+    grid.insertText("日本", replacementRange: unspecified)
+    editor.send(.action(name: "save", argsJson: ""))
+    try await eventually(editor, "source save while preview worker is held") {
+      (try? Data(contentsOf: file)) == Data(("日本" + original).utf8)
+    }
+    XCTAssertNil(grid.focusedCompose); XCTAssertTrue(editor.uninsertedText.isEmpty)
+    let model = try await completeModel(editor)
+    XCTAssertTrue(editor.selectDocument([NSRange(location: 0,length: 2)],in: model))
+    try await eventually(editor,"complete-value source selection without visible geometry") {
+      grid.focusedComposeLogical?.pane.compose.cursors.first?.hasAnchor == true
+    }
+    let selected = try await completeModel(editor)
+    XCTAssertTrue(editor.replaceDocumentSelection("改",in: selected))
+    editor.send(.action(name: "save",argsJson: ""))
+    try await eventually(editor,"complete-value replacement saves without visible geometry") {
+      (try? Data(contentsOf: file)) == Data(("改" + original).utf8)
+    }
+    XCTAssertNil(grid.focusedCompose)
+    await hold.release()
+    try await eventually(editor, "latest preview after held work retires") {
+      guard let pane = grid.focusedCompose else { return false }
+      return grid.composeGeometryIsCurrent(pane) && pane.layout.text.projection.text.hasPrefix("改Plain café")
+    }
+    editor.send(.action(name: "undo", argsJson: "")); editor.send(.action(name: "save", argsJson: ""))
+    try await eventually(editor,"undo held-preview accessibility replacement") { (try? Data(contentsOf: file)) == Data(("日本" + original).utf8) }
+    editor.send(.action(name: "undo",argsJson: "")); editor.send(.action(name: "save",argsJson: ""))
+    try await eventually(editor, "undo held-preview edit preserves exact CRLF source") { (try? Data(contentsOf: file)) == Data(original.utf8) }
+  }
+
   @MainActor
   private func completeModel(_ editor: NativeEditor, provisional: Bool = false) async throws -> ComposeDocumentPresentation {
     editor.composeDocument.activate()
@@ -398,9 +465,9 @@ final class ComposeBackendTests: XCTestCase {
     grid.setMarkedText("abc",selectedRange: NSRange(location: 3,length: 0),replacementRange: unspecified)
     grid.insertText("abc",replacementRange: unspecified)
     grid.setMarkedText("\nYZ",selectedRange: NSRange(location: 3,length: 0),replacementRange: NSRange(location: 1,length: 1))
-    let pane = try XCTUnwrap(grid.focusedCompose)
-    let overlay = try XCTUnwrap(ComposeDocumentOverlay(window: UInt64(editor.store.windowID),pane: pane.pane,
-      composition: pane.layout.composition,virtualInsertion: pane.layout.virtualInsertion,virtualSelections: pane.virtualSelections))
+    let logical = try XCTUnwrap(grid.focusedComposeLogical)
+    let overlay = try XCTUnwrap(ComposeDocumentOverlay(window: UInt64(editor.store.windowID),pane: logical.pane,
+      composition: logical.composition,virtualInsertion: logical.insertion,virtualSelections: logical.selections))
     let model = try XCTUnwrap(ComposeDocumentPresentation(baseline,overlay: overlay))
     XCTAssertEqual(model.text,"a\nYZc"+original)
     XCTAssertTrue(editor.selectDocument([NSRange(location: 2,length: 3)],in: model))
@@ -495,9 +562,9 @@ final class ComposeBackendTests: XCTestCase {
     _ = try await completeModel(editor)
     let baseline = try XCTUnwrap(editor.composeDocument.snapshot), unspecified = NSRange(location: NSNotFound, length: 0)
     grid.insertText("base", replacementRange: unspecified)
-    let pane = try XCTUnwrap(grid.focusedCompose)
-    let overlay = try XCTUnwrap(ComposeDocumentOverlay(window: UInt64(editor.store.windowID), pane: pane.pane,
-      composition: pane.layout.composition, virtualInsertion: pane.layout.virtualInsertion, virtualSelections: pane.virtualSelections))
+    let logical = try XCTUnwrap(grid.focusedComposeLogical)
+    let overlay = try XCTUnwrap(ComposeDocumentOverlay(window: UInt64(editor.store.windowID), pane: logical.pane,
+      composition: logical.composition, virtualInsertion: logical.insertion, virtualSelections: logical.selections))
     let prefix = try XCTUnwrap(ComposeDocumentPresentation(baseline, overlay: overlay))
     XCTAssertTrue(editor.selectDocument([NSRange(location: 14, length: 0), NSRange(location: 0, length: 0)], in: prefix))
     for text in ["日", "本"] {
@@ -517,7 +584,8 @@ final class ComposeBackendTests: XCTestCase {
 
   @MainActor
   func testPendingPointerBindsSecondaryOwnerAndKeepsDistinctCaretExpansionIntents() async throws {
-    let backend = try backend(); defer { backend.captureDiagnostics("pending-caret-pointer"); backend.stop() }
+    let backend = try backend(); var stopped = false
+    defer { if stopped { kill(backend.server.processIdentifier,SIGCONT) }; backend.captureDiagnostics("pending-caret-pointer"); backend.stop() }
     let editor = editor(BackendPasteboard()); defer { editor.detachAll() }
     let original = "zero\nmiddle\nend\n", file = backend.root.appendingPathComponent("pending-caret-pointer.md")
     try Data(original.utf8).write(to: file); try await attach(backend, file: file, editor: editor, requireTables: false)
@@ -532,7 +600,9 @@ final class ComposeBackendTests: XCTestCase {
     }
     let model = try await completeModel(editor), unspecified = NSRange(location: NSNotFound, length: 0)
     XCTAssertTrue(editor.selectDocument([NSRange(location: 12, length: 0), NSRange(location: 0, length: 0)], in: model))
+    XCTAssertEqual(kill(backend.server.processIdentifier,SIGSTOP),0); stopped = true
     grid.setMarkedText("日本", selectedRange: NSRange(location: 2, length: 0), replacementRange: unspecified); grid.unmarkText()
+    try await waitForPreview(editor)
     let pending = try XCTUnwrap(grid.focusedCompose), primary = try XCTUnwrap(pending.layout.composition?.primaryID)
     let secondary = try XCTUnwrap(pending.layout.composition?.ordered.first { $0 != primary })
     let display = try XCTUnwrap(pending.layout.draftDisplayRanges[secondary])
@@ -541,7 +611,9 @@ final class ComposeBackendTests: XCTestCase {
     grid.setMarkedText("x", selectedRange: NSRange(location: 1, length: 0), replacementRange: unspecified)
     let start = grid.markedRange().location
     grid.setMarkedText("Q", selectedRange: NSRange(location: 1, length: 0), replacementRange: NSRange(location: start - 1, length: 2))
-    grid.unmarkText(); editor.send(.action(name: "save", argsJson: ""))
+    grid.unmarkText()
+    XCTAssertEqual(kill(backend.server.processIdentifier,SIGCONT),0); stopped = false
+    editor.send(.action(name: "save", argsJson: ""))
     try await eventually(editor, "the primary consumes 日 while the secondary consumes 本 in the same old draft region", timeout: 20) {
       (try? Data(contentsOf: file)) == Data("QQzero\nmiddle\n日本end\n".utf8)
     }
@@ -628,9 +700,9 @@ final class ComposeBackendTests: XCTestCase {
     XCTAssertTrue(editor.selectDocument([NSRange(location: 12,length: 0),NSRange(location: 0,length: 0)],in: model))
     let unspecified = NSRange(location: NSNotFound,length: 0)
     grid.setMarkedText("日本",selectedRange: NSRange(location: 0,length: 1),replacementRange: unspecified)
-    let pane = try XCTUnwrap(grid.focusedCompose)
-    let overlay = try XCTUnwrap(ComposeDocumentOverlay(window: UInt64(editor.store.windowID),pane: pane.pane,
-      composition: pane.layout.composition,virtualInsertion: pane.layout.virtualInsertion,virtualSelections: pane.virtualSelections))
+    let logical = try XCTUnwrap(grid.focusedComposeLogical)
+    let overlay = try XCTUnwrap(ComposeDocumentOverlay(window: UInt64(editor.store.windowID),pane: logical.pane,
+      composition: logical.composition,virtualInsertion: logical.insertion,virtualSelections: logical.selections))
     let marked = try XCTUnwrap(ComposeDocumentPresentation(baseline,overlay: overlay))
     let ranges = try XCTUnwrap(marked.selectedRanges)
     XCTAssertEqual(ranges.count,2)
@@ -994,6 +1066,7 @@ final class ComposeBackendTests: XCTestCase {
     try await eventually(editor, "source selection changes the captured projection owner") {
       editor.store.panes.first?.compose.selectionRevision != model.selectionRevision
     }
+    try await waitForPreview(editor)
     let selected = try XCTUnwrap(grid.focusedCompose)
     XCTAssertFalse(model.owns(window: UInt64(editor.store.windowID), pane: selected.pane))
     XCTAssertNil(model.range(of: UInt64(editor.store.windowID), pane: selected.pane))
@@ -1134,6 +1207,14 @@ final class ComposeBackendTests: XCTestCase {
     }
   }
 
+  @MainActor
+  private func waitForPreview(_ editor: NativeEditor, file: StaticString = #filePath, line: UInt = #line) async throws {
+    try await eventually(editor,"publish geometry for the current logical preview", {
+      guard let grid = editor.grid, let pane = grid.focusedCompose else { return false }
+      return grid.composeGeometryIsCurrent(pane)
+    },file: file,line: line)
+  }
+
   private func backend() throws -> ComposeBackend {
     guard let path = ProcessInfo.processInfo.environment["FC_COMPOSE_TEST_FRESH"] else {
       throw XCTSkip("Set FC_COMPOSE_TEST_FRESH to a matching Fresh binary with the web feature for the native/backend contract")
@@ -1143,7 +1224,8 @@ final class ComposeBackendTests: XCTestCase {
   }
 
   @MainActor
-  private func attach(_ backend: ComposeBackend, file: URL, editor: NativeEditor, requireTables: Bool = true) async throws {
+  private func attach(_ backend: ComposeBackend, file: URL, editor: NativeEditor, requireTables: Bool = true,
+                      requirePreview: Bool = true) async throws {
     let control = backend.root.appendingPathComponent("runtime/fresh/\(backend.name).ctrl.sock")
     try await eventually(nil, "private server control socket") { backend.server.isRunning && FileManager.default.fileExists(atPath: control.path) }
     let result = try await backend.command(["ensure", backend.name])
@@ -1153,7 +1235,13 @@ final class ComposeBackendTests: XCTestCase {
     _ = try await backend.command(["open-file", backend.name, file.path])
     editor.attach(socketPath: path, app: nil)
     try await eventually(editor, "connected native editor") { editor.connected && !editor.store.panes.isEmpty }
-    if editor.grid?.focusedCompose == nil { editor.send(.action(name: "markdownToggleCompose", argsJson: "")) }
+    if !editor.store.panes.contains(where: { $0.hasCompose && $0.compose.keyboard }) {
+      editor.send(.action(name: "markdownToggleCompose", argsJson: ""))
+    }
+    if !requirePreview {
+      try await eventually(editor, "logical Compose inputs") { editor.grid?.focusedComposeLogical != nil }
+      return
+    }
     try await eventually(editor, "ready measured Compose") {
       guard let pane = editor.grid?.focusedCompose else { return false }
       return pane.pane.compose.formattingReady && pane.pane.compose.keyboard && (!requireTables || !pane.layout.text.tables.isEmpty)
@@ -1162,11 +1250,12 @@ final class ComposeBackendTests: XCTestCase {
 
   @MainActor
   private func editor(_ pasteboard: BackendPasteboard, documentQuietNanoseconds: UInt64 = 80_000_000,
+                      preparePreview: ComposePreviewController.Prepare? = nil,
                       decodeImage: @escaping @Sendable (Data, Int) throws -> ComposeImageAsset = { try ComposeImageAsset.decode($0, maximumDimension: $1) }) -> NativeEditor {
     _ = NSApplication.shared; NSApp.setActivationPolicy(.prohibited)
     return NativeEditor(pasteboard: pasteboard,
       environment: ["FC_NATIVE_RICH_COMPOSE": "1", "FC_NATIVE_MEASURED_TABLES": "1"],
-      documentQuietNanoseconds: documentQuietNanoseconds, decodeComposeImage: decodeImage)
+      documentQuietNanoseconds: documentQuietNanoseconds, prepareComposePreview: preparePreview, decodeComposeImage: decodeImage)
   }
 
   @MainActor
@@ -1632,6 +1721,7 @@ final class ComposeBackendTests: XCTestCase {
     try await eventually(editor, "native available-width resize") { (grid.focusedCompose?.layout.width ?? width) < width }
     let identity = try XCTUnwrap(grid.focusedCompose).identity
     editor.switchBack(); XCTAssertFalse(editor.shown); editor.show(); XCTAssertTrue(editor.shown)
+    try await waitForPreview(editor)
     XCTAssertEqual(grid.focusedCompose?.identity, identity)
     XCTAssertTrue(backend.server.isRunning)
     XCTAssertEqual(try Data(contentsOf: file), expected)
@@ -1945,7 +2035,9 @@ final class ComposeBackendTests: XCTestCase {
     let unspecified = NSRange(location: NSNotFound, length: 0)
     grid.setMarkedText("日本", selectedRange: NSRange(location: 1, length: 0), replacementRange: unspecified)
     XCTAssertEqual(grid.markedRange(), NSRange(location: unit, length: 2))
-    XCTAssertTrue(try XCTUnwrap(grid.focusedCompose).layout.text.projection.text.contains("alpha 日本café Tail"))
+    let logical = try XCTUnwrap(grid.focusedComposeLogical)
+    XCTAssertEqual(logical.composition?.primary.draft.string,"日本")
+    XCTAssertEqual(logical.composition?.markedRange,NSRange(location: unit,length: 2))
     grid.insertText("日本", replacementRange: unspecified)
     try await eventually(editor, "source click and immediately committed conversion") {
       grid.focusedCompose?.cursor?.position == UInt64(position + "日本".utf8.count)
@@ -1972,7 +2064,8 @@ final class ComposeBackendTests: XCTestCase {
 
   @MainActor
   private func pendingInsertionClick(prefix: String) async throws {
-    let backend = try backend(); defer { backend.stop() }
+    let backend = try backend(); var stopped = false
+    defer { if stopped { kill(backend.server.processIdentifier,SIGCONT) }; backend.stop() }
     let pasteboard = BackendPasteboard(), editor = editor(pasteboard)
     defer { editor.detachAll() }
     let original = "| A | B |\n|---|---|\n| one | two |\n\n# Heading\n\nTail\n"
@@ -1982,7 +2075,9 @@ final class ComposeBackendTests: XCTestCase {
     let position = original[..<original.range(of: "Tail")!.lowerBound].utf8.count
     try await click(UInt64(position), editor: editor)
     let grid = try XCTUnwrap(editor.grid), unspecified = NSRange(location: NSNotFound, length: 0)
+    XCTAssertEqual(kill(backend.server.processIdentifier,SIGSTOP),0); stopped = true
     grid.insertText(prefix, replacementRange: unspecified)
+    try await waitForPreview(editor)
     let pending = try XCTUnwrap(grid.focusedCompose), id = try XCTUnwrap(pending.cursor?.id)
     let display = try XCTUnwrap(pending.layout.draftDisplayRanges[id])
     let rect = try XCTUnwrap(pending.layout.text.caret(atUTF16: display.location + 1))
@@ -1991,11 +2086,13 @@ final class ComposeBackendTests: XCTestCase {
     XCTAssertEqual(grid.selectedRange(), NSRange(location: position + 1, length: 0))
     grid.setMarkedText("X", selectedRange: NSRange(location: 1, length: 0), replacementRange: unspecified)
     XCTAssertEqual(grid.markedRange(), NSRange(location: position + 1, length: 1))
+    try await waitForPreview(editor)
     let converted = try XCTUnwrap(grid.focusedCompose)
     XCTAssertTrue(converted.layout.text.projection.text.contains("日Xcafé"))
     let candidate = try XCTUnwrap(converted.textServiceRect(for: grid.selectedRange()))
     XCTAssertEqual(candidate.range, grid.selectedRange()); XCTAssertGreaterThan(candidate.rect.height, 0)
     grid.insertText("X", replacementRange: unspecified)
+    XCTAssertEqual(kill(backend.server.processIdentifier,SIGCONT),0); stopped = false
     let prefixWithX = "日X"+prefix.dropFirst()
     let expected = Data(original.utf8.prefix(position)) + Data(prefixWithX.utf8) + Data(original.utf8.dropFirst(position))
     editor.send(.action(name: "save", argsJson: ""))

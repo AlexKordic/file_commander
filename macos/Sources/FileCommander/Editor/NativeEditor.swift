@@ -144,6 +144,7 @@ final class NativeEditor: NSObject, CellGridDelegate {
     self?.socket?.send(.composeViewport(request))
   }
   private let decodeComposeImage: @Sendable (Data, Int) throws -> ComposeImageAsset
+  private let prepareComposePreview: ComposePreviewController.Prepare?
   private lazy var composeImages = ComposeImageController(decode: decodeComposeImage) { [weak self] request in
     self?.socket?.send(.composeAsset(request))
   }
@@ -161,10 +162,12 @@ final class NativeEditor: NSObject, CellGridDelegate {
 
   init(pasteboard: any EditorPasteboard, environment: [String: String] = ProcessInfo.processInfo.environment,
        documentQuietNanoseconds: UInt64 = 80_000_000,
+       prepareComposePreview: ComposePreviewController.Prepare? = nil,
        decodeComposeImage: @escaping @Sendable (Data, Int) throws -> ComposeImageAsset = { try ComposeImageAsset.decode($0, maximumDimension: $1) }) {
     self.pasteboard = pasteboard
     self.documentQuietNanoseconds = documentQuietNanoseconds
     self.decodeComposeImage = decodeComposeImage
+    self.prepareComposePreview = prepareComposePreview
     richCompose = environment["FC_NATIVE_RICH_COMPOSE"] == "1"
     measuredTables = richCompose && environment["FC_NATIVE_MEASURED_TABLES"] == "1"
     super.init()
@@ -257,6 +260,7 @@ final class NativeEditor: NSObject, CellGridDelegate {
     pendingShow = false
     grid?.showingEvent = NSApp.currentEvent.flatMap { $0.type == .keyDown ? $0.timestamp : nil }
     shown = true
+    grid?.setComposePreviewsActive(true)
     updateDocumentDemand()
     grid?.composeNavigation.update()
     updateImageDemands(revalidate: true)
@@ -283,6 +287,7 @@ final class NativeEditor: NSObject, CellGridDelegate {
     guard shown else { return }
     grid?.finishComposition()
     shown = false
+    grid?.setComposePreviewsActive(false)
     updateDocumentDemand()
     grid?.composeNavigation.update()
     composeImages.update([])
@@ -322,6 +327,7 @@ final class NativeEditor: NSObject, CellGridDelegate {
     pendingCaretReveal = nil
     formattingFailures.removeAll()
     grid?.invalidateAccessibleImages()
+    grid?.setComposePreviewsActive(false)
   }
 
   private func connectionEnded(_ reason: String?) {
@@ -336,6 +342,7 @@ final class NativeEditor: NSObject, CellGridDelegate {
     receivedHello = false
     pendingShow = false
     grid?.invalidateAccessibleImages()
+    grid?.setComposePreviewsActive(false)
     hide()
     if let reason {
       Trace.write("editor connection ended: \(reason)")
@@ -353,8 +360,17 @@ final class NativeEditor: NSObject, CellGridDelegate {
     view.grid.richPopupProjection = richCompose
     view.grid.composeImageController = composeImages
     view.grid.composeViewportController = composeViewports
-    view.grid.onComposePresentationChanged = { [weak self] in self?.updateCompleteFlow() }
+    view.grid.onComposePresentationChanged = { [weak self] in
+      self?.updateCompleteFlow(); self?.updateImageDemands()
+      self?.scheduleViewportContinuation(); self?.pumpComposeInput(); self?.attemptCaretReveal()
+    }
     view.grid.sendComposeIndex = { [weak self] request in self?.socket?.send(.composeIndex(request)) }
+    if richCompose {
+      let previews = prepareComposePreview.map { ComposePreviewController(prepare: $0) } ?? ComposePreviewController()
+      previews.onFailure = { [weak self] _ in self?.app?.engine.reportError("The Markdown preview could not be prepared.") }
+      view.grid.setComposePreviewsActive(shown)
+      view.grid.installComposePreviewController(previews)
+    }
     self.view = view
     let menus = FreshMenus(store: store) { [weak self] action, argsJson in self?.send(.action(name: action, argsJson: argsJson)) }
     menus.openSettings = { [weak self] in self?.app?.openSettings(tab: .editor) }
@@ -602,14 +618,14 @@ final class NativeEditor: NSObject, CellGridDelegate {
 
   private func updateCompleteFlow() {
     if accessibilitySnapshot?.pane !== grid?.focusedCompose { accessibilitySnapshot = nil }
-    guard shown, richCompose, let snapshot = composeDocument.snapshot, let pane = grid?.focusedCompose,
+    guard shown, richCompose, let snapshot = composeDocument.snapshot, let pane = grid?.focusedComposeLogical,
           snapshot.document.owns(window: UInt64(store.windowID), pane: pane.pane) else {
       composeFlow.update(snapshot: nil, environment: nil); return
     }
     var overlay: ComposeDocumentOverlay?
-    if pane.pendingSelection || pane.layout.composition != nil || pane.layout.virtualInsertion != nil || pane.virtualSelections != nil {
+    if pane.pendingSelection || pane.composition != nil || pane.insertion != nil || pane.selections != nil {
       guard let value = ComposeDocumentOverlay(window: UInt64(store.windowID), pane: pane.pane,
-        composition: pane.layout.composition, virtualInsertion: pane.layout.virtualInsertion, virtualSelections: pane.virtualSelections) else {
+        composition: pane.composition, virtualInsertion: pane.insertion, virtualSelections: pane.selections) else {
         composeFlow.update(snapshot: nil, environment: nil); return
       }
       overlay = value
@@ -622,7 +638,7 @@ final class NativeEditor: NSObject, CellGridDelegate {
         authority: snapshot.pane.assetAuthority, document: snapshot.pane.assetDocument)
     }
     let context = captureDocumentBinding(snapshot, overlay: overlay, pane: pane)
-    composeFlow.update(snapshot: snapshot, environment: pane.layout.measurementEnvironment(images: images), overlay: overlay,
+    composeFlow.update(snapshot: snapshot, environment: pane.environment(images: images), overlay: overlay,
       context: context)
     trimDocumentBindings()
   }
@@ -650,7 +666,7 @@ final class NativeEditor: NSObject, CellGridDelegate {
     trimDocumentBindings()
   }
 
-  private func captureDocumentBinding(_ snapshot: ComposeDocumentSnapshot, overlay: ComposeDocumentOverlay?, pane: ComposePresentation) -> UUID? {
+  private func captureDocumentBinding(_ snapshot: ComposeDocumentSnapshot, overlay: ComposeDocumentOverlay?, pane: ComposeLogicalPreview) -> UUID? {
     let nodes = composeQueue.filter { $0.target?.identity == pane.identity && $0.target?.epoch == pane.pane.compose.viewport.epoch }
     let active = grid?.pendingComposition
     let actual = store.panes.first { $0.leaf == pane.identity.leaf && $0.hasBuffer && $0.buffer == pane.identity.buffer }
@@ -659,7 +675,7 @@ final class NativeEditor: NSObject, CellGridDelegate {
       guard let binding = documentBindings[id], binding.matches(snapshot, overlay: overlay) else { continue }
       if !ownsActual || binding.nodes.map(\.token) == nodes.map(\.token) && binding.active?.token == active?.token { return id }
     }
-    guard ownsActual, let primary = pane.cursor?.id else { return nil }
+    guard ownsActual, let primary = (pane.pane.compose.cursors.first(where: \.primary) ?? pane.pane.compose.cursors.first)?.id else { return nil }
     let captured = nodes.map { node -> ComposeDocumentBinding.Node in
       let group = node.preview.map { text in text.presentation.values.keys.sorted {
         if ($0 == text.presentation.primaryID) != ($1 == text.presentation.primaryID) { return $0 == text.presentation.primaryID }
@@ -671,7 +687,7 @@ final class NativeEditor: NSObject, CellGridDelegate {
     let id = UUID()
     documentBindings[id] = .init(document: ObjectIdentifier(snapshot.document), overlay: overlay, scope: pane.scope,
       marker: transitionSequence, nodes: captured, latest: nodes.last(where: { $0.preview != nil })?.preview,
-      active: active, displayed: pane.layout.composition, primary: primary, newline: pane.pane.compose.nativeNewline)
+      active: active, displayed: pane.composition, primary: primary, newline: pane.pane.compose.nativeNewline)
     return id
   }
 
@@ -695,11 +711,13 @@ final class NativeEditor: NSObject, CellGridDelegate {
   }
 
   func gridAccessibility(_ grid: CellGridView, activate: Bool) -> ComposeCompleteAccessibility? {
-    guard receivedHello, shown, richCompose, let pane = grid.focusedCompose else { return nil }
+    guard receivedHello, shown, richCompose, let basis = grid.focusedComposeLogical else { return nil }
+    let pane = grid.focusedCompose
     if activate { composeDocument.activate() }
     guard let model = composeFlow.presentation else { return nil }
-    if let value = accessibilitySnapshot, value.model === model, value.pane === pane { return value }
-    let value = ComposeCompleteAccessibility(model: model, pane: pane, flow: composeFlow.flow)
+    if let value = accessibilitySnapshot, value.model === model, value.pane === pane, value.basis.scope == basis.scope,
+       value.basis.pane.compose.editable == basis.pane.compose.editable { return value }
+    let value = ComposeCompleteAccessibility(model: model, basis: basis, pane: pane, flow: composeFlow.flow)
     accessibilitySnapshot = value
     return value
   }
@@ -761,6 +779,7 @@ final class NativeEditor: NSObject, CellGridDelegate {
       // the measured height. Do not page merely to fill that provisional gap.
       // Current-source projections remain available for input and drawing.
       for pane in self.grid?.composePanes.values.map({ $0 }) ?? [] where pane.pane.compose.hasViewport && pane.pane.compose.formattingReady {
+        guard self.grid?.composeGeometryIsCurrent(pane) == true else { continue }
         if let next = pane.scrolling.continuation(pane.viewport) {
           self.composeViewports.move(scope: pane.scope, from: pane.viewport, to: next, user: false)
         }
@@ -769,7 +788,7 @@ final class NativeEditor: NSObject, CellGridDelegate {
   }
 
   private func revealComposeCaret(_ pane: ComposePresentation) {
-    guard pane.pane.compose.hasViewport, let cursor = pane.cursor else { return }
+    guard grid?.composeGeometryIsCurrent(pane) == true, pane.pane.compose.hasViewport, let cursor = pane.cursor else { return }
     let next: WireComposeViewport?
     if let rect = pane.caret {
       next = pane.scrolling.revealing(caret: rect.offsetBy(dx: -pane.origin.x, dy: -pane.origin.y), from: pane.viewport)
@@ -789,6 +808,7 @@ final class NativeEditor: NSObject, CellGridDelegate {
           let current = store.panes.first(where: { $0.leaf == identity.leaf && $0.hasBuffer && $0.buffer == identity.buffer && $0.hasCompose }),
           current.compose.viewport.epoch == pending.target.epoch else { pendingCaretReveal = nil; return }
     guard current.compose.projectionUsable, let pane = grid?.composePanes[identity.leaf], pane.identity == identity,
+          grid?.composeGeometryIsCurrent(pane) == true,
           pane.pane.compose.bufferRevision == current.compose.bufferRevision else { return }
     pendingCaretReveal = nil
     revealComposeCaret(pane)
@@ -899,14 +919,14 @@ final class NativeEditor: NSObject, CellGridDelegate {
   }
 
   private func enqueueDocumentAction(_ ranges: [NSRange], in model: ComposeDocumentPresentation, replacement: String?) -> Bool {
-    guard receivedHello, store.composeSourceSelections, let grid, let pane = grid.focusedCompose,
+    guard receivedHello, store.composeSourceSelections, let grid, let pane = grid.focusedComposeLogical,
           composeDocument.snapshot?.document === model.document || publishedBindings[model.id] != nil,
           replacement == nil || pane.pane.compose.editable,
           !ranges.isEmpty, ranges.count <= 1024 else { return false }
     let capturedOverlay: ComposeDocumentOverlay?
-    if pane.pendingSelection || pane.layout.composition != nil || pane.layout.virtualInsertion != nil || pane.virtualSelections != nil {
+    if pane.pendingSelection || pane.composition != nil || pane.insertion != nil || pane.selections != nil {
       guard let captured = ComposeDocumentOverlay(window: UInt64(store.windowID),pane: pane.pane,
-        composition: pane.layout.composition,virtualInsertion: pane.layout.virtualInsertion,virtualSelections: pane.virtualSelections) else { return false }
+        composition: pane.composition,virtualInsertion: pane.insertion,virtualSelections: pane.selections) else { return false }
       capturedOverlay = captured
     } else { capturedOverlay = nil }
     let sameOverlay: Bool
@@ -931,7 +951,7 @@ final class NativeEditor: NSObject, CellGridDelegate {
             let end = model.endpoint(atUTF16: NSMaxRange(range),affinity: range.length == 0 ? .downstream : .upstream) else { return false }
       endpoints.append((start,end))
     }
-    let displayed = pane.layout.composition
+    let displayed = pane.composition
     grid.finishComposition()
     let nodes = composeQueue.filter { $0.target?.identity == pane.identity && $0.target?.epoch == pane.pane.compose.viewport.epoch }
     let latest = nodes.last(where: { $0.preview != nil })
@@ -985,7 +1005,7 @@ final class NativeEditor: NSObject, CellGridDelegate {
     }
     let kind: ComposeDocumentAction.Kind
     if let replacement {
-      guard let primary = pane.cursor else { return false }
+      guard let primary = (pane.pane.compose.cursors.first(where: \.primary) ?? pane.pane.compose.cursors.first) else { return false }
       let owner: ComposeDocumentAction.Cursor = nodes.last.flatMap { $0.isSourceSelection ? .selectedGroup($0.token,ordinal: 0) : nil }
         ?? latest.map { cursor(primary.id,for: $0) } ?? .known(primary.id)
       kind = .replacement(replacement,cursor: owner)
@@ -1043,7 +1063,7 @@ final class NativeEditor: NSObject, CellGridDelegate {
   }
 
   private func enqueueRetainedDocumentAction(_ ranges: [NSRange], in model: ComposeDocumentPresentation,
-                                            replacement: String?, pane: ComposePresentation) -> Bool {
+                                            replacement: String?, pane: any ComposeInputBasis) -> Bool {
     guard let actual = currentDocumentOwner(model), let id = publishedBindings[model.id], let binding = documentBindings[id],
           let captured = binding.action(ranges, in: model, replacement: replacement), let grid else { return false }
     grid.finishComposition()
@@ -1464,7 +1484,8 @@ final class NativeEditor: NSObject, CellGridDelegate {
           // captured action's result, including its cancellation/recovery.
           target = pane
         } else { target = nil }
-      case .key, .action: target = grid?.focusedCompose
+      case .key, .action:
+        if let basis = grid?.composeTextInputBasis { target = basis } else { target = grid?.focusedCompose }
       case .popupPointer(let pointer):
         target = store.popups.first { $0.instance == pointer.instance && $0.version == pointer.version }
           .flatMap { $0.hasSourceAnchor ? grid?.composePanes[$0.sourceAnchor.leaf] : nil }
@@ -1578,11 +1599,34 @@ final class NativeEditor: NSObject, CellGridDelegate {
       }
       if let identity = pendingComposePane {
         input.bufferEpoch = queued.target?.epoch ?? 0
+        if input.textInput {
+          if pendingComposeLayout {
+            guard let actual = store.panes.first(where: {
+              $0.leaf == identity.leaf && $0.hasBuffer && $0.buffer == identity.buffer && $0.hasCompose
+            }), actual.compose.keyboard, grid?.composeInputAllowed == true else { return }
+          }
+          // Text already owns raw source/caret coordinates. A retained draft
+          // frame must not cause synchronous shaping just to dispatch it.
+          input.scope = queued.target?.scope ?? WireComposeScope()
+          if let actual = store.panes.first(where: {
+            $0.leaf == identity.leaf && $0.hasBuffer && $0.buffer == identity.buffer && $0.hasCompose
+          }) { pendingComposeBefore = (actual.compose.bufferRevision,actual.compose.cursors) }
+          composeInFlight = true; socket.send(.composeInput(input)); return
+        }
+        if case .action = message, !pendingComposeLayout,
+           let actual = store.panes.first(where: { $0.leaf == identity.leaf && $0.buffer == identity.buffer && $0.hasCompose }),
+           grid?.composePanes[identity.leaf].map({ grid?.composeGeometryIsCurrent($0) == true }) != true {
+          // Source-only actions such as Save must remain usable while shaping.
+          // Fresh asks for a measured region if this action actually needs it.
+          input.scope = queued.target?.scope ?? WireComposeScope()
+          pendingComposeBefore = (actual.compose.bufferRevision, actual.compose.cursors)
+          composeInFlight = true; socket.send(.composeInput(input)); return
+        }
         guard var visible = grid?.composePanes[identity.leaf], visible.identity == identity else {
           // A modal can temporarily hide a still-open Compose view. Its raw
           // UI input remains usable; Fresh proactively cancels this request if
           // its tab, buffer lifetime, presentation or keyboard focus changes.
-          if pendingComposeLayout { return }
+          if pendingComposeLayout || !input.textInput && grid?.composeTextInputBasis != nil { return }
           input.scope = queued.target?.scope ?? WireComposeScope()
           composeInFlight = true
           socket.send(.composeInput(input))
@@ -1592,6 +1636,8 @@ final class NativeEditor: NSObject, CellGridDelegate {
           input.cancel = true
           break
         }
+        if !input.textInput, visible.pane.compose.keyboard, grid?.composeInputAllowed == true,
+           grid?.composeGeometryIsCurrent(visible) != true, pendingComposeProjection == nil { return }
         if visible.layout.composition != nil || visible.pendingSelection, let actual = store.panes.first(where: { $0.leaf == identity.leaf && $0.hasBuffer && $0.buffer == identity.buffer }),
            let measured = grid?.composeInputMeasurement(actual, measuredBase: queued.snapshot) { visible = measured }
         let pane = pendingComposeProjection.flatMap { grid?.composeMeasurement(identity: identity, projection: $0) } ?? visible

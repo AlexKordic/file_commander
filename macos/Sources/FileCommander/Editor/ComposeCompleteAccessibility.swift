@@ -6,30 +6,37 @@ import FreshKit
 @MainActor
 final class ComposeCompleteAccessibility {
   let model: ComposeDocumentPresentation
-  let pane: ComposePresentation
+  let basis: any ComposeInputBasis
+  let pane: ComposePresentation?
   let flow: ComposeFlowMeasurement?
 
-  init(model: ComposeDocumentPresentation, pane: ComposePresentation, flow: ComposeFlowMeasurement?) {
-    self.model = model; self.pane = pane
+  convenience init(model: ComposeDocumentPresentation, pane: ComposePresentation, flow: ComposeFlowMeasurement?) {
+    self.init(model: model, basis: pane, pane: pane, flow: flow)
+  }
+
+  init(model: ComposeDocumentPresentation, basis: any ComposeInputBasis, pane: ComposePresentation?, flow: ComposeFlowMeasurement?) {
+    self.model = model; self.basis = basis; self.pane = pane
     self.flow = flow?.presentation === model ? flow : nil
   }
 
   private lazy var crop: NSRange? = {
-    model.range(window: pane.identity.window, pane: pane.pane, projection: pane.layout.text.projection)
+    guard let pane else { return nil }
+    return model.range(window: pane.identity.window, pane: pane.pane, projection: pane.layout.text.projection)
   }()
   private lazy var translation: CGPoint? = {
-    flow?.correspondence(window: pane.identity.window, pane: pane.pane, layout: pane.layout)
+    guard let pane else { return nil }
+    return flow?.correspondence(window: pane.identity.window, pane: pane.pane, layout: pane.layout)
   }()
 
   var visibleRange: NSRange {
-    guard let crop else { return ComposeAccessibilityText.missing }
+    guard let pane, let crop else { return ComposeAccessibilityText.missing }
     let visible = ComposeAccessibilityText(pane: pane).visibleRange
     guard visible.location != NSNotFound else { return visible }
     return NSRange(location: crop.location + visible.location, length: visible.length)
   }
 
   func bounds(for range: NSRange) -> CGRect? {
-    guard model.contains(range), let crop else { return nil }
+    guard let pane, model.contains(range), let crop else { return nil }
     if range.location >= crop.location, NSMaxRange(range) <= NSMaxRange(crop) {
       return ComposeAccessibilityText(pane: pane).bounds(for:
         NSRange(location: range.location - crop.location, length: range.length))
@@ -40,7 +47,7 @@ final class ComposeCompleteAccessibility {
   }
 
   func character(at point: CGPoint) -> NSRange {
-    guard let crop, pane.bounds.contains(point) else { return ComposeAccessibilityText.missing }
+    guard let pane, let crop, pane.bounds.contains(point) else { return ComposeAccessibilityText.missing }
     let local = CGPoint(x: point.x - pane.origin.x, y: point.y - pane.origin.y)
     let range: NSRange
     if let placed = pane.layout.text.attachments.first(where: { $0.rect.contains(local) }),
@@ -81,6 +88,7 @@ final class ComposeCompleteAccessibility {
   }
 
   func imageRect(_ source: Range<Int>) -> CGRect? {
+    guard let pane else { return nil }
     if let placed = pane.attachment(start: UInt64(source.lowerBound), end: UInt64(source.upperBound)), crop != nil {
       return placed.rect.offsetBy(dx: pane.origin.x, dy: pane.origin.y)
     }

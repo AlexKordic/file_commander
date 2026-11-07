@@ -110,6 +110,21 @@ final class CellGridView: NSView, @preconcurrency NSTextInputClient {
   private var scrollRemainder: CGFloat = 0
   private var horizontalRemainder: CGFloat = 0
   private(set) var composePanes: [UInt64: ComposePresentation] = [:]
+  private(set) var composeLogicalPanes: [UInt64: ComposeLogicalPreview] = [:]
+  private var publishedPreviewRequests: [UInt64: (owner: ComposePreviewController.Owner, request: ComposePreviewRequest)] = [:]
+  private var currentPreviewGeometry: Set<UInt64> = []
+  private var composePreviewsActive = true
+  private(set) var composePreviewController: ComposePreviewController?
+
+  /// Keep the same worker owner for this grid's entire lifetime, including
+  /// hide/show and backend resets while cancelled Core Text is still running.
+  func installComposePreviewController(_ controller: ComposePreviewController) {
+    precondition(composePreviewController == nil)
+    composePreviewController = controller
+    controller.onChange = { [weak self] in self?.rebuildCompose(); self?.needsDisplay = true }
+    rebuildCompose()
+  }
+
   weak var composeImageController: ComposeImageController?
   weak var composeViewportController: ComposeViewportController?
   var sendComposeIndex: ((WireComposeIndexRequest) -> Void)?
@@ -217,7 +232,7 @@ final class CellGridView: NSView, @preconcurrency NSTextInputClient {
 
   /// Redraws what a scene message changed.
   func apply(_ change: SceneChange) {
-    if change.isHello { popupCapture = nil; popupHover = nil }
+    if change.isHello { popupCapture = nil; popupHover = nil; resetComposePreviews() }
     if change.isHello || change.sizeChanged || change.themeChanged || change.regions.contains("panes") {
       rebuildCompose()
       needsDisplay = true
@@ -235,13 +250,14 @@ final class CellGridView: NSView, @preconcurrency NSTextInputClient {
   }
 
   private func rebuildCompose() {
+    if composePreviewController != nil && !composePreviewsActive { resetComposePreviews(); return }
     if let composition {
       let target = composition.target
       let current = store.panes.first { $0.leaf == target.identity.leaf && $0.hasBuffer && $0.buffer == target.identity.buffer }
       let live = Set(current?.compose.cursors.map(\.id) ?? [])
       let proposal = composition.after.flatMap { delegate?.grid(self, pendingCursorIDsAfter: $0, in: target) }
       let ownsProposedGroup = proposal.map { Set(composition.text.presentation.values.keys).isSubset(of: $0) } ?? false
-      if UInt64(store.windowID) != target.identity.window || current?.hasCompose != true
+      if current.map({ target.ownsLifetime(window: UInt64(store.windowID), pane: $0) }) != true || current?.hasCompose != true
           || current?.compose.viewport.epoch != target.pane.compose.viewport.epoch
           || current?.compose.focused != true || (!rebindingComposition && !composition.afterAction && !ownsProposedGroup && !composition.text.presentation.values.keys.allSatisfy(live.contains)) {
         cancelComposition(recover: true, rebuild: false)
@@ -251,16 +267,23 @@ final class CellGridView: NSView, @preconcurrency NSTextInputClient {
     }
     let old = focusedCompose
     let previous = composePanes
+    let owners = Set(store.panes.filter { $0.hasBuffer && $0.hasCompose }.map {
+      ComposePreviewController.Owner(window: UInt64(store.windowID), pane: $0)
+    })
+    composePreviewController?.retain(owners: owners)
+    publishedPreviewRequests = publishedPreviewRequests.filter { owners.contains($0.value.owner) }
+    currentPreviewGeometry.removeAll(); composeLogicalPanes.removeAll()
     var next: [UInt64: ComposePresentation] = [:]
     for pane in store.panes {
       if let value = presentation(pane, reuse: previous[pane.leaf],
         sharingMeasurementsWith: Array(previous.values) + Array(next.values)) { next[pane.leaf] = value }
     }
     composePanes = next
-    if let composition, composePanes[composition.target.identity.leaf] == nil {
+    if composePreviewController == nil, let composition, composePanes[composition.target.identity.leaf] == nil {
       cancelComposition(recover: true, rebuild: false)
       rebuildCompose(); needsDisplay = true; return
     }
+    if composition != nil { revealCompositionCaret() }
     updateComposeTooltips()
     updateAccessibleImages()
     composeNavigation.update()
@@ -388,6 +411,7 @@ final class CellGridView: NSView, @preconcurrency NSTextInputClient {
       pane.compose.focused = input.compose.focused; pane.compose.keyboard = input.compose.keyboard
       return value.text.presentation
     }
+    let logicalPane = pane
     if preedit == nil, pane.hasCompose, !pane.compose.projectionUsable, let reuse, reuse.pane.compose.formattingReady,
        reuse.identity == .init(window: UInt64(store.windowID), leaf: pane.leaf, buffer: pane.buffer),
        reuse.pane.compose.viewport.epoch == pane.compose.viewport.epoch,
@@ -418,15 +442,44 @@ final class CellGridView: NSView, @preconcurrency NSTextInputClient {
       && composeCaretRevision == pane.compose.bufferRevision ? composeCarets : [:]
     if pending?.selectionGroup != nil { caretStates = [:] }
     if let selection { caretStates[selection.caret.id] = selection.caret }
-    return ComposePresentation(pane: pane, window: UInt64(store.windowID),
-      cell: CGSize(width: cellWidth, height: cellHeight), body: bodyFont, monospace: monoFont,
-      typography: composePreferences.typography(zoom: composeZoom), pageWidth: composePreferences.pageWidth * composeZoom,
-      reuse: reuse, sharingMeasurementsWith: peers ?? Array(composePanes.values),
-      measuredBase: measuredBase,
-      caretStates: caretStates, images: images, viewport: viewport, composition: preedit,
-      pendingSelection: selection != nil || virtualSelection != nil || pending?.selectionGroup != nil,
-      virtualInsertion: virtualInsertion, virtualSelections: virtualSelection,
-      environmentLike: reuse ?? composePanes[pane.leaf], geometryRevision: composeGeometryRevision)
+    let typography = composePreferences.typography(zoom: composeZoom)
+    let pageWidth = CGFloat(composePreferences.pageWidth * composeZoom)
+    let pendingSelection = selection != nil || virtualSelection != nil || pending?.selectionGroup != nil
+    let available = CGFloat(pane.content.w) * cellWidth - 32
+    let width = pageWidth > 0 ? min(pageWidth, available) : available
+    func make(_ result: ComposePreviewResult? = nil, reusingOnly: Bool = false) -> ComposePresentation? {
+      ComposePresentation(pane: pane, window: UInt64(store.windowID),
+        cell: CGSize(width: cellWidth, height: cellHeight), body: bodyFont, monospace: monoFont,
+        typography: typography, pageWidth: pageWidth,
+        reuse: reuse, sharingMeasurementsWith: peers ?? Array(composePanes.values), measuredBase: measuredBase,
+        caretStates: caretStates, images: images, viewport: viewport, composition: preedit,
+        pendingSelection: pendingSelection, virtualInsertion: virtualInsertion, virtualSelections: virtualSelection,
+        environmentLike: reuse ?? composePanes[pane.leaf], geometryRevision: composeGeometryRevision,
+        previewResult: result, reusingOnly: reusingOnly)
+    }
+    if includePending, let basis = composeSnapshot(preedit == nil ? logicalPane : pane) {
+      composeLogicalPanes[pane.leaf] = ComposeLogicalPreview(basis: basis, body: bodyFont, monospace: monoFont,
+        width: width, typography: typography, composition: preedit, insertion: virtualInsertion,
+        selections: virtualSelection, pendingSelection: pendingSelection)
+    }
+    guard includePending, let controller = composePreviewController else { return make() }
+    guard pane.hasCompose, pane.hasBuffer,
+          let request = ComposePreviewRequest(pane: pane.compose, body: bodyFont as CTFont, monospace: monoFont as CTFont,
+            width: width, typography: typography, images: images, composition: preedit, virtualInsertion: virtualInsertion) else { return nil }
+    let owner = ComposePreviewController.Owner(window: UInt64(store.windowID), pane: pane)
+    if let published = publishedPreviewRequests[pane.leaf], published.owner == owner,
+       request.hasSameGeometry(as: published.request), let value = make(reusingOnly: true) {
+      controller.discard(owner: owner)
+      publishedPreviewRequests[pane.leaf] = (owner, request); currentPreviewGeometry.insert(pane.leaf)
+      return value
+    }
+    if let result = controller.result(owner: owner, request: request), let value = make(result) {
+      publishedPreviewRequests[pane.leaf] = (owner, request); currentPreviewGeometry.insert(pane.leaf)
+      return value
+    }
+    // Keep the complete old frame in its original namespace while measuring.
+    // Logical queries use composeLogicalPanes/current raw input, never this crop.
+    return reuse.flatMap { $0.ownsLifetime(window: UInt64(store.windowID), pane: pane) ? $0 : nil }
   }
 
   /// Geometry for a deferred key is measured with the same fonts, width and
@@ -486,7 +539,31 @@ final class CellGridView: NSView, @preconcurrency NSTextInputClient {
 
   var focusedCompose: ComposePresentation? {
     guard composeInputAllowed else { return nil }
-    return composePanes.values.first { $0.pane.compose.focused && $0.pane.compose.keyboard }
+    return composePanes.values.first { measured in
+      measured.pane.compose.focused && measured.pane.compose.keyboard && store.panes.contains { current in
+        current.hasCompose && current.compose.focused && current.compose.keyboard
+          && measured.ownsLifetime(window: UInt64(store.windowID), pane: current)
+      }
+    }
+  }
+
+  var focusedComposeLogical: ComposeLogicalPreview? {
+    guard composeInputAllowed else { return nil }
+    return composeLogicalPanes.values.first { $0.pane.compose.focused && $0.pane.compose.keyboard }
+  }
+
+  func composeGeometryIsCurrent(_ pane: ComposePresentation) -> Bool {
+    composePreviewController == nil || currentPreviewGeometry.contains(pane.identity.leaf) && composePanes[pane.identity.leaf] === pane
+  }
+
+  func resetComposePreviews() {
+    composePreviewController?.reset(); publishedPreviewRequests.removeAll(); currentPreviewGeometry.removeAll()
+    composeLogicalPanes.removeAll(); composePanes.removeAll()
+  }
+
+  func setComposePreviewsActive(_ active: Bool) {
+    composePreviewsActive = active
+    if active { rebuildCompose() } else { resetComposePreviews() }
   }
 
   private func compose(at point: CGPoint) -> ComposePresentation? {
@@ -650,7 +727,7 @@ final class CellGridView: NSView, @preconcurrency NSTextInputClient {
   override func accessibilityRole() -> NSAccessibility.Role? { .textArea }
   override func accessibilityRoleDescription() -> String? { "editor" }
   override func accessibilityLabel() -> String? { title }
-  var usesCompleteAccessibility: Bool { focusedCompose != nil && store.composeDocumentUpdates }
+  var usesCompleteAccessibility: Bool { focusedComposeLogical != nil && store.composeDocumentUpdates }
   var completeAccessibility: ComposeCompleteAccessibility? { delegate?.gridAccessibility(self, activate: true) }
 
   func completeAccessibilityChanged() {
@@ -688,8 +765,11 @@ final class CellGridView: NSView, @preconcurrency NSTextInputClient {
   override func accessibilityNumberOfCharacters() -> Int { (accessibilityValue() as? NSString)?.length ?? 0 }
 
   private var accessibilitySelectionPane: ComposePresentation? {
+    let logical = textServiceValue
     guard delegate?.connected == true, store.composeSourceSelections,
+          composition == nil, logical.preview == nil, logical.virtualSelection == nil,
           let pane = focusedCompose, pane.layout.composition == nil,
+          composeGeometryIsCurrent(pane),
           pane.layout.virtualInsertion == nil, pane.virtualSelections == nil,
           pane.pane.compose.hasViewport, pane.pane.compose.viewport.epoch != 0 else { return nil }
     return pane
@@ -716,7 +796,7 @@ final class CellGridView: NSView, @preconcurrency NSTextInputClient {
       }
       if selector == #selector(setAccessibilitySelectedText(_:)) {
         guard let value = completeAccessibility else { return false }
-        return delegate?.connected == true && store.composeSourceSelections && value.pane.pane.compose.editable
+        return delegate?.connected == true && store.composeSourceSelections && value.basis.pane.compose.editable
           && value.model.selectedRanges?.first != nil
           && delegate?.grid(self, documentActionsAvailable: value.model) == true
       }
@@ -937,7 +1017,7 @@ final class CellGridView: NSView, @preconcurrency NSTextInputClient {
       for image in value.model.images {
         let id = ComposeAccessibilityImage.ID(owner: value.model.document.owner, source: Int(image.start)..<Int(image.end))
         next[id] = accessibleImages[id] ?? ComposeAccessibilityImage(id: id, grid: self)
-        labels[id] = completeImageDescription(image, in: value.pane)
+        labels[id] = completeImageDescription(image, in: value.basis)
       }
     } else if !usesCompleteAccessibility, delegate?.connected == true, let pane = focusedCompose {
       for placed in pane.layout.text.attachments {
@@ -956,8 +1036,15 @@ final class CellGridView: NSView, @preconcurrency NSTextInputClient {
     if old != Set(next.keys) { NSAccessibility.post(element: self, notification: .layoutChanged) }
   }
 
-  func completeImageDescription(_ image: WireComposeImage, in pane: ComposePresentation) -> String {
-    if pane.image(start: image.start, end: image.end) != nil { return pane.layout.imageDescription(image) }
+  func completeImageDescription(_ image: WireComposeImage, in basis: any ComposeInputBasis) -> String {
+    if let controller = composeImageController {
+      if let state = controller.knownState(scope: basis.scope,image: image,
+        authority: basis.pane.compose.assetAuthority,document: basis.pane.compose.assetDocument) {
+        return ComposePaneLayout.imageDescription(image,state: state)
+      }
+    } else if let pane = basis.measuredInputBase, pane.image(start: image.start, end: image.end) != nil {
+      return pane.layout.imageDescription(image)
+    }
     let label = image.alt.isEmpty ? "Image" : image.alt
     return String((image.title.isEmpty ? label : "\(label): \(image.title)").prefix(512))
   }
@@ -1122,7 +1209,7 @@ final class CellGridView: NSView, @preconcurrency NSTextInputClient {
   }
 
   private func revealCompositionCaret() {
-    guard composition != nil, let pane = focusedCompose else { return }
+    guard composition != nil, let pane = focusedCompose, composeGeometryIsCurrent(pane) else { return }
     delegate?.grid(self, revealCaretIn: pane)
   }
 
@@ -1217,11 +1304,11 @@ final class CellGridView: NSView, @preconcurrency NSTextInputClient {
     return .init(hasSource: true, preview: preview, virtualSelection: virtualSelection, context: context, legacy: legacy)
   }
 
-  /// A raw range cannot borrow pixels from an older source/context owner.
-  /// Draft-generation matching is part of the separate background cutover;
-  /// this path still publishes each changed preview synchronously.
+  /// A raw range cannot borrow pixels from an older source/context or draft
+  /// generation while its replacement is still being prepared.
   var textServiceGeometry: ComposePresentation? {
     guard let current = composeTextInputBasis, let measured = focusedCompose,
+          composeGeometryIsCurrent(measured),
           measured.ownsLifetime(window: UInt64(store.windowID), pane: current.pane),
           measured.scope == current.scope else { return nil }
     switch (current.textContext, measured.textContext) {
@@ -1304,6 +1391,7 @@ final class CellGridView: NSView, @preconcurrency NSTextInputClient {
 
   private func selectComposition(at point: CGPoint, extend: Bool) -> Bool {
     guard var current = composition, let pane = focusedCompose, let draft = pane.layout.draftDisplayRange,
+          composeGeometryIsCurrent(pane),
           let display = pane.layout.text.hitUTF16(at: CGPoint(x: point.x - pane.origin.x, y: point.y - pane.origin.y)) else { return false }
     let index: Int
     if compositionDragAnchor != nil { index = min(NSMaxRange(draft), max(draft.location, display)) }

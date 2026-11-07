@@ -40,7 +40,8 @@ final class ComposePresentation: ComposeInputBasis {
         caretStates: [UInt64: WireComposeCaret] = [:], images: [UInt64: ComposeImageState] = [:], viewport: WireComposeViewport? = nil,
         preedit: ComposeMarkedText? = nil, composition: ComposeComposition? = nil, pendingSelection: Bool = false,
         virtualInsertion: ComposeVirtualInsertion? = nil, virtualSelections: ComposeVirtualSelections? = nil,
-        environmentLike: ComposePresentation? = nil, geometryRevision: UInt64 = 0) {
+        environmentLike: ComposePresentation? = nil, geometryRevision: UInt64 = 0,
+        previewResult: ComposePreviewResult? = nil, reusingOnly: Bool = false) {
     guard pane.hasCompose, pane.hasBuffer else { return nil }
     if pane.compose.hasTextContext {
       textContext = ComposeTextContext(pane.compose.textContext, documentLength: pane.compose.documentLen, reuse: reuse?.textContext)
@@ -51,10 +52,21 @@ final class ComposePresentation: ComposeInputBasis {
                         width: CGFloat(rect.w) * cell.width, height: CGFloat(rect.h) * cell.height)
     let available = bounds.width - 32
     let width = pageWidth > 0 ? min(pageWidth, available) : available
-    guard width > 0, let layout = ComposePaneLayout(pane: pane.compose, body: body as CTFont,
-      monospace: monospace as CTFont, width: width, typography: typography, images: images, reuse: reuse?.layout,
-      sharingMeasurementsWith: peers.map(\.layout), measuredBase: measuredBase?.layout,
-      preedit: preedit, composition: composition, virtualInsertion: virtualInsertion) else { return nil }
+    guard width > 0 else { return nil }
+    let prepared: ComposePaneLayout?
+    if let previewResult {
+      let draft = composition ?? preedit.flatMap { ComposeComposition(primary: 0, values: [0: $0]) }
+      guard let request = ComposePreviewRequest(pane: pane.compose, body: body as CTFont,
+        monospace: monospace as CTFont, width: width, typography: typography, images: images,
+        composition: draft, virtualInsertion: virtualInsertion) else { return nil }
+      prepared = previewResult.layout(matching: request)
+    } else {
+      prepared = ComposePaneLayout(pane: pane.compose, body: body as CTFont,
+        monospace: monospace as CTFont, width: width, typography: typography, images: images, reuse: reuse?.layout,
+        sharingMeasurementsWith: peers.map(\.layout), measuredBase: measuredBase?.layout,
+        preedit: preedit, composition: composition, virtualInsertion: virtualInsertion, reusingOnly: reusingOnly)
+    }
+    guard let layout = prepared else { return nil }
     self.pane = pane; self.pendingSelection = pendingSelection; self.virtualSelections = virtualSelections
     self.layout = layout
     // Each snapshot owns its indices. Keep the first match, as the prior

@@ -33,11 +33,12 @@ public final class ComposePaneLayout {
                sharingMeasurementsWith peers: [ComposePaneLayout] = [],
                measuredBase: ComposePaneLayout? = nil,
                preedit: ComposeMarkedText? = nil, composition: ComposeComposition? = nil, virtualInsertion: ComposeVirtualInsertion? = nil,
-               measurement: ComposeTextLayout.MeasurementOptions? = nil, record: ((ComposeTextLayout.Fragment)->Bool)? = nil) {
+               measurement: ComposeTextLayout.MeasurementOptions? = nil, record: ((ComposeTextLayout.Fragment)->Bool)? = nil,
+               reusingOnly: Bool = false) {
     self.init(pane: pane, body: body, monospace: monospace, width: width, typography: typography,
       images: images, reuse: reuse, sharingMeasurementsWith: peers, measuredBase: measuredBase,
       preedit: preedit, composition: composition, virtualInsertion: virtualInsertion,
-      measurement: measurement, record: record, prepared: nil)
+      measurement: measurement, record: record, prepared: nil, reusingOnly: reusingOnly)
   }
 
   init?(pane: WireComposePane, body: CTFont, monospace: CTFont, width: CGFloat,
@@ -45,7 +46,7 @@ public final class ComposePaneLayout {
         sharingMeasurementsWith peers: [ComposePaneLayout] = [], measuredBase: ComposePaneLayout? = nil,
         preedit: ComposeMarkedText? = nil, composition: ComposeComposition? = nil, virtualInsertion: ComposeVirtualInsertion? = nil,
         measurement: ComposeTextLayout.MeasurementOptions? = nil, record: ((ComposeTextLayout.Fragment)->Bool)? = nil,
-        prepared: ComposeProjectionPlan?) {
+        prepared: ComposeProjectionPlan?, reusingOnly: Bool = false) {
     guard typography.isValid, width.isFinite, width > 0,
           let sourceStart = Int(exactly: pane.sourceStart), let sourceEnd = Int(exactly: pane.sourceEnd), sourceStart <= sourceEnd else { return nil }
     guard pane.images.allSatisfy({ !($0.rendered && $0.sourcePreview) }) else { return nil }
@@ -112,8 +113,8 @@ public final class ComposePaneLayout {
        pane.documentLen == reuse.pane.documentLen,
        pane.assetAuthority == reuse.pane.assetAuthority, pane.assetDocument == reuse.pane.assetDocument,
        pane.text.utf8.elementsEqual(reuse.pane.text.utf8), pane.segments == reuse.pane.segments,
-       Self.sameTypography(pane.spans, reuse.pane.spans), pane.images == reuse.pane.images, pane.tables == reuse.pane.tables,
-       pane.hangingContexts == reuse.pane.hangingContexts, sizes == reuse.imageSizes,
+       Self.sameTypography(pane.spans, reuse.pane.spans), pane.images == reuse.pane.images, Self.sameTables(pane.tables, reuse.pane.tables),
+       Self.sameHangingContexts(pane.hangingContexts, reuse.pane.hangingContexts), sizes == reuse.imageSizes,
        width == reuse.width, typography == reuse.typography,
        CFEqual(body, reuse.body), CFEqual(monospace, reuse.monospace) else { continue }
       tableModel = reuse.tableModel; text = reuse.text
@@ -125,6 +126,7 @@ public final class ComposePaneLayout {
       codeBlocks = reuse.codeBlocks; codeFrames = reuse.codeFrames
       return
     }
+    guard !reusingOnly else { return nil }
     guard let prepared = prepared ?? ComposeProjectionPlan(pane: pane, composition: composition,
       virtualInsertion: virtualInsertion, visibleImages: visible) else { return nil }
     let items = Dictionary(grouping: pane.spans.filter { $0.role == 13 }, by: \.start)
@@ -316,6 +318,19 @@ public final class ComposePaneLayout {
     return matches.count == 1 ? links[matches[0]] : nil
   }
 
+  private static func sameTables(_ lhs: [WireComposeTable], _ rhs: [WireComposeTable]) -> Bool {
+    guard lhs == rhs else { return false }
+    return zip(lhs, rhs).allSatisfy { a,b in
+      zip(a.measurement.columns, b.measurement.columns).allSatisfy { a,b in
+        zip(a.samples, b.samples).allSatisfy { a,b in a.text.utf8.elementsEqual(b.text.utf8) }
+      }
+    }
+  }
+
+  private static func sameHangingContexts(_ lhs: [WireComposeHangingContext], _ rhs: [WireComposeHangingContext]) -> Bool {
+    lhs == rhs && zip(lhs, rhs).allSatisfy { a,b in a.text.utf8.elementsEqual(b.text.utf8) }
+  }
+
   private static func sameTypography(_ lhs: [WireComposeSpan], _ rhs: [WireComposeSpan]) -> Bool {
     lhs.count == rhs.count && zip(lhs, rhs).allSatisfy { a, b in
       a.start == b.start && a.end == b.end && a.role == b.role && a.flags == b.flags
@@ -346,8 +361,11 @@ public final class ComposePaneLayout {
   }
 
   public func imageDescription(_ image: WireComposeImage) -> String {
+    Self.imageDescription(image,state: images[image.start] ?? .loading)
+  }
+
+  public static func imageDescription(_ image: WireComposeImage, state: ComposeImageState) -> String {
     let label = image.alt.isEmpty ? "Image" : image.alt
-    let state = images[image.start] ?? .loading
     let message: String
     switch state {
     case .loading: message = "\(label): loading"

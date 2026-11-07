@@ -676,8 +676,18 @@ measurement-candidate lifetime boundaries, literal Unicode context reuse and
 invalid headers. Its held-geometry cases advance the authoritative raw scene
 while retaining the old view, then check current text queries and IME capture.
 Pixel requests cannot use that old source/context owner for a new raw range.
-These are ownership checks; preview shaping still uses the synchronous path,
-with draft-generation matching needed for the background cutover.
+`ComposePreviewTests` is also required. Controlled workers verify one actual
+worker through cancellation/reset, latest-request coalescing, exact source/draft/
+font/width/image ownership, failure recovery and rejection after numeric lifetime
+reuse. Prepared glyphs, attachments and ornaments match synchronous construction;
+a reuse-only miss cannot shape. Arbitrary attributed objects stay on the main
+actor. A held-preview grid checks immediate raw/IME queries, stale pixel refusal
+and latest-only publication across draft, source and environment changes.
+The private-backend held-preview workflow exercises complete accessibility text,
+selection/replacement, IME input, exact CRLF save and undo before any visible
+preview is published. Render-dependent tests await matching geometry; pending
+pointer workflows deliberately hold backend acknowledgments while the preview
+worker prepares their draft, preserving the unacknowledged-input contract.
 Viewport regressions keep the durable source/pixel anchor separate from an
 adjacent-region probe. Wire checks cover explicit byte-zero presence, invalid
 types/ranges, marker rebasing beyond retained coordinate history, opaque resets,

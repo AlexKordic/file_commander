@@ -108,6 +108,14 @@ public final class ComposeImageController {
     return cache.count >= 128 && demands.contains(where: { $0.key == key }) ? .deferred(originalSize: nil) : .loading
   }
 
+  /// Metadata-only queries must not call an undemanded offscreen resource
+  /// "loading". This lookup neither schedules I/O nor changes cache ownership.
+  public func knownState(scope: WireComposeScope, image: WireComposeImage, authority: UInt64, document: UInt64) -> ComposeImageState? {
+    let key = Key(window: scope.windowID, buffer: scope.buffer, authority: authority, document: document, target: image.target)
+    guard cache[key] != nil || demands.contains(where: { $0.key == key }) else { return nil }
+    return state(scope: scope,image: image,authority: authority,document: document)
+  }
+
   /// Order demands nearest the viewport first. Duplicate references share a
   /// resource read/cache entry while source ranges remain on each attachment.
   /// Live documents may retain already received bytes through provisional or

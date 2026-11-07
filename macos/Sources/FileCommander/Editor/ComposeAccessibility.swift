@@ -119,7 +119,7 @@ final class ComposeAccessibilityImage: NSAccessibilityElement {
   override func accessibilityParent() -> Any? { grid }
   override func accessibilityRole() -> NSAccessibility.Role? { .image }
   override func accessibilityLabel() -> String? {
-    if let complete { return grid?.completeImageDescription(complete.image, in: complete.value.pane) }
+    if let complete { return grid?.completeImageDescription(complete.image, in: complete.value.basis) }
     return current.map { $0.pane.layout.imageDescription($0.image) }
   }
   override func accessibilityHelp() -> String? { isAccessibilityElement() ? "Select image Markdown source" : nil }

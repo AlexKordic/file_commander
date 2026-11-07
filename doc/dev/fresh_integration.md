@@ -1311,9 +1311,28 @@ the current raw scene plus owned pending text/selection, rather than extracting
 logical text from glyph geometry. Legacy projected-text queries require the
 matching measured owner. Invalid raw headers cannot expose a prior frame's text.
 Pixel queries require agreement with that raw source/context owner and report
-unavailable geometry instead of using an old frame for a new raw range. Preview
-construction remains synchronous; the background preview cutover, including
-draft-generation ownership, remains separate work.
+unavailable geometry instead of using an old frame for a new raw range.
+
+Changed visible previews are prepared off the main actor. Each native editor
+owns one actual preview worker across cancellation, hide/show and backend reset,
+with only the newest request retained per active leaf. A request captures literal
+wire bytes, plain draft values, fonts, available pixel width, typography and
+image identities. No arbitrary attributed IME object or published mutable pane
+crosses to the worker. The result returns only to its exact request and lifetime;
+late results cannot publish after a reset even if numeric owners are reused.
+Selection-only updates may reuse geometry through the same fully validated
+constructor, in a mode that cannot start shaping on a cache miss.
+
+While changed glyphs are pending, the prior frame retains its original owner.
+Logical source, pending text, complete accessibility text and source actions do
+not wait for it. Native composition survives an absent preview. Candidate pixel
+queries and automatic caret reveal wait for current source and draft geometry;
+publication retries caret reveal and queued work. Complete-value accessibility
+selection/replacement also uses logical input ownership without requiring a
+visible pane. Image labels read current known resource metadata; querying an
+undemanded offscreen image neither starts I/O nor labels it as loading.
+Explicit offscreen navigation/input measurement remains synchronous; this worker
+does not move every Core Text call or formatter operation off-thread.
 
 Native rich Compose keeps marked text as a provisional replacement over that
 immutable source snapshot. Partial updates, marked/selected subranges and
