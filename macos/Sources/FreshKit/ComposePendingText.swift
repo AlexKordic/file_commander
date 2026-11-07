@@ -653,7 +653,7 @@ public struct ComposePendingText {
   }
 
   private static func exact(_ value: String?, _ expected: String) -> Bool {
-    value.map { Array($0.utf16) == Array(expected.utf16) } ?? false
+    value.map { $0.utf16.elementsEqual(expected.utf16) } ?? false
   }
 
   private static func boundary(_ units: [UInt16], _ index: Int) -> Bool {

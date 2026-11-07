@@ -1270,6 +1270,17 @@ skips redundant source-window preparation;
 formatter/parser caches, transient allocations and the full native flow still
 require the general resource audit.
 
+Fresh's semantic cache keeps at most eight composing documents and reuses live
+tab snapshots. Gathering and parser polling release entries whose window,
+buffer lifetime or filesystem authority has gone away. Obsolete parser jobs are
+cancelled; a running slot remains owned until its completion is consumed, and
+that completion cannot restore a closed document. Private cache tests verify
+source/semantic ownership release, live-tab reuse and a late cancelled result.
+This entry-count policy still needs the general retained-byte and transient
+allocation audit. Native pending-text literal checks compare UTF-16 sequences
+without materializing a pair of temporary arrays; canonical equivalence cannot
+authorize editing different source bytes.
+
 Projection boundary validation and this model share a sparse UTF-8/UTF-16
 index with checkpoints about every 1,024 bytes. It retains literal bytes and
 rejects surrogate/UTF-8 interiors without a hash entry for every scalar.
