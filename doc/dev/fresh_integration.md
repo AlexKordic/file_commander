@@ -1726,6 +1726,16 @@ scene connection through the ordinary recovery path; pending native text
 remains available through Copy Uninserted Text. The largest representable
 counter and optional zero-valued allocation metrics retain their exact values.
 
+Scene model allocation admits at most 65,536 grid rows and 4,096 panes, with
+matching per-message update-list limits. Copies must contain complete triples;
+one message admits at most 65,536 copy instructions and 65,536 declared copied
+rows in total. Each applied copy uses the existing source/destination extent
+and reads the original frame. Out-of-range collection declarations end the
+connection before SceneStore grows its arrays. Accepted boundary values remain
+complete. These limits apply to scene metadata after protobuf decoding; they
+do not bound the decoder, text/image bodies or total app memory, and they do
+not impose a Markdown width or truncate source.
+
 ### Native pending-input admission
 
 The opt-in native Compose path admits at most 128 pending input events and

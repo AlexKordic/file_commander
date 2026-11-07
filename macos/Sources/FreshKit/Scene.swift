@@ -169,6 +169,10 @@ public struct FrameTiming: Sendable {
 /// One message from Fresh, decoded off the main thread: a `ServerHello`'s
 /// whole scene or a `Frame`, with its grid rows already turned into runs.
 public struct SceneMessage: @unchecked Sendable {
+  /// Admission for model collections and copy work, independent of encoded
+  /// message size. These are not Markdown, wrapping or total-memory limits.
+  public static let maximumGridRows = 65_536
+  public static let maximumPanes = 4_096
   public let isHello: Bool
   /// Present only in the server's initial hello.
   public let protocolVersion: UInt32?
@@ -232,6 +236,15 @@ public struct SceneMessage: @unchecked Sendable {
     guard let sequence = Int(exactly: frame.seq),
           !frame.hasWindowID || Int(exactly: frame.windowID) != nil,
           !frame.hasClipboard || Int(exactly: frame.clipboard.seq) != nil else { return nil }
+    guard frame.gridLen <= Self.maximumGridRows, frame.paneLen <= Self.maximumPanes,
+          frame.rows.count <= Self.maximumGridRows, frame.panes.count <= Self.maximumPanes,
+          frame.copies.count.isMultiple(of: 3), frame.copies.count / 3 <= Self.maximumGridRows else { return nil }
+    var copiedRows = 0
+    for index in stride(from: 2, to: frame.copies.count, by: 3) {
+      let count = Int(frame.copies[index])
+      guard count <= Self.maximumGridRows - copiedRows else { return nil }
+      copiedRows += count
+    }
     let timing: FrameTiming?
     if frame.hasTiming {
       guard let value = FrameTiming(frame.timing) else { return nil }
@@ -362,9 +375,10 @@ public final class SceneStore {
       change.sizeChanged = change.sizeChanged || message.isHello
     }
     for copy in message.gridCopies {
-      for offset in 0..<max(0, copy.count) {
+      guard copy.to >= 0, copy.from >= 0, copy.to < grid.count, copy.from < previous.count else { continue }
+      let count = min(copy.count, grid.count - copy.to, previous.count - copy.from)
+      for offset in 0..<count {
         let to = copy.to + offset, from = copy.from + offset
-        guard to >= 0, to < grid.count, from >= 0, from < previous.count else { continue }
         grid[to] = previous[from]
         change.rows.insert(to)
       }

@@ -793,6 +793,12 @@ boundaries for hellos and frames, including optional timing values. A private
 socket peer sends an unrepresentable window counter while text awaits a reply;
 the client must close, retain the text and leave its last scene unpublished.
 The required native-suite registry includes these decoder cases.
+Collection tests reject oversized declarations/update lists and malformed or
+over-budget copy instructions. They apply the largest admitted collections,
+check their final entries and shrinking, and compare clipped copies against
+the original frame. Socket cases also require pending-text recovery when an
+unadmitted collection count closes the connection. Oversized before-controls
+decode the declaration only; they never attempt the requested allocation.
 
 Pending-input admission tests use a private scene peer that withholds receipts.
 They distinguish the admitted preview from overflow recovery, enforce aggregate

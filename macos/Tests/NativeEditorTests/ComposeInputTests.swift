@@ -189,6 +189,22 @@ private final class ScenePeer: @unchecked Sendable {
 
 final class ComposeInputTests: XCTestCase {
   @MainActor
+  func testUnadmittedSceneCountsCloseTheConnectionAndRecoverPendingText() async throws {
+    for gridCount in [true, false] {
+      let peer = try ScenePeer(pane: pane("Tail")); defer { peer.close() }
+      let editor = richEditor(); defer { editor.detachAll() }
+      editor.attach(socketPath: peer.path, app: nil)
+      try await eventually { editor.grid?.focusedCompose != nil }
+      let revision = editor.store.revision
+      editor.send(.text("日本語"))
+      try await eventually { peer.inputs.count == 1 }
+      peer.sendFrame(.with { $0.seq = 2; if gridCount { $0.gridLen = UInt32.max } else { $0.paneLen = UInt32.max } })
+      try await eventually { !editor.connected && editor.uninsertedText == ["日本語"] }
+      XCTAssertEqual(editor.store.revision, revision)
+    }
+  }
+
+  @MainActor
   func testInvalidSceneCounterClosesTheConnectionAndRecoversPendingText() async throws {
     let peer = try ScenePeer(pane: pane("Tail")); defer { peer.close() }
     let editor = richEditor(); defer { editor.detachAll() }
