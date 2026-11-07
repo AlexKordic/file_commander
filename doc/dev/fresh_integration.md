@@ -1300,6 +1300,21 @@ Drawing keeps its measured glyph geometry and construction endpoint cache;
 other source-range queries share this index with the document model. This
 changes neither source nor wrapping.
 
+Queued text and composition capture use `ComposeInputSnapshot`, a raw-source
+header/context owner that does not construct a measured pane. An edit receipt
+can supply that owner before its projection is ready. A new source revision
+drops the prior measured view; only a matching lifetime/revision can retain an
+optional geometry candidate, and measurement still validates all layout inputs.
+`composeSnapshot` captures source; `composeInputMeasurement` explicitly requests
+geometry. Ordinary text, IME capture, selected-range and substring queries read
+the current raw scene plus owned pending text/selection, rather than extracting
+logical text from glyph geometry. Legacy projected-text queries require the
+matching measured owner. Invalid raw headers cannot expose a prior frame's text.
+Pixel queries require agreement with that raw source/context owner and report
+unavailable geometry instead of using an old frame for a new raw range. Preview
+construction remains synchronous; the background preview cutover, including
+draft-generation ownership, remains separate work.
+
 Native rich Compose keeps marked text as a provisional replacement over that
 immutable source snapshot. Partial updates, marked/selected subranges and
 context queries use provisional document UTF-16 positions. The same measured

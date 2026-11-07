@@ -85,7 +85,7 @@ final class NativeEditor: NSObject, CellGridDelegate {
     var identity: ComposePresentation.Identity
     var scope: WireComposeScope
     var epoch: UInt64
-    @MainActor init(_ pane: ComposePresentation) {
+    @MainActor init(_ pane: any ComposeInputBasis) {
       identity = pane.identity; scope = pane.scope; epoch = pane.pane.compose.viewport.epoch
     }
   }
@@ -102,7 +102,7 @@ final class NativeEditor: NSObject, CellGridDelegate {
     var chain: CompositionChain?
     var preview: ComposePendingText? { didSet { origins = preview?.origins() } }
     var origins: ComposePendingText.Origins?
-    var snapshot: ComposePresentation?
+    var snapshot: (any ComposeInputBasis)?
     var pointerPreview: ComposePointer.Preview?
     var virtualPrefix: ComposeVirtualSelections?
     var selectionPredecessor: UUID?
@@ -1048,7 +1048,7 @@ final class NativeEditor: NSObject, CellGridDelegate {
           let captured = binding.action(ranges, in: model, replacement: replacement), let grid else { return false }
     grid.finishComposition()
     guard let rebased = replayDocumentHistory(captured, after: binding.marker), action(rebased, owns: actual) else { return false }
-    let target = grid.composeSnapshot(actual) ?? pane
+    let target: any ComposeInputBasis = grid.composeSnapshot(actual) ?? pane
     let token = UUID()
     if let barrier = composeQueue.last?.token {
       enqueueCompose(.document(rebased, after: barrier), target: target, token: token)
@@ -1130,7 +1130,7 @@ final class NativeEditor: NSObject, CellGridDelegate {
       virtualPrefix: prefix?.virtualPrefix,sourceSelection: last.selectionPredecessor != nil)
   }
 
-  func grid(_ grid: CellGridView, pendingCursorIDsAfter token: UUID, in pane: ComposePresentation) -> Set<UInt64>? {
+  func grid(_ grid: CellGridView, pendingCursorIDsAfter token: UUID, in pane: any ComposeInputBasis) -> Set<UInt64>? {
     var token = token, visited: Set<UUID> = []
     while visited.insert(token).inserted, let node = composeQueue.first(where: { $0.token == token }),
           node.target?.identity == pane.identity, node.target?.epoch == pane.pane.compose.viewport.epoch {
@@ -1141,7 +1141,7 @@ final class NativeEditor: NSObject, CellGridDelegate {
   }
 
   func grid(_ grid: CellGridView, commit text: ComposePendingText, initial: ComposePendingText,
-            token: UUID, after: UUID?, afterAction: Bool, virtualPrefix: ComposeVirtualSelections?, aliases: [UInt64: UInt64], in pane: ComposePresentation) {
+            token: UUID, after: UUID?, afterAction: Bool, virtualPrefix: ComposeVirtualSelections?, aliases: [UInt64: UInt64], in pane: any ComposeInputBasis) {
     guard receivedHello else { for value in text.recoveryTexts { self.grid(grid, recover: value) }; return }
     let chain = after.map { CompositionChain(predecessor: $0, initial: initial, text: text, afterAction: afterAction) }
     if let after, !composeQueue.contains(where: { $0.token == after }) {
@@ -1190,7 +1190,7 @@ final class NativeEditor: NSObject, CellGridDelegate {
     struct Rebound {
       let text: ComposePendingText
       let aliases: [UInt64: UInt64]
-      let snapshot: ComposePresentation
+      let snapshot: any ComposeInputBasis
       let target: InputTarget
       let prefix: ComposeVirtualSelections?
     }
@@ -1452,10 +1452,10 @@ final class NativeEditor: NSObject, CellGridDelegate {
     }
     switch input {
     case .key, .mouse, .popupPointer, .paste, .text, .action, .widget, .settingsClick, .kbEditClick:
-      let target: ComposePresentation?
+      let target: (any ComposeInputBasis)?
       switch input {
       case .text, .paste:
-        if let focused = grid?.focusedCompose { target = focused }
+        if let focused = grid?.composeTextInputBasis { target = focused }
         else if let last = composeQueue.last, case .message(.popupPointer(let pointer)) = last.input,
                 pointer.mouse.kind == .up, let identity = last.target?.identity,
                 let pane = grid?.composePanes[identity.leaf], pane.identity == identity {
@@ -1509,7 +1509,7 @@ final class NativeEditor: NSObject, CellGridDelegate {
     }
   }
 
-  private func enqueueCompose(_ input: PendingInput, target: ComposePresentation?, chain: CompositionChain? = nil,
+  private func enqueueCompose(_ input: PendingInput, target: (any ComposeInputBasis)?, chain: CompositionChain? = nil,
                               preview: ComposePendingText? = nil, pointerPreview: ComposePointer.Preview? = nil,
                               virtualPrefix: ComposeVirtualSelections? = nil, selectionPredecessor: UUID? = nil,
                               documentSelectionPreview: ComposeVirtualSelections? = nil, token: UUID = UUID(), cursorAliases: [UInt64: UInt64] = [:]) {
@@ -1593,7 +1593,7 @@ final class NativeEditor: NSObject, CellGridDelegate {
           break
         }
         if visible.layout.composition != nil || visible.pendingSelection, let actual = store.panes.first(where: { $0.leaf == identity.leaf && $0.hasBuffer && $0.buffer == identity.buffer }),
-           let measured = grid?.composeInputSnapshot(actual, measuredBase: queued.snapshot) { visible = measured }
+           let measured = grid?.composeInputMeasurement(actual, measuredBase: queued.snapshot) { visible = measured }
         let pane = pendingComposeProjection.flatMap { grid?.composeMeasurement(identity: identity, projection: $0) } ?? visible
         pendingComposeBefore = (visible.pane.compose.bufferRevision, visible.pane.compose.cursors)
         if pane.pane.compose.keyboard {

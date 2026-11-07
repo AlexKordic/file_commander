@@ -45,5 +45,6 @@
   "FreshKitTests.SceneWireTests",
   "NativeEditorTests.ComposeBackendTests",
   "NativeEditorTests.ComposeInputTests",
+  "NativeEditorTests.ComposeInputSnapshotTests",
   "NativeEditorTests.ComposePreferencesTests"
 ]

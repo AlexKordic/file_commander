@@ -5,7 +5,7 @@ import FreshKit
 /// Drawing and hit testing for one rich pane. Fresh retains the buffer,
 /// selections and undo history; this is an immutable scene presentation.
 @MainActor
-final class ComposePresentation {
+final class ComposePresentation: ComposeInputBasis {
   struct Identity: Equatable {
     var window, leaf, buffer: UInt64
   }
@@ -18,6 +18,7 @@ final class ComposePresentation {
   let viewport: WireComposeViewport
   let scrolling: ComposeViewport
   let textContext: ComposeTextContext?
+  var measuredInputBase: ComposePresentation? { self }
   /// Selection feedback only; input measurements must use the backend snapshot.
   let pendingSelection: Bool
   let virtualSelections: ComposeVirtualSelections?
@@ -134,17 +135,6 @@ final class ComposePresentation {
 
   func attachment(start: UInt64, end: UInt64) -> ComposeTextLayout.PlacedAttachment? {
     attachmentSources[ImageSource(start: start, end: end)].map { layout.text.attachments[$0] }
-  }
-
-  var scope: WireComposeScope {
-    WireComposeScope.with {
-      $0.windowID = identity.window
-      $0.leaf = identity.leaf
-      $0.buffer = identity.buffer
-      $0.bufferRevision = pane.compose.bufferRevision
-      $0.projectionRevision = pane.compose.projectionRevision
-      $0.selectionRevision = pane.compose.selectionRevision
-    }
   }
 
   var caret: CGRect? {

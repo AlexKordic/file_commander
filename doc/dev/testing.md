@@ -670,6 +670,14 @@ typing/save/undo workflows; they do not qualify actual input methods.
 A raw-context regression changes canonically equivalent source of equal byte
 length, checking literal substrings, grapheme ranges and both directions of
 the current UTF-16/source mapping.
+`ComposeInputSnapshotTests` is required by the native lane. It checks raw
+receipt ownership without ready formatting, release of prior glyph geometry,
+measurement-candidate lifetime boundaries, literal Unicode context reuse and
+invalid headers. Its held-geometry cases advance the authoritative raw scene
+while retaining the old view, then check current text queries and IME capture.
+Pixel requests cannot use that old source/context owner for a new raw range.
+These are ownership checks; preview shaping still uses the synchronous path,
+with draft-generation matching needed for the background cutover.
 Viewport regressions keep the durable source/pixel anchor separate from an
 adjacent-region probe. Wire checks cover explicit byte-zero presence, invalid
 types/ranges, marker rebasing beyond retained coordinate history, opaque resets,

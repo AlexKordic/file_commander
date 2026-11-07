@@ -666,21 +666,21 @@ final class ComposeInputTests: XCTestCase {
     grid.insertText("追加", replacementRange: NSRange(location: NSNotFound, length: 0))
     let preview = try XCTUnwrap(grid.focusedCompose)
     XCTAssertTrue(preview.layout.text.projection.text.hasPrefix("追加"))
-    let measured = try XCTUnwrap(grid.composeInputSnapshot(scene, measuredBase: captured))
+    let measured = try XCTUnwrap(grid.composeInputMeasurement(scene, measuredBase: captured))
     XCTAssertNil(measured.layout.composition)
     XCTAssertTrue(measured.layout.text === captured.layout.text, "measuring the real input basis must retain its complete already measured geometry")
     XCTAssertTrue(grid.focusedCompose === preview, "input measurement must not replace the visible pending text")
     XCTAssertEqual(measured.pane.compose.text, source); XCTAssertEqual(measured.scope, captured.scope)
     var foreignScene = scene; foreignScene.leaf = 99
-    let foreign = try XCTUnwrap(grid.composeSnapshot(foreignScene))
-    let independent = try XCTUnwrap(grid.composeInputSnapshot(scene, measuredBase: foreign))
+    let foreign = try XCTUnwrap(grid.composeInputMeasurement(foreignScene))
+    let independent = try XCTUnwrap(grid.composeInputMeasurement(scene, measuredBase: foreign))
     XCTAssertFalse(independent.layout.text === foreign.layout.text, "a different pane cannot supply a captured input basis")
     try await eventually { peer.inputs.count == 1 }
     XCTAssertTrue(peer.inputs[0].textInput); XCTAssertEqual(peer.inputs[0].scope, captured.scope)
     var preferences = ComposePreferences()
     preferences.bodySize = 22; preferences.pageWidth = 320
     grid.setComposePreferences(preferences, zoom: 1)
-    let resized = try XCTUnwrap(grid.composeInputSnapshot(scene, measuredBase: captured))
+    let resized = try XCTUnwrap(grid.composeInputMeasurement(scene, measuredBase: captured))
     XCTAssertFalse(resized.layout.text === captured.layout.text)
     XCTAssertEqual(resized.layout.width, 320); XCTAssertEqual(CTFontGetSize(resized.body), 22)
     XCTAssertNil(resized.layout.composition); XCTAssertEqual(resized.pane.compose.text, source)
@@ -690,7 +690,7 @@ final class ComposeInputTests: XCTestCase {
     changed.compose.assetAuthority = 5; changed.compose.assetDocument = 7
     let before = peer.lastApplied; peer.show(changed)
     try await eventually { peer.lastApplied > before }
-    let current = try XCTUnwrap(grid.composeInputSnapshot(changed, measuredBase: captured))
+    let current = try XCTUnwrap(grid.composeInputMeasurement(changed, measuredBase: captured))
     XCTAssertFalse(current.layout.text === captured.layout.text)
     XCTAssertEqual(current.scope.bufferRevision, 5); XCTAssertEqual(current.pane.compose.text, changedSource)
     XCTAssertEqual(current.layout.text.projection.source.upperBound, changedSource.utf8.count)
