@@ -10,6 +10,8 @@
   "FreshKitTests.ComposeDocumentControllerTests",
   "FreshKitTests.ComposeFlowTests",
   "FreshKitTests.ComposeFlowMeasurementTests",
+  "FreshKitTests.ComposeFlowControllerTests",
+  "FreshKitTests.ComposeFlowTextIndexTests",
   "FreshKitTests.ComposeHangingContextTests",
   "FreshKitTests.ComposeImageControllerTests",
   "FreshKitTests.ComposeImageTests",

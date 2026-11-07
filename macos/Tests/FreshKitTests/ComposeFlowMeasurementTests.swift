@@ -113,4 +113,32 @@ final class ComposeFlowMeasurementTests: XCTestCase {
     XCTAssertNotNil(ComposePaneLayout(pane:marker,body:body,monospace:code,width:320))
     XCTAssertNil(ComposePaneLayout(pane:marker,body:body,monospace:code,width:320,measurement:.init(maximumContextUnits:64)))
   }
+
+  func testCaretHeadersReuseExactGeometryWhileStylesAndAdmissionRemainCurrent() throws {
+    var fixture=DocumentUpdateFixture()
+    fixture.pane.compose.text=String(repeating:"é café 👩🏽‍💻\r\n",count:20)
+    fixture.pane.compose.sourceEnd=UInt64(fixture.pane.compose.text.utf8.count);fixture.pane.compose.documentLen=fixture.pane.compose.sourceEnd
+    fixture.pane.compose.segments[0].sourceEnd=fixture.pane.compose.sourceEnd;fixture.pane.compose.segments[0].displayEnd=fixture.pane.compose.sourceEnd
+    let first=try fixture.snapshot(),env=ComposeFlowMeasurement.Environment(body:body,monospace:code,width:320)
+    let original=try ComposeFlowMeasurement.measure(first,environment:env)
+    fixture.pane.compose.selectionRevision += 1;fixture.pane.compose.decorationRevision += 1;fixture.pane.compose.cursors[0].position=2
+    let moved=try fixture.snapshot(id:2),updated=try ComposeFlowMeasurement.measure(moved,environment:env,reusing:original)
+    XCTAssertEqual(updated.geometryGeneration,original.geometryGeneration)
+    XCTAssertTrue(updated.document === moved.document);XCTAssertEqual(updated.document.selectionRevision,fixture.pane.compose.selectionRevision)
+    fixture.pane.compose.spans[0].flags=2
+    let restyled=try ComposeFlowMeasurement.measure(fixture.snapshot(id:3),environment:env,reusing:updated)
+    XCTAssertNotEqual(restyled.geometryGeneration,updated.geometryGeneration)
+    XCTAssertThrowsError(try ComposeFlowMeasurement.measure(moved,environment:env,options:.init(maximumFragments:1),reusing:updated))
+  }
+
+  func testCanonicallyEqualTableSamplesCannotAliasGeometryReuse() throws {
+    var input=try tableFixture().pane
+    input.tables[0].measurement.columns[0].samples=[.with {$0.text="é"}]
+    let first=try snapshot(input),env=ComposeFlowMeasurement.Environment(body:body,monospace:code,width:320)
+    let old=try ComposeFlowMeasurement.measure(first,environment:env)
+    input.tables[0].measurement.columns[0].samples[0].text="e\u{301}"
+    XCTAssertEqual(first.pane.tables,input.tables,"Swift equality intentionally misses the literal encoding change")
+    let next=try ComposeFlowMeasurement.measure(snapshot(input),environment:env,reusing:old)
+    XCTAssertNotEqual(next.geometryGeneration,old.geometryGeneration)
+  }
 }

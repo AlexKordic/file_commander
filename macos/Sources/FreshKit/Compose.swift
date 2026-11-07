@@ -358,7 +358,7 @@ public final class ComposeTextLayout {
   public let size: CGSize
   public let attachments: [PlacedAttachment]
   public let tables: [Table]
-  public struct MeasurementOptions: Sendable {
+  public struct MeasurementOptions: Sendable, Equatable {
     public var maximumContextUnits: Int
     public var maximumCoordinates: Int
     public var maximumFragments: Int

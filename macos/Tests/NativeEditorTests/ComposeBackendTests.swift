@@ -132,8 +132,10 @@ final class ComposeBackendTests: XCTestCase {
     let controller = editor.composeDocument; controller.activate()
     try await eventually(editor, "complete projection for measured flow", timeout: 20) { controller.status == .ready }
     let snapshot = try XCTUnwrap(controller.snapshot), grid = try XCTUnwrap(editor.grid)
-    let first = try XCTUnwrap(grid.focusedCompose), environment = first.layout.measurementEnvironment()
-    let flow = try await Task.detached { try ComposeFlowMeasurement.measure(snapshot, environment: environment) }.value
+    let first = try XCTUnwrap(grid.focusedCompose)
+    try await eventually(editor, "native complete flow coordinator", timeout: 20) { editor.composeFlow.status == .ready }
+    let flow = try XCTUnwrap(editor.composeFlow.flow)
+    XCTAssertTrue(flow.document === snapshot.document)
     XCTAssertFalse(flow.usage.retainedGlyphs); XCTAssertGreaterThan(flow.lines.count, 1800)
     XCTAssertLessThanOrEqual(flow.usage.maximumContextUnits, 16_384)
     XCTAssertEqual(flow.tables.count, 2); XCTAssertFalse(flow.attachments.isEmpty)
@@ -158,7 +160,30 @@ final class ComposeBackendTests: XCTestCase {
     XCTAssertLessThan(translation.y, 0)
     let heading = (snapshot.document.text as NSString).range(of: "Final heading", options: .literal)
     XCTAssertNotEqual(heading.location, NSNotFound); XCTAssertNotNil(flow.bounds(for: heading))
+    grid.setComposePreferences(.init(), zoom: 1.25)
+    XCTAssertNil(editor.composeFlow.flow, "a new font environment retires the old measured generation")
+    try await eventually(editor, "complete flow after native zoom", timeout: 20) { editor.composeFlow.status == .ready }
+    let zoomed = try XCTUnwrap(editor.composeFlow.flow), shown = try XCTUnwrap(grid.focusedCompose)
+    XCTAssertNotEqual(zoomed.geometryGeneration, flow.geometryGeneration)
+    XCTAssertNotNil(zoomed.correspondence(window: UInt64(editor.store.windowID), pane: shown.pane, layout: shown.layout))
+    let localHeading = (shown.layout.text.projection.text as NSString).range(of: "Final heading", options: .literal)
+    XCTAssertNotEqual(localHeading.location, NSNotFound)
+    let selection = zoomed.document.selectionRevision
+    grid.setAccessibilitySelectedTextRange(localHeading)
+    XCTAssertNil(editor.composeFlow.flow, "pending local selections cannot publish an authoritative-only selection generation")
+    try await eventually(editor, "current source selection and complete geometry", timeout: 20) {
+      editor.composeFlow.status == .ready && editor.composeFlow.flow?.document.selectionRevision != selection
+    }
+    let selected = try XCTUnwrap(editor.composeFlow.flow), selectedPane = try XCTUnwrap(grid.focusedCompose)
+    XCTAssertTrue(selected.document.owns(window: UInt64(editor.store.windowID), pane: selectedPane.pane))
+    XCTAssertNotNil(selected.correspondence(window: UInt64(editor.store.windowID), pane: selectedPane.pane, layout: selectedPane.layout))
     XCTAssertEqual(try Data(contentsOf: file), Data(source.utf8))
+    let metrics: [String: Any] = ["source_bytes": source.utf8.count, "projection_utf16": snapshot.document.characterCount,
+      "measured_lines": flow.textIndex.lineCount, "normalized_styles": flow.textIndex.styles.count,
+      "offscreen_crop_utf16_start": visible.location, "start_and_tail_certified": true,
+      "zoom_remeasured": true, "source_selection_replaced_ownership": true, "source_bytes_unchanged": true]
+    try JSONSerialization.data(withJSONObject: metrics, options: .prettyPrinted).write(to: backend.root.appendingPathComponent("flow-metrics.json"))
+    editor.switchBack(); XCTAssertNil(editor.composeFlow.flow); XCTAssertEqual(editor.composeFlow.status, .idle)
   }
 
   @MainActor

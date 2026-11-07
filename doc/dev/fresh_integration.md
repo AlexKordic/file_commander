@@ -1110,11 +1110,32 @@ continues to use the native pane's available point width.
 A crop receives a translation into the complete flow only after its literal
 projection/map, source/selection/formatter owner, fonts, image dimensions, actual
 glyph runs, global indices and line geometry agree. A changed width or owner
-retires the proof; no estimated prefix height is used. This remains an internal
-geometry foundation. Public AX value, selection, styles, visual-line ownership,
-visible ranges, bounds and provisional actions still require a coordinated
-document-wide integration. In particular, table gaps and empty cells cannot
-inherit a guessed accessibility line policy from the fragment array.
+retires the proof; no estimated prefix height is used.
+
+`ComposeFlowTextIndex` defines complete text ownership over those measured
+fragments. Table cells retain source reading order, with each fragment owning
+the structural separators before the next fragment. Empty cells remain lines.
+Soft-wrap boundaries respect upstream/downstream affinity; consumed Unicode
+line endings and cell boundaries select the next line. EOF always belongs to an
+existing measured line, including a trailing empty line when present. Table
+separators without painted glyphs use the owning fragment's measured edge
+caret for bounds. Indexed logical font/attachment spans cover the entire value,
+including gaps; queries need not rebuild a complete attributed string.
+
+The native `ComposeFlowController` measures complete snapshots on one worker,
+including across cancellation and connection reset. Late successful work cannot
+publish retired ownership. A caret/header update can reuse geometry only when
+fonts, image dimensions, admission policy and a literal protobuf digest of all
+layout inputs agree. Canonically equal strings cannot alias different table or
+marker encodings. Reuse always substitutes the current document owner. Source,
+focus, font/width and image changes update or retire the candidate; hiding and
+disconnect release it. Reading known image dimensions starts no offscreen I/O.
+
+This remains an internal generation until public AX value, selection, styles,
+lines, visible ranges, bounds and provisional actions can switch together.
+Pending local selections and composition/virtual insertion withhold the
+authoritative-only flow;
+it does not relabel its old coordinates as the new provisional document.
 Current certified formatting coverage skips redundant source-window preparation.
 Formatter/parser caches, transient allocations and the full native flow still
 require the general resource audit. The coordinator is integrated with the native

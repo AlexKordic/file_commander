@@ -34,6 +34,8 @@ final class NativeEditor: NSObject, CellGridDelegate {
   lazy var composeDocument = ComposeDocumentController { [weak self] request in
     self?.socket?.send(.composeDocument(request))
   }
+  let composeFlow = ComposeFlowController()
+  private var composeFlowOwner: WireComposeIndexOwner?
   private(set) var view: EditorHostView?
   var grid: CellGridView? { view?.grid }
   private var chrome: ChromeView? { view?.chrome }
@@ -140,6 +142,7 @@ final class NativeEditor: NSObject, CellGridDelegate {
     richCompose = environment["FC_NATIVE_RICH_COMPOSE"] == "1"
     measuredTables = richCompose && environment["FC_NATIVE_MEASURED_TABLES"] == "1"
     super.init()
+    composeDocument.onChange = { [weak self] in self?.updateCompleteFlow() }
     composeImages.onChange = { [weak self] in
       self?.grid?.refreshComposeImages(geometryChanged: true)
       self?.updateImageDemands()
@@ -264,6 +267,7 @@ final class NativeEditor: NSObject, CellGridDelegate {
   }
 
   private func disconnect() {
+    composeFlow.reset(); composeFlowOwner = nil
     composeDocument.reset()
     recoverPendingText()
     composeImages.reset()
@@ -289,6 +293,7 @@ final class NativeEditor: NSObject, CellGridDelegate {
   }
 
   private func connectionEnded(_ reason: String?) {
+    composeFlow.reset(); composeFlowOwner = nil
     composeDocument.reset()
     let failedToAttach = !receivedHello && pendingShow
     recoverPendingText()
@@ -315,6 +320,7 @@ final class NativeEditor: NSObject, CellGridDelegate {
     view.grid.richPopupProjection = richCompose
     view.grid.composeImageController = composeImages
     view.grid.composeViewportController = composeViewports
+    view.grid.onComposePresentationChanged = { [weak self] in self?.updateCompleteFlow() }
     view.grid.sendComposeIndex = { [weak self] request in self?.socket?.send(.composeIndex(request)) }
     self.view = view
     let menus = FreshMenus(store: store) { [weak self] action, argsJson in self?.send(.action(name: action, argsJson: argsJson)) }
@@ -524,7 +530,36 @@ final class NativeEditor: NSObject, CellGridDelegate {
 
   private func updateDocumentDemand() {
     let pane = shown && richCompose ? store.panes.first(where: { $0.hasCompose && $0.compose.focused }) : nil
+    let owner = pane.flatMap { pane -> WireComposeIndexOwner? in
+      guard store.composeDocumentUpdates, pane.hasBuffer, pane.compose.hasViewport, pane.compose.viewport.epoch != 0,
+            pane.compose.documentLen <= UInt64(ComposeDocumentReceiver.maximumSource) else { return nil }
+      return .with {
+        $0.window = UInt64(store.windowID); $0.leaf = pane.leaf; $0.buffer = pane.buffer
+        $0.epoch = pane.compose.viewport.epoch; $0.revision = pane.compose.bufferRevision
+        $0.authority = pane.compose.assetAuthority; $0.document = pane.compose.assetDocument; $0.length = pane.compose.documentLen
+      }
+    }
+    let sameDocument = owner.map { composeFlowOwner?.isSameDocument(as: $0) == true } ?? false
+    if !sameDocument { composeFlow.reset() }
+    composeFlowOwner = owner
     composeDocument.update(window: UInt64(store.windowID), pane: pane, supported: store.composeDocumentUpdates)
+    updateCompleteFlow()
+  }
+
+  private func updateCompleteFlow() {
+    guard shown, richCompose, let snapshot = composeDocument.snapshot, let pane = grid?.focusedCompose,
+          snapshot.document.owns(window: UInt64(store.windowID), pane: pane.pane),
+          !pane.pendingSelection, pane.layout.composition == nil, pane.layout.virtualInsertion == nil, pane.virtualSelections == nil else {
+      composeFlow.update(snapshot: nil, environment: nil); return
+    }
+    // Read already known dimensions for the whole document without demanding
+    // offscreen bytes or retaining decoded pixels in the measurement worker.
+    var images: [UInt64: ComposeImageState] = [:]
+    for image in snapshot.pane.images {
+      images[image.start] = composeImages.state(scope: pane.scope, image: image,
+        authority: snapshot.pane.assetAuthority, document: snapshot.pane.assetDocument)
+    }
+    composeFlow.update(snapshot: snapshot, environment: pane.layout.measurementEnvironment(images: images))
   }
 
   private func updateImageDemands(revalidate: Bool = false) {

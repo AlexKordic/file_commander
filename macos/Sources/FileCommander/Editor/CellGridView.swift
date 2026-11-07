@@ -88,6 +88,7 @@ final class CellGridView: NSView, @preconcurrency NSTextInputClient {
   weak var composeImageController: ComposeImageController?
   weak var composeViewportController: ComposeViewportController?
   var sendComposeIndex: ((WireComposeIndexRequest) -> Void)?
+  var onComposePresentationChanged: (() -> Void)?
   lazy var composeNavigation = ComposeAccessibilityNavigation(grid: self)
   private var composeGeometryRevision: UInt64 = 0
   var richPopupProjection = false
@@ -251,6 +252,7 @@ final class CellGridView: NSView, @preconcurrency NSTextInputClient {
         inputContext?.textInputClientDidUpdateSelection()
       }
     }
+    onComposePresentationChanged?()
   }
 
   private func updateComposeTooltips() {
