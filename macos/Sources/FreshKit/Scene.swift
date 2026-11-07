@@ -146,19 +146,23 @@ public struct FrameTiming: Sendable {
   /// Allocations and bytes of Fresh's previous push (an `alloc-stats` build).
   public var prevAllocs, prevAllocBytes: Int?
 
-  init(_ t: WireTiming) {
-    ack = Int(t.ack)
+  init?(_ t: WireTiming) {
+    guard let ack = Int(exactly: t.ack), let queued = Int(exactly: t.queued),
+          let ahead = Int(exactly: t.ahead), let top = Int(exactly: t.top),
+          !t.hasPrevAllocs || Int(exactly: t.prevAllocs) != nil,
+          !t.hasPrevAllocBytes || Int(exactly: t.prevAllocBytes) != nil else { return nil }
+    self.ack = ack
     buildMs = t.buildMs
     diffMs = t.encodeMs
     renderMs = t.renderMs
     gridMs = t.gridMs
-    queued = Int(t.queued)
-    ahead = Int(t.ahead)
+    self.queued = queued
+    self.ahead = ahead
     owed = Int(t.owed)
-    top = Int(t.top)
+    self.top = top
     cpuMs = t.cpuMs
-    prevAllocs = t.hasPrevAllocs ? Int(t.prevAllocs) : nil
-    prevAllocBytes = t.hasPrevAllocBytes ? Int(t.prevAllocBytes) : nil
+    prevAllocs = t.hasPrevAllocs ? Int(exactly: t.prevAllocs) : nil
+    prevAllocBytes = t.hasPrevAllocBytes ? Int(exactly: t.prevAllocBytes) : nil
   }
 }
 
@@ -223,8 +227,18 @@ public struct SceneMessage: @unchecked Sendable {
     default:
       return nil
     }
+    // Wire counters are unsigned 64-bit values; the native model uses Int.
+    // Refuse an unrepresentable frame before conversions or publication.
+    guard let sequence = Int(exactly: frame.seq),
+          !frame.hasWindowID || Int(exactly: frame.windowID) != nil,
+          !frame.hasClipboard || Int(exactly: frame.clipboard.seq) != nil else { return nil }
+    let timing: FrameTiming?
+    if frame.hasTiming {
+      guard let value = FrameTiming(frame.timing) else { return nil }
+      timing = value
+    } else { timing = nil }
     self.frame = frame
-    sequence = Int(frame.seq)
+    self.sequence = sequence
     var rows: [Int: [CellRun]] = [:]
     for row in frame.rows { rows[Int(row.index)] = CellRun.runs(row) }
     gridRows = rows
@@ -232,7 +246,7 @@ public struct SceneMessage: @unchecked Sendable {
       (to: Int(frame.copies[$0]), from: Int(frame.copies[$0 + 1]), count: Int(frame.copies[$0 + 2]))
     }
     gridCount = frame.hasGridLen ? Int(frame.gridLen) : nil
-    timing = frame.hasTiming ? FrameTiming(frame.timing) : nil
+    self.timing = timing
   }
 }
 

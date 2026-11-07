@@ -1717,6 +1717,15 @@ scalar constructor. No source, Markdown context or display width is shortened.
 Source capture and index construction still scan a changed revision; this is
 not incremental source/semantic parsing or an application latency guarantee.
 
+### Scene frame admission
+
+The native model stores scene sequence, window, clipboard and timing counters
+as `Int`. Every supplied unsigned wire counter must be exactly representable
+before a hello or frame is published. A value outside that range ends the
+scene connection through the ordinary recovery path; pending native text
+remains available through Copy Uninserted Text. The largest representable
+counter and optional zero-valued allocation metrics retain their exact values.
+
 ### Native pending-input admission
 
 The opt-in native Compose path admits at most 128 pending input events and

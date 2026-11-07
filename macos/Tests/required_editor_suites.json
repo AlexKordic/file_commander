@@ -42,6 +42,7 @@
   "FreshKitTests.RecordedSceneTests",
   "FreshKitTests.SceneKeysTests",
   "FreshKitTests.SceneTests",
+  "FreshKitTests.SceneValidationTests",
   "FreshKitTests.SceneWireTests",
   "NativeEditorTests.ComposeBackendTests",
   "NativeEditorTests.ComposeInputTests",

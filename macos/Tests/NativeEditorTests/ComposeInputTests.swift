@@ -149,6 +149,7 @@ private final class ScenePeer: @unchecked Sendable {
   }
 
   func show(_ pane: WirePane) { send(.frame, frame(pane: pane)) }
+  func sendFrame(_ value: WireFrame) { send(.frame, value) }
   func index(_ chunk: WireComposeIndexChunk) { send(.composeIndexChunk, chunk) }
 
   func showPopup(_ pane: WirePane, popup: WireScenePopup) {
@@ -187,6 +188,21 @@ private final class ScenePeer: @unchecked Sendable {
 }
 
 final class ComposeInputTests: XCTestCase {
+  @MainActor
+  func testInvalidSceneCounterClosesTheConnectionAndRecoversPendingText() async throws {
+    let peer = try ScenePeer(pane: pane("Tail")); defer { peer.close() }
+    let editor = richEditor(); defer { editor.detachAll() }
+    editor.attach(socketPath: peer.path, app: nil)
+    try await eventually { editor.grid?.focusedCompose != nil }
+    let revision = editor.store.revision
+    editor.send(.text("日本語"))
+    try await eventually { peer.inputs.count == 1 }
+    peer.sendFrame(.with { $0.seq = 2; $0.windowID = UInt64.max })
+    try await eventually { !editor.connected && editor.uninsertedText == ["日本語"] }
+    XCTAssertEqual(editor.store.windowID, 1)
+    XCTAssertEqual(editor.store.revision, revision, "an invalid frame is never published")
+  }
+
   @MainActor
   func testStalledPeerBoundsAdmittedTypingAndRetainsOverflowVerbatim() async throws {
     let peer = try ScenePeer(pane: pane("Tail")); defer { peer.close() }

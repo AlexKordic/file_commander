@@ -788,6 +788,12 @@ lookups and EOF, and retain the existing raw-context/caret-window contracts.
 All six parser profile panes also remain byte-identical to their prior controls.
 Constructor timings exclude buffer extraction, parsing, transport and GUI paint.
 
+Scene-frame validation tests exercise signed-native/unsigned-wire counter
+boundaries for hellos and frames, including optional timing values. A private
+socket peer sends an unrepresentable window counter while text awaits a reply;
+the client must close, retain the text and leave its last scene unpublished.
+The required native-suite registry includes these decoder cases.
+
 Pending-input admission tests use a private scene peer that withholds receipts.
 They distinguish the admitted preview from overflow recovery, enforce aggregate
 payload bytes, drain accepted edits in order without replaying rejected text,
