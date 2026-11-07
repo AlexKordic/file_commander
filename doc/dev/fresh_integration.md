@@ -1274,12 +1274,15 @@ skips redundant source-window preparation;
 formatter/parser caches, transient allocations and the full native flow still
 require the general resource audit.
 
-Fresh's semantic cache keeps at most eight composing documents and reuses live
-tab snapshots. A 64 MiB soft budget additionally limits retained source String
-capacity and sparse UTF-16 index capacity. It evicts older snapshots before
+Fresh's semantic cache reuses live tab snapshots, with soft retention targets
+of eight documents and 64 MiB of source String and sparse UTF-16 index capacity.
+It evicts older snapshots before
 copying a new revision, then checks actual capacity after index construction.
-The current document is retained even if it alone exceeds that budget; no
-source is truncated and no file-size restriction is added. Obsolete cached
+The requested document and visible Compose working set remain retained even
+if they exceed either target. Visible panes/workspaces cannot evict and reparse
+each other continually; leaving Compose makes a snapshot eligible for eviction
+during polling, without another gather. No source is truncated and no file-size
+restriction is added. Obsolete cached
 source/index ownership is released before the replacement read, while its
 formatter decorations can still rebase to the new source.
 Gathering and parser polling release entries whose window,

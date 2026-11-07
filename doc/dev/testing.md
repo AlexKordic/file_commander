@@ -568,7 +568,10 @@ Fresh parser-cache unit suite additionally checks snapshot retention by allocate
 source/index capacity: LRU eviction below eight entries, index capacity at the
 64 MiB boundary, exact Unicode/CRLF for an oversized current document, and an
 evicted parser job whose real slot and source remain owned until completion.
-The current document is exempt from the soft retention budget. These checks do
+The requested document and visible Compose working set are exempt from the soft
+retention targets. A multi-workspace pressure test checks stable snapshot
+identities across repeated gathering, then retirement during polling after a
+workspace leaves Compose. These checks do
 not bound semantic metadata, editor buffers, parser transients or native input
 history.
 
