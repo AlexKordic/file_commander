@@ -14,6 +14,10 @@ repo = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(repo / 'tools'))
 from release_gate import required_tests, manual_tests
 
+# Includes interpreter startup and the fixture's child process. These checks
+# assert registry/results/package behavior; they are not latency benchmarks.
+FIXTURE_TIMEOUT = 15
+
 require(required_tests(repo, 'Darwin') - required_tests(repo, 'Linux') == {'fc.macos.native_editor'},
         'native editor qualification must be required only on macOS')
 require(required_tests(repo, 'Linux') <= required_tests(repo, 'Darwin'), 'macOS registry loses common contracts')
@@ -123,7 +127,7 @@ else:
     def run(lane='release', control='pass', valid=False, fake_ctest=True):
         env = dict(os.environ, FC_LANE_CONTROL=control)
         if fake_ctest: env['PATH'] = str(root) + os.pathsep + env['PATH']
-        result = subprocess.run([*base, lane, '--build', str(build)], env=env, capture_output=True, text=True, timeout=5)
+        result = subprocess.run([*base, lane, '--build', str(build)], env=env, capture_output=True, text=True, timeout=FIXTURE_TIMEOUT)
         require((result.returncode == 0) == valid, f'lane control {lane}/{control}: {result.stdout} {result.stderr}')
         return result
     run(valid=True)
@@ -191,7 +195,7 @@ raise SystemExit(97)
     def run_package(valid=True, smoke_status=0):
         smoke_marker.unlink(missing_ok=True)
         result = subprocess.run(package_command, env=dict(package_env, FC_PACKAGE_SMOKE_STATUS=str(smoke_status)),
-                                capture_output=True, text=True, timeout=5)
+                                capture_output=True, text=True, timeout=FIXTURE_TIMEOUT)
         require(not build_marker.exists(), 'manual package test invoked the build toolchain')
         require(smoke_marker.exists() == valid, f'package validation did not guard relocation: {result.stdout} {result.stderr}')
         if valid:
@@ -211,7 +215,7 @@ raise SystemExit(97)
     binaries['bin/fresh'].chmod(0o600); run_package(valid=False); binaries['bin/fresh'].chmod(0o700)
     smoke_marker.unlink(missing_ok=True)
     result = subprocess.run([*package_command, '--build-only'], env=package_env,
-                            capture_output=True, text=True, timeout=5)
+                            capture_output=True, text=True, timeout=FIXTURE_TIMEOUT)
     require(result.returncode != 0 and build_marker.exists() and not smoke_marker.exists(),
             'automatic packaging did not build or ignored the build failure')
     # Reproduce the original bug with a real one-test CTest project.
@@ -219,6 +223,6 @@ raise SystemExit(97)
     result = run(fake_ctest=False)
     require('incomplete release suite' in result.stderr, 'unrelated real CTest project accepted')
     wrong = 'Linux' if platform.system() == 'Darwin' else 'Darwin'
-    result = subprocess.run([*base, 'fast', '--expect-os', wrong], capture_output=True, text=True, timeout=5)
+    result = subprocess.run([*base, 'fast', '--expect-os', wrong], capture_output=True, text=True, timeout=FIXTURE_TIMEOUT)
     require(result.returncode != 0 and 'native OS mismatch' in result.stderr, 'cross-host qualification accepted')
 print('PASS complete release registry, configuration, results, artifacts, manual package isolation and native host identity')

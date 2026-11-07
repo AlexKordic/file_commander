@@ -22,8 +22,10 @@ with tempfile.TemporaryDirectory(prefix='fc-supervisor-') as directory:
     crash = executable('signal', 'import os, signal\nos.kill(os.getpid(), signal.SIGTERM)\n')
     noisy = executable('noisy', "import os\nfor _ in range(128): os.write(1, b'x'*65536)\nprint('FINAL')\n")
     hang = executable('hang', 'import time\ntime.sleep(30)\n')
-    def run(binary):
-        return run_script(binary, root/'unused', root, root/(binary.name+'-config'), timeout=2, output_limit=4096)
+    def run(binary, timeout=10):
+        # Normal Python fixtures test exit/output/ownership, not startup speed.
+        # Keep the actual deadline probe explicit and independent below.
+        return run_script(binary, root/'unused', root, root/(binary.name+'-config'), timeout=timeout, output_limit=4096)
     descriptors = Path('/dev/fd')
     before = len(list(descriptors.iterdir()))
     for _ in range(8):
@@ -38,7 +40,7 @@ with tempfile.TemporaryDirectory(prefix='fc-supervisor-') as directory:
     require(run(crash)[0] == -signal.SIGTERM, 'signal lost')
     result = run(noisy)
     require(result[0] == 0 and len(result[3]) <= 4096 and b'FINAL' in result[3], 'noisy output is not bounded tail')
-    require(run(hang)[2], 'deadline not reported')
+    require(run(hang, timeout=2)[2], 'deadline not reported')
     def callback_failure(master, elapsed):
         raise RuntimeError('deliberate callback failure')
     try:
@@ -50,7 +52,8 @@ with tempfile.TemporaryDirectory(prefix='fc-supervisor-') as directory:
     require(len(list(descriptors.iterdir()))==before,'callback failure leaks descriptors')
     with ThreadPoolExecutor(max_workers=4) as pool:
         results = list(pool.map(run, [quick]*8))
-    require(all(r[0] == 0 and b'[PASS] quick' in r[3] for r in results), 'parallel runs interfere')
+    require(all(r[0] == 0 and b'[PASS] quick' in r[3] for r in results),
+            f'parallel runs failed: {[(r[0], round(r[1], 3), r[2], r[3][-512:]) for r in results]}')
     child_pids = root/'children'
     tree = executable('tree', '''import os, subprocess, sys, time
 child = subprocess.Popen([sys.executable, '-c', 'import subprocess,sys,time; p=subprocess.Popen([sys.executable,"-c","import time; time.sleep(30)"], start_new_session=True); print(p.pid,flush=True); time.sleep(30)'], start_new_session=True, stdout=open(sys.argv[2], 'w'))

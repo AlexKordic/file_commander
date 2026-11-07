@@ -30,7 +30,11 @@ python3 tools/run_test_lane.py fast --build build-release
 
 Each test has a CTest timeout. The Python drivers run `fc` with its own
 `HOME`, XDG directories and fixture directory, so tests never touch your real
-settings. The shared PTY supervisor in `test/lua_runner.py`, used by the Lua,
+settings. Normal Python harness fixtures allow interpreter startup separately
+from assertions about exit status, signals, output and process ownership. The
+supervisor's deliberate two-second deadline probe and tree teardown deadline
+remain explicit; normal fixture execution is not a startup latency benchmark.
+The shared PTY supervisor in `test/lua_runner.py`, used by the Lua,
 terminal and package tests, also caps the captured output and kills the whole
 process tree at the end.
 
