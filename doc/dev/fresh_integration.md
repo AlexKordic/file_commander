@@ -1727,6 +1727,13 @@ hello. Pre-open and post-close sends are ignored. Requested-message counts and
 serial queue insertion move together. These guarantees do not establish an OS
 connect timeout or complete transport/decode resource budgets.
 
+A failed transmit ends the connection and wakes its reader even when the peer
+can still send. The reader delivers one close notification carrying the first
+terminal cause; explicit cancellation retains its normal nil cause. Pending
+native text uses the existing close/recovery path. A zero-progress write is an
+I/O failure, and queued packets stop after termination. This does not impose a
+reply deadline on a peer that successfully accepts bytes but never answers.
+
 ### Scene frame admission
 
 The native model stores scene sequence, window, clipboard and timing counters

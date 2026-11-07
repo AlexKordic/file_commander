@@ -791,6 +791,12 @@ Constructor timings exclude buffer extraction, parsing, transport and GUI paint.
 Scene-socket lifecycle cases close before opening, reject duplicate opens,
 ignore sends outside an open connection, and race ordinary input with startup.
 The peer records actual wire kinds and must receive the hello first.
+Transmit-failure cases use only their private Unix-socket fixture: they shut
+down its client write half while the peer keeps its output half alive. One
+case proves reception still works before requiring write-error closure;
+another requires pending native text recovery. Descriptor inspection is solely
+for OS fault injection; production has no test-only transport hook. Explicit
+close still reports its normal nil cause. The test wait is not an app deadline.
 
 Scene-frame validation tests exercise signed-native/unsigned-wire counter
 boundaries for hellos and frames, including optional timing values. A private

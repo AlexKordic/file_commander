@@ -29,6 +29,7 @@ private final class ScenePeer: @unchecked Sendable {
   private var receivedIndexes: [WireComposeIndexRequest] = []
   private var sequence: UInt64 = 0
   private var applied: UInt64 = 0
+  private let holdReadEOF: DispatchSemaphore?
 
   var hellos: [WireClientHello] { lock.lock(); defer { lock.unlock() }; return receivedHellos }
   var inputs: [WireComposeInput] { lock.lock(); defer { lock.unlock() }; return received }
@@ -40,7 +41,9 @@ private final class ScenePeer: @unchecked Sendable {
   var lastApplied: UInt64 { lock.lock(); defer { lock.unlock() }; return applied }
 
   init(pane: WirePane, version: UInt32 = SceneWire.version, regionProbes: Bool = true, nativePopups: Bool = true,
-       sourceSelections: Bool = true, semanticIndex: Bool = false, greeting: Greeting = .normal) throws {
+       sourceSelections: Bool = true, semanticIndex: Bool = false, greeting: Greeting = .normal,
+       holdAfterReadEOF: Bool = false) throws {
+    holdReadEOF = holdAfterReadEOF ? DispatchSemaphore(value: 0) : nil
     try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
     listener = Darwin.socket(AF_UNIX, SOCK_STREAM, 0)
     var started = false
@@ -96,6 +99,9 @@ private final class ScenePeer: @unchecked Sendable {
           lock.lock(); receivedAssets.append(request); lock.unlock()
         }
       }
+      // A write-fault fixture can keep the server's output half alive after
+      // client input EOF. close() always releases this private wait.
+      _ = holdReadEOF?.wait(timeout: .now() + 30)
     }
     started = true
   }
@@ -186,23 +192,69 @@ private final class ScenePeer: @unchecked Sendable {
     lock.unlock()
     if oldClient >= 0 { Darwin.shutdown(oldClient, SHUT_RDWR) }
     if oldListener >= 0 { Darwin.shutdown(oldListener, SHUT_RDWR); Darwin.close(oldListener) }
+    holdReadEOF?.signal()
     try? FileManager.default.removeItem(at: directory)
   }
 }
 
 final class ComposeInputTests: XCTestCase {
+  /// Fault the private fixture's client transmit side, leaving reception live.
+  /// Mirror locates the otherwise private descriptor solely for OS fault
+  /// injection; production needs no test-only transport or public fd API.
+  private func failClientWrites(_ socket: SceneSocket, fixture: ScenePeer) throws {
+    XCTAssertEqual(socket.path, fixture.path)
+    let fd = try XCTUnwrap(Mirror(reflecting: socket).children.first { $0.label == "fd" }?.value as? Int32)
+    XCTAssertGreaterThanOrEqual(fd, 0)
+    XCTAssertEqual(Darwin.shutdown(fd, SHUT_WR), 0)
+  }
+
+  @MainActor
+  func testSceneWriteFailureEndsTheConnectionWhileReceptionRemainsLive() async throws {
+    let peer = try ScenePeer(pane: pane("Tail"), holdAfterReadEOF: true); defer { peer.close() }
+    let socket = SceneSocket(path: peer.path); defer { socket.close() }
+    var messages = 0, ended = false, reason: String?
+    socket.onMessage = { _ in messages += 1 }
+    socket.onClose = { value in ended = true; reason = value }
+    try socket.open(telemetry: false)
+    try await eventually { messages == 1 }
+    try failClientWrites(socket, fixture: peer)
+    peer.show(pane("Reception is still alive"))
+    try await eventually { messages == 2 }
+    XCTAssertTrue(socket.isOpen)
+    socket.send(.key(.with { $0.key = "write-fault" }))
+    try await eventually { ended }
+    XCTAssertFalse(socket.isOpen)
+    XCTAssertTrue(reason?.contains("write") == true)
+  }
+
+  @MainActor
+  func testSceneWriteFailureRecoversPendingNativeText() async throws {
+    let peer = try ScenePeer(pane: pane("Tail"), holdAfterReadEOF: true); defer { peer.close() }
+    let editor = richEditor(); defer { editor.detachAll() }
+    editor.attach(socketPath: peer.path, app: nil)
+    try await eventually { editor.grid?.focusedCompose != nil && peer.lastApplied >= 1 }
+    editor.send(.text("日本語"))
+    try await eventually { peer.inputs.count == 1 }
+    let socket = try XCTUnwrap(Mirror(reflecting: editor).children.first { $0.label == "socket" }?.value as? SceneSocket)
+    try failClientWrites(socket, fixture: peer)
+    editor.gridDidResize(try XCTUnwrap(editor.grid), columns: 80, rows: 35)
+    try await eventually { !editor.connected && editor.uninsertedText == ["日本語"] }
+  }
+
   @MainActor
   func testSceneSocketRejectsDuplicateOpenAndIgnoresSendsAfterClose() async throws {
     let peer = try ScenePeer(pane: pane("Tail")); defer { peer.close() }
     let socket = SceneSocket(path: peer.path); defer { socket.close() }
     var closes = 0
-    socket.onClose = { _ in closes += 1 }
+    var closeReasons: [String?] = []
+    socket.onClose = { reason in closeReasons.append(reason); closes += 1 }
     try socket.open(telemetry: false)
     try await eventually { peer.hellos.count == 1 }
     XCTAssertThrowsError(try socket.open(telemetry: false))
     XCTAssertTrue(socket.isOpen); XCTAssertEqual(socket.requested, 1)
     socket.close()
     try await eventually { closes == 1 }
+    XCTAssertNil(closeReasons[0], "an intentional close retains its normal termination cause")
     socket.send(.paste("must not be queued")); socket.close()
     XCTAssertEqual(socket.requested, 1)
     XCTAssertEqual(peer.hellos.count, 1)

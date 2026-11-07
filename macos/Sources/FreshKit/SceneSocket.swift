@@ -50,6 +50,7 @@ public final class SceneSocket: @unchecked Sendable {
   private let writes = DispatchQueue(label: "fc.scene.write")
   private let state = NSLock()
   private var closed = false
+  private var terminalReason: String?
   /// Messages written so far; touched only on the write queue.
   private var written = 0
   /// Messages handed to `send` so far, under `state`.
@@ -133,7 +134,9 @@ public final class SceneSocket: @unchecked Sendable {
   private func enqueue(_ bytes: [UInt8], payloadCount: Int, name: (type: String, kind: String?)) {
     requestedCount += 1
     writes.async { [weak self] in
-      guard let self, (try? self.writeAll(bytes)) != nil else { return }
+      guard let self, self.isOpen else { return }
+      do { try self.writeAll(bytes) }
+      catch { self.end(reason: String(describing: error)); return }
       self.written += 1
       self.onSent?(self.written, name.type, name.kind, payloadCount, ProcessInfo.processInfo.systemUptime)
     }
@@ -150,12 +153,21 @@ public final class SceneSocket: @unchecked Sendable {
   /// Ends an active connection; `onClose` follows when its reader exits.
   /// Closing an unopened instance prevents a later open.
   public func close() {
+    end(reason: nil)
+  }
+
+  /// The first terminal cause wins. A transmit failure must also wake the
+  /// reader, whose single completion delivers normal connection recovery.
+  @discardableResult
+  private func end(reason: String?) -> String? {
     state.lock()
     let wasClosed = closed
-    closed = true
+    if !wasClosed { closed = true; terminalReason = reason }
     let descriptor = fd
+    let finalReason = terminalReason
     state.unlock()
     if !wasClosed, descriptor >= 0 { shutdown(descriptor, SHUT_RDWR) }
+    return finalReason
   }
 
   public var isOpen: Bool {
@@ -265,12 +277,9 @@ public final class SceneSocket: @unchecked Sendable {
         break
       }
     }
-    state.lock()
-    closed = true
-    state.unlock()
-    shutdown(fd, SHUT_RDWR)
+    let finalReason = end(reason: reason)
     DispatchQueue.main.async { [weak self] in
-      MainActor.assumeIsolated { self?.onClose?(reason) }
+      MainActor.assumeIsolated { self?.onClose?(finalReason) }
     }
   }
 
@@ -278,9 +287,9 @@ public final class SceneSocket: @unchecked Sendable {
     var offset = 0
     while offset < bytes.count {
       let n = bytes[offset...].withUnsafeBytes { write(fd, $0.baseAddress, $0.count) }
-      if n < 0 {
-        if errno == EINTR { continue }
-        throw Failure.system("write", errno)
+      if n <= 0 {
+        if n < 0 && errno == EINTR { continue }
+        throw Failure.system("write", n == 0 ? EIO : errno)
       }
       offset += n
     }
