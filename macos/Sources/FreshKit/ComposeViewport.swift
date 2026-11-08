@@ -35,6 +35,14 @@ public struct ComposeViewport {
     limitedHorizontal(CGFloat(anchor.horizontalOffset))
   }
 
+  /// A complete layout can seek in measured pixels without estimating a file
+  /// height from terminal rows. Cropped layouts need a source-region probe.
+  public func moved(_ anchor: WireComposeViewport, toFraction fraction: CGFloat) -> WireComposeViewport? {
+    guard fraction.isFinite, text.projection.source.lowerBound == 0,
+          UInt64(text.projection.source.upperBound) == documentLength else { return nil }
+    return anchored(at: min(1, max(0, fraction)) * max(0, text.size.height - height), from: anchor)
+  }
+
   public func moved(_ anchor: WireComposeViewport, by delta: CGFloat, horizontally horizontal: CGFloat = 0, fallback: CGFloat = 0) -> WireComposeViewport? {
     guard delta.isFinite, horizontal.isFinite, delta != 0 || horizontal != 0 else { return nil }
     var result = anchor

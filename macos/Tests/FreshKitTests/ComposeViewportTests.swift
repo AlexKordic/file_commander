@@ -192,6 +192,72 @@ final class ComposeViewportTests: XCTestCase {
     .with { $0.windowID = 1; $0.leaf = leaf; $0.buffer = buffer; $0.bufferRevision = 4 }
   }
 
+  func testScrollbarFractionsUseMeasuredHeightAndPreserveHorizontalPosition() throws {
+    let text = try layout(String(repeating: "café 東京 👩🏽‍💻 and wrapped prose.\n", count: 100), width: 170)
+    let viewport = ComposeViewport(text: text, documentLength: UInt64(text.projection.source.count), height: 137)
+    let anchor = WireComposeViewport.with { $0.epoch = 7; $0.horizontalOffset = 12 }
+    for fraction: CGFloat in [0, 0.23, 0.8, 1] {
+      let next = try XCTUnwrap(viewport.moved(anchor, toFraction: fraction))
+      XCTAssertEqual(viewport.displayedTop(next), fraction * (text.size.height - viewport.height), accuracy: 0.001)
+      XCTAssertEqual(next.horizontalOffset, 12); XCTAssertEqual(next.epoch, 7)
+      XCTAssertNotNil(text.caret(for: Int(next.position)))
+    }
+    XCTAssertNil(viewport.moved(anchor, toFraction: .nan))
+    let cropped = ComposeViewport(text: try layout("part\n", start: 100), documentLength: 1000, height: 137)
+    XCTAssertNil(cropped.moved(anchor, toFraction: 0.8), "a crop must not masquerade as the complete file")
+  }
+
+  @MainActor
+  func testScrollbarSeekCoalescesAndNormalizesUTF8BeforeMovingItsAnchor() {
+    var sent: [WireComposeViewportRequest] = []
+    let controller = ComposeViewportController { sent.append($0) }, owner = scope()
+    let initial = WireComposeViewport.with { $0.epoch = 7; $0.horizontalOffset = 17 }
+    func shown(_ viewport: WireComposeViewport) -> WirePane {
+      var value = pane(owner, anchor: viewport); value.compose.documentLen = 10_000; return value
+    }
+    XCTAssertTrue(controller.seek(scope: owner, from: initial, position: 3333, length: 10_000))
+    XCTAssertTrue(controller.seek(scope: owner, from: controller.value(scope: owner, remote: initial), position: 7777, length: 10_000))
+    XCTAssertEqual(sent.count, 1); XCTAssertEqual(sent[0].position, initial.position)
+    var remote = initial; remote.sequence = 1; remote.region = 3332
+    controller.observe(window: 1, panes: [shown(remote)], reply: .with { $0.id = 1; $0.accepted = true })
+    XCTAssertEqual(sent.count, 2); XCTAssertEqual(sent[1].region, 7777)
+    XCTAssertEqual(controller.seeking(scope: owner), 7777)
+    remote.sequence = 2; remote.region = 7775
+    controller.observe(window: 1, panes: [shown(remote)], reply: .with { $0.id = 2; $0.accepted = true })
+    XCTAssertEqual(sent.count, 3); XCTAssertEqual(sent[2].position, 7775)
+    XCTAssertFalse(sent[2].hasRegion); XCTAssertEqual(sent[2].offset, 0)
+    XCTAssertEqual(sent[2].horizontalOffset, 17); XCTAssertNil(controller.seeking(scope: owner))
+    XCTAssertEqual(controller.value(scope: owner, remote: remote).position, 7775)
+    controller.observe(window: 1, panes: [shown(remote)], reply: .with { $0.id = 2; $0.accepted = true })
+    XCTAssertEqual(sent.count, 3, "a delayed probe receipt cannot repeat the jump")
+  }
+
+  @MainActor
+  func testScrollbarSeekRetiresOnWheelEditReplacementRejectionAndReset() {
+    let owner = scope(), initial = WireComposeViewport.with { $0.epoch = 7 }
+    for change in 0..<7 {
+      var sent: [WireComposeViewportRequest] = []
+      let controller = ComposeViewportController { sent.append($0) }
+      XCTAssertTrue(controller.seek(scope: owner, from: initial, position: 500, length: 1000))
+      var remote = initial; remote.sequence = 1; remote.region = 500
+      var shown = pane(owner, anchor: remote); shown.compose.documentLen = 1000
+      switch change {
+      case 0:
+        var moved = initial; moved.position = 40
+        _ = controller.move(scope: owner, from: controller.value(scope: owner, remote: initial), to: moved, user: true)
+      case 1: shown.compose.bufferRevision += 1
+      case 2: shown.compose.viewport.epoch += 1
+      case 3: shown.buffer += 1
+      case 4: break
+      case 5: controller.reset()
+      default: break
+      }
+      controller.observe(window: change == 6 ? 2 : 1, panes: [shown], reply: .with { $0.id = 1; $0.accepted = change != 4 })
+      XCTAssertNil(controller.seeking(scope: owner))
+      XCTAssertFalse(sent.dropFirst().contains { $0.position == 500 && !$0.hasRegion }, "retired seeks cannot redirect the current document")
+    }
+  }
+
   @MainActor
   func testRegionOnlyRequestsCoalesceAndCannotChangeAnotherClientsVisibleAnchor() throws {
     var sent: [WireComposeViewportRequest] = []

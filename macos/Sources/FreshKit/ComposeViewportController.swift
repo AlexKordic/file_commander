@@ -11,6 +11,11 @@ public final class ComposeViewportController {
   }
   private var latest: [Target: WireComposeViewportRequest] = [:]
   private var inFlight: WireComposeViewportRequest?
+  private struct Seek {
+    let request: WireComposeViewportRequest
+    let length: UInt64
+  }
+  private var seeks: [Target: Seek] = [:]
   private var nextID: UInt64 = 0
   private let send: (WireComposeViewportRequest) -> Void
   public var onChange: (() -> Void)?
@@ -34,6 +39,30 @@ public final class ComposeViewportController {
     }
   }
 
+  public func seeking(scope: WireComposeScope) -> UInt64? {
+    guard let seek = seeks[Target(scope)], seek.request.scope.bufferRevision == scope.bufferRevision else { return nil }
+    return seek.request.region
+  }
+
+  /// A thumb can point into an unmeasured UTF-8 scalar. Ask Fresh to normalize
+  /// that region before promoting it to a durable source anchor. Cursor and
+  /// terminal-client viewports remain untouched.
+  @discardableResult
+  public func seek(scope: WireComposeScope, from current: WireComposeViewport, position: UInt64, length: UInt64) -> Bool {
+    guard position <= length, Int(exactly: length) != nil, current.epoch != 0,
+          current.affinity <= 1, current.offset.isFinite, abs(current.offset) <= 100_000,
+          current.horizontalOffset.isFinite, (0...100_000_000).contains(current.horizontalOffset) else { return false }
+    let target = Target(scope)
+    if let previous = seeks[target], previous.request.scope == scope, previous.request.epoch == current.epoch,
+       previous.request.region == position { return false }
+    var probe = current; probe.region = position
+    userScrollGeneration &+= 1
+    enqueue(scope: scope, desired: probe)
+    seeks[target] = .init(request: latest[target]!, length: length)
+    onChange?()
+    return true
+  }
+
   @discardableResult
   public func move(scope: WireComposeScope, from current: WireComposeViewport, to desired: WireComposeViewport, user: Bool) -> Bool {
     guard desired.epoch == current.epoch, desired.affinity <= 1, desired.offset.isFinite,
@@ -43,9 +72,19 @@ public final class ComposeViewportController {
     // A physical scroll also wins over a queued key's later caret reveal when
     // it reaches a document boundary and does not actually move the viewport.
     if user { userScrollGeneration &+= 1 }
+    let cancelledSeek = seeks.removeValue(forKey: Target(scope)) != nil
     guard desired.position != current.position || desired.affinity != current.affinity || abs(desired.offset - current.offset) > 0.01
       || abs(desired.horizontalOffset - current.horizontalOffset) > 0.01
-      || desired.hasRegion != current.hasRegion || desired.region != current.region else { return false }
+      || desired.hasRegion != current.hasRegion || desired.region != current.region else {
+      if cancelledSeek { onChange?() }
+      return false
+    }
+    enqueue(scope: scope, desired: desired)
+    onChange?()
+    return true
+  }
+
+  private func enqueue(scope: WireComposeScope, desired: WireComposeViewport) {
     nextID += 1
     let request = WireComposeViewportRequest.with {
       $0.id = nextID; $0.scope = scope; $0.position = desired.position
@@ -55,12 +94,26 @@ public final class ComposeViewportController {
     }
     latest[Target(scope)] = request
     pump()
-    onChange?()
-    return true
   }
 
   public func observe(window: UInt64, panes: [WirePane], reply: WireComposeViewportReply?) {
     let previous = latest
+    var resolved: [(WireComposeScope, WireComposeViewport, UInt64)] = []
+    seeks = seeks.filter { target, seek in
+      guard target.window == window else { return false }
+      guard let pane = panes.first(where: { $0.leaf == target.leaf && $0.hasBuffer && $0.buffer == target.buffer }),
+            pane.hasCompose, pane.compose.hasViewport, pane.compose.viewport.epoch == seek.request.epoch,
+            pane.compose.bufferRevision == seek.request.scope.bufferRevision,
+            pane.compose.documentLen == seek.length else { return false }
+      if reply?.id == seek.request.id, reply?.accepted == false { return false }
+      let remote = pane.compose.viewport
+      guard remote.sequence >= seek.request.id else { return true }
+      if remote.sequence == seek.request.id, remote.hasRegion, remote.region <= seek.request.region,
+         seek.request.region - remote.region <= 3, remote.region <= seek.length {
+        resolved.append((seek.request.scope, remote, remote.region))
+      }
+      return false
+    }
     latest = latest.filter { target, request in
       guard target.window == window else { return true }
       guard let pane = panes.first(where: { $0.leaf == target.leaf }),
@@ -74,12 +127,16 @@ public final class ComposeViewportController {
       if latest[Target(pending.scope)]?.id == reply.id { latest.removeValue(forKey: Target(pending.scope)) }
       inFlight = nil
     }
+    for (scope, remote, position) in resolved {
+      var next = remote; next.position = position; next.affinity = 0; next.offset = 0; next.clearRegion()
+      _ = move(scope: scope, from: remote, to: next, user: false)
+    }
     pump()
     if previous != latest { onChange?() }
   }
 
   public func reset() {
-    latest.removeAll(); inFlight = nil; nextID = 0; userScrollGeneration = 0
+    latest.removeAll(); seeks.removeAll(); inFlight = nil; nextID = 0; userScrollGeneration = 0
   }
 
   private func pump() {

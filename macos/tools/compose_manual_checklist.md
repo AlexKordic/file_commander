@@ -30,6 +30,10 @@ interactive latency or VoiceOver behavior from an offscreen test result.
    change body/code fonts and zoom in the app's Compose preferences, and try
    light/dark appearance. Wrapping follows available pixels without fixed
    columns, missing source, overlapping ornaments or a jumping reading anchor.
+   Drag the scrollbar thumb to the top, middle and bottom; click the track on
+   either side of it and scroll with the pointer over the track. The thumb and
+   document must move together without moving the text cursor. Repeat in both
+   splits and in a large file, including fast drags and tab changes mid-drag.
 3. **Mapped editing.** Click and drag through styled text, wrapped lines,
    emoji, accents, CJK and right-to-left text. Type, delete, use arrows,
    Shift+arrows, Home/End and PageUp/PageDown. Enter and leave code/table cells

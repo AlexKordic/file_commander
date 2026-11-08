@@ -158,6 +158,11 @@ private final class ScenePeer: @unchecked Sendable {
   }
 
   func show(_ pane: WirePane) { send(.frame, frame(pane: pane)) }
+  func showPanes(_ panes: [WirePane]) {
+    var frame = frame(pane: nil); frame.paneLen = .init(panes.count)
+    frame.panes = panes.enumerated().map { index, pane in .with { $0.index = .init(index); $0.pane = pane } }
+    send(.frame, frame)
+  }
   func sendFrame(_ value: WireFrame) { send(.frame, value) }
   func index(_ chunk: WireComposeIndexChunk) { send(.composeIndexChunk, chunk) }
 
@@ -2582,6 +2587,98 @@ final class ComposeInputTests: XCTestCase {
     XCTAssertEqual(try WirePaste(serializedBytes: peer.inputs[2].payload).text, "日本語",
       "a committed phrase is one Fresh text action, not a sequence of character keys")
   }
+  @MainActor
+  private func scrollbarEvent(_ type: NSEvent.EventType, at point: CGPoint, grid: CellGridView) throws -> NSEvent {
+    let inWindow = grid.convert(point, to: nil)
+    let location = grid.window.map { $0.convertPoint(toScreen: inWindow) } ?? inWindow
+    return try XCTUnwrap(NSEvent.mouseEvent(with: type, location: location, modifierFlags: [],
+      timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: 0, context: nil,
+      eventNumber: 1, clickCount: 1, pressure: type == .leftMouseUp ? 0 : 1))
+  }
+
+  @MainActor
+  func testScrollbarDragAndTrackPagingUseNativeViewportWithoutMovingTheCursor() async throws {
+    var initial = pane(String(repeating: "café 東京 👩🏽‍💻 and wrapped prose\n", count: 500))
+    initial.vscroll = .with { $0.x = 79; $0.w = 1; $0.h = 35 }
+    initial.content.w = 79
+    let peer = try ScenePeer(pane: initial); defer { peer.close() }
+    let editor = richEditor(); defer { editor.detachAll() }
+    editor.attach(socketPath: peer.path, app: nil)
+    let grid = try await readyGrid(editor)
+    let before = try XCTUnwrap(grid.focusedCompose), bar = try XCTUnwrap(grid.composeScrollbar(initial))
+    XCTAssertLessThan(bar.proportion, 1)
+    let start = CGPoint(x: bar.track.midX, y: bar.thumb.midY)
+    grid.mouseDown(with: try scrollbarEvent(.leftMouseDown, at: start, grid: grid))
+    let bottom = CGPoint(x: bar.track.midX, y: bar.track.maxY + 100)
+    grid.mouseDragged(with: try scrollbarEvent(.leftMouseDragged, at: bottom, grid: grid))
+    try await eventually { peer.viewports.count == 1 }
+    grid.mouseUp(with: try scrollbarEvent(.leftMouseUp, at: bottom, grid: grid))
+    let request = peer.viewports[0], scrolled = try XCTUnwrap(grid.focusedCompose)
+    XCTAssertEqual(scrolled.scrolling.displayedTop(scrolled.viewport), scrolled.layout.text.size.height - scrolled.scrolling.height, accuracy: 0.001)
+    XCTAssertEqual(grid.composeScrollbar(scrolled.pane)?.value ?? -1, 1, accuracy: 0.001)
+    XCTAssertTrue(scrolled.layout.text === before.layout.text)
+    XCTAssertEqual(scrolled.pane.compose.cursors, before.pane.compose.cursors)
+    var acknowledged = initial
+    acknowledged.compose.viewport = .with {
+      $0.sequence = request.id; $0.epoch = request.epoch; $0.position = request.position
+      $0.affinity = request.affinity; $0.offset = request.offset; $0.horizontalOffset = request.horizontalOffset
+    }
+    peer.acknowledgeScroll(request, pane: acknowledged)
+    try await eventually { grid.focusedCompose?.pane.compose.viewport.sequence == request.id }
+    let trackPoint = CGPoint(x: bar.track.midX, y: bar.track.minY + 2)
+    grid.mouseDown(with: try scrollbarEvent(.leftMouseDown, at: trackPoint, grid: grid))
+    grid.mouseUp(with: try scrollbarEvent(.leftMouseUp, at: trackPoint, grid: grid))
+    try await eventually { peer.viewports.count == 2 }
+    XCTAssertLessThan(try XCTUnwrap(grid.focusedCompose).scrolling.displayedTop(try XCTUnwrap(grid.focusedCompose).viewport),
+      scrolled.scrolling.displayedTop(scrolled.viewport))
+    let paged = try XCTUnwrap(grid.focusedCompose)
+    let wheelPoint = grid.convert(trackPoint, to: nil)
+    let screenHeight = NSScreen.screens.first?.frame.height ?? 0
+    let wheel = try XCTUnwrap(ScrollInjector.make(.init(at: 0, delta: 30, phase: .changed),
+      location: CGPoint(x: wheelPoint.x, y: screenHeight - wheelPoint.y), windowNumber: 0))
+    grid.scrollWheel(with: wheel)
+    let wheeled = try XCTUnwrap(grid.focusedCompose)
+    XCTAssertEqual(wheeled.scrolling.displayedTop(wheeled.viewport), paged.scrolling.displayedTop(paged.viewport) - 30, accuracy: 0.001,
+      "the wheel over the scrollbar uses native pixel scrolling even with a delayed track-click receipt")
+    XCTAssertTrue(peer.inputs.isEmpty)
+    XCTAssertFalse(peer.kinds.contains(SceneWire.Kind.mouse.rawValue), "native scrollbar gestures cannot fall through to terminal mouse handling")
+  }
+
+  @MainActor
+  private func readyGrid(_ editor: NativeEditor) async throws -> CellGridView {
+    try await eventually { editor.grid?.focusedCompose != nil }
+    let grid = try XCTUnwrap(editor.grid); try await waitForPreview(grid); return grid
+  }
+
+  @MainActor
+  func testScrollbarTargetsItsSplitAndRetiresDragWhenItsBufferChanges() async throws {
+    let source = String(repeating: "A paragraph with café and 東京.\n", count: 300)
+    var left = pane(source, width: 39)
+    left.vscroll = .with { $0.x = 39; $0.w = 1; $0.h = 35 }
+    var right = left; right.leaf = 8; right.buffer = 9; right.content.x = 40; right.vscroll.x = 79
+    right.compose.focused = false
+    let peer = try ScenePeer(pane: left); defer { peer.close() }
+    let editor = richEditor(); defer { editor.detachAll() }
+    editor.attach(socketPath: peer.path, app: nil)
+    let grid = try await readyGrid(editor)
+    peer.showPanes([left, right])
+    try await eventually { grid.composePanes[8].map { grid.composeGeometryIsCurrent($0) } == true }
+    let bar = try XCTUnwrap(grid.composeScrollbar(right))
+    let start = CGPoint(x: bar.track.midX, y: bar.thumb.midY)
+    grid.mouseDown(with: try scrollbarEvent(.leftMouseDown, at: start, grid: grid))
+    grid.mouseDragged(with: try scrollbarEvent(.leftMouseDragged, at: CGPoint(x: start.x, y: bar.track.maxY + 20), grid: grid))
+    try await eventually { peer.viewports.count == 1 }
+    XCTAssertEqual(peer.viewports[0].scope.leaf, 8); XCTAssertEqual(peer.viewports[0].scope.buffer, 9)
+    XCTAssertEqual(grid.composePanes[2]?.viewport.position, 0, "the active split remains in place")
+    right.buffer = 10; right.compose.viewport.epoch = 70
+    peer.showPanes([left, right])
+    try await eventually { grid.composePanes[8]?.identity.buffer == 10 }
+    grid.mouseDragged(with: try scrollbarEvent(.leftMouseDragged, at: CGPoint(x: start.x, y: bar.track.minY), grid: grid))
+    grid.mouseUp(with: try scrollbarEvent(.leftMouseUp, at: start, grid: grid))
+    XCTAssertEqual(peer.viewports.count, 1)
+    XCTAssertTrue(peer.inputs.isEmpty); XCTAssertFalse(peer.kinds.contains(SceneWire.Kind.mouse.rawValue))
+  }
+
   private func pane(_ text: String, revision: UInt64 = 4, width: UInt32 = 80) -> WirePane {
     .with {
       $0.leaf = 2; $0.buffer = 3; $0.content = .with { $0.w = width; $0.h = 35 }

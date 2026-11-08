@@ -134,6 +134,43 @@ private final class ComposeBackend {
 
 final class ComposeBackendTests: XCTestCase {
   @MainActor
+  func testScrollbarSeeksAcrossCroppedUnicodeSourceWithoutEditingTheFile() async throws {
+    let backend = try backend(); defer { backend.captureDiagnostics("scrollbar"); backend.stop() }
+    let editor = editor(BackendPasteboard()); defer { editor.detachAll() }
+    let original = (0..<25_000).map { "Paragraph \($0) café 東京 👩🏽‍💻 with proportional prose and several words to wrap.\n\n" }.joined()
+    let file = backend.root.appendingPathComponent("scrollbar.md")
+    try Data(original.utf8).write(to: file)
+    try await attach(backend, file: file, editor: editor, requireTables: false)
+    let grid = try XCTUnwrap(editor.grid), initial = try XCTUnwrap(grid.focusedCompose)
+    XCTAssertLessThan(initial.pane.compose.sourceEnd - initial.pane.compose.sourceStart, initial.pane.compose.documentLen,
+      "the real parser must exercise a cropped source window")
+    let cursor = initial.pane.compose.cursors
+    let bytes = Array(original.utf8), middle = bytes.count * 2 / 3
+    let target = try XCTUnwrap(bytes.indices.dropFirst(middle).first { bytes[$0] & 0xc0 == 0x80 })
+    editor.grid(grid, seek: (CGFloat(target) + 0.25) / CGFloat(bytes.count), in: initial)
+    try await eventually(editor, "normalized scrollbar source anchor", timeout: 25) {
+      guard let current = grid.focusedCompose, grid.composeGeometryIsCurrent(current),
+            current.viewport.position <= UInt64(target), UInt64(target) - current.viewport.position <= 3 else { return false }
+      return current.pane.compose.sourceStart <= current.viewport.position && current.viewport.position <= current.pane.compose.sourceEnd
+    }
+    XCTAssertEqual(grid.focusedCompose?.pane.compose.cursors, cursor)
+    editor.grid(grid, seek: 1, in: try XCTUnwrap(grid.focusedCompose))
+    try await eventually(editor, "scrollbar reaches file end", timeout: 25) {
+      grid.focusedCompose?.viewport.position == UInt64(bytes.count) && grid.focusedCompose?.pane.compose.sourceEnd == UInt64(bytes.count)
+        && grid.focusedCompose.map { grid.composeGeometryIsCurrent($0) } == true
+    }
+    let end = try XCTUnwrap(grid.focusedCompose)
+    XCTAssertEqual(end.scrolling.displayedTop(end.viewport), max(0, end.layout.text.size.height - end.scrolling.height), accuracy: 0.001)
+    editor.grid(grid, seek: 0, in: end)
+    try await eventually(editor, "scrollbar returns to start", timeout: 25) {
+      grid.focusedCompose?.viewport.position == 0 && grid.focusedCompose?.pane.compose.sourceStart == 0
+        && grid.focusedCompose.map { grid.composeGeometryIsCurrent($0) } == true
+    }
+    XCTAssertEqual(grid.focusedCompose?.pane.compose.cursors, cursor)
+    XCTAssertEqual(try Data(contentsOf: file), Data(original.utf8))
+  }
+
+  @MainActor
   func testRealBackendLogicalAccessibilityAndSaveContinueWhilePreviewIsHeld() async throws {
     let backend = try backend(); defer { backend.captureDiagnostics("held-preview"); backend.stop() }
     let hold = BackendPreviewHold(); addTeardownBlock { await hold.release() }

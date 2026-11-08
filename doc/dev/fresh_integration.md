@@ -1709,6 +1709,15 @@ screen coordinates; the selection includes wrapped lines and uses only the
 current measured preview. While a replacement is pending, stale geometry
 cannot position system text UI. Focused asynchronous Compose toggling is
 covered by an offscreen first-responder regression test.
+Rich Compose scrollbars draw and control the native viewport independently of
+Fresh's terminal viewport. Thumb dragging seeks through the document, track
+clicks page by the measured pane height, and wheel input over the track uses
+the same pixel-scrolling channel as the document. Complete layouts use measured
+pixel height; cropped layouts show source-byte progress. Distant seeks first
+probe a source region so Fresh can normalize a UTF-8 boundary, then move the
+source anchor. Rapid seeks coalesce; wheel input, source replacement, edits,
+workspace changes and rejected probes retire obsolete seek intentions. A drag
+belongs to its original split and buffer lifetime and never moves the cursor.
 Selection-only frames share those immutable indices when the literal text,
 source/UTF-16 origins and document length match. Incoming metadata is validated
 before reuse, and the selection belongs to the new snapshot. Changed origins,

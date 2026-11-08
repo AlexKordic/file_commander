@@ -115,14 +115,21 @@ final class ChromeView: NSView {
     let area = box(track)
     editorBackground.setFill()
     area.fill()
-    let start = Int(pane.thumbStart), end = Int(pane.thumbEnd)
     for marker in pane.markers {
       NSColor(scene: SceneColor(packed: marker.color)).setFill()
       NSRect(x: area.maxX - 3, y: area.minY + CGFloat(marker.row) * grid.cellHeight + grid.cellHeight / 2 - 1, width: 3, height: 2).fill()
     }
-    guard end > start, end - start < track.height else { return }
-    let thumb = NSRect(x: area.midX - 3, y: area.minY + CGFloat(start) * grid.cellHeight + 2,
-                       width: 6, height: max(grid.cellHeight, CGFloat(end - start) * grid.cellHeight) - 4)
+    let thumb: CGRect
+    if grid.usesComposeScrollbar(pane) {
+      guard let bar = grid.composeScrollbar(pane), bar.proportion < 1 else { return }
+      let measured = grid.composeScrollbarThumb(pane, bar: bar)
+      thumb = CGRect(x: area.midX - 3, y: measured.minY + 2, width: 6, height: max(1, measured.height - 4))
+    } else {
+      let start = Int(pane.thumbStart), end = Int(pane.thumbEnd)
+      guard end > start, end - start < track.height else { return }
+      thumb = NSRect(x: area.midX - 3, y: area.minY + CGFloat(start) * grid.cellHeight + 2,
+        width: 6, height: max(grid.cellHeight, CGFloat(end - start) * grid.cellHeight) - 4)
+    }
     editorText.withAlphaComponent(0.28).setFill()
     NSBezierPath(roundedRect: thumb, xRadius: 3, yRadius: 3).fill()
   }

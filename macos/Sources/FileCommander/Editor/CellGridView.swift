@@ -16,6 +16,7 @@ protocol CellGridDelegate: AnyObject {
   func gridPaste(_ grid: CellGridView)
   func grid(_ grid: CellGridView, point: CGPoint, in pane: ComposePresentation, extend: Bool, count: Int)
   func grid(_ grid: CellGridView, scroll delta: CGPoint, in pane: ComposePresentation)
+  func grid(_ grid: CellGridView, seek fraction: CGFloat, in pane: ComposePresentation)
   func grid(_ grid: CellGridView, revealCaretIn pane: ComposePresentation)
   func grid(_ grid: CellGridView, replace text: String, range: NSRange, in pane: ComposePresentation)
   func grid(_ grid: CellGridView, select ranges: [Range<Int>], in pane: ComposePresentation)
@@ -33,6 +34,7 @@ protocol CellGridDelegate: AnyObject {
 }
 
 extension CellGridDelegate {
+  func grid(_ grid: CellGridView, seek fraction: CGFloat, in pane: ComposePresentation) {}
   func grid(_ grid: CellGridView, pendingCursorIDsAfter token: UUID, in pane: any ComposeInputBasis) -> Set<UInt64>? { nil }
   func gridAccessibility(_ grid: CellGridView, activate: Bool) -> ComposeCompleteAccessibility? { nil }
   func grid(_ grid: CellGridView, documentActionsAvailable model: ComposeDocumentPresentation) -> Bool { false }
@@ -135,6 +137,15 @@ final class CellGridView: NSView, @preconcurrency NSTextInputClient {
   var popupCapture: UInt64?
   var popupHover: UInt64?
   private var composeDrag: UInt64?
+  private struct ScrollbarDrag {
+    let owner: ComposePreviewController.Owner
+    let revision: UInt64
+    let track: CGRect
+    let height, grabOffset: CGFloat
+    var fraction: CGFloat
+  }
+  private var scrollbarGesture = false
+  private var scrollbarDrag: ScrollbarDrag?
   private var composeCaretIdentity: ComposePresentation.Identity?
   private var composeCaretRevision: UInt64 = 0
   private var composeCarets: [UInt64: WireComposeCaret] = [:]
@@ -562,6 +573,7 @@ final class CellGridView: NSView, @preconcurrency NSTextInputClient {
   }
 
   func resetComposePreviews() {
+    scrollbarDrag = nil
     composePreviewController?.reset(); publishedPreviewRequests.removeAll(); currentPreviewGeometry.removeAll()
     composeLogicalPanes.removeAll(); composePanes.removeAll()
   }
@@ -1424,6 +1436,62 @@ final class CellGridView: NSView, @preconcurrency NSTextInputClient {
 
   // MARK: Mouse
 
+  func usesComposeScrollbar(_ pane: WirePane) -> Bool {
+    composePreviewController != nil && pane.hasBuffer && pane.hasCompose && pane.compose.hasViewport
+  }
+
+  func composeScrollbar(_ wire: WirePane) -> ComposeScrollbar? {
+    guard usesComposeScrollbar(wire), let pane = composePanes[wire.leaf], composeGeometryIsCurrent(pane),
+          pane.ownsLifetime(window: UInt64(store.windowID), pane: wire) else { return nil }
+    return ComposeScrollbar(pane: pane, cell: CGSize(width: cellWidth, height: cellHeight),
+      seeking: composeViewportController?.seeking(scope: pane.scope))
+  }
+
+  func composeScrollbarThumb(_ wire: WirePane, bar: ComposeScrollbar) -> CGRect {
+    if let drag = scrollbarDrag, drag.owner == .init(window: UInt64(store.windowID), pane: wire),
+       drag.revision == wire.compose.bufferRevision, drag.track == bar.track {
+      return bar.thumb(value: drag.fraction, height: drag.height)
+    }
+    return bar.thumb
+  }
+
+  private func composeScrollbarPane(at point: CGPoint) -> WirePane? {
+    guard composeInputAllowed else { return nil }
+    return store.panes.first { pane in
+      guard usesComposeScrollbar(pane) else { return false }
+      let rect = pane.vscroll
+      return CGRect(x: CGFloat(rect.x) * cellWidth, y: CGFloat(rect.y) * cellHeight,
+        width: CGFloat(rect.w) * cellWidth, height: CGFloat(rect.h) * cellHeight).contains(point)
+    }
+  }
+
+  private func beginScrollbar(at point: CGPoint) -> Bool {
+    guard let wire = composeScrollbarPane(at: point) else { return false }
+    scrollbarGesture = true; scrollbarDrag = nil; composeDrag = nil
+    guard let bar = composeScrollbar(wire), let pane = composePanes[wire.leaf], bar.proportion < 1 else { return true }
+    let thumb = bar.thumb
+    if thumb.contains(point) {
+      scrollbarDrag = .init(owner: .init(window: UInt64(store.windowID), pane: wire),
+        revision: wire.compose.bufferRevision, track: bar.track, height: thumb.height,
+        grabOffset: point.y - thumb.minY, fraction: bar.value)
+    } else {
+      delegate?.grid(self, scroll: CGPoint(x: 0, y: (point.y < thumb.minY ? -1 : 1) * pane.scrolling.height * 0.9), in: pane)
+    }
+    return true
+  }
+
+  private func dragScrollbar(to point: CGPoint) {
+    guard var drag = scrollbarDrag, composeInputAllowed,
+          let wire = store.panes.first(where: { $0.leaf == drag.owner.leaf && $0.hasCompose && $0.hasBuffer }),
+          drag.owner == .init(window: UInt64(store.windowID), pane: wire), drag.revision == wire.compose.bufferRevision,
+          let bar = composeScrollbar(wire), bar.track == drag.track, let pane = composePanes[wire.leaf] else {
+      scrollbarDrag = nil; return
+    }
+    drag.fraction = bar.fraction(at: point.y, grabOffset: drag.grabOffset, height: drag.height)
+    scrollbarDrag = drag
+    delegate?.grid(self, seek: drag.fraction, in: pane)
+  }
+
   private func selectComposition(at point: CGPoint, extend: Bool) -> Bool {
     guard var current = composition, let pane = focusedCompose, let draft = pane.layout.draftDisplayRange,
           composeGeometryIsCurrent(pane),
@@ -1470,8 +1538,10 @@ final class CellGridView: NSView, @preconcurrency NSTextInputClient {
     window?.makeFirstResponder(self)
     lastDragCell = nil
     let point = point(of: event)
+    scrollbarGesture = false; scrollbarDrag = nil
     popupCapture = nil
     if sendPopupMouse(.down, point: point, flags: event.modifierFlags, count: event.clickCount) { return }
+    if beginScrollbar(at: point) { return }
     let captured = compose(at: point)
     if composition != nil {
       if inputContext?.handleEvent(event) == true { return }
@@ -1487,6 +1557,7 @@ final class CellGridView: NSView, @preconcurrency NSTextInputClient {
   }
 
   override func mouseDragged(with event: NSEvent) {
+    if scrollbarGesture { dragScrollbar(to: point(of: event)); return }
     if sendPopupMouse(.drag, point: point(of: event), flags: event.modifierFlags) { return }
     if compositionDragAnchor != nil, composition != nil { _ = selectComposition(at: point(of: event), extend: true); return }
     if let leaf = composeDrag, let pane = composePanes[leaf] {
@@ -1500,6 +1571,9 @@ final class CellGridView: NSView, @preconcurrency NSTextInputClient {
   }
 
   override func mouseUp(with event: NSEvent) {
+    if scrollbarGesture {
+      scrollbarGesture = false; scrollbarDrag = nil; onComposePresentationChanged?(); return
+    }
     if sendPopupMouse(.up, point: point(of: event), flags: event.modifierFlags) { return }
     if compositionDragAnchor != nil { compositionDragAnchor = nil; return }
     if composeDrag != nil { composeDrag = nil; return }
@@ -1535,12 +1609,15 @@ final class CellGridView: NSView, @preconcurrency NSTextInputClient {
   /// A trackpad moves three rows per scroll step, as one wheel notch does in
   /// Fresh; a wheel sends a step per notch.
   override func scrollWheel(with event: NSEvent) {
-    if popup(at: point(of: event)) == nil, let pane = compose(at: point(of: event)), pane.pane.compose.hasViewport {
+    let point = point(of: event), scrollbar = composeScrollbarPane(at: point)
+    let pane = compose(at: point) ?? scrollbar.flatMap { composePanes[$0.leaf] }
+    if popup(at: point) == nil, let pane, pane.pane.compose.hasViewport, composeGeometryIsCurrent(pane) {
       let scale = event.hasPreciseScrollingDeltas ? 1 : CTFontGetSize(pane.body) * 3
       let delta = CGPoint(x: -event.scrollingDeltaX * scale, y: -event.scrollingDeltaY * scale)
       if delta != .zero { delegate?.grid(self, scroll: delta, in: pane) }
       return
     }
+    if scrollbar != nil, popup(at: point) == nil { return }
     let precise = event.hasPreciseScrollingDeltas
     let step = precise ? cellHeight * 3 : 1
     scrollRemainder += event.scrollingDeltaY
@@ -1552,7 +1629,7 @@ final class CellGridView: NSView, @preconcurrency NSTextInputClient {
         "ev": "wheel", "et": EditorTelemetry.ms(event.timestamp), "dy": Double(event.scrollingDeltaY),
         "dx": Double(event.scrollingDeltaX), "precise": precise, "phase": Int(event.phase.rawValue),
         "mom": Int(event.momentumPhase.rawValue), "steps": vertical, "cell": Double(cellHeight),
-        "at": [cell(at: point(of: event)).column, cell(at: point(of: event)).row], "win": event.window != nil,
+        "at": [cell(at: point).column, cell(at: point).row], "win": event.window != nil,
       ])
     }
     if vertical != 0 {

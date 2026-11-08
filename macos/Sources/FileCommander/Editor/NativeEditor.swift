@@ -385,6 +385,7 @@ final class NativeEditor: NSObject, CellGridDelegate {
     view.grid.composeImageController = composeImages
     view.grid.composeViewportController = composeViewports
     view.grid.onComposePresentationChanged = { [weak self] in
+      self?.chrome?.needsDisplay = true
       self?.updateCompleteFlow(); self?.updateImageDemands()
       self?.scheduleViewportContinuation(); self?.pumpComposeInput(); self?.attemptCaretReveal()
     }
@@ -804,7 +805,8 @@ final class NativeEditor: NSObject, CellGridDelegate {
       // the measured height. Do not page merely to fill that provisional gap.
       // Current-source projections remain available for input and drawing.
       for pane in self.grid?.composePanes.values.map({ $0 }) ?? [] where pane.pane.compose.hasViewport && pane.pane.compose.formattingReady {
-        guard self.grid?.composeGeometryIsCurrent(pane) == true else { continue }
+        guard self.grid?.composeGeometryIsCurrent(pane) == true,
+              self.composeViewports.seeking(scope: pane.scope) == nil else { continue }
         if let next = pane.scrolling.continuation(pane.viewport) {
           self.composeViewports.move(scope: pane.scope, from: pane.viewport, to: next, user: false)
         }
@@ -878,6 +880,24 @@ final class NativeEditor: NSObject, CellGridDelegate {
     guard receivedHello, let next = pane.scrolling.moved(pane.viewport, by: delta.y, horizontally: delta.x,
       fallback: pane.bounds.minY + 12 - pane.origin.y) else { return }
     composeViewports.move(scope: pane.scope, from: pane.viewport, to: next, user: true)
+  }
+
+  func grid(_ grid: CellGridView, seek fraction: CGFloat, in pane: ComposePresentation) {
+    guard receivedHello, fraction.isFinite, grid.composeGeometryIsCurrent(pane), pane.pane.compose.hasViewport,
+          Int(exactly: pane.scrolling.documentLength) != nil else { return }
+    let fraction = min(1, max(0, fraction))
+    if let next = pane.scrolling.moved(pane.viewport, toFraction: fraction) {
+      composeViewports.move(scope: pane.scope, from: pane.viewport, to: next, user: true)
+    } else if fraction == 0 || fraction == 1 {
+      var next = pane.viewport
+      next.position = fraction == 0 ? 0 : pane.scrolling.documentLength
+      next.offset = 0; next.affinity = fraction == 0 ? 0 : 1; next.clearRegion()
+      composeViewports.move(scope: pane.scope, from: pane.viewport, to: next, user: true)
+    } else {
+      let length = pane.scrolling.documentLength
+      let position = min(length, UInt64(fraction * CGFloat(length)))
+      composeViewports.seek(scope: pane.scope, from: pane.viewport, position: position, length: length)
+    }
   }
 
   func grid(_ grid: CellGridView, revealCaretIn pane: ComposePresentation) {
