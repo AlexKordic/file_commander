@@ -72,6 +72,93 @@ final class ComposePreviewTests: XCTestCase {
     store.apply(try XCTUnwrap(SceneMessage(kind: SceneWire.Kind.frame.rawValue, payload: bytes[...])))
   }
 
+  func testFocusedComposeTogglePublishesAndRetiresAsyncPreview() async throws {
+    _ = NSApplication.shared; NSApp.setActivationPolicy(.prohibited)
+    let previews = ComposePreviewController(), store = SceneStore(), grid = CellGridView(store: store)
+    grid.installComposePreviewController(previews)
+    store.onChange = { [weak grid] in grid?.apply($0) }
+    let window = NSWindow(contentRect: CGRect(x: 0, y: 0, width: 800, height: 500),
+      styleMask: .borderless, backing: .buffered, defer: false)
+    window.isReleasedWhenClosed = false; window.contentView = grid
+    defer { window.makeFirstResponder(nil); window.contentView = nil; window.close() }
+    XCTAssertTrue(window.makeFirstResponder(grid))
+    XCTAssertTrue(window.firstResponder === grid)
+    XCTAssertNotNil(grid.inputContext)
+    for revision in UInt64(4)...6 {
+      var wire = pane("Heading café 東京 👩🏽‍💻\n", revision: revision)
+      var cells = wire; cells.clearCompose()
+      try show(cells, in: store)
+      XCTAssertNil(grid.focusedCompose)
+      try show(wire, in: store)
+      try await eventually { grid.focusedCompose?.pane.compose.bufferRevision == revision }
+      XCTAssertTrue(window.firstResponder === grid)
+      XCTAssertEqual(grid.selectedRange(), NSRange(location: 0, length: 0))
+      wire.compose.cursors[0].position = 1
+      wire.compose.cursors[0].utf16Position = 1
+      wire.compose.textContext.selectionStart = 1; wire.compose.textContext.selectionEnd = 1
+      wire.compose.selectionRevision += 1
+      try show(wire, in: store)
+      XCTAssertEqual(grid.selectedRange(), NSRange(location: 1, length: 0))
+      try show(cells, in: store)
+      XCTAssertNil(grid.focusedCompose)
+    }
+  }
+
+  func testTextInputAccessoryGeometryUsesCurrentPaneInScreenCoordinates() async throws {
+    _ = NSApplication.shared; NSApp.setActivationPolicy(.prohibited)
+    let gate = PreviewGate(), previews = controller(gate), store = SceneStore(), grid = CellGridView(store: store)
+    addTeardownBlock { await gate.releaseAll() }
+    grid.installComposePreviewController(previews)
+    store.onChange = { [weak grid] in grid?.apply($0) }
+    let window = NSWindow(contentRect: CGRect(x: 90, y: 110, width: 800, height: 500),
+      styleMask: .borderless, backing: .buffered, defer: false)
+    window.isReleasedWhenClosed = false; window.contentView = grid
+    defer { window.makeFirstResponder(nil); window.contentView = nil; window.close() }
+    XCTAssertTrue(window.makeFirstResponder(grid))
+    let source = "café 東京 👩🏽‍💻\nSecond line of selected text.\n"
+    var wire = pane(source)
+    wire.content.x = 2; wire.content.y = 1; wire.content.w = 60; wire.content.h = 12
+    wire.compose.cursors[0].position = UInt64(source.utf8.count)
+    wire.compose.cursors[0].anchor = 0
+    wire.compose.cursors[0].utf16Position = UInt64(source.utf16.count)
+    wire.compose.cursors[0].utf16Anchor = 0
+    wire.compose.textContext.selectionEnd = UInt64(source.utf16.count)
+    try show(wire, in: store)
+    try await eventually { await gate.started == 1 }
+    XCTAssertEqual(grid.unionRectInVisibleSelectedRange, .zero, "pending geometry cannot place system UI")
+    await gate.release(0)
+    try await eventually { grid.focusedCompose != nil }
+    let shown = try XCTUnwrap(grid.textServiceGeometry)
+    XCTAssertEqual(shown.selectedRange, NSRange(location: 0, length: source.utf16.count))
+    let selection = try XCTUnwrap(ComposeAccessibilityText(pane: shown).bounds(for: shown.selectedRange))
+    XCTAssertGreaterThan(selection.height, grid.cellHeight, "the union includes more than the first selected line")
+    XCTAssertEqual(grid.unionRectInVisibleSelectedRange, window.convertToScreen(grid.convert(selection, to: nil)))
+    XCTAssertEqual(grid.documentVisibleRect,
+      window.convertToScreen(grid.convert(shown.bounds.intersection(grid.visibleRect), to: nil)))
+    XCTAssertTrue(grid.responds(to: NSSelectorFromString("unionRectInVisibleSelectedRange")))
+    XCTAssertTrue(grid.responds(to: NSSelectorFromString("documentVisibleRect")))
+    var changed = wire; changed.compose.bufferRevision += 1; changed.compose.projectionRevision += 1
+    changed.compose.text = "Replacement source\n"
+    changed.compose.sourceEnd = UInt64(changed.compose.text.utf8.count)
+    changed.compose.documentLen = changed.compose.sourceEnd
+    changed.compose.segments = [.with { $0.sourceEnd = changed.compose.sourceEnd; $0.displayEnd = changed.compose.sourceEnd }]
+    changed.compose.textContext.text = changed.compose.text
+    changed.compose.textContext.selectionEnd = 0
+    changed.compose.cursors[0].position = 0; changed.compose.cursors[0].clearAnchor()
+    changed.compose.cursors[0].utf16Position = 0; changed.compose.cursors[0].clearUtf16Anchor()
+    try show(changed, in: store)
+    try await eventually { await gate.started == 2 }
+    XCTAssertNil(grid.textServiceGeometry)
+    XCTAssertEqual(grid.unionRectInVisibleSelectedRange, .zero, "old selected text cannot anchor a new revision")
+    await gate.release(1)
+    try await eventually { grid.focusedCompose?.pane.compose.bufferRevision == changed.compose.bufferRevision }
+    let caret = try XCTUnwrap(grid.textServiceGeometry?.caret)
+    XCTAssertEqual(grid.unionRectInVisibleSelectedRange, window.convertToScreen(grid.convert(caret, to: nil)))
+    window.contentView = nil
+    XCTAssertEqual(grid.unionRectInVisibleSelectedRange, .zero)
+    XCTAssertEqual(grid.documentVisibleRect, .zero)
+  }
+
   func testPreparedGeometryMatchesSynchronousFontsGlyphsAndImagesAndRefusesOtherInputs() async throws {
     let source = "Heading\n\ncafé 👩🏽‍💻 ![tiny](tiny.png) words.\n"
     var wire = pane(source)

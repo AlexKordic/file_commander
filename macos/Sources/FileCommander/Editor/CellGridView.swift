@@ -1332,6 +1332,36 @@ final class CellGridView: NSView, @preconcurrency NSTextInputClient {
         : value.context?.selection ?? value.legacy?.textServiceSelectedRange
           ?? NSRange(location: value.hasSource ? NSNotFound : 0, length: 0))
   }
+
+  // AppKit calls both accessors from textInputClientDidUpdateSelection().
+  // They are optional protocol requirements, but sending that notification
+  // without implementing them raises an Objective-C exception on macOS 26.
+  @objc var unionRectInVisibleSelectedRange: NSRect {
+    let local: CGRect?
+    if composeTextPane != nil || focusedCompose != nil {
+      // Raw text queries can advance before asynchronous layout. Never anchor
+      // system text UI to the retained geometry of a previous revision.
+      guard let pane = textServiceGeometry else { return .zero }
+      local = ComposeAccessibilityText(pane: pane).bounds(for: pane.selectedRange)
+    } else {
+      local = caretRect
+    }
+    guard let local, local.intersects(visibleRect) else { return .zero }
+    return accessibilityScreenRect(local)
+  }
+
+  @objc var documentVisibleRect: NSRect {
+    let document: CGRect
+    if let pane = composeTextPane {
+      let content = pane.content
+      document = CGRect(x: CGFloat(content.x) * cellWidth, y: CGFloat(content.y) * cellHeight,
+        width: CGFloat(content.w) * cellWidth, height: CGFloat(content.h) * cellHeight)
+    } else { document = bounds }
+    let visible = document.intersection(visibleRect)
+    guard !visible.isNull, !visible.isEmpty else { return .zero }
+    return accessibilityScreenRect(visible)
+  }
+
   func validAttributesForMarkedText() -> [NSAttributedString.Key] { [.underlineStyle, .markedClauseSegment] }
   func attributedSubstring(forProposedRange range: NSRange, actualRange: NSRangePointer?) -> NSAttributedString? {
     actualRange?.pointee = NSRange(location: NSNotFound, length: 0)

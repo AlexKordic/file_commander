@@ -22,6 +22,8 @@ interactive latency or VoiceOver behavior from an offscreen test result.
    Compose/Preview** if Compose is not active. `F10` returns to the panels;
    `F10` returns to the same editor. Open `second.md` with `F4`; retain an
    unsaved edit there while switching between its tab and `compose.md`.
+   With the editor focused, toggle Compose off and on repeatedly in both a
+   local and an SSH tab. The preview must appear without closing the app.
 2. **Typography and reflow.** Inspect all six heading levels, setext, emphasis,
    links, quotes, nested lists, code and tables. Prose must be proportional;
    `iiiiii` and `WWWWWW` should differ in width. Resize from narrow to wide,

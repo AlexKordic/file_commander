@@ -1703,6 +1703,12 @@ can share the validated geometry while retaining current presentation metadata.
 Draft text, source ranges and raw reveal context also belong to the reuse key.
 Raw text-service snapshot reuse also requires literal UTF-8 bytes, preserving
 the current UTF-16/source map when canonically equivalent source changes.
+The custom text view implements AppKit's selection-union and visible-document
+rectangle accessors before sending text-selection notifications. Both return
+screen coordinates; the selection includes wrapped lines and uses only the
+current measured preview. While a replacement is pending, stale geometry
+cannot position system text UI. Focused asynchronous Compose toggling is
+covered by an offscreen first-responder regression test.
 Selection-only frames share those immutable indices when the literal text,
 source/UTF-16 origins and document length match. Incoming metadata is validated
 before reuse, and the selection belongs to the new snapshot. Changed origins,
