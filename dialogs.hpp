@@ -49,12 +49,14 @@ struct Dialog {
   void cancel_submission();
 
   virtual void OnShow() = 0;
+  // Called when the dialog stops showing, closed or replaced by another.
+  virtual void OnHide() {}
 };
 
 struct Files : Dialog {
   Component files;
   // std::string filter_txt;
-  Component sort_name, sort_size, sort_time;
+  Component sort_name, sort_size, sort_time, stop_loading;
   int       filter_cursor_pos = 0;
 
   explicit Files(PanelSharedState::P s);
@@ -80,6 +82,27 @@ struct MkdirDialog : Dialog {
   void    ok();
   void    cancel();
   Element render();
+};
+
+// The extraction popup: a compressed tar or a compressed file, extracted in one pass to a folder; "Browse anyway" lists it instead.
+struct ExtractDialog : Dialog {
+  Filepath                 archive;
+  std::string              destination;
+  int                      destination_cursor = 0;
+  bool                     into_folder        = true;
+  std::vector<std::string> conflict_labels{"Replace", "Update if newer", "Skip"};
+  int                      conflict_selected = 0;
+  std::string              error;
+
+  Component input_destination, check_folder, radio_conflict, button_extract, button_browse, button_close;
+
+  ExtractDialog(PanelSharedState::P s);
+  void     OnShow() override;
+  Filepath folder() const;
+  void     ok();
+  void     browse();
+  void     cancel();
+  Element  render();
 };
 
 struct GlobSelectDialog : Dialog {
@@ -176,6 +199,7 @@ struct CopyDialog : Dialog {
   CopyDiscoveryProcess::P _discovery_process;
 
   Element render();
+  Element archive_note();
   void    run_copy();
   void    cancel();
 
@@ -356,12 +380,51 @@ struct RestartEditorDialog : Dialog {
   std::string error;
 };
 
+// Asks for an encrypted archive's password for a reader waiting on another thread. Closing it any other way than OK answers Cancel, so the reader never waits forever.
+struct ArchivePasswordDialog : Dialog {
+  using Answer = std::function<void(std::optional<std::string>)>;
+  ArchivePasswordDialog(std::function<void()> close);
+  void ask(const std::string& archive, bool wrong, Answer answer);
+  void OnShow() override;
+  void OnHide() override;
+  void submit();
+  std::string archive, password;
+  bool wrong = false;
+  int cursor = 0;
+  Answer answer;
+  Component input;
+  std::function<void()> close;
+};
+
 struct ConnectSSHDialog : Dialog {
   ConnectSSHDialog(std::function<void()> close,
                    std::function<bool(const std::string &, const std::string &, std::string &)> connect);
   void OnShow() override;
-  std::string host, path = "/", error;
+  void submit();
+  // An empty path connects to "/". Cursors start after any retained text, so
+  // typing extends a value instead of being inserted in front of it.
+  std::string host, path, error;
+  int host_cursor = 0, path_cursor = 0;
   Component host_input, path_input;
+  std::function<void()> close;
+  std::function<bool(const std::string &, const std::string &, std::string &)> connect;
+};
+
+// Limits copies and moves, applied to running jobs at once.
+struct TransferSpeedDialog : Dialog {
+  TransferSpeedDialog(std::function<void()> close, std::function<uint64_t()> current,
+                      std::function<void(uint64_t bytes_per_second, bool persist)> apply);
+  void OnShow() override;
+  void submit();
+  std::vector<std::string> labels;
+  int selected = 0;
+  bool persist = true;
+  std::string custom, error;
+  int custom_cursor = 0;
+  Component presets, custom_input, keep;
+  std::function<void()> close;
+  std::function<uint64_t()> current;
+  std::function<void(uint64_t, bool)> apply;
 };
 
 struct CommandPaletteDialog : Dialog {

@@ -1,0 +1,251 @@
+{
+  "id": "bench_page_down_large",
+  "title": "Benchmark: page down through a large file",
+  "order": 902,
+  "duration": 300,
+  "chapter": "editor",
+  "needs": {
+    "editor": true
+  },
+  "summary": "Opens a small file to start the editor, then a 61,000-line file (file_io_jobs.cpp 40 times) and pages down to its end, at key-repeat speed and then as fast as frames come back; then opens a 304,000-line one. Editor timing is recorded.",
+  "covers": {},
+  "steps": [
+    {
+      "set_preference": {
+        "editor_telemetry": true
+      }
+    },
+    {
+      "generate_file": {
+        "from": "{repo}/file_io_jobs.cpp",
+        "copies": 1,
+        "to": "{home}/bench/warmup.cpp"
+      }
+    },
+    {
+      "generate_file": {
+        "from": "{repo}/file_io_jobs.cpp",
+        "copies": 40,
+        "to": "{home}/bench/large-40.cpp"
+      }
+    },
+    {
+      "generate_file": {
+        "from": "{repo}/file_io_jobs.cpp",
+        "copies": 200,
+        "to": "{home}/bench/large-200.cpp"
+      }
+    },
+    {
+      "open_tabs": {
+        "left": "{home}/bench",
+        "right": "{home}",
+        "focus": "left"
+      }
+    },
+    {
+      "window_frame": {
+        "w": 1600,
+        "h": 1000
+      }
+    },
+    {
+      "cursor": {
+        "side": "left",
+        "name": "warmup.cpp"
+      }
+    },
+    {
+      "keys": [
+        "@open_in_editor"
+      ]
+    },
+    {
+      "wait": {
+        "editor": {
+          "contains": "warmup\\.cpp: 1 copies"
+        }
+      },
+      "timeout": 60
+    },
+    {
+      "wait": {
+        "editor": {
+          "window": "main"
+        }
+      },
+      "timeout": 5
+    },
+    {
+      "editor_trust": {
+        "timeout": 3000
+      }
+    },
+    {
+      "pause": 1000
+    },
+    {
+      "editor_keys": [
+        "F10"
+      ]
+    },
+    {
+      "wait": {
+        "editor": {
+          "running": false
+        }
+      },
+      "timeout": 10
+    },
+    {
+      "cursor": {
+        "side": "left",
+        "name": "large-40.cpp"
+      }
+    },
+    {
+      "editor_watch": {
+        "contains": "// large-40.cpp: 40 copies",
+        "mark": "open-40"
+      }
+    },
+    {
+      "keys": [
+        "@open_in_editor"
+      ]
+    },
+    {
+      "wait": {
+        "editor": {
+          "contains": "large-40\\.cpp: 40 copies"
+        }
+      },
+      "timeout": 60
+    },
+    {
+      "wait": {
+        "editor": {
+          "window": "main"
+        }
+      },
+      "timeout": 5
+    },
+    {
+      "pause": 2000
+    },
+    {
+      "notice": "Paging down at key-repeat speed"
+    },
+    {
+      "editor_key_repeat": {
+        "key": "PageDown",
+        "interval_ms": 33,
+        "until": {
+          "editor": {
+            "contains": "END OF LARGE FILE"
+          }
+        },
+        "label": "paced"
+      }
+    },
+    {
+      "pause": 1500
+    },
+    {
+      "editor_keys": [
+        "Ctrl+Home"
+      ]
+    },
+    {
+      "wait": {
+        "editor": {
+          "contains": "large-40\\.cpp: 40 copies"
+        }
+      },
+      "timeout": 10
+    },
+    {
+      "pause": 1500
+    },
+    {
+      "notice": "Paging down as fast as frames come back"
+    },
+    {
+      "editor_key_repeat": {
+        "key": "PageDown",
+        "interval_ms": 0,
+        "until": {
+          "editor": {
+            "contains": "END OF LARGE FILE"
+          }
+        },
+        "label": "saturating"
+      }
+    },
+    {
+      "pause": 1500
+    },
+    {
+      "editor_keys": [
+        "F10"
+      ]
+    },
+    {
+      "wait": {
+        "editor": {
+          "running": false
+        }
+      },
+      "timeout": 10
+    },
+    {
+      "cursor": {
+        "side": "left",
+        "name": "large-200.cpp"
+      }
+    },
+    {
+      "editor_watch": {
+        "contains": "// large-200.cpp: 200 copies",
+        "mark": "open-200"
+      }
+    },
+    {
+      "keys": [
+        "@open_in_editor"
+      ]
+    },
+    {
+      "wait": {
+        "editor": {
+          "contains": "large-200\\.cpp: 200 copies"
+        }
+      },
+      "timeout": 60
+    },
+    {
+      "wait": {
+        "editor": {
+          "window": "main"
+        }
+      },
+      "timeout": 5
+    },
+    {
+      "pause": 1500
+    },
+    {
+      "editor_keys": [
+        "F10"
+      ]
+    },
+    {
+      "wait": {
+        "editor": {
+          "running": false
+        }
+      },
+      "timeout": 10
+    }
+  ]
+}

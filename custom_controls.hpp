@@ -13,6 +13,7 @@ namespace ftxui {
 // A clipped box may have a negative height; never feed it to DBMenu allocation.
 Component clipped_menu(DataSource* data);
 
+Event ctrl_page_down();
 Event event_from_string(std::string s);
 std::string event_to_string(const Event& e);
 std::string event_to_token(const Event& e);

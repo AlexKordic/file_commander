@@ -11,9 +11,9 @@ manifest = json.loads((repo / 'dependencies.json').read_text())
 parser = argparse.ArgumentParser(description=__doc__)
 for name, value in manifest['git'].items():
     parser.add_argument('--' + name, type=Path, default=repo / value['default_path'])
-parser.add_argument('--lzma', type=Path, default=repo / manifest['lzma']['default_path'])
+parser.add_argument('--sevenzip', type=Path, default=repo / manifest['sevenzip']['default_path'])
 parser.add_argument('--skip-fresh', action='store_true')
-parser.add_argument('--skip-lzma', action='store_true')
+parser.add_argument('--skip-sevenzip', action='store_true')
 args = parser.parse_args()
 failures = []
 for name, spec in manifest['git'].items():
@@ -31,19 +31,20 @@ for name, spec in manifest['git'].items():
             failures.append(f'{name}: expected clean {spec["revision"]}; found {revision}' + (' with modified tracked files' if dirty else ''))
     except (OSError, subprocess.CalledProcessError):
         failures.append(f'{name}: cannot read checkout at {path}')
-if not args.skip_lzma:
-    archive = repo / manifest['lzma']['archive']
-    if not archive.is_file() or hashlib.sha256(archive.read_bytes()).hexdigest() != manifest['lzma']['archive_sha256']:
-        failures.append('lzma: dependency archive fingerprint mismatch')
-    root = args.lzma
+if not args.skip_sevenzip:
+    spec = manifest['sevenzip']
+    archive = repo / spec['archive']
+    if not archive.is_file() or hashlib.sha256(archive.read_bytes()).hexdigest() != spec['archive_sha256']:
+        failures.append('sevenzip: dependency archive fingerprint mismatch')
+    root = args.sevenzip
     paths = sorted(p for p in root.rglob('*') if p.is_file() and '_o' not in p.parts and
                    (p.suffix in ('.c', '.h', '.cpp', '.mak', '.S', '.asm') or p.name.startswith('makefile')))
     digest = hashlib.sha256()
     for path in paths:
         digest.update(path.relative_to(root).as_posix().encode() + b'\0')
         digest.update(hashlib.sha256(path.read_bytes()).digest())
-    if len(paths) != manifest['lzma']['source_files'] or digest.hexdigest() != manifest['lzma']['source_sha256']:
-        failures.append(f'lzma: source set differs from SDK {manifest["lzma"]["version"]} manifest')
+    if len(paths) != spec['source_files'] or digest.hexdigest() != spec['source_sha256']:
+        failures.append(f'sevenzip: source set differs from 7-Zip {spec["version"]} manifest')
 if failures:
     raise SystemExit('\n'.join(failures))
 print('Dependency revisions and source fingerprints match dependencies.json')

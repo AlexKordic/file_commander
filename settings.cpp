@@ -60,6 +60,11 @@ std::optional<AppSettings> SettingsStore::load(const Filepath& path) {
   bool_field(o,"single_panel_mode",s.single_panel); string_field(o,"focused_panel",s.focused_panel);
   if (s.focused_panel!="left" && s.focused_panel!="right") throw std::runtime_error("invalid focused panel");
   string_field(o,"fresh_binary_path",s.fresh_binary_path); string_field(o,"last_editor_session_id",s.last_editor_session_id);
+  if (auto v=o.if_contains("transfer_rate_limit")) {
+    if (!v->is_int64() && !v->is_uint64()) throw std::runtime_error("invalid transfer rate limit");
+    if (v->is_int64() && v->as_int64()<0) throw std::runtime_error("invalid transfer rate limit");
+    s.transfer_rate_limit=v->is_uint64() ? v->as_uint64() : static_cast<std::uint64_t>(v->as_int64());
+  }
   if (auto v=o.if_contains("bookmarks")) for (const auto& p:v->as_array()) s.bookmarks.push_back(str(p));
   if (auto v=o.if_contains("key_bindings")) s.key_bindings=string_map(*v);
   if (auto v=o.if_contains("command_use_count")) for (const auto& kv:v->as_object()) {
@@ -74,6 +79,7 @@ void SettingsStore::save(const Filepath& path, const AppSettings& s) {
   j::object o; o["version"]=1; panel(o,"left",s.left); panel(o,"right",s.right);
   o["single_panel_mode"]=s.single_panel; o["focused_panel"]=s.focused_panel;
   o["fresh_binary_path"]=s.fresh_binary_path; o["last_editor_session_id"]=s.last_editor_session_id;
+  o["transfer_rate_limit"]=s.transfer_rate_limit;
   j::array bookmarks; for (const auto& p:s.bookmarks) bookmarks.emplace_back(p); o["bookmarks"]=std::move(bookmarks);
   o["key_bindings"]=object(s.key_bindings);
   j::object counts; for (const auto& [k,v]:s.command_use_count) counts[k]=v; o["command_use_count"]=std::move(counts);

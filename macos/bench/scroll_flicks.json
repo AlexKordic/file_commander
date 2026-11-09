@@ -1,0 +1,206 @@
+{
+  "id": "bench_scroll_flicks",
+  "title": "Scroll benchmark: trackpad flicks",
+  "order": 900,
+  "duration": 120,
+  "chapter": "editor",
+  "needs": {
+    "editor": true
+  },
+  "summary": "Six trackpad flicks of file_io_jobs.cpp in the editor, then in a plain text view, with editor timing recorded.",
+  "covers": {},
+  "steps": [
+    {
+      "set_preference": {
+        "editor_telemetry": true
+      }
+    },
+    {
+      "open_tabs": {
+        "left": "{repo}",
+        "right": "{home}",
+        "focus": "left"
+      }
+    },
+    {
+      "window_frame": {
+        "w": 1600,
+        "h": 1000
+      }
+    },
+    {
+      "cursor": {
+        "side": "left",
+        "name": "file_io_jobs.cpp"
+      }
+    },
+    {
+      "keys": [
+        "@open_in_editor"
+      ]
+    },
+    {
+      "wait": {
+        "editor": {
+          "contains": "traversal\\.hpp"
+        }
+      },
+      "timeout": 25
+    },
+    {
+      "wait": {
+        "editor": {
+          "window": "main"
+        }
+      },
+      "timeout": 5
+    },
+    {
+      "editor_keys": [
+        "Enter"
+      ]
+    },
+    {
+      "pause": 2000
+    },
+    {
+      "notice": "Scrolling the editor"
+    },
+    {
+      "scroll": {
+        "target": "editor",
+        "speed": -2000
+      }
+    },
+    {
+      "pause": 3500
+    },
+    {
+      "scroll": {
+        "target": "editor",
+        "speed": -5000
+      }
+    },
+    {
+      "pause": 3500
+    },
+    {
+      "scroll": {
+        "target": "editor",
+        "speed": -8000
+      }
+    },
+    {
+      "pause": 3500
+    },
+    {
+      "scroll": {
+        "target": "editor",
+        "speed": 6000
+      }
+    },
+    {
+      "pause": 3500
+    },
+    {
+      "scroll": {
+        "target": "editor",
+        "speed": -3000
+      }
+    },
+    {
+      "pause": 3500
+    },
+    {
+      "scroll": {
+        "target": "editor",
+        "speed": 9000
+      }
+    },
+    {
+      "pause": 3500
+    },
+    {
+      "editor_keys": [
+        "F10"
+      ]
+    },
+    {
+      "wait": {
+        "editor": {
+          "running": false
+        }
+      },
+      "timeout": 10
+    },
+    {
+      "textview_open": "{repo}/file_io_jobs.cpp"
+    },
+    {
+      "pause": 1500
+    },
+    {
+      "notice": "Scrolling a text view"
+    },
+    {
+      "scroll": {
+        "target": "textview",
+        "speed": -2000
+      }
+    },
+    {
+      "pause": 3500
+    },
+    {
+      "scroll": {
+        "target": "textview",
+        "speed": -5000
+      }
+    },
+    {
+      "pause": 3500
+    },
+    {
+      "scroll": {
+        "target": "textview",
+        "speed": -8000
+      }
+    },
+    {
+      "pause": 3500
+    },
+    {
+      "scroll": {
+        "target": "textview",
+        "speed": 6000
+      }
+    },
+    {
+      "pause": 3500
+    },
+    {
+      "scroll": {
+        "target": "textview",
+        "speed": -3000
+      }
+    },
+    {
+      "pause": 3500
+    },
+    {
+      "scroll": {
+        "target": "textview",
+        "speed": 9000
+      }
+    },
+    {
+      "pause": 3500
+    },
+    {
+      "textview_close": true
+    },
+    {
+      "pause": 500
+    }
+  ]
+}

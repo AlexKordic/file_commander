@@ -1,0 +1,155 @@
+{
+  "id": "crash_recovery",
+  "title": "Crash recovery",
+  "order": 28,
+  "duration": 75,
+  "chapter": "recovery",
+  "needs": {
+    "crash": true,
+    "idle_queue": true
+  },
+  "summary": "A real crash in the middle of a copy: what comes back, and how the copy continues.",
+  "covers": {
+    "commands": [
+      "simulate_crash"
+    ],
+    "anchors": [
+      "activity.recovery",
+      "activity.resume"
+    ]
+  },
+  "steps": [
+    {
+      "open_tabs": {
+        "left": "{home}/music",
+        "right": "{home}/backup",
+        "focus": "left"
+      }
+    },
+    {
+      "chapter": "Recovery"
+    },
+    {
+      "set_transfer_speed": "3 MiB"
+    },
+    {
+      "caption": "A long copy",
+      "sub": "Every copy is journaled on disk before it starts"
+    },
+    {
+      "cursor": {
+        "side": "left",
+        "name": "Night Drive"
+      }
+    },
+    {
+      "keys": [
+        "@copy"
+      ]
+    },
+    {
+      "wait": {
+        "sheet": "copy"
+      }
+    },
+    {
+      "wait": {
+        "anchor": "sheet.copy.start"
+      }
+    },
+    {
+      "click": "sheet.copy.start",
+      "as_job": "music"
+    },
+    {
+      "wait": {
+        "sheet": null
+      },
+      "timeout": 30
+    },
+    {
+      "wait": {
+        "job": {
+          "name": "music",
+          "state": "running",
+          "progress_at_least": 0.3
+        }
+      },
+      "timeout": 60
+    },
+    {
+      "caption": "Now File Commander is killed",
+      "sub": "SIGKILL: no warning, no chance to save"
+    },
+    {
+      "crash": "Kill File Commander"
+    },
+    {
+      "caption": "Back where you were",
+      "sub": "The tabs came back, and the copy is waiting, paused"
+    },
+    {
+      "keys": [
+        "@toggle_job_list"
+      ]
+    },
+    {
+      "wait": {
+        "window": "activity"
+      }
+    },
+    {
+      "wait": {
+        "job": {
+          "name": "paused",
+          "state": "paused"
+        }
+      },
+      "timeout": 10
+    },
+    {
+      "highlight": "activity.list",
+      "hold": 2000
+    },
+    {
+      "unhighlight": true
+    },
+    {
+      "caption": "Resume checks first",
+      "sub": "FC makes sure the files didn’t change, then continues file by file"
+    },
+    {
+      "click": "activity.resume"
+    },
+    {
+      "wait": {
+        "running_job": true
+      },
+      "timeout": 10
+    },
+    {
+      "wait": {
+        "running_job": false
+      },
+      "timeout": 90
+    },
+    {
+      "close_window": "activity"
+    },
+    {
+      "expect": {
+        "file": {
+          "exists": "{home}/backup/Night Drive/04 Slow Lights.flac"
+        }
+      }
+    },
+    {
+      "caption": "Nothing was lost",
+      "sub": "Finished files were kept; the interrupted one was copied again",
+      "hold": 2400
+    },
+    {
+      "uncaption": true
+    }
+  ]
+}

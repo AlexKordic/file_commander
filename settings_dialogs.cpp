@@ -54,19 +54,21 @@ namespace ftxui {
 ConnectSSHDialog::ConnectSSHDialog(
     std::function<void()> close,
     std::function<bool(const std::string &, const std::string &, std::string &)> connect)
-    : Dialog(nullptr) {
-  host_input = Input(&host, "SSH config alias (for example box)");
-  path_input = Input(&path, "Absolute remote directory");
+    : Dialog(nullptr), close(close), connect(std::move(connect)) {
+  // Single-line fields: Enter moves from the host to the path, then connects.
+  InputOption host_option;
+  host_option.multiline       = false;
+  host_option.cursor_position = &host_cursor;
+  host_option.on_enter        = [this] { path_input->TakeFocus(); };
+  host_input = Input(&host, "SSH config alias (for example box)", host_option) | showInputCursor(&host_cursor);
+  InputOption path_option;
+  path_option.multiline       = false;
+  path_option.cursor_position = &path_cursor;
+  path_option.on_enter        = [this] { submit(); };
+  path_input = Input(&path, "Absolute remote directory (empty for /)", path_option) | showInputCursor(&path_cursor);
   ButtonOption option;
   option.transform = ascii_button_transform();
-  auto button = Button(
-      " Connect ",
-      [this, close, connect] {
-        error.clear();
-        if (connect(host, path, error))
-          close();
-      },
-      option);
+  auto button = Button(" Connect ", [this] { submit(); }, option);
   auto cancel = Button(" Cancel ", close, option);
   navigation =
       CatchEvent(Container::Vertical({host_input, path_input, Container::Horizontal({button, cancel})}),
@@ -87,7 +89,141 @@ ConnectSSHDialog::ConnectSSHDialog(
 }
 void ConnectSSHDialog::OnShow() {
   error.clear();
+  host_cursor = static_cast<int>(host.size());
+  path_cursor = static_cast<int>(path.size());
   host_input->TakeFocus();
+}
+
+void ConnectSSHDialog::submit() {
+  error.clear();
+  if (connect(host, path.empty() ? "/" : path, error)) close();
+}
+
+ArchivePasswordDialog::ArchivePasswordDialog(std::function<void()> close) : Dialog(nullptr), close(std::move(close)) {
+  InputOption option;
+  option.multiline       = false;
+  option.password        = true;
+  option.cursor_position = &cursor;
+  option.on_enter        = [this] { submit(); };
+  input                  = Input(&password, "Password", option) | showInputCursor(&cursor);
+  ButtonOption button_option;
+  button_option.transform = ascii_button_transform();
+  auto ok     = Button(" OK ", [this] { submit(); }, button_option);
+  auto cancel = Button(" Cancel ", [this] { this->close(); }, button_option);
+  navigation  = CatchEvent(Container::Vertical({input, Container::Horizontal({ok, cancel})}), [this](Event e) {
+    if (e == keys().key_cancel_dialog) {
+      this->close();
+      return true;
+    }
+    return false;
+  });
+  renderer = Renderer(navigation, [this, ok, cancel] {
+    return window(text(" Archive Password ") | bold,
+                  vbox({paragraph(archive), text(wrong ? "That password is wrong; try again." : "This archive is encrypted.") |
+                                                 (wrong ? color(Color::Red) : dim),
+                        input->Render(), separator(), hbox({ok->Render(), filler(), cancel->Render()})})) |
+           size(WIDTH, LESS_THAN, 72);
+  });
+}
+
+void ArchivePasswordDialog::ask(const std::string& question, bool refused, Answer reply) {
+  OnHide();  // A question still open is answered Cancel.
+  archive = question;
+  wrong   = refused;
+  answer  = std::move(reply);
+}
+
+void ArchivePasswordDialog::OnShow() {
+  password.clear();
+  cursor = 0;
+  input->TakeFocus();
+}
+
+void ArchivePasswordDialog::OnHide() {
+  if (auto reply = std::exchange(answer, {})) reply(std::nullopt);
+  password.clear();
+}
+
+void ArchivePasswordDialog::submit() {
+  if (auto reply = std::exchange(answer, {})) reply(password);
+  password.clear();
+  close();
+}
+
+namespace {
+// Presets in MiB/s; 0 is unlimited. The last entry takes the custom value.
+const uint64_t kSpeedPresets[] = {0, 100, 10, 2, 1};
+}  // namespace
+
+TransferSpeedDialog::TransferSpeedDialog(std::function<void()> close, std::function<uint64_t()> current,
+                                         std::function<void(uint64_t, bool)> apply)
+    : Dialog(nullptr), close(std::move(close)), current(std::move(current)), apply(std::move(apply)) {
+  labels = {"Unlimited", "100 MiB/s", "10 MiB/s", "2 MiB/s", "1 MiB/s", "Custom (MiB/s below)"};
+  presets = Radiobox(&labels, &selected);
+  InputOption option;
+  option.multiline       = false;
+  option.cursor_position = &custom_cursor;
+  option.on_enter        = [this] { submit(); };
+  custom_input           = Input(&custom, "for example 25", option) | showInputCursor(&custom_cursor);
+  keep                   = Checkbox("Keep for future sessions", &persist);
+  ButtonOption button_option;
+  button_option.transform = ascii_button_transform();
+  auto set    = Button(" Apply ", [this] { submit(); }, button_option);
+  auto cancel = Button(" Cancel ", this->close, button_option);
+  navigation  = CatchEvent(Container::Vertical({presets, custom_input, keep, Container::Horizontal({set, cancel})}), [this](Event e) {
+    if (e == keys().key_cancel_dialog) {
+      this->close();
+      return true;
+    }
+    if (e == Event::Return && presets->Focused()) {
+      submit();
+      return true;
+    }
+    return false;
+  });
+  renderer = Renderer(navigation, [this, set, cancel] {
+    const auto rate = this->current();
+    Elements content{
+      paragraph("Limits copies, moves between filesystems and SSH transfers. A change applies to a running copy at once."),
+      text(rate ? "Now: " + std::to_string(rate / (1024 * 1024)) + " MiB/s" : "Now: unlimited") | dim,
+      separator(),
+      presets->Render(),
+      hbox({text("Custom: "), custom_input->Render() | size(WIDTH, EQUAL, 12)}),
+      keep->Render(),
+    };
+    if (!error.empty()) content.push_back(paragraph(error) | color(Color::Red));
+    content.push_back(separator());
+    content.push_back(hbox({set->Render(), filler(), cancel->Render()}));
+    return window(text(" Transfer speed ") | bold, vbox(std::move(content))) | size(WIDTH, LESS_THAN, 72);
+  });
+}
+
+void TransferSpeedDialog::OnShow() {
+  error.clear();
+  const uint64_t mib = current() / (1024 * 1024);
+  selected = 5;
+  for (int i = 0; i < 5; ++i)
+    if (kSpeedPresets[i] == mib) selected = i;
+  custom = selected == 5 ? std::to_string(mib) : "";
+  custom_cursor = static_cast<int>(custom.size());
+  presets->TakeFocus();
+}
+
+void TransferSpeedDialog::submit() {
+  error.clear();
+  uint64_t mib = selected < 5 ? kSpeedPresets[selected] : 0;
+  if (selected == 5) {
+    try {
+      size_t used = 0;
+      mib = std::stoull(custom, &used);
+      if (used != custom.size()) throw std::invalid_argument(custom);
+    } catch (const std::exception&) {
+      error = "Enter a whole number of MiB/s, or 0 for unlimited";
+      return;
+    }
+  }
+  apply(mib * 1024 * 1024, persist);
+  close();
 }
 
 RestartEditorDialog::RestartEditorDialog(std::function<void()> close,
@@ -300,7 +436,15 @@ int fuzzy_score(const std::string& query_lower, const std::string& text_lower) {
   }
   if (qpos != static_cast<int>(query_lower.size())) return -1;
   if (has_prefix) score += 10;
-  return score;
+  // Letters scattered across words must not outrank the query typed as a
+  // whole: "ssh" belongs to "Connect SSH", not to "Switch focuSed panel".
+  int literal_bonus = 0;
+  for (size_t at = text_lower.find(query_lower); at != std::string::npos; at = text_lower.find(query_lower, at + 1)) {
+    const bool word_start = at == 0 || text_lower[at - 1] == ' ' || text_lower[at - 1] == '_' || text_lower[at - 1] == '-';
+    literal_bonus = std::max(literal_bonus, word_start ? 150 : 100);
+    if (word_start) break;
+  }
+  return score + literal_bonus;
 }
 
 }  // namespace

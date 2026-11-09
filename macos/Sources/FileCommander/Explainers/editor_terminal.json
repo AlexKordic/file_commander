@@ -1,0 +1,149 @@
+{
+  "id": "editor_terminal",
+  "title": "The editor as a terminal",
+  "order": 23,
+  "duration": 45,
+  "chapter": "editor",
+  "needs": {
+    "editor": true
+  },
+  "summary": "Settings › Editor can show Fresh's own terminal interface in place of the native editor.",
+  "covers": {
+    "anchors": [
+      "settings.editor.terminal"
+    ]
+  },
+  "steps": [
+    {
+      "open_tabs": {
+        "left": "{home}/projects/notes",
+        "right": "{home}",
+        "focus": "left"
+      }
+    },
+    {
+      "chapter": "Editor"
+    },
+    {
+      "caption": "Fresh's own look",
+      "sub": "Settings › Editor › Show the editor as a terminal runs its terminal interface instead"
+    },
+    {
+      "open_window": "settings",
+      "note": "editor"
+    },
+    {
+      "wait": {
+        "window": "settings"
+      }
+    },
+    {
+      "highlight": "settings.editor.terminal",
+      "hold": 2000
+    },
+    {
+      "set_preference": {
+        "terminal_editor": true
+      }
+    },
+    {
+      "pause": 1200
+    },
+    {
+      "close_window": "settings"
+    },
+    {
+      "cursor": {
+        "side": "left",
+        "name": "ideas.md"
+      }
+    },
+    {
+      "keys": [
+        "@open_in_editor"
+      ]
+    },
+    {
+      "wait": {
+        "editor": {
+          "contains": "Ideas"
+        }
+      },
+      "timeout": 25
+    },
+    {
+      "wait": {
+        "editor": {
+          "window": "main"
+        }
+      },
+      "timeout": 5
+    },
+    {
+      "caption": "Same place, same Fresh",
+      "sub": "It takes the panes' place too, with the same tabs and unsaved text"
+    },
+    {
+      "pause": 1500
+    },
+    {
+      "caption": "Its own keys",
+      "sub": "Typing, F-keys and Control keys go to Fresh, ahead of File Commander's menus"
+    },
+    {
+      "editor_keys": [
+        "End"
+      ]
+    },
+    {
+      "type": " (typed)"
+    },
+    {
+      "wait": {
+        "editor": {
+          "contains": "\\(typed\\)"
+        }
+      },
+      "timeout": 10
+    },
+    {
+      "pause": 900
+    },
+    {
+      "caption": "F10 comes back",
+      "sub": "Fresh's own switch key detaches it, and the panes return"
+    },
+    {
+      "keys": [
+        "F10"
+      ]
+    },
+    {
+      "wait": {
+        "editor": {
+          "running": false
+        }
+      },
+      "timeout": 10
+    },
+    {
+      "wait": {
+        "cursor": {
+          "side": "left",
+          "name": "ideas.md"
+        }
+      }
+    },
+    {
+      "set_preference": {
+        "terminal_editor": false
+      }
+    },
+    {
+      "pause": 600
+    },
+    {
+      "uncaption": true
+    }
+  ]
+}

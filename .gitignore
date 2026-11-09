@@ -2,6 +2,10 @@ build
 .cache
 boost-1.90.0-cmake.tar.gz
 build-*
+xcuserdata/
+*.xcuserstate
 __pycache__/
 .DS_Store
 CMakeUserPresets.json
+macos/.build/
+macos/.swiftpm/

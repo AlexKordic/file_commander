@@ -15,10 +15,20 @@
     "fc.terminal.input_resize",
     "fc.extended.editor_restart",
     "fc.remote.filesystem",
+    "fc.remote.protocol",
+    "fc.remote.protocol_python",
+    "fc.remote.stream",
+    "fc.remote.verifier",
     "fc.remote.transfers",
     "fc.remote.panels",
-    "fc.extended.ssh_editor"
+    "fc.extended.ssh_editor",
+    "fc.macos.explainers",
+    "fc.macos.compose_fixtures",
+    "fc.macos.native_harness"
   ],
+  "platforms": {
+    "Darwin": ["fc.macos.native_editor"]
+  },
   "groups": {
     "recovery": [
       "states",
@@ -81,6 +91,34 @@
       "loop_watchdog",
       "long_sleep",
       "long_wait"
+    ],
+    "sevenzip": [
+      "load",
+      "seven",
+      "solid",
+      "formats",
+      "failures"
+    ],
+    "archive": [
+      "browse",
+      "copy",
+      "cancel",
+      "nested",
+      "formats",
+      "extract",
+      "names",
+      "passwords",
+      "damaged",
+      "limits",
+      "create"
+    ],
+    "model": [
+      "panes",
+      "commands",
+      "rate",
+      "engine",
+      "editor",
+      "large"
     ]
   },
   "manual": [

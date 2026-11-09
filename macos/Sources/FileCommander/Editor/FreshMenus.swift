@@ -1,0 +1,239 @@
+import AppKit
+import ExplainerKit
+import FreshKit
+
+/// Fresh's menus in the macOS menu bar while the editor is shown in the key
+/// window. The menu bar becomes the app menu, Fresh's own menus (File, Edit,
+/// View, ... and any a plugin adds) and Window; File Commander's menus come
+/// back when the files are shown or another window becomes key. Items are built from the scene each time a menu opens,
+/// so enabled and checked states are always current, and choosing one sends
+/// the action to Fresh.
+@MainActor
+final class FreshMenus: NSObject, NSMenuDelegate {
+  private let store: SceneStore
+  /// Runs an action by name with its item's arguments (JSON, or empty).
+  private let run: (String, String) -> Void
+  /// Opens File Commander's Settings window.
+  var openSettings: (() -> Void)?
+  /// Hides the editor and shows the files.
+  var showFiles: (() -> Void)?
+  var hasUninsertedText: (() -> Bool)?
+  var copyUninsertedText: (() -> Void)?
+  private var saved: NSMenu?
+  private var installed: NSMenu?
+  private var repairPending = false
+  private var observers: [NSObjectProtocol] = []
+  private var installedLabels: [String] = []
+
+  /// Cmd shortcuts Fresh's macos-gui keymap gives these actions; shown on the
+  /// items so the menus teach them. The editor view sends the keys to Fresh
+  /// itself, so the menu only fires them when it is clicked.
+  static let shortcuts: [String: (String, NSEvent.ModifierFlags)] = [
+    "save": ("s", .command), "save_as": ("s", [.command, .shift]), "open": ("o", .command), "new": ("n", .command),
+    "close_tab": ("w", .command), "undo": ("z", .command), "redo": ("z", [.command, .shift]), "copy": ("c", .command),
+    "cut": ("x", .command), "paste": ("v", .command), "select_all": ("a", .command), "search": ("f", .command),
+    "find_next": ("g", .command), "find_previous": ("g", [.command, .shift]), "quick_open": ("p", .command),
+    "command_palette": ("p", [.command, .shift]), "add_cursor_next_match": ("d", .command), "goto_line": ("l", .command),
+    "toggle_comment": ("/", .command), "toggle_file_explorer": ("b", .command), "delete_line": ("k", [.command, .shift]),
+    "focus_file_explorer": ("e", .command), "navigate_back": ("-", .command), "navigate_forward": ("=", .command),
+  ]
+
+  init(store: SceneStore, run: @escaping (String, String) -> Void) {
+    self.store = store
+    self.run = run
+    super.init()
+    for name in [NSMenu.didAddItemNotification, NSMenu.didRemoveItemNotification] {
+      observers.append(NotificationCenter.default.addObserver(forName: name, object: nil, queue: nil) { [weak self] note in
+        MainActor.assumeIsolated { self?.barEdited(note.object as? NSMenu) }
+      })
+    }
+  }
+
+  private var entries: [WireMenuEntry] { store.menus.filter(\.visible) }
+
+  // MARK: Installing
+
+  func install() {
+    guard saved == nil else { return }
+    saved = NSApp.mainMenu
+    let bar = buildMainMenu()
+    installed = bar
+    NSApp.mainMenu = bar
+  }
+
+  func uninstall() {
+    guard let saved else { return }
+    NSApp.mainMenu = saved
+    self.saved = nil
+    installed = nil
+  }
+
+  /// SwiftUI writes changes to the app's commands into whatever menu bar is
+  /// installed, so a change while Fresh's bar is up lands in it. The app holds
+  /// its commands still meanwhile (`AppController.menusHeld`); should one get
+  /// through anyway, Fresh's bar is rebuilt.
+  private func barEdited(_ menu: NSMenu?) {
+    guard let menu, menu === installed, !repairPending else { return }
+    repairPending = true
+    DispatchQueue.main.async { [weak self] in
+      guard let self else { return }
+      self.repairPending = false
+      guard self.saved != nil else { return }
+      Trace.write("menus: the app's commands changed in Fresh's menu bar; rebuilding it")
+      let bar = self.buildMainMenu()
+      self.installed = bar
+      NSApp.mainMenu = bar
+    }
+  }
+
+  /// Rebuilds the bar when Fresh's top-level menus change (a plugin added one).
+  func menusChanged() {
+    guard saved != nil else { return }
+    let labels = entries.map(\.label)
+    guard labels != installedLabels else { return }
+    let bar = buildMainMenu()
+    installed = bar
+    NSApp.mainMenu = bar
+  }
+
+  private func buildMainMenu() -> NSMenu {
+    let bar = NSMenu(title: "Main")
+    let appItem = NSMenuItem(title: "File Commander", action: nil, keyEquivalent: "")
+    let appMenu = NSMenu(title: "File Commander")
+    appMenu.addItem(withTitle: "About File Commander", action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)), keyEquivalent: "")
+    appMenu.addItem(.separator())
+    appMenu.addItem(item("Settings…", key: ",", action: #selector(settings)))
+    appMenu.addItem(.separator())
+    appMenu.addItem(withTitle: "Hide File Commander", action: #selector(NSApplication.hide(_:)), keyEquivalent: "h")
+    let others = appMenu.addItem(withTitle: "Hide Others", action: #selector(NSApplication.hideOtherApplications(_:)), keyEquivalent: "h")
+    others.keyEquivalentModifierMask = [.command, .option]
+    appMenu.addItem(withTitle: "Show All", action: #selector(NSApplication.unhideAllApplications(_:)), keyEquivalent: "")
+    appMenu.addItem(.separator())
+    appMenu.addItem(withTitle: "Quit File Commander", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+    appItem.submenu = appMenu
+    bar.addItem(appItem)
+
+    installedLabels = []
+    var helpItem: NSMenuItem?
+    for (index, entry) in entries.enumerated() {
+      let label = entry.label
+      installedLabels.append(label)
+      let top = NSMenuItem(title: label, action: nil, keyEquivalent: "")
+      let menu = NSMenu(title: label)
+      menu.autoenablesItems = false
+      menu.delegate = self
+      menu.identifier = NSUserInterfaceItemIdentifier("fresh.\(index)")
+      top.submenu = menu
+      // Help goes last, after Window, as in every Mac app.
+      if label == "Help" { helpItem = top } else { bar.addItem(top) }
+    }
+
+    let windowItem = NSMenuItem(title: "Window", action: nil, keyEquivalent: "")
+    let windowMenu = NSMenu(title: "Window")
+    windowMenu.addItem(withTitle: "Minimize", action: #selector(NSWindow.performMiniaturize(_:)), keyEquivalent: "m")
+    windowMenu.addItem(withTitle: "Zoom", action: #selector(NSWindow.performZoom(_:)), keyEquivalent: "")
+    let fullScreen = windowMenu.addItem(withTitle: "Enter Full Screen", action: #selector(NSWindow.toggleFullScreen(_:)), keyEquivalent: "f")
+    fullScreen.keyEquivalentModifierMask = [.command, .control]
+    windowMenu.addItem(.separator())
+    windowMenu.addItem(item("Show Files", key: "", action: #selector(files)))
+    windowMenu.addItem(.separator())
+    windowMenu.addItem(withTitle: "Bring All to Front", action: #selector(NSApplication.arrangeInFront(_:)), keyEquivalent: "")
+    windowItem.submenu = windowMenu
+    bar.addItem(windowItem)
+    if let helpItem { bar.addItem(helpItem) }
+    NSApp.windowsMenu = windowMenu
+    return bar
+  }
+
+  private func item(_ title: String, key: String, action: Selector) -> NSMenuItem {
+    let item = NSMenuItem(title: title, action: action, keyEquivalent: key)
+    item.target = self
+    return item
+  }
+
+  @objc private func settings() { openSettings?() }
+  @objc private func files() { showFiles?() }
+  @objc private func copyUninserted() { copyUninsertedText?() }
+
+  // MARK: Fresh's items
+
+  func menuNeedsUpdate(_ menu: NSMenu) {
+    guard let id = menu.identifier?.rawValue, id.hasPrefix("fresh.") else { return }
+    let path = id.dropFirst("fresh.".count).split(separator: ".").compactMap { Int($0) }
+    guard let first = path.first, first < entries.count else { return }
+    var items = entries[first].items
+    for index in path.dropFirst() {
+      guard index < items.count, case .submenu(let submenu)? = items[index].item else { return }
+      items = submenu.items
+    }
+    menu.removeAllItems()
+    for (index, entry) in items.enumerated() {
+      switch entry.item {
+      case .separator?:
+        if menu.items.last.map({ !$0.isSeparatorItem }) ?? false { menu.addItem(.separator()) }
+      case .submenu(let entry)?:
+        let item = NSMenuItem(title: entry.label, action: nil, keyEquivalent: "")
+        let submenu = NSMenu(title: item.title)
+        submenu.autoenablesItems = false
+        submenu.delegate = self
+        submenu.identifier = NSUserInterfaceItemIdentifier(id + ".\(index)")
+        item.submenu = submenu
+        menu.addItem(item)
+      case .action(let entry)?:
+        let action = entry.action
+        let item = NSMenuItem(title: entry.label.isEmpty ? action : entry.label, action: #selector(choose(_:)), keyEquivalent: "")
+        item.target = self
+        item.representedObject = MenuAction(name: action, argsJson: entry.argsJson)
+        item.isEnabled = entry.enabled
+        if entry.hasChecked { item.state = entry.checked ? .on : .off }
+        if let (key, modifiers) = FreshMenus.shortcuts[action] {
+          item.keyEquivalent = key
+          item.keyEquivalentModifierMask = modifiers
+        } else if !entry.accel.isEmpty {
+          item.attributedTitle = FreshMenus.title(item.title, accelerator: entry.accel)
+        }
+        menu.addItem(item)
+      case .label(let entry)?:
+        if !entry.label.isEmpty {
+          let item = NSMenuItem(title: entry.label, action: nil, keyEquivalent: "")
+          item.isEnabled = false
+          menu.addItem(item)
+        }
+      case nil:
+        break
+      }
+    }
+    while menu.items.last?.isSeparatorItem == true { menu.removeItem(at: menu.items.count - 1) }
+    if path.count == 1, items.contains(where: { if case .action(let action)? = $0.item { return action.action == "copy" }; return false }),
+       hasUninsertedText?() == true {
+      menu.addItem(.separator())
+      menu.addItem(item("Copy Uninserted Text", key: "", action: #selector(copyUninserted)))
+    }
+  }
+
+  @objc private func choose(_ sender: NSMenuItem) {
+    guard let action = sender.representedObject as? MenuAction else { return }
+    run(action.name, action.argsJson)
+  }
+
+  /// "Title" with Fresh's own shortcut right-aligned, for keys that aren't Cmd chords.
+  static func title(_ title: String, accelerator: String) -> NSAttributedString {
+    let style = NSMutableParagraphStyle()
+    style.tabStops = [NSTextTab(textAlignment: .right, location: 260)]
+    let text = NSMutableAttributedString(string: title, attributes: [.font: NSFont.menuFont(ofSize: 0), .paragraphStyle: style])
+    text.append(NSAttributedString(string: "\t" + accelerator, attributes: [
+      .font: NSFont.menuFont(ofSize: 0), .foregroundColor: NSColor.secondaryLabelColor, .paragraphStyle: style,
+    ]))
+    return text
+  }
+}
+
+private final class MenuAction: NSObject {
+  let name: String
+  let argsJson: String
+
+  init(name: String, argsJson: String) {
+    self.name = name
+    self.argsJson = argsJson
+  }
+}

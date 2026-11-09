@@ -74,6 +74,10 @@ struct JobStats {
   double _finished_time   = -1;
   double _bytes_processed = 0;
   double _bytes_total     = 0;
+  bool _streaming = false;
+  uint64_t _transfer_written = 0, _transfer_verified = 0, _transfer_durable = 0;
+  uint64_t _transfer_data_flushes = 0;
+  uint64_t _transfer_renamed = 0;
 };
 // Published under the job mutex; observers retain an immutable view for a frame.
 struct JobSnapshot : JobInstructions, JobStats {
@@ -97,7 +101,7 @@ struct JobInterface {
 // Specifies single operation to be performed on a set of files.
 // Operation steps are defined in advance and FileJobs will execute them in order
 struct JobSpec : JobInstructions, JobStats, JobInterface {
-  std::vector<ArchiveLease> _archive_leases;
+  std::function<void(JobSpec &)> _poll_transfer; // Called only under the job mutex.
   uint64_t           _job_id = 0;
   std::shared_ptr<TransferJournal> _journal;
   std::atomic<bool> _recovery_waiting{false};
@@ -119,7 +123,7 @@ struct JobSpec : JobInstructions, JobStats, JobInterface {
   int64_t item_count() const { return _items_pending > 0 ? _items_pending : _items.size(); }
   // Not in FileJobs books
   bool    is_stopped() const { return _stopped.load(std::memory_order_acquire); };
-  std::shared_ptr<const JobSnapshot> snapshot(bool details = true);
+  std::shared_ptr<const JobSnapshot> snapshot(bool details = true, bool journal = false);
   std::function<void(std::shared_ptr<const JobSnapshot>)> completed;
   std::shared_ptr<const JobSnapshot> _completed_summary;
   std::vector<std::string> _step_errors;
@@ -165,7 +169,6 @@ struct JobRetention {
 };
 
 struct FileJobServices {
-  ArchiveService* archives = nullptr;
   std::shared_ptr<const boost::filesystem::copy_file_io_hooks> file_io;
   std::function<Err(const std::string&)> clipboard = push_to_clipboard;
 };
@@ -200,8 +203,10 @@ class FileJobs {
 
   /// Dismiss (remove) a job from history by ID.
   virtual void dismiss_job(uint64_t job_id) = 0;
-  // TODO: review later
+  // Bytes per second for copies and moves; 0 is unlimited. A change applies to
+  // running transfers within one throttle step and emits transfer_rate_changed.
   virtual void set_transfer_rate(uint64_t bytes_per_second) = 0;
+  virtual uint64_t transfer_rate() const = 0;
 
   virtual std::deque<JobErrorInfo> get_errors(int count) = 0;
 

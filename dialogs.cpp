@@ -1,6 +1,7 @@
 #include "traversal.hpp"
 
 #include "dialogs.hpp"
+#include "archive_formats.hpp"
 #include "dialog_support.hpp"
 #include "archive.hpp"
 #include "bfs.hpp"
@@ -79,6 +80,16 @@ std::function<Element(const EntryState&)> ascii_button_transform() {
     if (s.focused) return text(t) | theme().sort_button_active;
     return text(t) | theme().sort_button;
   };
+}
+
+ButtonOption theme_button(Decorator Theme::*style) {
+  ButtonOption option;
+  option.transform = [style](const EntryState& s) -> Element {
+    // The theme is read on every render, so colour edits apply at once.
+    Element e = text(s.focused ? "[" + s.label + "]" : " " + s.label + " ") | theme().*style;
+    return s.focused ? e | bold : e;
+  };
+  return option;
 }
 
 std::function<Element(const EntryState& state)> text_menuitem_transform() {
@@ -224,15 +235,25 @@ bool execute_file_command(PanelSharedState* app,DataSource* data_source,const st
       app->move_to(parent_dir, old_path);
       return true;
     }
+    if (action->id == "open_as_archive") {
+      if (app->dir->items.empty() || !app->browse_archive) return false;
+      DirItem& where = app->dir->items.at(data_source->focused_id);
+      if (where.is_dir() || !app->browse_archive(where.path_ref())) return false;
+      data_source->focused_id = app->dir->offset_vissible(0, 0);
+      app->filter_txt.clear();
+      return true;
+    }
     if (action->id == "enter_dir") {
       if (app->dir->items.empty()) return false;
       DirItem& where = app->dir->items.at(data_source->focused_id);
       if (!where.is_dir()) {
         if (!app->enter_archive) return false;
-        const bool entered_archive = app->enter_archive(where.path_ref());
-        if (!entered_archive) return false;
-        data_source->focused_id = app->dir->offset_vissible(0, 0);
-        app->filter_txt.clear();
+        const int entered_archive = app->enter_archive(where.path_ref());
+        if (entered_archive == 0) return false;
+        if (entered_archive == 1) {
+          data_source->focused_id = app->dir->offset_vissible(0, 0);
+          app->filter_txt.clear();
+        }
         return true;
       }
       app->move_to(where.path_ref(), {});
@@ -333,6 +354,8 @@ Files::Files(PanelSharedState::P s) : Dialog(std::move(s)) {
   sort_name = Button("Name", [dir = app->dir] { dir->sort_toggle_name_direction(); }, ascii_button);
   sort_size = Button("Size", [dir = app->dir] { dir->sort_toggle_size_direction(); }, ascii_button);
   sort_time = Button("Date", [dir = app->dir] { dir->sort_toggle_time_direction(); }, ascii_button);
+  stop_loading = Maybe(Button("Stop", [state = app] { state->stop_loading(); }, theme_button(&Theme::stop_button)),
+                       [state = app] { return state->loading(); });
 
   setup_filelist_datasource(app, _data_source);
 
@@ -343,7 +366,7 @@ Files::Files(PanelSharedState::P s) : Dialog(std::move(s)) {
     return handled || filelist_handle_filter(app.get(), data_source, ctx);
   };
 
-  auto render_selection = [state = app, sort_name = sort_name, sort_size = sort_size, sort_time = sort_time]() -> Element {
+  auto render_selection = [state = app, sort_name = sort_name, sort_size = sort_size, sort_time = sort_time, stop = stop_loading]() -> Element {
     std::string prefixes[3] = {"  ", "  ", "  "};
     switch (state->dir->order_by) {
     case Orderby::NAME_ASC: prefixes[0] = "↑↑"; break;
@@ -354,15 +377,15 @@ Files::Files(PanelSharedState::P s) : Dialog(std::move(s)) {
     case Orderby::TIME_DESC: prefixes[2] = "↓↓"; break;
     }
     auto     s        = state->dir->stats();
-    std::string columns = " cols:name,size,date";
+    // A panel is often narrower than every field together. The texts are
+    // clipped at their end before the sort buttons lose any width.
+    std::string columns;
     if (state->show_permissions_column) columns += ",perm";
     if (state->show_owner_group_column) columns += ",owner:group";
+    if (!columns.empty()) columns = " +" + columns.substr(1);
     Elements children = Elements({
-      text(" Sel " + std::to_string(s.items_selected) + "/" + std::to_string(s.items_total)),
-      text(" bytes "),
-      coloredInt(s.bytes_selected),
-      text("/"),
-      coloredInt(s.bytes_total),
+      text(std::format(" Sel {}/{}  {}/{}", s.items_selected, s.items_total, JobListDialog::format_bytes(double(s.bytes_selected)),
+                       JobListDialog::format_bytes(double(s.bytes_total)))) | xflex_shrink,
       text(" | "),
       text(prefixes[0]),
       sort_name->Render(),
@@ -370,8 +393,13 @@ Files::Files(PanelSharedState::P s) : Dialog(std::move(s)) {
       sort_size->Render(),
       text(prefixes[2]),
       sort_time->Render(),
-      text(columns) | dim,
+      text(columns) | dim | xflex_shrink,
     });
+    if (state->loading()) {
+      children.push_back(text(" | "));
+      if (const int percent = state->load_percent(); percent >= 0) children.push_back(text(std::to_string(percent) + "% "));
+      children.push_back(stop->Render());
+    }
     return hbox(std::move(children));
   };
   debug_info = [this]() -> Element { return text(" " + std::to_string(app->render_count) + " "); };
@@ -381,7 +409,7 @@ Files::Files(PanelSharedState::P s) : Dialog(std::move(s)) {
   //   text(std::to_string(_data_source.items_visible) + "/" + std::to_string(_data_source.v.items_total)),
   // }); };
 
-  navigation = Container::Vertical({Container::Horizontal({sort_name, sort_size, sort_time}), files});
+  navigation = Container::Vertical({Container::Horizontal({sort_name, sort_size, sort_time, stop_loading}), files});
   renderer   = Renderer(navigation, [app = app, render_selection = render_selection, files = files, this]() -> Element {
     app->render_count++;
     return vbox({
@@ -470,6 +498,95 @@ void MkdirDialog::ok() {
 }
 
 void MkdirDialog::cancel() { cancel_submission();app->action.close_dialog(); }
+
+//
+// Extract
+//
+
+ExtractDialog::ExtractDialog(PanelSharedState::P s) : Dialog(std::move(s)) {
+  InputOption destination_opt;
+  destination_opt.on_change      = [this]() { this->error.clear(); };
+  destination_opt.on_enter       = [this]() { this->ok(); };
+  destination_opt.multiline      = false;
+  destination_opt.cursor_position = &destination_cursor;
+  input_destination              = Input(&destination, "Folder to extract into", destination_opt);
+  CheckboxOption checkbox_opt    = CheckboxOption::Simple();
+  check_folder                   = Checkbox("Into a folder named after the archive", &into_folder, checkbox_opt);
+  radio_conflict                 = Radiobox(&conflict_labels, &conflict_selected);
+  button_extract                 = Button(" Extract ", [this] { this->ok(); });
+  button_browse                  = Button(" Browse anyway ", [this] { this->browse(); });
+  button_close                   = Button(" Cancel ", [this] { this->cancel(); });
+  navigation = CatchEvent(Container::Vertical({
+                            input_destination,
+                            check_folder,
+                            radio_conflict,
+                            Container::Horizontal({button_extract, button_browse, button_close}),
+                          }),
+                          close_on_esc(this));
+  renderer   = Renderer(navigation, [this]() -> Element { return this->render(); });
+}
+
+void ExtractDialog::OnShow() {
+  archive            = app->action.arguments->focused;
+  destination        = app->action.arguments->target.native();
+  destination_cursor = int(destination.size());
+  const auto* row    = archive_format_of(archive);
+  into_folder        = !row || row->kind != ArchiveKind::Compressed;
+  conflict_selected  = 0;
+  error.clear();
+}
+
+Filepath ExtractDialog::folder() const {
+  return into_folder ? Filepath(destination) / archive_stem(archive) : Filepath(destination);
+}
+
+Element ExtractDialog::render() {
+  Elements e = {
+    paragraphAlignCenter("Extract " + archive.filename().native()),
+    separator(),
+    text("To:"),
+    input_destination->Render(),
+    check_folder->Render(),
+    text(into_folder ? "  " + folder().native() : "") | dim,
+    separator(),
+    text("If a file exists:"),
+    radio_conflict->Render(),
+  };
+  if (!error.empty()) e.push_back(text(error) | theme().mkdir_errortxt);
+  e.push_back(filler());
+  e.push_back(hbox({button_extract->Render(), text(" "), button_browse->Render(), text(" "), button_close->Render()}) | hcenter);
+  return window(text(" Extract ") | bold | hcenter, vbox(std::move(e)), BorderStyle::DOUBLE);
+}
+
+void ExtractDialog::ok() {
+  error.clear();
+  if (destination.empty()) {
+    error = "Enter a folder to extract into";
+    return;
+  }
+  const auto target = folder();
+  if (is_virtual_path(target)) {
+    error = "Extract into a local folder";
+    return;
+  }
+  boost::system::error_code ec;
+  const auto bytes = is_archive_path(archive) ? 0 : int64_t(boost::filesystem::file_size(archive, ec));
+  const auto mode  = conflict_selected == 2 ? CopyConflictMode::Skip : conflict_selected == 1 ? CopyConflictMode::Update : CopyConflictMode::Replace;
+  auto job = std::make_shared<JobSpec>(std::make_shared<const OperationPlan>(extraction_plan(archive, target, mode, ec ? 0 : bytes)));
+  if (!(app->jobs ? *app->jobs : file_operations()).add_job(job)) {
+    error = "The job queue is full; try again when a job finishes";
+    return;
+  }
+  app->action.close_dialog();
+}
+
+void ExtractDialog::browse() {
+  const auto where = archive;
+  app->action.close_dialog();
+  if (app->browse_archive) app->browse_archive(where);
+}
+
+void ExtractDialog::cancel() { app->action.close_dialog(); }
 
 namespace {
 
@@ -846,7 +963,13 @@ void CopyDialog::run_copy() {
     _confirm_when_ready = true;
     return;
   }
-  if (is_archive_file_path(target)) {
+  const auto archive = archive_destination(target, app->action.arguments->selected);
+  if (archive.kind == ArchiveDestination::Refuse) {
+    _confirm_when_ready = false;
+    file_operations().report_error(archive.text);
+    return;
+  }
+  if (archive.kind == ArchiveDestination::Create) {
     auto plan=selection_plan(OperationType::ARCHIVE_CREATE,app->action.arguments->selected,target);
     plan.conflict=to_job_copy_conflict(_conflict);
     auto job=std::make_shared<JobSpec>(std::make_shared<const OperationPlan>(std::move(plan)));
@@ -862,6 +985,13 @@ void CopyDialog::run_copy() {
   _clear_operation_state();
   app->dir->clear_selection();
   app->action.close_dialog();
+}
+
+// What the destination's name makes of the copy: a new archive, or why it can't be one.
+Element CopyDialog::archive_note() {
+  const auto archive = archive_destination(Filepath(destination_path), app->action.arguments->selected);
+  if (archive.kind == ArchiveDestination::Copy) return text("");
+  return text(" " + archive.text) | (archive.kind == ArchiveDestination::Refuse ? theme().mkdir_errortxt : dim);
 }
 
 Element CopyDialog::render() {
@@ -889,6 +1019,7 @@ Element CopyDialog::render() {
     text(" Copy " + std::to_string(file_count) + " selected items ") | bold | hcenter,
   vbox({
             hbox({text(" TO: "), input_destination_path->Render() | xflex_grow, text(" ")}),
+            archive_note(),
             separator(),
             hbox({button_ok->Render() | hcenter, button_cancel->Render() | hcenter}) | hcenter,
             _confirm_when_ready ? text("Preparing copy…") | hcenter : text(""),
@@ -1108,16 +1239,10 @@ void ToClipboardDialog::OnShow() {
   std::string text;
   text.reserve(required_size);
   const bool just_names = app->action.dialog == "NameToClipboard";
-  if (just_names) {
-    for (int i = selected_count - 1; i >= 0; --i) {
-      text += selected.at(i).filename().native();
-      text += "\n";
-    }
-  } else {
-    for (int i = selected_count - 1; i >= 0; --i) {
-      text += selected.at(i).native();
-      text += "\n";
-    }
+  // The selection is in panel order, so the text lists items as they are shown.
+  for (const Filepath& path : selected) {
+    text += just_names ? path.filename().native() : path.native();
+    text += "\n";
   }
   if (!text.empty() && text.back() == '\n') {
     // remove last newline

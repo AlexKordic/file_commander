@@ -621,6 +621,7 @@ struct copy_file_context
 {
     const copy_file_io_hooks* io;
     uint64_t bytes_per_second;       // 0 = unlimited
+    const std::atomic<uint64_t>* bytes_per_second_source; // overrides bytes_per_second when set
     std::atomic<bool>* cancel_requested; // null = no cancel support
     std::atomic<uint64_t>* bytes_copied;
     bool (*checkpoint)(void*);
@@ -754,10 +755,13 @@ int copy_file_data_read_write_impl(int infile, int outfile, char* buf, std::size
 
     copy_file_context* tctx = tls_copy_ctx;
     typedef std::chrono::steady_clock clock_type;
-    clock_type::time_point throttle_start;
+    clock_type::time_point throttle_start = clock_type::now();
     uint64_t throttle_bytes = 0;
-    if (tctx && tctx->bytes_per_second > 0)
-        throttle_start = clock_type::now();
+    auto current_rate = [tctx]() -> uint64_t {
+        if (!tctx) return 0;
+        return tctx->bytes_per_second_source ? tctx->bytes_per_second_source->load(std::memory_order_relaxed) : tctx->bytes_per_second;
+    };
+    uint64_t throttle_rate = current_rate();
 
     // Don't use file size to limit the amount of data to copy since some filesystems, like procfs or sysfs,
     // provide files with generated content and indicate that their size is zero or 4096. Just copy as much data
@@ -800,25 +804,38 @@ int copy_file_data_read_write_impl(int infile, int outfile, char* buf, std::size
         if (tctx && tctx->bytes_copied)
             tctx->bytes_copied->fetch_add(static_cast<uint64_t>(sz_read), std::memory_order_relaxed);
 
-        // Rate limiting: sleep to maintain target bytes_per_second
-        if (tctx && tctx->bytes_per_second > 0)
+        // Rate limiting: sleep to maintain the target rate. A changed rate
+        // restarts the window, so lowering it doesn't stall and raising it
+        // doesn't burst to catch up.
+        throttle_bytes += static_cast< uint64_t >(sz_read);
+        for (;;)
         {
-            throttle_bytes += static_cast< uint64_t >(sz_read);
-            double expected = static_cast< double >(throttle_bytes) / static_cast< double >(tctx->bytes_per_second);
-            double elapsed = std::chrono::duration< double >(clock_type::now() - throttle_start).count();
-            while (expected > elapsed) {
-                if (tctx->cancel_requested && tctx->cancel_requested->load(std::memory_order_relaxed)) return ECANCELED;
-                if (tctx->checkpoint && !tctx->checkpoint(tctx->checkpoint_context)) return ECANCELED;
-                const double delay = (expected - elapsed) < 0.05 ? expected - elapsed : 0.05;
-                std::this_thread::sleep_for(std::chrono::duration<double>(delay));
-                elapsed = std::chrono::duration<double>(clock_type::now() - throttle_start).count();
-            }
-            // Reset window periodically to avoid precision drift on large transfers
-            if (throttle_bytes >= tctx->bytes_per_second)
+            const uint64_t rate = current_rate();
+            if (rate != throttle_rate)
             {
+                throttle_rate = rate;
                 throttle_start = clock_type::now();
                 throttle_bytes = 0;
+                break;
             }
+            if (rate == 0)
+                break;
+            double expected = static_cast< double >(throttle_bytes) / static_cast< double >(rate);
+            double elapsed = std::chrono::duration< double >(clock_type::now() - throttle_start).count();
+            if (expected <= elapsed)
+            {
+                // Reset window periodically to avoid precision drift on large transfers
+                if (throttle_bytes >= rate)
+                {
+                    throttle_start = clock_type::now();
+                    throttle_bytes = 0;
+                }
+                break;
+            }
+            if (tctx->cancel_requested && tctx->cancel_requested->load(std::memory_order_relaxed)) return ECANCELED;
+            if (tctx->checkpoint && !tctx->checkpoint(tctx->checkpoint_context)) return ECANCELED;
+            const double delay = (expected - elapsed) < 0.05 ? expected - elapsed : 0.05;
+            std::this_thread::sleep_for(std::chrono::duration<double>(delay));
         }
     }
 
@@ -3479,7 +3496,7 @@ BOOST_FILESYSTEM_DECL
 bool copy_file(path const& from, path const& to, copy_file_options const& opts, error_code* ec)
 {
     // Fast path: no throttle/cancel, delegate directly to the standard implementation
-    if (opts.bytes_per_second == 0 && opts.cancel_requested == nullptr && opts.bytes_copied == nullptr && opts.checkpoint == nullptr && opts.io == nullptr && opts.transaction == nullptr)
+    if (opts.bytes_per_second == 0 && opts.bytes_per_second_source == nullptr && opts.cancel_requested == nullptr && opts.bytes_copied == nullptr && opts.checkpoint == nullptr && opts.io == nullptr && opts.transaction == nullptr)
         return copy_file(from, to, opts.options, ec);
 
 #if defined(BOOST_POSIX_API)
@@ -3529,6 +3546,7 @@ bool copy_file(path const& from, path const& to, copy_file_options const& opts, 
     copy_file_context ctx;
     ctx.io = opts.io;
     ctx.bytes_per_second = opts.bytes_per_second;
+    ctx.bytes_per_second_source = opts.bytes_per_second_source;
     ctx.cancel_requested = opts.cancel_requested;
     ctx.bytes_copied = opts.bytes_copied;
     ctx.checkpoint = opts.checkpoint;

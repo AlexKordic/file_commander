@@ -1,0 +1,138 @@
+{
+  "id": "palette_keys",
+  "title": "Commands and keys",
+  "order": 24,
+  "duration": 55,
+  "chapter": "yours",
+  "summary": "Find any command in the palette, rebind its key, and pick a key preset.",
+  "covers": {
+    "commands": [
+      "command_palette"
+    ],
+    "anchors": [
+      "palette.field"
+    ]
+  },
+  "steps": [
+    {
+      "open_tabs": {
+        "left": "{home}",
+        "right": "{home}/camera",
+        "focus": "left"
+      }
+    },
+    {
+      "chapter": "Make It Yours"
+    },
+    {
+      "caption": "Every command, one search away",
+      "sub": "The command palette finds commands by any part of their name"
+    },
+    {
+      "keys": [
+        "@command_palette"
+      ]
+    },
+    {
+      "wait": {
+        "palette": "commands"
+      }
+    },
+    {
+      "wait": {
+        "text_focus": true
+      }
+    },
+    {
+      "type": "ssh"
+    },
+    {
+      "wait": {
+        "anchor": "palette.row[command=connect_ssh]"
+      }
+    },
+    {
+      "highlight": "palette.row[command=connect_ssh]",
+      "hold": 1800
+    },
+    {
+      "caption": "Change its key",
+      "sub": "Select a command, press ⌃K, then the new key"
+    },
+    {
+      "keys": [
+        "Ctrl+K"
+      ]
+    },
+    {
+      "pause": 700
+    },
+    {
+      "keys": [
+        "Ctrl+Opt+S"
+      ]
+    },
+    {
+      "wait": {
+        "hud": "Connect to Server"
+      }
+    },
+    {
+      "unhighlight": true
+    },
+    {
+      "keys": [
+        "Esc"
+      ]
+    },
+    {
+      "wait": {
+        "palette": null
+      }
+    },
+    {
+      "caption": "The new key works",
+      "sub": ""
+    },
+    {
+      "keys": [
+        "Ctrl+Opt+S"
+      ]
+    },
+    {
+      "wait": {
+        "sheet": "ssh"
+      }
+    },
+    {
+      "pause": 900
+    },
+    {
+      "keys": [
+        "Esc"
+      ]
+    },
+    {
+      "wait": {
+        "sheet": null
+      }
+    },
+    {
+      "caption": "Two presets",
+      "sub": "Commander keeps the terminal keys; Mac uses Finder’s shortcuts. Settings › Keys lists every key"
+    },
+    {
+      "open_window": "settings",
+      "note": "keys"
+    },
+    {
+      "pause": 2600
+    },
+    {
+      "close_window": "settings"
+    },
+    {
+      "uncaption": true
+    }
+  ]
+}

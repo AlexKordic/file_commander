@@ -1,0 +1,89 @@
+{
+  "id": "bookmarks",
+  "title": "Bookmarks",
+  "order": 16,
+  "duration": 35,
+  "chapter": "places",
+  "summary": "Bookmark folders, servers and archives, and open them from the sidebar.",
+  "covers": {
+    "commands": [
+      "add_bookmark",
+      "open_bookmarks"
+    ],
+    "anchors": [
+      "sidebar.bookmarks"
+    ]
+  },
+  "steps": [
+    {
+      "open_tabs": {
+        "left": "{home}/photos/2026",
+        "right": "{home}",
+        "focus": "left"
+      }
+    },
+    {
+      "chapter": "Places"
+    },
+    {
+      "caption": "Bookmark a folder",
+      "sub": "Bookmark This Folder adds the focused pane’s folder to the sidebar"
+    },
+    {
+      "keys": [
+        "@add_bookmark"
+      ]
+    },
+    {
+      "wait": {
+        "bookmark": "2026"
+      }
+    },
+    {
+      "highlight": "sidebar.bookmarks",
+      "hold": 1800
+    },
+    {
+      "unhighlight": true
+    },
+    {
+      "caption": "Open a bookmark",
+      "sub": "Click it to open it in the focused pane"
+    },
+    {
+      "navigate": {
+        "side": "left",
+        "to": "{home}"
+      }
+    },
+    {
+      "click": "sidebar.bookmark[name=2026]"
+    },
+    {
+      "wait": {
+        "path": {
+          "side": "left",
+          "ends_with": "/2026"
+        }
+      }
+    },
+    {
+      "caption": "Servers and archives too",
+      "sub": "Right-click a bookmark to open it in either pane or a new tab, or to remove it"
+    },
+    {
+      "pause": 2200
+    },
+    {
+      "remove_bookmark": "2026"
+    },
+    {
+      "wait": {
+        "no_bookmark": "2026"
+      }
+    },
+    {
+      "uncaption": true
+    }
+  ]
+}

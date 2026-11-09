@@ -1,2 +1,0 @@
-#!/bin/sh
-exec "@ZIG_EXECUTABLE@" @FC_ZIG_TOOL@ "$@"

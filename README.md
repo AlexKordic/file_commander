@@ -19,7 +19,10 @@ built so that the interface never waits for the disk or the network.
   restored on the next start.
 - **Search, don't memorize.** `F1` opens a command palette with every command;
   rebind any key from there. Also: bookmarks, tabs, glob selection,
-  find, 7z archive browsing and Lua scripting.
+  find, archives (browse, extract and create zip, 7z, tar and compressed tars) and Lua scripting.
+- **A native Mac app too.** The same file manager with menus, sheets, themes
+  with fonts for every element, and a tutorial that explains each feature by
+  doing it. See [the macOS app](doc/dev/macos_app.md).
 
 ```text
  Tabs  1:demo     cT:new cW:close f11/f12:switch ║ Tabs  1:2026      cT:new cW:close f11/f12:switch
@@ -37,7 +40,7 @@ built so that the interface never waits for the disk or the network.
 ```
 
 **Status:** release candidate, built from source. It is tested on macOS on
-Apple silicon. Linux builds are supported but not yet fully tested. There are no
+Apple silicon. Linux builds are supported but not yet fully tested: build on the Linux system you will run FC on (it links against that system's glibc; see [release packages](doc/dev/building.md#release-packages)). There are no
 binary downloads yet, and Windows is not supported.
 
 ## Build
@@ -56,7 +59,7 @@ cmake --preset release \
   -DFC_FTXUI_SOURCE_DIR="$PWD/build-deps/ftxui" \
   -DFC_LUAJIT_SOURCE_DIR="$PWD/build-deps/luajit" \
   -DFC_FRESH_SOURCE_DIR="$PWD/build-deps/fresh" \
-  -DFC_LZMA_SOURCE_DIR="$PWD/build-deps/lzma"
+  -DFC_SEVENZIP_SOURCE_DIR="$PWD/build-deps/7zip"
 cmake --build --preset release
 ./build-release/fc
 ```
@@ -65,10 +68,7 @@ The bootstrap script downloads the exact dependency versions FC is tested with
 (listed in [`dependencies.json`](dependencies.json)) into `build-deps/`. The
 first build also downloads Boost and Rust crates, so it needs network access.
 
-There is no install step yet. Run `build-release/fc` directly, or symlink it into
-a directory on your `PATH`. To move FC to another machine, build the
-self-contained package (`fc`, `fresh`, `7zr` and the license notices) described
-in [building FC](doc/dev/building.md).
+Run the terminal interface as `build-release/fc`, or symlink it into a directory on your `PATH`. For the native macOS app, open [FileCommander.xcodeproj](macos/FileCommander.xcodeproj) to choose your signing team in Xcode, or use `macos/build_app.sh --install` to build, verify signing and install the complete app bundle; see [building the macOS app](doc/dev/macos_app.md#build). To move the terminal interface to another machine, build the self-contained package (`fc`, `fresh`, 7-Zip's `7z.so` and the license notices) described in [building FC](doc/dev/building.md).
 
 More build options, such as debug and sanitizer builds or using local
 dependency checkouts, are in [building FC](doc/dev/building.md).

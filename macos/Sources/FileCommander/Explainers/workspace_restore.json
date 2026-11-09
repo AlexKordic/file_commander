@@ -1,0 +1,125 @@
+{
+  "id": "workspace_restore",
+  "title": "Quit and come back",
+  "order": 27,
+  "duration": 40,
+  "chapter": "recovery",
+  "needs": {
+    "restart": true
+  },
+  "summary": "Tabs, folders, selections and filters come back after a quit.",
+  "covers": {
+    "anchors": [
+      "pane.left.tabs"
+    ]
+  },
+  "steps": [
+    {
+      "open_tabs": {
+        "left": "{home}/camera",
+        "right": "{home}/music",
+        "focus": "left"
+      }
+    },
+    {
+      "chapter": "Recovery"
+    },
+    {
+      "caption": "Leave it as it is",
+      "sub": "Select some photos and filter the list"
+    },
+    {
+      "keys": [
+        "@glob_select"
+      ]
+    },
+    {
+      "wait": {
+        "glob": true
+      }
+    },
+    {
+      "wait": {
+        "text_focus": true
+      }
+    },
+    {
+      "type": "*.jpg"
+    },
+    {
+      "keys": [
+        "Enter"
+      ]
+    },
+    {
+      "wait": {
+        "glob": false
+      }
+    },
+    {
+      "type": "or"
+    },
+    {
+      "wait": {
+        "filter": {
+          "side": "left",
+          "is": "or"
+        }
+      }
+    },
+    {
+      "caption": "Quit and open again",
+      "sub": "File Commander saves where you are every half second"
+    },
+    {
+      "relaunch": true
+    },
+    {
+      "caption": "Everything is back",
+      "sub": "Tabs, folders, selections, filters, sort order and the layout"
+    },
+    {
+      "wait": {
+        "path": {
+          "side": "left",
+          "ends_with": "/camera"
+        }
+      },
+      "timeout": 20
+    },
+    {
+      "wait": {
+        "filter": {
+          "side": "left",
+          "is": "or"
+        }
+      }
+    },
+    {
+      "highlight": [
+        "pane.left.tabs",
+        "pane.left.filter",
+        "pane.left.status"
+      ],
+      "hold": 2600
+    },
+    {
+      "unhighlight": true
+    },
+    {
+      "keys": [
+        "Backspace",
+        "Backspace"
+      ],
+      "gap": 120
+    },
+    {
+      "keys": [
+        "@clear_selection"
+      ]
+    },
+    {
+      "uncaption": true
+    }
+  ]
+}

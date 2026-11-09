@@ -1,0 +1,237 @@
+{
+  "id": "select",
+  "title": "Select files",
+  "order": 4,
+  "duration": 55,
+  "chapter": "basics",
+  "summary": "Mark items with Space, by pattern, or all at once; commands act on the selection.",
+  "covers": {
+    "commands": [
+      "select_toggle",
+      "clear_selection",
+      "glob_select",
+      "glob_deselect",
+      "select_all"
+    ]
+  },
+  "steps": [
+    {
+      "open_tabs": {
+        "left": "{home}/camera",
+        "right": "{home}/backup",
+        "focus": "left"
+      }
+    },
+    {
+      "chapter": "Basics"
+    },
+    {
+      "set_preference": {
+        "selection": "commander"
+      }
+    },
+    {
+      "caption": "Mark items",
+      "sub": "Select or Deselect marks the item under the cursor and moves down"
+    },
+    {
+      "cursor": {
+        "side": "left",
+        "name": "cathedral-steps.jpg"
+      }
+    },
+    {
+      "keys": [
+        "@select_toggle",
+        "@select_toggle",
+        "@select_toggle"
+      ],
+      "gap": 380
+    },
+    {
+      "wait": {
+        "selected": {
+          "side": "left",
+          "count": 3
+        }
+      }
+    },
+    {
+      "highlight": "pane.left.status.selection",
+      "hold": 1600
+    },
+    {
+      "unhighlight": true
+    },
+    {
+      "caption": "Deselect All clears it",
+      "sub": ""
+    },
+    {
+      "keys": [
+        "@clear_selection"
+      ]
+    },
+    {
+      "wait": {
+        "selected": {
+          "side": "left",
+          "count": 0
+        }
+      }
+    },
+    {
+      "caption": "Select by pattern",
+      "sub": "Every name that matches *.mov. Case is ignored"
+    },
+    {
+      "keys": [
+        "@glob_select"
+      ]
+    },
+    {
+      "wait": {
+        "glob": true
+      }
+    },
+    {
+      "wait": {
+        "text_focus": true
+      }
+    },
+    {
+      "type": "*.mov"
+    },
+    {
+      "keys": [
+        "Enter"
+      ]
+    },
+    {
+      "wait": {
+        "glob": false
+      }
+    },
+    {
+      "wait": {
+        "selected": {
+          "side": "left",
+          "count": 6
+        }
+      }
+    },
+    {
+      "caption": "Deselect by pattern",
+      "sub": "Takes matches out of the selection again"
+    },
+    {
+      "keys": [
+        "@glob_deselect"
+      ]
+    },
+    {
+      "wait": {
+        "glob": true
+      }
+    },
+    {
+      "wait": {
+        "text_focus": true
+      }
+    },
+    {
+      "type": "MOV_0031*"
+    },
+    {
+      "keys": [
+        "Enter"
+      ]
+    },
+    {
+      "wait": {
+        "glob": false
+      }
+    },
+    {
+      "wait": {
+        "selected": {
+          "side": "left",
+          "count": 5
+        }
+      }
+    },
+    {
+      "keys": [
+        "@clear_selection"
+      ]
+    },
+    {
+      "caption": "Select All respects the filter",
+      "sub": "With a filter, Select All marks only what you see"
+    },
+    {
+      "type": "harbour"
+    },
+    {
+      "keys": [
+        "@select_all"
+      ]
+    },
+    {
+      "wait": {
+        "selected": {
+          "side": "left",
+          "count": 1
+        }
+      }
+    },
+    {
+      "keys": [
+        "Backspace",
+        "Backspace",
+        "Backspace",
+        "Backspace",
+        "Backspace",
+        "Backspace",
+        "Backspace"
+      ],
+      "gap": 90
+    },
+    {
+      "wait": {
+        "filter": {
+          "side": "left",
+          "is": ""
+        }
+      }
+    },
+    {
+      "caption": "Commands act on the selection",
+      "sub": "With nothing selected, they act on the item under the cursor",
+      "hold": 2400
+    },
+    {
+      "caption": "Prefer Finder-style selection?",
+      "sub": "Settings › General › Selection style: arrow keys select, ⌘-click adds"
+    },
+    {
+      "set_preference": {
+        "selection": "finder"
+      },
+      "hold": 1800
+    },
+    {
+      "set_preference": {
+        "selection": "commander"
+      }
+    },
+    {
+      "keys": [
+        "@clear_selection"
+      ]
+    },
+    {
+      "uncaption": true
+    }
+  ]
+}

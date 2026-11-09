@@ -1,0 +1,128 @@
+{
+  "id": "filter",
+  "title": "Filter the list",
+  "order": 3,
+  "duration": 35,
+  "chapter": "basics",
+  "summary": "Type to show only matching names; Backspace edits; a new folder clears the filter.",
+  "covers": {
+    "anchors": [
+      "pane.left.filter"
+    ]
+  },
+  "steps": [
+    {
+      "open_tabs": {
+        "left": "{home}/camera",
+        "right": "{home}/photos/2026",
+        "focus": "left"
+      }
+    },
+    {
+      "chapter": "Basics"
+    },
+    {
+      "caption": "Type to filter",
+      "sub": "Typing in a list shows only the names containing what you type. Case is ignored"
+    },
+    {
+      "type": "night"
+    },
+    {
+      "wait": {
+        "filter": {
+          "side": "left",
+          "is": "night"
+        }
+      }
+    },
+    {
+      "expect": {
+        "rows": {
+          "side": "left",
+          "count": 1
+        }
+      }
+    },
+    {
+      "highlight": "pane.left.filter",
+      "hold": 1600
+    },
+    {
+      "unhighlight": true
+    },
+    {
+      "caption": "Backspace edits it",
+      "sub": ""
+    },
+    {
+      "keys": [
+        "Backspace",
+        "Backspace",
+        "Backspace",
+        "Backspace",
+        "Backspace"
+      ],
+      "gap": 160
+    },
+    {
+      "wait": {
+        "filter": {
+          "side": "left",
+          "is": ""
+        }
+      }
+    },
+    {
+      "type": "jpg"
+    },
+    {
+      "wait": {
+        "rows": {
+          "side": "left",
+          "count": 8
+        }
+      }
+    },
+    {
+      "highlight": "pane.left.status",
+      "hold": 1800
+    },
+    {
+      "unhighlight": true
+    },
+    {
+      "caption": "Some keys are commands",
+      "sub": "Keys bound to commands, such as Space, + and ?, run them instead. Rebind them to filter with them",
+      "hold": 2600
+    },
+    {
+      "caption": "A new folder starts unfiltered",
+      "sub": ""
+    },
+    {
+      "keys": [
+        "@leave_dir"
+      ]
+    },
+    {
+      "wait": {
+        "path": {
+          "side": "left",
+          "ends_with": "/home"
+        }
+      }
+    },
+    {
+      "expect": {
+        "filter": {
+          "side": "left",
+          "is": ""
+        }
+      }
+    },
+    {
+      "uncaption": true
+    }
+  ]
+}

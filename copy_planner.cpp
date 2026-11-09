@@ -21,8 +21,6 @@ Filepath              resolve_link(Filepath current) {
 CopyPlanner::CopyPlanner(CopyRequest request, std::function<void()> notify, std::function<void(std::string, std::string, uint64_t)> emit) : _request(std::move(request)), _notify(std::move(notify)), _emit(std::move(emit)) {
   _sequence_id   = sequence.fetch_add(1);
   _plan.conflict = _request.conflict;
-  for (const auto& p : _request.sources)
-    if (auto lease = archive_service().lease_for_path(p)) _leases.push_back(std::move(lease));
   _thread = std::thread([this] { run(); });
 }
 CopyPlanner::~CopyPlanner() {
@@ -69,7 +67,7 @@ void CopyPlanner::run() {
                                      e.status.permissions(), *e.modified, *e.bytes)
                            : DirItem(e.path);
     boost::system::error_code ec;
-    if ((is_remote(e.path) || is_remote(target))
+    if ((is_virtual_path(e.path) || is_virtual_path(target))
             ? e.path == target
             : (boost::filesystem::equivalent(e.path, target, ec) && !ec)) {
       error(e.path, target, "Copy to self");
@@ -83,9 +81,10 @@ void CopyPlanner::run() {
       append(std::move(op));
       return false;
     }
-    if (e.link_text && !_request.follow_links) {
+    // A link inside an archive is copied as the link it is: there is nothing outside the archive to follow it to.
+    if (e.link_text && (!_request.follow_links || is_archive_path(e.path))) {
       auto text = *e.link_text;
-      if (!is_remote(e.path) && !(_request.preserve_relative_links && text.is_relative())) {
+      if (!is_virtual_path(e.path) && !(_request.preserve_relative_links && text.is_relative())) {
         text = resolve_link(e.path);
         if (text.empty()) {
           error(e.path, target, "Cyclic symlink");
@@ -100,10 +99,14 @@ void CopyPlanner::run() {
       append(std::move(op));
       return false;
     }
+    if (is_archive_path(e.path) && !boost::filesystem::is_directory(e.status) && !boost::filesystem::is_regular_file(e.status)) {
+      error(e.path, target, "Skipped: devices, pipes and sockets aren't copied out of archives");
+      return false;
+    }
     if (e.link_text && _request.follow_links && is_remote(e.path))
       op.source = RemoteFS::canonical(e.path);
     if (boost::filesystem::is_directory(e.status)) {
-      if (is_remote(e.path) || is_remote(target)) {
+      if (is_virtual_path(e.path) || is_virtual_path(target)) {
         if (e.path == target || path_is_under(e.path, target)) {
           error(e.path, target, "Copy dir into itself");
           return false;

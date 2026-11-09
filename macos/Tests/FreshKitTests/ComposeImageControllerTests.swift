@@ -1,0 +1,505 @@
+import XCTest
+import CoreGraphics
+import ImageIO
+@testable import FreshKit
+
+final class ComposeImageControllerTests: XCTestCase {
+  private func asset(_ width: Int = 16, maximumDimension: Int = 2048) throws -> ComposeImageAsset {
+    let context = try XCTUnwrap(CGContext(data: nil, width: width, height: 16, bitsPerComponent: 8, bytesPerRow: width * 4,
+      space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
+    let data = NSMutableData()
+    let destination = try XCTUnwrap(CGImageDestinationCreateWithData(data, "public.png" as CFString, 1, nil))
+    CGImageDestinationAddImage(destination, try XCTUnwrap(context.makeImage()), nil)
+    XCTAssertTrue(CGImageDestinationFinalize(destination))
+    return try ComposeImageAsset.decode(data as Data, maximumDimension: maximumDimension)
+  }
+
+  private func demand(target: String = "x.png", authority: UInt64 = 5, revision: UInt64 = 4) -> ComposeImageController.Demand {
+    .init(scope: .with { $0.windowID = 1; $0.leaf = 2; $0.buffer = 3; $0.bufferRevision = revision },
+      image: .with { $0.start = 10; $0.end = 30; $0.target = target; $0.rendered = true },
+      authority: authority, document: 7, maximumDimension: 256)
+  }
+
+  private func complete(_ request: WireComposeAssetRequest, value: UInt8 = 1) -> WireComposeAssetChunk {
+    .with { $0.id = request.id; $0.total = 1; $0.data = Data([value]); $0.done = true
+      $0.version = Data(repeating: value, count: 32); $0.digest = Data(repeating: value, count: 32) }
+  }
+
+  @MainActor
+  func testCanonicallyEquivalentImageNamesKeepTheirOwnPixelsAndValidators() async throws {
+    let composed = "caf\u{e9}.png", decomposed = "cafe\u{301}.png"
+    XCTAssertEqual(composed, decomposed, "Swift String equality folds canonical spelling")
+    XCTAssertNotEqual(Array(composed.utf8), Array(decomposed.utf8))
+    let firstImage = try asset(40), secondImage = try asset(80)
+    var sent: [WireComposeAssetRequest] = [], time = 0.0
+    let controller = ComposeImageController(now: { time }, decode: { bytes, _ in
+      bytes.first == 1 ? firstImage : secondImage
+    }, send: { sent.append($0) })
+    defer { controller.reset() }
+    let first = demand(target: composed)
+    var second = demand(target: decomposed); second.image.start = 40; second.image.end = 61
+    controller.update([first, second])
+    let requests = sent.filter { !$0.cancel }
+    XCTAssertEqual(requests.count, 2, "byte-distinct names can address different files on an SSH filesystem")
+    guard requests.count == 2 else { return }
+    controller.receive([complete(requests[1], value: 2), complete(requests[0], value: 1)])
+    try await eventually { controller.outstandingCount == 0 }
+    XCTAssertTrue(controller.state(scope: first.scope, image: first.image, authority: 5, document: 7).asset === firstImage)
+    XCTAssertTrue(controller.state(scope: second.scope, image: second.image, authority: 5, document: 7).asset === secondImage)
+    time = 6; controller.update([second, first])
+    let refresh = sent.filter { !$0.cancel }.suffix(2)
+    XCTAssertEqual(refresh.first(where: { $0.start == first.image.start })?.knownDigest, Data(repeating: 1, count: 32))
+    XCTAssertEqual(refresh.first(where: { $0.start == second.image.start })?.knownDigest, Data(repeating: 2, count: 32))
+    controller.update([first])
+    XCTAssertTrue(sent.contains { $0.cancel && $0.id == refresh.first(where: { $0.start == second.image.start })?.id })
+    XCTAssertFalse(sent.contains { $0.cancel && $0.id == refresh.first(where: { $0.start == first.image.start })?.id })
+  }
+
+  @MainActor
+  func testLiteralTargetIdentitySurvivesStringBridgingAndRetargeting() async throws {
+    let literal = "images/\(String(repeating: "café👩🏽‍💻/", count: 4))café.png"
+    let foreign = NSMutableString(string: literal) as String
+    XCTAssertEqual(Array(literal.utf8), Array(foreign.utf8))
+    let old = try asset(40), replacement = try asset(80)
+    var sent: [WireComposeAssetRequest] = []
+    let controller = ComposeImageController(decode: { bytes, _ in bytes.first == 1 ? old : replacement }, send: { sent.append($0) })
+    defer { controller.reset() }
+    let first = demand(target: literal)
+    var second = demand(target: foreign); second.image.start = 40; second.image.end = 60
+    controller.update([first, second])
+    XCTAssertEqual(sent.count, 1, "identical bytes share a read regardless of String storage")
+    controller.receive([complete(sent[0])]); try await eventually { controller.outstandingCount == 0 }
+    XCTAssertTrue(controller.state(scope: second.scope, image: second.image, authority: 5, document: 7).asset === old)
+    var changed = first
+    changed.image.target = literal.replacingOccurrences(of: "café.png", with: "cafe\u{301}.png")
+    changed.scope.bufferRevision += 1
+    XCTAssertEqual(changed.image.target, first.image.target)
+    controller.update([changed])
+    XCTAssertEqual(sent.filter { !$0.cancel }.count, 2, "mutating a target must derive a new literal resource identity")
+    XCTAssertTrue(sent.last!.knownVersion.isEmpty); XCTAssertTrue(sent.last!.knownDigest.isEmpty)
+    controller.receive([complete(sent.last!, value: 2)]); try await eventually { controller.outstandingCount == 0 }
+    XCTAssertTrue(controller.state(scope: first.scope, image: first.image, authority: 5, document: 7).asset === old)
+    XCTAssertTrue(controller.state(scope: changed.scope, image: changed.image, authority: 5, document: 7).asset === replacement)
+  }
+
+  @MainActor
+  func testDecodesOffMainThreadDeduplicatesReferencesAndKeepsSourceAuthoritySeparate() async throws {
+    let decoded = try asset(), changed = expectation(description: "decoded image")
+    var sent: [WireComposeAssetRequest] = []
+    let controller = ComposeImageController(decode: { _, _ in
+      XCTAssertFalse(Thread.isMainThread)
+      return decoded
+    }, send: { sent.append($0) })
+    controller.onChange = { changed.fulfill() }
+    let original = demand()
+    var duplicate = original; duplicate.image.start = 40; duplicate.image.end = 60
+    controller.update([original, duplicate])
+    XCTAssertEqual(sent.count, 1, "same resource in two places shares its read")
+    controller.receive([complete(sent[0])])
+    await fulfillment(of: [changed], timeout: 3)
+    guard case .ready(let result) = controller.state(scope: original.scope, image: original.image, authority: 5, document: 7) else {
+      return XCTFail("image did not enter the decoded cache")
+    }
+    XCTAssertTrue(result === decoded)
+    controller.update([demand(revision: 6)])
+    XCTAssertEqual(sent.count, 1, "typing reuses an unchanged resource")
+    controller.update([demand(authority: 8, revision: 6)])
+    XCTAssertEqual(sent.count, 2, "another authority cannot use the old resource")
+    XCTAssertEqual(sent[1].authority, 8)
+    controller.receive([complete(sent[0])]) // late duplicate from the old authority
+    if case .ready = controller.state(scope: original.scope, image: original.image, authority: 8, document: 7) {
+      XCTFail("late data crossed authorities")
+    }
+    var savedAs = demand(authority: 8, revision: 6); savedAs.document = 9
+    controller.update([savedAs])
+    XCTAssertEqual(sent.filter { !$0.cancel }.count, 3, "Save As changes relative-image resolution")
+    XCTAssertEqual(sent.last?.document, 9)
+    controller.reset()
+  }
+
+  @MainActor
+  func testTypingAndReferenceMovementKeepAnAlreadyReceivedImageDecode() async throws {
+    let image = try asset(), started = expectation(description: "image bytes reached the decode worker")
+    let release = DispatchSemaphore(value: 0)
+    defer { release.signal() }
+    var sent: [WireComposeAssetRequest] = []
+    let controller = ComposeImageController(decode: { _, _ in
+      started.fulfill(); release.wait(); return image
+    }, send: { sent.append($0) })
+    defer { controller.reset() }
+    let original = demand()
+    controller.update([original]); controller.receive([complete(sent[0])])
+    await fulfillment(of: [started], timeout: 3)
+    XCTAssertEqual(controller.outstandingCount, 1)
+    var current = original
+    for revision in 5..<35 {
+      current.scope.bufferRevision = UInt64(revision)
+      current.scope.leaf = UInt64(10 + revision % 3)
+      current.image.start += 1; current.image.end += 1
+      controller.update([current])
+    }
+    release.signal()
+    try await eventually {
+      controller.state(scope: current.scope, image: current.image, authority: current.authority, document: current.document).asset === image
+    }
+    XCTAssertEqual(sent.filter { !$0.cancel }.count, 1,
+      "typing or switching the visible reference must not discard received bytes and read them again")
+    XCTAssertEqual(controller.outstandingCount, 0)
+  }
+
+  @MainActor
+  func testFormattingGapRetainsReceivedPixelsWithoutAuthorizingSourceReads() async throws {
+    let image = try asset(), started = expectation(description: "received bytes decode")
+    let release = DispatchSemaphore(value: 0)
+    defer { release.signal() }
+    var sent: [WireComposeAssetRequest] = [], time = 0.0
+    let controller = ComposeImageController(now: { time }, decode: { _, _ in
+      started.fulfill(); release.wait(); return image
+    }, send: { sent.append($0) })
+    defer { controller.reset() }
+    let original = demand()
+    controller.update([original])
+    controller.update([], retainingDocuments: [original.documentIdentity])
+    XCTAssertEqual(sent.filter(\.cancel).map(\.id), [1], "an unfinished source-scoped read must still cancel")
+    controller.receive([complete(sent[0])])
+    XCTAssertEqual(controller.outstandingCount, 0)
+    time = 6; controller.update([original]); controller.receive([complete(sent.last!)])
+    await fulfillment(of: [started], timeout: 3)
+    controller.update([], retainingDocuments: [original.documentIdentity])
+    XCTAssertEqual(controller.outstandingCount, 1)
+    release.signal()
+    try await eventually { controller.state(scope: original.scope, image: original.image, authority: 5, document: 7).asset === image }
+    XCTAssertEqual(sent.filter { !$0.cancel }.count, 2)
+    XCTAssertEqual(controller.outstandingCount, 0)
+  }
+
+  @MainActor
+  func testLateDecodesStayWithTheirOriginalResourceAndDocumentIdentity() async throws {
+    let old = try asset(), replacement = try asset(32)
+    for field in 0..<5 {
+      let started = expectation(description: "old resource decode \(field)")
+      let release = DispatchSemaphore(value: 0)
+      defer { release.signal() }
+      var sent: [WireComposeAssetRequest] = []
+      let controller = ComposeImageController(decode: { bytes, _ in
+        if bytes.first == 1 { started.fulfill(); release.wait(); return old }
+        return replacement
+      }, send: { sent.append($0) })
+      defer { controller.reset() }
+      let original = demand()
+      controller.update([original]); controller.receive([complete(sent[0])])
+      await fulfillment(of: [started], timeout: 3)
+      var next = original
+      switch field {
+      case 0: next.image.target = "other.png"
+      case 1: next.document += 1
+      case 2: next.authority += 1
+      case 3: next.scope.buffer += 1
+      default: next.scope.windowID += 1
+      }
+      controller.update([next], retainingDocuments: [next.documentIdentity]); controller.receive([complete(sent.last!, value: 2)])
+      try await eventually { controller.state(scope: next.scope, image: next.image, authority: next.authority, document: next.document).asset === replacement }
+      release.signal()
+      try await eventually { controller.outstandingCount == 0 }
+      XCTAssertTrue(controller.state(scope: next.scope, image: next.image, authority: next.authority, document: next.document).asset === replacement)
+      let oldState = controller.state(scope: original.scope, image: original.image, authority: original.authority, document: original.document)
+      if field == 0 {
+        XCTAssertTrue(oldState.asset === old, "a live document may cache the old target, but it cannot replace the new target")
+      } else {
+        XCTAssertNil(oldState.asset, "a retired document, authority, buffer or window cannot publish a late decode")
+      }
+    }
+  }
+
+  @MainActor
+  func testCancelledDecodesRetainTheirSlotsAcrossRepeatedSourceChanges() async throws {
+    let decoded = try asset(), release = DispatchSemaphore(value: 0)
+    defer { for _ in 0..<8 { release.signal() } }
+    let resumed = expectation(description: "new resource starts after an old decode frees its slot")
+    var sent: [WireComposeAssetRequest] = []
+    let controller = ComposeImageController(decode: { _, _ in release.wait(); return decoded }, send: {
+      sent.append($0)
+      if $0.id == 5 && !$0.cancel { resumed.fulfill() }
+    })
+    controller.update((0..<5).map { demand(target: "\($0).png") })
+    XCTAssertEqual(sent.count, 4)
+    controller.receive(sent.map { complete($0) })
+    XCTAssertEqual(controller.outstandingCount, 4)
+    for authority in 10..<110 { controller.update([demand(authority: UInt64(authority))]) }
+    XCTAssertEqual(sent.count, 4, "cancelled Image I/O jobs cannot accumulate more compressed payloads")
+    XCTAssertEqual(controller.outstandingCount, 4)
+    for _ in 0..<4 { release.signal() }
+    await fulfillment(of: [resumed], timeout: 3)
+    XCTAssertLessThanOrEqual(controller.outstandingCount, 4)
+    controller.reset()
+  }
+
+  @MainActor
+  func testMemoryLimitedPreviewDoesNotReloadWhenNearbyDemandChanges() async throws {
+    let decoded = try asset(80)
+    var sent: [WireComposeAssetRequest] = [], time = 0.0
+    let controller = ComposeImageController(maximumCacheBytes: 0, now: { time }, decode: { _, _ in decoded }, send: { sent.append($0) })
+    defer { controller.reset() }
+    let original = demand()
+    controller.update([original]); controller.receive([complete(sent[0])])
+    try await eventually { controller.outstandingCount == 0 }
+    let expected = ComposeImageState.ready(decoded).size(body: 16, width: 300, block: true)
+    XCTAssertEqual(controller.state(scope: original.scope, image: original.image, authority: 5, document: 7).size(body: 16, width: 300, block: true), expected,
+      "evicting pixels must retain known image geometry")
+    time = 100
+    var neighbor = demand(target: "neighbor.png"); neighbor.image.start = 40; neighbor.image.end = 60
+    for _ in 0..<10 {
+      controller.update([neighbor, original]); controller.update([original, neighbor])
+    }
+    XCTAssertEqual(sent.filter { !$0.cancel && $0.start == original.image.start }.count, 1,
+      "viewport ordering and nearby images cannot restart an over-budget preview")
+    controller.update([], retainingDocuments: [original.documentIdentity])
+    controller.update([original], retainingDocuments: [original.documentIdentity])
+    XCTAssertEqual(sent.filter { !$0.cancel && $0.start == original.image.start }.count, 1,
+      "provisional formatting gaps cannot discard the memory-pressure decision")
+  }
+
+  @MainActor
+  func testCacheEvictionIsBoundedAndDoesNotContinuouslyReloadVisibleImages() async throws {
+    let decoded = try asset(), changed = expectation(description: "bounded cache result")
+    var sent: [WireComposeAssetRequest] = []
+    let controller = ComposeImageController(maximumCacheBytes: 0, decode: { _, _ in decoded }, send: { sent.append($0) })
+    controller.onChange = { changed.fulfill() }
+    let original = demand()
+    controller.update([original]); controller.receive([complete(sent[0])])
+    await fulfillment(of: [changed], timeout: 3)
+    XCTAssertEqual(controller.decodedBytes, 0)
+    controller.update([original])
+    XCTAssertEqual(sent.count, 1, "eviction cannot create a read/decode/reflow loop")
+    if case .deferred(let size) = controller.state(scope: original.scope, image: original.image, authority: 5, document: 7) {
+      XCTAssertEqual(size, decoded.originalSize)
+    } else {
+      XCTFail("a bounded-cache fallback is missing")
+    }
+    controller.reset()
+  }
+
+  @MainActor
+  func testMemoryLimitedPreviewRetriesWhenOtherVisiblePixelsLeave() async throws {
+    let image = try asset()
+    var sent: [WireComposeAssetRequest] = [], time = 0.0
+    let controller = ComposeImageController(maximumCacheBytes: image.cost, now: { time }, decode: { _, _ in image }, send: { sent.append($0) })
+    defer { controller.reset() }
+    let first = demand(), second = demand(target: "second.png")
+    controller.update([first, second]); controller.receive(sent.map { complete($0) })
+    try await eventually { controller.outstandingCount == 0 }
+    XCTAssertTrue(controller.state(scope: first.scope, image: first.image, authority: 5, document: 7).asset === image)
+    XCTAssertNil(controller.state(scope: second.scope, image: second.image, authority: 5, document: 7).asset)
+    time = 6
+    controller.update([second])
+    XCTAssertEqual(sent.filter { !$0.cancel }.count, 3, "leaving the competing image frees capacity for the deferred one")
+    XCTAssertTrue(sent.last!.knownVersion.isEmpty)
+    XCTAssertTrue(sent.last!.knownDigest.isEmpty, "evicted pixels require bytes, not an unchanged response")
+    controller.receive([complete(sent.last!)])
+    try await eventually { controller.outstandingCount == 0 }
+    XCTAssertTrue(controller.state(scope: second.scope, image: second.image, authority: 5, document: 7).asset === image)
+    XCTAssertLessThanOrEqual(controller.decodedBytes, image.cost)
+  }
+
+  @MainActor
+  func testMemoryLimitedPreviewCanRetryASmallerThumbnailOrExplicitReload() async throws {
+    let large = try asset(80), small = try asset(80, maximumDimension: 16)
+    var sent: [WireComposeAssetRequest] = [], time = 0.0
+    let controller = ComposeImageController(maximumCacheBytes: small.cost, now: { time },
+      decode: { _, dimension in dimension <= 16 ? small : large }, send: { sent.append($0) })
+    defer { controller.reset() }
+    var wanted = demand()
+    controller.update([wanted]); controller.receive([complete(sent[0])])
+    try await eventually { controller.outstandingCount == 0 }
+    XCTAssertEqual(controller.decodedBytes, 0)
+    controller.reloadVisible()
+    XCTAssertEqual(sent.count, 2, "an explicit reload can retry the same resource under memory pressure")
+    controller.receive([complete(sent[1])])
+    try await eventually { controller.outstandingCount == 0 }
+    XCTAssertEqual(sent.count, 2, "an explicit reload does not start an automatic retry loop")
+    time = 6; wanted.maximumDimension = 16
+    controller.update([wanted])
+    XCTAssertEqual(sent.count, 3)
+    controller.receive([complete(sent[2])])
+    try await eventually { controller.outstandingCount == 0 }
+    XCTAssertTrue(controller.state(scope: wanted.scope, image: wanted.image, authority: 5, document: 7).asset === small)
+    XCTAssertEqual(small.originalSize, large.originalSize)
+    XCTAssertLessThanOrEqual(controller.decodedBytes, small.cost)
+  }
+
+  @MainActor
+  func testBitmapFreeMetadataStaysBoundedWithoutCyclingVisibleResources() async throws {
+    let image = try asset()
+    var sent: [WireComposeAssetRequest] = []
+    let controller = ComposeImageController(maximumCacheBytes: 0, decode: { _, _ in image }, send: { sent.append($0) })
+    defer { controller.reset() }
+    let wanted = (0..<160).map { demand(target: "\($0).png") }
+    controller.update(wanted)
+    var delivered = 0
+    while delivered < 128 {
+      let requests = Array(sent.dropFirst(delivered))
+      guard !requests.isEmpty else { return XCTFail("scheduler stopped before the metadata bound") }
+      delivered += requests.count
+      controller.receive(requests.map { complete($0) })
+      try await eventually { sent.count > delivered || controller.outstandingCount == 0 }
+      XCTAssertLessThanOrEqual(controller.cachedResourceCount, 128)
+      XCTAssertEqual(controller.decodedBytes, 0)
+    }
+    XCTAssertEqual(sent.count, 128)
+    XCTAssertEqual(controller.cachedResourceCount, 128)
+    for _ in 0..<10 { controller.update(Array(wanted.reversed())); controller.update(wanted) }
+    XCTAssertEqual(sent.count, 128, "visible metadata cannot evict its peers and cycle source reads")
+    let next = try XCTUnwrap(wanted.last)
+    guard case .deferred(let size) = controller.state(scope: next.scope, image: next.image, authority: 5, document: 7) else {
+      return XCTFail("an unadmitted resource needs an explained memory fallback")
+    }
+    XCTAssertNil(size, "an unread resource has no invented source geometry")
+    controller.update([next])
+    XCTAssertEqual(sent.count, 129, "a resource can start once the old metadata is offscreen")
+    controller.receive([complete(sent.last!)])
+    try await eventually { controller.outstandingCount == 0 }
+    XCTAssertEqual(controller.cachedResourceCount, 128)
+    controller.reset()
+    XCTAssertEqual(controller.cachedResourceCount, 0)
+  }
+
+  @MainActor
+  private func eventually(_ condition: () -> Bool) async throws {
+    let deadline = ProcessInfo.processInfo.systemUptime + 3
+    while !condition(), ProcessInfo.processInfo.systemUptime < deadline { try await Task.sleep(nanoseconds: 10_000_000) }
+    XCTAssertTrue(condition())
+    if !condition() { throw POSIXError(.ETIMEDOUT) }
+  }
+
+  @MainActor
+  func testAutomaticValidationKeepsThePreviewAndSkipsDecodeForUnchangedResources() async throws {
+    let image = try asset(), automatic = expectation(description: "timer checks the visible image")
+    let decoded = expectation(description: "decoded only once")
+    var sent: [WireComposeAssetRequest] = [], time = 0.0
+    let controller = ComposeImageController(now: { time }, decode: { _, _ in decoded.fulfill(); return image }, send: {
+      sent.append($0); if $0.id == 2 && !$0.cancel { automatic.fulfill() }
+    })
+    defer { controller.reset() }
+    let wanted = demand()
+    controller.update([wanted]); controller.receive([complete(sent[0])])
+    await fulfillment(of: [decoded], timeout: 3)
+    try await eventually { controller.state(scope: wanted.scope, image: wanted.image, authority: 5, document: 7).asset != nil }
+    time = 6 // No new scene/update call: the production timer must perform the check.
+    await fulfillment(of: [automatic], timeout: 3)
+    XCTAssertEqual(sent.count, 2)
+    XCTAssertEqual(sent[1].knownVersion, Data(repeating: 1, count: 32))
+    XCTAssertEqual(sent[1].knownDigest, Data(repeating: 1, count: 32))
+    XCTAssertTrue(controller.state(scope: wanted.scope, image: wanted.image, authority: 5, document: 7).asset === image)
+    controller.receive([.with { $0.id = sent[1].id; $0.done = true; $0.unchanged = true
+      $0.version = Data(repeating: 2, count: 32); $0.digest = sent[1].knownDigest }])
+    XCTAssertEqual(controller.outstandingCount, 0)
+    XCTAssertTrue(controller.state(scope: wanted.scope, image: wanted.image, authority: 5, document: 7).asset === image)
+    controller.update([]); time = 12
+    controller.update([wanted])
+    XCTAssertEqual(sent.last?.knownVersion, Data(repeating: 2, count: 32), "returning to an image validates its last resource version")
+    controller.receive([.with { $0.id = sent.last!.id; $0.done = true; $0.unchanged = true
+      $0.version = Data(repeating: 2, count: 32); $0.digest = sent.last!.knownDigest }])
+    time = 70; controller.update([wanted])
+    XCTAssertTrue(sent.last!.knownVersion.isEmpty, "periodic hashing also covers coarse/cached filesystem stamps")
+    XCTAssertEqual(sent.last?.knownDigest, Data(repeating: 1, count: 32))
+    controller.receive([.with { $0.id = sent.last!.id; $0.done = true; $0.unchanged = true
+      $0.version = Data(repeating: 2, count: 32); $0.digest = sent.last!.knownDigest }])
+  }
+
+  @MainActor
+  func testChangedImagesReplaceThePreviewAfterDecodeAndTransientFailuresRetainIt() async throws {
+    let old = try asset(), replacement = try asset(32)
+    var sent: [WireComposeAssetRequest] = [], time = 0.0
+    let controller = ComposeImageController(now: { time }, decode: { bytes, _ in bytes.first == 1 ? old : replacement }, send: { sent.append($0) })
+    defer { controller.reset() }
+    let wanted = demand()
+    func state() -> ComposeImageState { controller.state(scope: wanted.scope, image: wanted.image, authority: 5, document: 7) }
+    controller.update([wanted]); controller.receive([complete(sent[0])])
+    try await eventually { state().asset === old }
+    time = 6; controller.update([wanted])
+    XCTAssertTrue(state().asset === old, "refreshing never clears a valid preview")
+    controller.receive([.with { $0.id = sent.last!.id; $0.error = "Connection interrupted"; $0.retryable = true; $0.done = true }])
+    guard case .stale(let retained, let warning) = state() else { return XCTFail("transient failure discarded the last image") }
+    XCTAssertTrue(retained === old); XCTAssertEqual(warning, "Connection interrupted")
+    time = 12; controller.update([wanted])
+    XCTAssertEqual(sent.last?.knownDigest, Data(repeating: 1, count: 32))
+    controller.receive([.with { $0.id = sent.last!.id; $0.done = true; $0.unchanged = true
+      $0.version = sent.last!.knownVersion; $0.digest = sent.last!.knownDigest }])
+    guard case .ready = state() else { return XCTFail("successful validation did not clear the stale warning") }
+    time = 18; controller.update([wanted])
+    controller.receive([complete(sent.last!, value: 2)])
+    try await eventually { state().asset === replacement }
+    XCTAssertEqual(state().asset?.originalSize.width, 32)
+    time = 24; controller.update([wanted])
+    controller.receive([.with { $0.id = sent.last!.id; $0.error = "Image unavailable"; $0.done = true }])
+    guard case .failed = state() else { return XCTFail("confirmed missing resource did not show its fallback") }
+    time = 30; controller.update([wanted])
+    XCTAssertTrue(sent.last!.knownDigest.isEmpty)
+    controller.receive([complete(sent.last!, value: 1)])
+    try await eventually { state().asset === old }
+  }
+
+  @MainActor
+  func testInvalidDecodedContentIsRevalidatedWithoutRepeatedTransfersOrDecodes() async throws {
+    let decoded = expectation(description: "invalid content decoded only once")
+    var sent: [WireComposeAssetRequest] = [], time = 0.0
+    let controller = ComposeImageController(now: { time }, decode: { _, _ in decoded.fulfill(); throw ComposeImageAsset.Failure.invalid },
+      send: { sent.append($0) })
+    defer { controller.reset() }
+    let wanted = demand()
+    controller.update([wanted]); controller.receive([complete(sent[0])])
+    await fulfillment(of: [decoded], timeout: 3)
+    try await eventually { controller.outstandingCount == 0 }
+    time = 6; controller.update([wanted])
+    XCTAssertEqual(sent.last?.knownDigest, Data(repeating: 1, count: 32))
+    controller.receive([.with { $0.id = sent.last!.id; $0.done = true; $0.unchanged = true
+      $0.version = sent.last!.knownVersion; $0.digest = sent.last!.knownDigest }])
+    guard case .failed = controller.state(scope: wanted.scope, image: wanted.image, authority: 5, document: 7) else { return XCTFail("invalid image lost its explained fallback") }
+    XCTAssertEqual(controller.outstandingCount, 0)
+  }
+
+  @MainActor
+  func testReorderingVisibleDuplicateReferencesDoesNotCancelTheirSharedLoad() {
+    var sent: [WireComposeAssetRequest] = [], time = 0.0
+    let controller = ComposeImageController(now: { time }, send: { sent.append($0) })
+    defer { controller.reset() }
+    let first = demand()
+    var second = first; second.scope.leaf = 9; second.image.start = 40; second.image.end = 60
+    controller.update([first, second])
+    for _ in 0..<20 { controller.update([second, first]); controller.update([first, second]) }
+    XCTAssertEqual(sent.count, 1, "viewport tie ordering cannot starve an asset with repeated cancellation")
+    controller.update([second])
+    XCTAssertEqual(sent.filter(\.cancel).map(\.id), [1])
+    time = 6; controller.update([second])
+    XCTAssertEqual(sent.filter { !$0.cancel }.count, 2)
+    XCTAssertEqual(sent.last?.scope.leaf, 9, "a closed reference is replaced with a still-visible source scope")
+  }
+
+  @MainActor
+  func testTypingAndPendingFormattingCannotRestartAnImageRequestOnEveryCharacter() async throws {
+    let image = try asset()
+    var sent: [WireComposeAssetRequest] = [], time = 0.0
+    let controller = ComposeImageController(now: { time }, decode: { _, _ in image }, send: { sent.append($0) })
+    defer { controller.reset() }
+    controller.update([demand()])
+    for revision in 5..<30 {
+      controller.update([]) // the current scene is waiting for formatting
+      controller.update([demand(revision: UInt64(revision))])
+    }
+    XCTAssertEqual(sent.filter { !$0.cancel }.count, 1)
+    time = 6; controller.update([demand(revision: 30)])
+    XCTAssertEqual(sent.filter { !$0.cancel }.count, 2)
+    controller.receive([complete(sent.last!)])
+    try await eventually { controller.state(scope: self.demand().scope, image: self.demand().image, authority: 5, document: 7).asset != nil }
+    time = 12; controller.update([demand(revision: 30)])
+    XCTAssertEqual(sent.filter { !$0.cancel }.count, 3)
+    for revision in 31..<100 {
+      controller.update([])
+      controller.update([demand(revision: UInt64(revision))])
+    }
+    XCTAssertEqual(sent.filter { !$0.cancel }.count, 3, "cancelled refreshes keep their backoff through source edits")
+    XCTAssertTrue(controller.state(scope: demand().scope, image: demand().image, authority: 5, document: 7).asset === image)
+    time = 18; controller.update([demand(revision: 100)])
+    XCTAssertEqual(sent.last?.knownDigest, Data(repeating: 1, count: 32))
+  }
+}

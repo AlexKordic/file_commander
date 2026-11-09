@@ -3,6 +3,7 @@
 #include <map>
 #include <random>
 #include "application_events.hpp"
+#include "archive.hpp"
 #include "file_io_jobs.hpp"
 #include "location.hpp"
 #include "settings.hpp"
@@ -43,6 +44,10 @@ void locations() {
                    "fc-archive:%2Fouter!%2Fabsolute", "fc-archive:%2Fouter!..%2Fescape", "fc-archive:%2Fouter!..!"})
     rejects([&] { Location::decode(bad); }, std::string("malformed location accepted: ") + bad);
   require(Location::decode("/a/./b/../c").local == Filepath("/a/c"), "local normalization");
+  require(Location::decode("/a/b/").local == Filepath("/a/b") && Location::decode("/").local == Filepath("/"), "trailing separator kept");
+  auto trailing = Location::decode("ssh://host/tmp/fc/");
+  require(trailing.local == Filepath("/tmp/fc") && trailing.display() == "ssh://host/tmp/fc", "remote trailing separator kept");
+  require(Location::decode("ssh://host/").local == Filepath("/") && Location::decode(".").local == Filepath("."), "root normalization");
 }
 void settings() {
   Fixture     f;
@@ -56,6 +61,7 @@ void settings() {
   s.key_bindings           = {{"Copy", "f8"}};
   s.fresh_binary_path      = "/quoted ' editor";
   s.last_editor_session_id = "session Ω";
+  s.transfer_rate_limit    = 18446744073709551615ull;
   SettingsStore::save(f / "settings", s);
   auto loaded = SettingsStore::load(f / "settings");
   require(loaded.has_value(), "saved settings missing");
@@ -64,12 +70,14 @@ void settings() {
             && v.right.sort == s.right.sort && !v.right.permissions && v.right.owner_group,
           "panel round trip");
   require(v.single_panel && v.focused_panel == "right" && v.bookmarks == s.bookmarks && v.key_bindings == s.key_bindings
-            && v.command_use_count == s.command_use_count && v.fresh_binary_path == s.fresh_binary_path && v.last_editor_session_id == s.last_editor_session_id,
+            && v.command_use_count == s.command_use_count && v.fresh_binary_path == s.fresh_binary_path && v.last_editor_session_id == s.last_editor_session_id
+            && v.transfer_rate_limit == s.transfer_rate_limit,
           "settings fields lost");
   require(!SettingsStore::load(f / "missing"), "missing config is not normal");
   for (auto json :
        {"[", "[]", "{\"version\":2}", "{\"left_sort\":\"bogus\"}", "{\"focused_panel\":\"middle\"}", "{\"single_panel_mode\":0}", "{\"bookmarks\":[3]}",
-        "{\"key_bindings\":{\"Copy\":false}}", "{\"command_use_count\":{\"Copy\":-1}}", "{\"command_use_count\":{\"Copy\":2147483648}}"}) {
+        "{\"key_bindings\":{\"Copy\":false}}", "{\"command_use_count\":{\"Copy\":-1}}", "{\"command_use_count\":{\"Copy\":2147483648}}",
+        "{\"transfer_rate_limit\":-1}", "{\"transfer_rate_limit\":1.5}", "{\"transfer_rate_limit\":\"fast\"}"}) {
     write(f / "bad", json);
     rejects([&] { SettingsStore::load(f / "bad"); }, "malformed settings accepted");
     require(read(f / "bad") == json, "load modified bad settings");
@@ -241,9 +249,9 @@ void retention() {
   until([&] { return jobs->idle(); }, "retained detail timeout");
   require(!job->snapshot()->_details_expired && !job->snapshot()->_errors.empty(), "positive detail budget evicted small payload");
   Fixture f;
-  fs::create_directory(f / "extracted");
-  write(f / "extracted/source", "leased bytes");
-  auto            lease = std::make_shared<ArchiveRoot>(f / "extracted");
+  fs::create_directory(f / "input");
+  write(f / "input/source", "leased bytes");
+  require(create_archive(f / "bundle.7z", {f / "input/source"}, f / "input").ok(), "archive fixture failed");
   Gate            gate;
   FileJobServices services;
   services.clipboard = [&](const auto&) {
@@ -258,15 +266,16 @@ void retention() {
   queued->add_job(std::make_shared<JobSpec>(block_plan));
   gate.await();
   auto copy_plan = std::make_shared<OperationPlan>();
-  copy_plan->steps.push_back({Operation::Kind::CopyFile, f / "extracted/source", f / "copied"});
+  copy_plan->steps.push_back({Operation::Kind::CopyFile, archive_root(f / "bundle.7z") / "source", f / "copied", {}, {}, 12});
   auto copy = std::make_shared<JobSpec>(copy_plan);
-  copy->_archive_leases.push_back(lease);
   queued->add_job(copy);
-  lease.reset();
-  require(fs::exists(f / "extracted/source"), "queued lease lost before execution");
+  // A queued copy out of an archive doesn't need the archive kept open: it opens it again when it runs.
+  ArchiveFS::close_unused();
   gate.open();
-  until([&] { return queued->idle(); }, "leased copy timeout");
-  require(read(f / "copied") == "leased bytes" && !fs::exists(f / "extracted"), "completed job did not release archive lease");
+  until([&] { return queued->idle(); }, "archive copy timeout");
+  require(copy->snapshot()->_state == JobState::COMPLETED && read(f / "copied") == "leased bytes", "queued archive copy failed");
+  for (fs::directory_iterator it(f.root), end; it != end; ++it)
+    require(it->path().filename().native().rfind(".fc-copy-", 0) != 0, "archive copy left its staging folder");
 }
 void typed() {
   Fixture f;

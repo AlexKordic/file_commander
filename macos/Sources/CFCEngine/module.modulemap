@@ -1,0 +1,6 @@
+module CFCEngine {
+  header "../../../fc_engine.hpp"
+  requires cplusplus
+  link "fc_engine_bundle"
+  export *
+}

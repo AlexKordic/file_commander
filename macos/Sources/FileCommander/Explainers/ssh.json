@@ -1,0 +1,173 @@
+{
+  "id": "ssh",
+  "title": "SSH servers",
+  "order": 17,
+  "duration": 80,
+  "chapter": "places",
+  "needs": {
+    "idle_queue": true
+  },
+  "summary": "Connect to a server, browse it, upload a folder, and watch it refresh.",
+  "covers": {
+    "commands": [
+      "connect_ssh"
+    ],
+    "anchors": [
+      "sheet.ssh.host",
+      "sheet.ssh.connect"
+    ]
+  },
+  "steps": [
+    {
+      "open_tabs": {
+        "left": "{home}",
+        "right": "{home}/projects",
+        "focus": "left"
+      }
+    },
+    {
+      "chapter": "Places"
+    },
+    {
+      "caption": "Connect to a server",
+      "sub": "SSH locations open in a tab. The server needs only Python 3"
+    },
+    {
+      "keys": [
+        "@connect_ssh"
+      ]
+    },
+    {
+      "wait": {
+        "sheet": "ssh"
+      }
+    },
+    {
+      "wait": {
+        "text_focus": true
+      }
+    },
+    {
+      "type": "demo-server"
+    },
+    {
+      "keys": [
+        "Tab"
+      ]
+    },
+    {
+      "keys": [
+        "Cmd+A"
+      ]
+    },
+    {
+      "type": "{server}"
+    },
+    {
+      "pause": 600
+    },
+    {
+      "click": "sheet.ssh.connect"
+    },
+    {
+      "wait": {
+        "sheet": null
+      },
+      "timeout": 25
+    },
+    {
+      "wait": {
+        "rows": {
+          "side": "left",
+          "contains": "index.html"
+        }
+      },
+      "timeout": 25
+    },
+    {
+      "caption": "A demo server",
+      "sub": "It runs FC's real remote agent on your Mac instead of over the network"
+    },
+    {
+      "highlight": [
+        "pane.left.tabs",
+        "pane.left.path"
+      ],
+      "hold": 2200
+    },
+    {
+      "unhighlight": true
+    },
+    {
+      "caption": "Upload a folder",
+      "sub": "Copy works between local and remote tabs, and between two servers"
+    },
+    {
+      "focus": "right"
+    },
+    {
+      "cursor": {
+        "side": "right",
+        "name": "website"
+      }
+    },
+    {
+      "keys": [
+        "@copy"
+      ]
+    },
+    {
+      "wait": {
+        "sheet": "copy"
+      }
+    },
+    {
+      "wait": {
+        "anchor": "sheet.copy.start"
+      }
+    },
+    {
+      "click": "sheet.copy.start",
+      "as_job": "upload"
+    },
+    {
+      "wait": {
+        "sheet": null
+      },
+      "timeout": 30
+    },
+    {
+      "wait": {
+        "rows": {
+          "side": "left",
+          "contains": "website"
+        }
+      },
+      "timeout": 40
+    },
+    {
+      "caption": "It refreshes by itself",
+      "sub": "The active SSH tab is checked every three seconds"
+    },
+    {
+      "touch": "{server}/new-page.html"
+    },
+    {
+      "wait": {
+        "rows": {
+          "side": "left",
+          "contains": "new-page.html"
+        }
+      },
+      "timeout": 12
+    },
+    {
+      "caption": "Your own servers",
+      "sub": "Hosts, users, keys and jump hosts come from ~/.ssh/config. Passwords are asked in a sheet",
+      "hold": 2800
+    },
+    {
+      "uncaption": true
+    }
+  ]
+}

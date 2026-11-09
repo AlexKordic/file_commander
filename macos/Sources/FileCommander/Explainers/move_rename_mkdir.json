@@ -1,0 +1,175 @@
+{
+  "id": "move_rename_mkdir",
+  "title": "New folder, rename and move",
+  "order": 8,
+  "duration": 50,
+  "chapter": "files",
+  "needs": {
+    "idle_queue": true
+  },
+  "summary": "Create a folder, rename files, and move them to the other pane.",
+  "covers": {
+    "commands": [
+      "mkdir",
+      "rename",
+      "move"
+    ],
+    "anchors": [
+      "sheet.mkdir.name",
+      "sheet.move.start"
+    ]
+  },
+  "steps": [
+    {
+      "open_tabs": {
+        "left": "{home}/photos/2026",
+        "right": "{home}/backup",
+        "focus": "left"
+      }
+    },
+    {
+      "chapter": "Files"
+    },
+    {
+      "caption": "New folder",
+      "sub": ""
+    },
+    {
+      "keys": [
+        "@mkdir"
+      ]
+    },
+    {
+      "wait": {
+        "sheet": "mkdir"
+      }
+    },
+    {
+      "wait": {
+        "text_focus": true
+      }
+    },
+    {
+      "type": "Summer"
+    },
+    {
+      "keys": [
+        "Enter"
+      ]
+    },
+    {
+      "wait": {
+        "sheet": null
+      }
+    },
+    {
+      "wait": {
+        "rows": {
+          "side": "left",
+          "contains": "Summer"
+        }
+      }
+    },
+    {
+      "caption": "Rename",
+      "sub": "Rename works on one item or on the whole selection"
+    },
+    {
+      "cursor": {
+        "side": "left",
+        "name": "beach.jpg"
+      }
+    },
+    {
+      "keys": [
+        "@rename"
+      ]
+    },
+    {
+      "wait": {
+        "sheet": "rename"
+      }
+    },
+    {
+      "wait": {
+        "text_focus": true
+      }
+    },
+    {
+      "keys": [
+        "Cmd+A"
+      ]
+    },
+    {
+      "type": "beach-day.jpg"
+    },
+    {
+      "keys": [
+        "Enter"
+      ]
+    },
+    {
+      "wait": {
+        "sheet": null
+      }
+    },
+    {
+      "wait": {
+        "rows": {
+          "side": "left",
+          "contains": "beach-day.jpg"
+        }
+      }
+    },
+    {
+      "caption": "Move to the other pane",
+      "sub": "Within one disk a move is a rename; across disks FC copies first, then removes"
+    },
+    {
+      "cursor": {
+        "side": "left",
+        "name": "city.jpg"
+      }
+    },
+    {
+      "keys": [
+        "@move"
+      ]
+    },
+    {
+      "wait": {
+        "sheet": "move"
+      }
+    },
+    {
+      "pause": 1200
+    },
+    {
+      "click": "sheet.move.start"
+    },
+    {
+      "wait": {
+        "sheet": null
+      }
+    },
+    {
+      "wait": {
+        "rows": {
+          "side": "right",
+          "contains": "city.jpg"
+        }
+      }
+    },
+    {
+      "wait": {
+        "rows": {
+          "side": "left",
+          "lacks": "city.jpg"
+        }
+      }
+    },
+    {
+      "uncaption": true
+    }
+  ]
+}

@@ -27,9 +27,33 @@ closes an editor tab. To stop the editor, quit Fresh from its own menu.
 If you rebind the switch command in FC's palette, the editor uses the same key
 to switch back. See [rebinding keys](keys.md#rebinding-keys).
 
+In the macOS app, the editor is drawn natively in the main window, in place of
+the panes, instead of in a terminal: Fresh's menus fill the menu bar, its tabs,
+sidebar, palette and status bar are Mac controls, and the usual `⌘` shortcuts
+work. It is the same Fresh session, so everything on this page applies. See [the editor in the macOS
+app](macos_app.md#the-editor).
+
 Remote files from [SSH tabs](ssh.md) open in the same editor. The same path
 on two different hosts opens as two different tabs. Files inside 7z archives
 can't be opened; copy them out of the archive first.
+
+## Markdown Compose
+
+For a Markdown file, press `Ctrl+P` in Fresh, type `>` to show commands, and
+choose **Markdown: Toggle Compose/Preview**. Run the command again to return to
+the source view. Compose edits the same Markdown buffer: saving, undo, editor
+tabs and `F10` switching work as usual.
+
+The macOS app also has an opt-in development version of Compose with
+proportional prose, larger headings and inline PNG/JPEG images. Prose wraps to
+the available window width. Click rendered text to edit it in place; Markdown
+syntax is revealed where needed for editing. Images resolve on the document's
+filesystem, including an SSH host, and unavailable images show a placeholder.
+The saved file remains Markdown.
+
+Rich typography requires matching FC and Fresh development builds and is off
+by default. See the [experimental rich Compose integration](dev/fresh_integration.md#experimental-rich-compose)
+for its flags, supported behavior and qualification requirements.
 
 ## One editor per profile
 

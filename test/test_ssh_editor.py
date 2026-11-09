@@ -1,6 +1,6 @@
 """One real Fresh backend routes local and SSH buffers and saves through the agent.
 
-Default: exact Python SSH agent over the local transport fixture. --host box:
+Default: exact Python SSH agent over the local transport fixture. --host dev:
 real OpenSSH, with all remote mutations inside an owned /tmp directory.
 """
 import argparse

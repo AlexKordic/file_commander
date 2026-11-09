@@ -50,12 +50,18 @@ struct PanelSharedState {
 
   // std::function<ftxui::Element(RowInfo&)> transform;
   std::function<void(Filepath, Filepath)> move_to;
-  std::function<bool(const Filepath&)>    enter_archive;
+  // 0: not an archive; 1: the panel went into it; 2: handled where it is (a dialog, or a refusal).
+  std::function<int(const Filepath&)>     enter_archive;
+  std::function<bool(const Filepath&)>    browse_archive;  // Open as archive, whatever the name.
   std::function<bool(int64_t&)>           leave_virtual_dir;
   std::function<void(int)>                set_min_y;
   std::function<Filepath const*()>        get_focused_item;
   std::function<void(int)>                set_focused_index;
   std::function<int()>                    get_focused_index;
+  // Whether a directory read is in flight, and stopping it.
+  std::function<bool()>                   loading      = [] { return false; };
+  std::function<int()>                    load_percent = [] { return -1; };
+  std::function<void()>                   stop_loading = [] {};
 
   explicit PanelSharedState(Dir* d);
   PanelSharedState() = delete;

@@ -1,0 +1,146 @@
+{
+  "id": "editor_basics",
+  "title": "The editor",
+  "order": 18,
+  "duration": 50,
+  "chapter": "editor",
+  "needs": {
+    "editor": true
+  },
+  "summary": "Open files in Fresh, switch back and forth, and keep unsaved text.",
+  "covers": {
+    "commands": [
+      "open_in_editor",
+      "switch_to_file_commander",
+      "switch_editor_prev",
+      "switch_editor_next"
+    ]
+  },
+  "steps": [
+    {
+      "open_tabs": {
+        "left": "{home}/projects/website",
+        "right": "{home}/projects/notes",
+        "focus": "left"
+      }
+    },
+    {
+      "chapter": "Editor"
+    },
+    {
+      "caption": "Open files in the editor",
+      "sub": "Open in Editor shows them in Fresh, in place of the panes"
+    },
+    {
+      "cursor": {
+        "side": "left",
+        "name": "index.html"
+      }
+    },
+    {
+      "keys": [
+        "@open_in_editor"
+      ]
+    },
+    {
+      "wait": {
+        "editor": {
+          "running": true
+        }
+      },
+      "timeout": 25
+    },
+    {
+      "wait": {
+        "editor": {
+          "window": "main"
+        }
+      },
+      "timeout": 5
+    },
+    {
+      "wait": {
+        "editor": {
+          "contains": "Field Notes"
+        }
+      },
+      "timeout": 25
+    },
+    {
+      "caption": "Edit",
+      "sub": "Fresh is a full editor: tabs, search, multiple cursors, syntax colors"
+    },
+    {
+      "editor_keys": [
+        "End"
+      ]
+    },
+    {
+      "editor_type": " <!-- draft -->"
+    },
+    {
+      "pause": 900
+    },
+    {
+      "caption": "Switch back",
+      "sub": "F10 in the editor comes back to File Commander"
+    },
+    {
+      "editor_keys": [
+        "F10"
+      ]
+    },
+    {
+      "wait": {
+        "editor": {
+          "running": false
+        }
+      },
+      "timeout": 10
+    },
+    {
+      "caption": "Unsaved text survives",
+      "sub": "Switching only hides the editor; its tabs and unsaved text stay"
+    },
+    {
+      "keys": [
+        "@switch_to_file_commander"
+      ]
+    },
+    {
+      "wait": {
+        "editor": {
+          "running": true
+        }
+      },
+      "timeout": 20
+    },
+    {
+      "wait": {
+        "editor": {
+          "contains": "draft"
+        }
+      },
+      "timeout": 15
+    },
+    {
+      "pause": 1500
+    },
+    {
+      "editor_keys": [
+        "F10"
+      ]
+    },
+    {
+      "wait": {
+        "editor": {
+          "running": false
+        }
+      },
+      "timeout": 10
+    },
+    {
+      "uncaption": true
+    }
+  ]
+}

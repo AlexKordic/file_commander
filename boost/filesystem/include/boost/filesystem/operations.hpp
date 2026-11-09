@@ -85,6 +85,8 @@ struct copy_file_options
     copy_options options = copy_options::none;
     const copy_file_io_hooks* io = nullptr;
     uint64_t bytes_per_second = 0;              // 0 = unlimited
+    // When set, read before every chunk instead of bytes_per_second, so the limit can change mid-file.
+    const std::atomic<uint64_t>* bytes_per_second_source = nullptr;
     std::atomic<bool>* cancel_requested = nullptr; // null = no cancel support
     std::atomic<uint64_t>* bytes_copied = nullptr; // progress of the private output
     bool (*checkpoint)(void*) = nullptr; // false aborts; may wait for resume

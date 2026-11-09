@@ -1,10 +1,13 @@
 #include "copy_planner.hpp"
 #include "file_io_jobs.hpp"
 #include "remote_fs.hpp"
+#include "remote_protocol.hpp"
 #include "sha256.hpp"
 #include "support/contracts.hpp"
 #include "transfer_journal.hpp"
 #include <iostream>
+#include <sstream>
+#include <sys/stat.h>
 using namespace Perun;
 using test::require;
 static void done(FileJobs &jobs, const std::shared_ptr<JobSpec> &job) {
@@ -15,6 +18,310 @@ static std::shared_ptr<JobSpec> copy_job(const Filepath &source, const Filepath 
   auto plan = std::make_shared<OperationPlan>();
   plan->steps.push_back({Operation::Kind::CopyFile, source, dest, {}, "", RemoteFS::inspect(source).size});
   return std::make_shared<JobSpec>(plan);
+}
+static void streaming_pipeline_contracts(FileJobs &jobs, const test::Fixture &local, const Filepath &remote) {
+  const std::string data(2 * 1024 * 1024 + 17, char(0xac));
+  Sha256 tree_hash; tree_hash.update(data); const auto expected_digest = tree_hash.finish();
+  test::write(local / "gap-first", data);
+  boost::filesystem::create_directory(local / "gap-dir");
+  test::write(local / "gap-dir/second", data);
+  boost::filesystem::create_symlink("gap-first", local / "gap-link");
+  const auto gate = local / "stream-gate", trace = local / "stream-trace";
+  setenv("FC_SSH_FIXTURE_STREAM_GATE", gate.c_str(), 1);
+  setenv("FC_SSH_FIXTURE_STREAM_TRACE", trace.c_str(), 1);
+  RemoteFS::close_connections();
+  auto plan = std::make_shared<OperationPlan>();
+  plan->steps = {
+      {Operation::Kind::CopyFile, local / "gap-first", remote / "gap-first", {}, "", int64_t(data.size())},
+      {Operation::Kind::CreateDirectory, local / "gap-dir", remote / "gap-dir"},
+      {Operation::Kind::CreateSymlink, local / "gap-link", remote / "gap-link", Filepath("gap-first")},
+      {Operation::Kind::CopyFile, local / "gap-dir/second", remote / "gap-dir/second", {}, "", int64_t(data.size())}};
+  auto job = std::make_shared<JobSpec>(plan);
+  jobs.add_job(job); done(jobs, job);
+  require(boost::filesystem::exists(Filepath(gate.native() + ".entered")) &&
+              boost::filesystem::exists(Filepath(gate.native() + ".second-ended")),
+          "Second file did not stream while the previous fsync was blocked");
+  auto snapshot = job->snapshot();
+  require(snapshot->_transfer_written == 2 * data.size() && snapshot->_transfer_verified == 2 * data.size() &&
+              snapshot->_transfer_durable == 2 * data.size(), "Pipeline progress did not track written/verified/durable bytes");
+  require(RemoteFS::digest(remote / "gap-first") == RemoteFS::digest(local / "gap-first") &&
+              RemoteFS::digest(remote / "gap-dir/second") == RemoteFS::digest(local / "gap-dir/second") &&
+              RemoteFS::inspect(remote / "gap-link").link == "gap-first", "Pipeline changed files or symbolic links");
+  require(RemoteFS::inspect(remote / "gap-dir").mtime_ns == RemoteFS::inspect(local / "gap-dir").mtime_ns,
+          "Look-ahead directory metadata was not finalized");
+  std::istringstream records(test::read(trace));
+  uint64_t time, identity, length, bytes = 0, frames = 0;
+  int pid, kind, operation;
+  std::string direction;
+  while (records >> time >> pid >> direction >> kind >> operation >> identity >> length)
+    if (direction == "in" && kind == RemoteFS::Wire::Data && operation == RemoteFS::Wire::opcode("stream_write")) {
+      bytes += length; ++frames;
+    }
+  require(bytes == 2 * data.size() && frames >= 6, "Wire data was expanded, missing or not framed as raw bytes");
+  unsetenv("FC_SSH_FIXTURE_STREAM_GATE"); unsetenv("FC_SSH_FIXTURE_STREAM_TRACE");
+  RemoteFS::close_connections();
+
+  // Whole directory moves share the same pipeline: publication of the first
+  // tree must not be needed to start the second tree's data stream.
+  for (bool same_host : {false, true}) {
+    const auto name = same_host ? "server-trees" : "move-trees";
+    const auto tree_gate = local / name;
+    auto trees = std::make_shared<OperationPlan>();
+    trees->type = same_host ? OperationType::COPY : OperationType::MOVE;
+    for (int n = 0; n < 2; ++n) {
+      const auto source = same_host ? remote / (std::string(name) + std::to_string(n))
+                                    : local / (std::string(name) + std::to_string(n));
+      RemoteFS::mkdir(source);
+      RemoteFS::write(source / "child", 0, data, true);
+      trees->steps.push_back({same_host ? Operation::Kind::CopyFile : Operation::Kind::MoveEntry,
+                             source, remote / (std::string(name) + "-out" + std::to_string(n))});
+    }
+    setenv("FC_SSH_FIXTURE_STREAM_GATE", tree_gate.c_str(), 1);
+    RemoteFS::close_connections();
+    auto transfer = std::make_shared<JobSpec>(trees);
+    jobs.add_job(transfer); done(jobs, transfer);
+    require(boost::filesystem::exists(Filepath(tree_gate.native() + ".second-ended")),
+            "Next tree waited for the previous tree's verification or publication");
+    for (const auto &op : trees->steps) {
+      require(RemoteFS::digest(op.destination / "child") == expected_digest, "Whole-tree pipeline changed data");
+      require(RemoteFS::inspect(op.source).exists == same_host, "Whole-tree move cleanup was incorrect");
+    }
+    unsetenv("FC_SSH_FIXTURE_STREAM_GATE"); RemoteFS::close_connections();
+  }
+
+  for (const auto &fault : {"corrupt", "disk-full"}) {
+    setenv("FC_SSH_FIXTURE_STREAM_FAULT", fault, 1);
+    auto fault_plan = std::make_shared<OperationPlan>();
+    for (int n = 0; n < 2; ++n)
+      fault_plan->steps.push_back({Operation::Kind::CopyFile, local / "gap-first",
+          remote / (std::string(fault) + std::to_string(n)), {}, "", int64_t(data.size())});
+    auto failed = std::make_shared<JobSpec>(fault_plan);
+    jobs.add_job(failed);
+    test::until([&] { return jobs.idle(); }, "Streaming fault did not stop the job");
+    require(failed->_state == JobState::PAUSED && !RemoteFS::inspect(fault_plan->steps[0].destination).exists &&
+                !RemoteFS::inspect(fault_plan->steps[1].destination).exists &&
+                RemoteFS::inspect(local / "gap-first").exists,
+            "Corrupt or full destination published output or removed its source");
+    unsetenv("FC_SSH_FIXTURE_STREAM_FAULT"); RemoteFS::close_connections();
+    jobs.resume(failed->_job_id); done(jobs, failed);
+    for (const auto &op : fault_plan->steps)
+      require(RemoteFS::digest(op.destination) == RemoteFS::digest(op.source), "Resumed fault published incorrect bytes");
+  }
+}
+static void move_cleanup_contract(const test::Fixture &local, const Filepath &remote) {
+  struct Fault { bool once = true; } fault;
+  auto hooks = std::make_shared<boost::filesystem::copy_file_io_hooks>();
+  hooks->context = &fault;
+  hooks->fault = [](void *context, const char *phase) {
+    auto &f = *static_cast<Fault *>(context);
+    if (std::string_view(phase) == "recovery_source_item" && f.once) { f.once = false; return EIO; }
+    return 0;
+  };
+  FileJobServices services; services.file_io = hooks;
+  auto jobs = make_file_jobs({}, services); jobs->enable_recovery(local / "cleanup-journal");
+  auto plan = std::make_shared<OperationPlan>(); plan->type = OperationType::MOVE;
+  for (int n = 0; n < 2; ++n) {
+    auto source = local / ("cleanup-source" + std::to_string(n));
+    RemoteFS::mkdir(source); test::write(source / "a", "first"); test::write(source / "b", "second");
+    plan->steps.push_back({Operation::Kind::MoveEntry, source, remote / source.filename()});
+  }
+  auto job = std::make_shared<JobSpec>(plan); jobs->add_job(job);
+  test::until([&] { return jobs->idle(); }, "Interrupted source cleanup did not pause");
+  require(job->_state == JobState::PAUSED && RemoteFS::inspect(plan->steps[0].source).exists &&
+              RemoteFS::read(plan->steps[0].destination / "a", 0, 20) == "first" &&
+              RemoteFS::read(plan->steps[0].destination / "b", 0, 20) == "second",
+          "Interrupted move cleanup lost verified output or incorrectly completed");
+  jobs->resume(job->_job_id); done(*jobs, job);
+  for (const auto &op : plan->steps)
+    require(!RemoteFS::inspect(op.source).exists && RemoteFS::read(op.destination / "b", 0, 20) == "second",
+            "Resume did not finish cleanup and the next tree safely");
+}
+static void verified_stage_contract(const test::Fixture &local, const Filepath &remote) {
+  struct Tamper { Filepath remote; bool once = true; } tamper{remote};
+  auto hooks = std::make_shared<boost::filesystem::copy_file_io_hooks>(); hooks->context = &tamper;
+  hooks->fault = [](void *context, const char *phase) {
+    auto &t = *static_cast<Tamper *>(context);
+    if (std::string_view(phase) != "remote_before_publish" || !t.once) return 0;
+    t.once = false;
+    for (const auto &entry : RemoteFS::list(t.remote)) {
+      if (!entry.path.filename().native().starts_with(".fc-copy-")) continue;
+      RemoteFS::write(entry.path / "data", 0, "tampered");
+      return 0;
+    }
+    return EIO;
+  };
+  FileJobServices services; services.file_io = hooks;
+  auto jobs = make_file_jobs({}, services); jobs->enable_recovery(local / "proof-journal");
+  test::write(local / "proof-source", "original verified source");
+  auto job = copy_job(local / "proof-source", remote / "proof-target"); jobs->add_job(job);
+  test::until([&] { return jobs->idle(); }, "Staging drift did not stop publication");
+  require(job->_state == JobState::PAUSED && !RemoteFS::inspect(remote / "proof-target").exists &&
+              test::read(local / "proof-source") == "original verified source",
+          "Modified verified staging output was published");
+  jobs->resume(job->_job_id); done(*jobs, job);
+  require(RemoteFS::read(remote / "proof-target", 0, 100) == "original verified source",
+          "Staging drift recovery published modified data");
+}
+static void pending_recovery_contracts(const test::Fixture &local, const Filepath &remote) {
+  {
+    auto plan = std::make_shared<OperationPlan>();
+    const auto raw = std::string("raw-\xff", 5);
+    plan->steps.push_back({Operation::Kind::CopyFile, remote / raw, local / raw});
+    auto job = std::make_shared<JobSpec>(plan); job->_job_id = 400;
+    const auto profile = local / "raw-journal";
+    boost::filesystem::create_directory(profile);
+    auto record = TransferJournal::create(profile, *job);
+    // The journal remains valid JSON, independently of whether this OS allows
+    // such a filename. Startup must preserve it without touching either host.
+    boost::json::parse(test::read(profile / "400.plan.json"));
+    auto recovery = make_file_jobs(); recovery->enable_recovery(profile);
+    const auto history = recovery->get_job_history();
+    require(history.size() == 1 && history[0]->_state == JobState::PAUSED &&
+                history[0]->_plan->steps[0].source.native() == plan->steps[0].source.native() &&
+                history[0]->_plan->steps[0].destination.native() == plan->steps[0].destination.native(),
+            "Non-UTF-8 paths changed or vanished across journal recovery");
+  }
+  for (bool replaced : {false, true}) {
+    auto prefix = replaced ? "pending-blocked" : "pending";
+    auto plan = std::make_shared<OperationPlan>();
+    for (int n = 0; n < 2; ++n) {
+      const auto name = std::string(prefix) + std::to_string(n);
+      test::write(local / name, "complete pending content");
+      plan->steps.push_back({Operation::Kind::CopyFile, local / name, remote / name, {}, "", 24});
+    }
+    auto job = std::make_shared<JobSpec>(plan); job->_job_id = 300;
+    auto directory = local / (std::string(prefix) + "-journal");
+    boost::filesystem::create_directory(directory);
+    auto record = TransferJournal::create(directory, *job); record->prepare_inputs();
+    std::vector<Filepath> roots;
+    for (int n = 0; n < 2; ++n) {
+      auto root = remote / boost::filesystem::unique_path(".fc-copy-%%%%%%%%-%%%%%%%%");
+      RemoteFS::mkdir(root); roots.push_back(root);
+      record->stage_pending(n, root / "data");
+      RemoteFS::write(root / "data", 0, "partial", true);
+      if (!replaced) {
+        RemoteFS::mkdir(root / "readonly");
+        RemoteFS::write(root / "readonly/child", 0, "discard partial output", true);
+        auto readonly = RemoteFS::inspect(root / "readonly"); readonly.mode = S_IFDIR | 0555;
+        RemoteFS::metadata(root / "readonly", readonly);
+      }
+    }
+    record->checkpoint(*job->snapshot(), JobState::RUNNING);
+    if (replaced) {
+      RemoteFS::rename(roots[1], remote / "replaced-stage-backup");
+      RemoteFS::mkdir(roots[1]);
+      RemoteFS::write(roots[1] / "unrelated", 0, "keep", true);
+    }
+    auto recovery = make_file_jobs(); recovery->enable_recovery(directory);
+    auto history = recovery->get_job_history();
+    require(history.size() == 1 && history[0]->_state == JobState::PAUSED && recovery->idle(),
+            "Pending pipeline performed work at startup");
+    require(RemoteFS::inspect(roots[0] / "data").exists, "Startup removed pending output without Resume");
+    recovery->resume(300);
+    test::until([&] { return recovery->idle(); }, "Pending pipeline recovery timed out");
+    if (replaced) {
+      require(history[0]->_state == JobState::PAUSED &&
+                  history[0]->snapshot()->_recovery_note.find("ownership changed") != std::string::npos,
+              "Replaced pending stage did not block recovery");
+      require(RemoteFS::inspect(roots[0] / "data").exists && RemoteFS::inspect(roots[1] / "unrelated").exists,
+              "Recovery cleaned stages before checking all ownership records");
+    } else {
+      done(*recovery, history[0]);
+      for (int n = 0; n < 2; ++n) {
+        require(!RemoteFS::inspect(roots[n]).exists, "Resume left incomplete look-ahead output");
+        const auto name = std::string(prefix) + std::to_string(n);
+        require(RemoteFS::read(remote / name, 0, 100) == "complete pending content", "Resume published partial output");
+      }
+    }
+  }
+}
+static void metadata_contracts(FileJobs &jobs, const test::Fixture &local, const Filepath &remote) {
+  const std::string name = "user.fc.transfer-warning";
+  const boost::json::object attrs{{name, "metadata retained on matching platforms"}};
+  test::write(local / "attrs-file", "file with metadata");
+  RemoteFS::attributes(local / "attrs-file", attrs);
+#if defined(__APPLE__)
+  const char *other_platform = "linux";
+#else
+  const char *other_platform = "darwin";
+#endif
+  RemoteFS::close_connections();
+  setenv("FC_SSH_FIXTURE_PLATFORM", other_platform, 1);
+  auto warned = [&](const std::shared_ptr<JobSpec> &job, const Filepath &source, const Filepath &target) {
+    done(jobs, job);
+    require(job->_items_failed == 0 && job->_errors.empty(), "Metadata warning marked the job failed");
+    bool found = false;
+    for (const auto &error : jobs.get_errors(100))
+      found |= error.message.starts_with("[Transfer warning]") &&
+               error.message.find(source.native()) != std::string::npos;
+    require(found, "Skipped metadata was not reported as a warning: " + source.native());
+    require(!RemoteFS::attributes(target).at("attributes").as_object().contains(name),
+            "Cross-platform attribute was applied to the target");
+    jobs.clear_errors();
+  };
+  auto copy = [&](const Filepath &source, const Filepath &target) {
+    auto job = copy_job(source, target);
+    jobs.add_job(job);
+    warned(job, source, target);
+    require(RemoteFS::digest(source) == RemoteFS::digest(target), "Metadata warning changed file content");
+    require(RemoteFS::attributes(source).at("attributes").as_object().at(name) == attrs.at(name),
+            "Copy discarded source metadata");
+  };
+  copy(local / "attrs-file", remote / "attrs-file");
+  RemoteFS::attributes(remote / "attrs-file", attrs);
+  copy(remote / "attrs-file", local / "attrs-download");
+
+  // CopyPlanner applies directory metadata after its individual file steps.
+  boost::filesystem::create_directory(local / "attrs-tree");
+  test::write(local / "attrs-tree/child", "directory child");
+  RemoteFS::attributes(local / "attrs-tree", attrs);
+  auto copy_directory = [&](const Filepath &source, const Filepath &parent) {
+    CopyRequest request;
+    request.sources = {source};
+    request.destination = parent;
+    CopyPlanner planner(request);
+    test::until([&] { return !planner._running.load(); }, "Metadata discovery timeout");
+    auto job = std::make_shared<JobSpec>(planner.take_plan());
+    jobs.add_job(job);
+    auto target = parent / source.filename();
+    warned(job, source, target);
+    require(RemoteFS::read(target / "child", 0, 1024) == "directory child", "Directory copy lost content");
+  };
+  copy_directory(local / "attrs-tree", remote);
+  RemoteFS::attributes(remote / "attrs-tree", attrs);
+  boost::filesystem::create_directory(local / "attrs-tree-download");
+  copy_directory(remote / "attrs-tree", local / "attrs-tree-download");
+
+  // A cross-filesystem directory move uses the recursive staging path instead.
+  auto plan = std::make_shared<OperationPlan>();
+  plan->type = OperationType::MOVE;
+  plan->steps.push_back({Operation::Kind::MoveEntry, local / "attrs-tree", remote / "attrs-moved"});
+  auto move = std::make_shared<JobSpec>(plan);
+  jobs.add_job(move);
+  warned(move, local / "attrs-tree", remote / "attrs-moved");
+  require(!RemoteFS::inspect(local / "attrs-tree").exists &&
+              RemoteFS::read(remote / "attrs-moved/child", 0, 1024) == "directory child",
+          "Metadata warning blocked verified move cleanup");
+
+  // An ACL still blocks publication, even when ordinary xattrs are nonfatal.
+  RemoteFS::close_connections();
+  setenv("FC_SSH_FIXTURE_ACL", "1", 1);
+  auto acl = copy_job(remote / "attrs-file", local / "attrs-acl-blocked");
+  jobs.add_job(acl);
+  test::until([&] { return jobs.idle(); }, "ACL validation timeout");
+  require(acl->_state == JobState::PAUSED && !RemoteFS::inspect(local / "attrs-acl-blocked").exists &&
+              acl->snapshot()->_recovery_note.find("Extended ACLs") != std::string::npos,
+          "Unsupported ACL was treated as a nonfatal xattr warning");
+  unsetenv("FC_SSH_FIXTURE_ACL");
+  unsetenv("FC_SSH_FIXTURE_PLATFORM");
+  RemoteFS::close_connections();
+  jobs.clear_errors();
+  auto preserved = copy_job(local / "attrs-file", remote / "attrs-preserved");
+  jobs.add_job(preserved);
+  done(jobs, preserved);
+  require(RemoteFS::attributes(remote / "attrs-preserved").at("attributes").as_object().at(name) ==
+              attrs.at(name) && jobs.get_errors(100).empty(),
+          "Same-platform metadata was skipped or reported as a warning");
 }
 int main(int argc, char **argv) {
   std::string host = argc > 1 ? argv[1] : "fixture";
@@ -113,6 +420,11 @@ int main(int argc, char **argv) {
     done(*jobs, deletions);
     require(!RemoteFS::inspect(remote / "tree").exists, "Remote delete failed");
     if (host == "fixture") {
+      streaming_pipeline_contracts(*jobs, local, remote);
+      move_cleanup_contract(local, remote);
+      verified_stage_contract(local, remote);
+      pending_recovery_contracts(local, remote);
+      metadata_contracts(*jobs, local, remote);
       RemoteFS::close_connections();
       setenv("FC_SSH_FIXTURE_DROP_RENAME", (local / "lost-ack").c_str(), 1);
       auto lost = copy_job(local / "alpha", remote / "lost-ack-copy");

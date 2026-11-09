@@ -1,0 +1,370 @@
+{
+  "id": "editor_window",
+  "title": "Files and editor in one window",
+  "order": 19,
+  "duration": 80,
+  "chapter": "editor",
+  "needs": {
+    "editor": true,
+    "idle_queue": true
+  },
+  "summary": "F4 turns the window into the editor: Fresh's menus in the menu bar, tabs, the command palette and the file sidebar.",
+  "covers": {
+    "anchors": [
+      "editor.tabs",
+      "editor.status",
+      "editor.palette",
+      "editor.explorer",
+      "toolbar.mode",
+      "jobs.bar"
+    ]
+  },
+  "steps": [
+    {
+      "open_tabs": {
+        "left": "{home}/photos",
+        "right": "{home}/backup",
+        "focus": "left"
+      }
+    },
+    {
+      "chapter": "Editor"
+    },
+    {
+      "caption": "Start a copy first",
+      "sub": "At 1 MiB/s it is still running when the editor opens"
+    },
+    {
+      "set_transfer_speed": "1 MiB"
+    },
+    {
+      "cursor": {
+        "side": "left",
+        "name": "2026"
+      }
+    },
+    {
+      "keys": [
+        "@copy"
+      ]
+    },
+    {
+      "wait": {
+        "sheet": "copy"
+      }
+    },
+    {
+      "wait": {
+        "anchor": "sheet.copy.start"
+      }
+    },
+    {
+      "click": "sheet.copy.start",
+      "as_job": "photos"
+    },
+    {
+      "wait": {
+        "sheet": null
+      },
+      "timeout": 30
+    },
+    {
+      "wait": {
+        "running_job": true
+      },
+      "timeout": 10
+    },
+    {
+      "navigate": {
+        "side": "left",
+        "to": "{home}/projects/website"
+      }
+    },
+    {
+      "cursor": {
+        "side": "left",
+        "name": "index.html"
+      }
+    },
+    {
+      "keys": [
+        "@open_in_editor"
+      ]
+    },
+    {
+      "wait": {
+        "editor": {
+          "contains": "Field Notes"
+        }
+      },
+      "timeout": 25
+    },
+    {
+      "wait": {
+        "editor": {
+          "window": "main"
+        }
+      },
+      "timeout": 5
+    },
+    {
+      "caption": "One window",
+      "sub": "The editor takes the place of the panes; Fresh edits, the window draws its tabs and status bar"
+    },
+    {
+      "highlight": [
+        "editor.tabs",
+        "editor.status"
+      ],
+      "hold": 2200
+    },
+    {
+      "caption": "Jobs keep going",
+      "sub": "The job bar stays below the editor, with its Pause and Cancel buttons"
+    },
+    {
+      "highlight": "jobs.bar",
+      "hold": 1800
+    },
+    {
+      "wait": {
+        "running_job": false
+      },
+      "timeout": 60
+    },
+    {
+      "caption": "Fresh's menus",
+      "sub": "While the editor is shown, the menu bar holds its menus, with ⌘ shortcuts"
+    },
+    {
+      "pause": 2400
+    },
+    {
+      "wait": {
+        "all": [
+          {
+            "menubar": "Selection"
+          },
+          {
+            "not": {
+              "menubar": "Transfers"
+            }
+          }
+        ]
+      },
+      "timeout": 5
+    },
+    {
+      "caption": "Command palette",
+      "sub": "⇧⌘P finds any editor command by name"
+    },
+    {
+      "editor_keys": [
+        "Cmd+Shift+P"
+      ]
+    },
+    {
+      "wait": {
+        "editor": {
+          "shows": "palette"
+        }
+      },
+      "timeout": 10
+    },
+    {
+      "editor_type": "toggle line"
+    },
+    {
+      "highlight": "editor.palette",
+      "hold": 2000
+    },
+    {
+      "pause": 2000
+    },
+    {
+      "editor_keys": [
+        "Esc"
+      ]
+    },
+    {
+      "wait": {
+        "editor": {
+          "hides": "palette"
+        }
+      },
+      "timeout": 10
+    },
+    {
+      "caption": "Files beside the text",
+      "sub": "⌘B shows the folder in a sidebar"
+    },
+    {
+      "editor_keys": [
+        "Cmd+B"
+      ]
+    },
+    {
+      "wait": {
+        "editor": {
+          "shows": "explorer"
+        }
+      },
+      "timeout": 10
+    },
+    {
+      "highlight": "editor.explorer",
+      "hold": 2000
+    },
+    {
+      "pause": 2000
+    },
+    {
+      "editor_keys": [
+        "Cmd+B"
+      ]
+    },
+    {
+      "pause": 300
+    },
+    {
+      "editor_keys": [
+        "Cmd+B"
+      ]
+    },
+    {
+      "wait": {
+        "editor": {
+          "hides": "explorer"
+        }
+      },
+      "timeout": 10
+    },
+    {
+      "caption": "Open another file",
+      "sub": "Without the > the palette finds files of the folder by name"
+    },
+    {
+      "editor_keys": [
+        "Cmd+P"
+      ]
+    },
+    {
+      "wait": {
+        "editor": {
+          "shows": "palette"
+        }
+      },
+      "timeout": 10
+    },
+    {
+      "editor_keys": [
+        "Backspace"
+      ]
+    },
+    {
+      "editor_type": "style"
+    },
+    {
+      "pause": 900
+    },
+    {
+      "editor_keys": [
+        "Enter"
+      ]
+    },
+    {
+      "wait": {
+        "editor": {
+          "contains": "max-width"
+        }
+      },
+      "timeout": 10
+    },
+    {
+      "pause": 1200
+    },
+    {
+      "wait": {
+        "all": [
+          {
+            "menubar": "Selection"
+          },
+          {
+            "not": {
+              "menubar": "Transfers"
+            }
+          }
+        ]
+      },
+      "timeout": 5
+    },
+    {
+      "caption": "Files or the editor",
+      "sub": "The switch in the toolbar goes back and forth, as F10 does; the panes stay as you left them"
+    },
+    {
+      "highlight": "toolbar.mode",
+      "hold": 1600
+    },
+    {
+      "click": "toolbar.mode"
+    },
+    {
+      "wait": {
+        "editor": {
+          "running": false
+        }
+      },
+      "timeout": 10
+    },
+    {
+      "wait": {
+        "cursor": {
+          "side": "left",
+          "name": "index.html"
+        }
+      }
+    },
+    {
+      "pause": 1400
+    },
+    {
+      "click": "toolbar.mode"
+    },
+    {
+      "wait": {
+        "editor": {
+          "running": true
+        }
+      },
+      "timeout": 10
+    },
+    {
+      "wait": {
+        "editor": {
+          "window": "main"
+        }
+      },
+      "timeout": 5
+    },
+    {
+      "pause": 1200
+    },
+    {
+      "editor_keys": [
+        "F10"
+      ]
+    },
+    {
+      "wait": {
+        "editor": {
+          "running": false
+        }
+      },
+      "timeout": 10
+    },
+    {
+      "uncaption": true
+    }
+  ]
+}

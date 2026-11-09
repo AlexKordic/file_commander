@@ -36,6 +36,7 @@ std::string read(const Filepath &, uint64_t offset, size_t length);
 void write(const Filepath &, uint64_t offset, std::string_view data, bool exclusive = false);
 void mkdir(const Filepath &);
 void remove(const Filepath &, bool recursive = false);
+void remove_staging(const Filepath &, uint64_t dev, uint64_t ino);
 void rename(const Filepath &, const Filepath &, bool replace = false, const Metadata *expected = nullptr);
 void symlink(std::string_view target, const Filepath &);
 void metadata(const Filepath &, const Metadata &);
@@ -45,9 +46,14 @@ std::string digest(const Filepath &, const std::atomic<bool> *cancelled = nullpt
 boost::json::object attributes(const Filepath &);
 void attributes(const Filepath &, const boost::json::object &);
 boost::json::object params(const Filepath &);
-std::string base64(std::string_view);
-std::string unbase64(std::string_view);
 void close_connections();
+struct ProtocolStats { uint64_t sent = 0, received = 0; };
+ProtocolStats protocol_stats(); // Plaintext FC bytes, including helper bootstrap; excludes SSH/TCP framing.
 std::string control_path(const std::string &host);
 int authenticate(const std::string &host); // foreground terminal owns prompts
+// The ssh program for a host: a registered override, else FC_SSH_BIN, else ssh.
+std::string ssh_command(const std::string &host);
+// Registers a stand-in for ssh for one host name (an empty command removes it).
+// The tutorial's demo server uses it; every other host keeps the normal ssh.
+void set_endpoint_command(const std::string &host, std::string command);
 } // namespace RemoteFS

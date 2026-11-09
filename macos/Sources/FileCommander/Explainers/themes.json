@@ -1,0 +1,134 @@
+{
+  "id": "themes",
+  "title": "Themes, colors and fonts",
+  "order": 25,
+  "duration": 60,
+  "chapter": "yours",
+  "needs": {
+    "settings": true
+  },
+  "summary": "Light and dark, colors for both, and a font and size for every element.",
+  "covers": {
+    "commands": [
+      "edit_theme_colors"
+    ],
+    "anchors": [
+      "settings.appearance.preview",
+      "settings.appearance.font.bigger"
+    ]
+  },
+  "steps": [
+    {
+      "open_tabs": {
+        "left": "{home}/camera",
+        "right": "{home}/music",
+        "focus": "left"
+      }
+    },
+    {
+      "chapter": "Make It Yours"
+    },
+    {
+      "caption": "Light or dark",
+      "sub": "Follow the system, or choose one in Settings › General"
+    },
+    {
+      "set_preference": {
+        "appearance": "dark"
+      },
+      "hold": 1800
+    },
+    {
+      "set_preference": {
+        "appearance": "light"
+      },
+      "hold": 1500
+    },
+    {
+      "set_preference": {
+        "appearance": "system"
+      }
+    },
+    {
+      "caption": "The theme editor",
+      "sub": "Every element has a color for light and for dark, and a font and size"
+    },
+    {
+      "keys": [
+        "@edit_theme_colors"
+      ]
+    },
+    {
+      "wait": {
+        "window": "settings"
+      }
+    },
+    {
+      "pause": 800
+    },
+    {
+      "click": "settings.appearance.element[listing.name#font]"
+    },
+    {
+      "caption": "Bigger names in the list",
+      "sub": "Changes show at once, in the preview and in the window"
+    },
+    {
+      "click": "settings.appearance.font.bigger"
+    },
+    {
+      "click": "settings.appearance.font.bigger"
+    },
+    {
+      "click": "settings.appearance.font.bigger"
+    },
+    {
+      "wait": {
+        "font_size": {
+          "element": "listing.name",
+          "is": 16
+        }
+      }
+    },
+    {
+      "highlight": "settings.appearance.preview",
+      "hold": 2200
+    },
+    {
+      "unhighlight": true
+    },
+    {
+      "caption": "Colors",
+      "sub": "Pick a color for light and dark, or a system color that follows your accent color"
+    },
+    {
+      "click": "settings.appearance.element[listing.directory]"
+    },
+    {
+      "highlight": [
+        "settings.appearance.color.light",
+        "settings.appearance.color.dark"
+      ],
+      "hold": 2400
+    },
+    {
+      "caption": "Save, revert or reset",
+      "sub": "Save keeps it as your own theme; Revert drops the edits"
+    },
+    {
+      "click": "settings.appearance.revert"
+    },
+    {
+      "pause": 900
+    },
+    {
+      "close_window": "settings"
+    },
+    {
+      "unhighlight": true
+    },
+    {
+      "uncaption": true
+    }
+  ]
+}

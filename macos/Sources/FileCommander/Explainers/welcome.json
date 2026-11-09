@@ -1,0 +1,126 @@
+{
+  "id": "welcome",
+  "title": "The window",
+  "order": 1,
+  "duration": 45,
+  "chapter": "basics",
+  "summary": "Panes, tabs, the path bar, the filter, the status line, the toolbar and Help.",
+  "covers": {
+    "commands": [
+      "switch_panel",
+      "help"
+    ],
+    "anchors": [
+      "pane.left",
+      "pane.right",
+      "toolbar.help"
+    ]
+  },
+  "steps": [
+    {
+      "open_tabs": {
+        "left": "{home}",
+        "right": "{home}/camera",
+        "focus": "left"
+      }
+    },
+    {
+      "chapter": "Basics"
+    },
+    {
+      "caption": "Two panes",
+      "sub": "Each pane has its own tabs, folder, selection and sort order"
+    },
+    {
+      "highlight": [
+        "pane.left",
+        "pane.right"
+      ],
+      "hold": 2000
+    },
+    {
+      "caption": "Tabs",
+      "sub": "Every pane keeps its own tabs. The graduation cap marks the tutorial's tabs"
+    },
+    {
+      "highlight": [
+        "pane.left.tabs",
+        "pane.right.tabs"
+      ],
+      "hold": 2000
+    },
+    {
+      "caption": "Path bar and filter",
+      "sub": "Click a folder in the path to go there; type to filter the list"
+    },
+    {
+      "highlight": [
+        "pane.left.path",
+        "pane.left.filter"
+      ],
+      "hold": 2200
+    },
+    {
+      "caption": "Status line",
+      "sub": "What is selected, how many bytes, and how long the folder took to read"
+    },
+    {
+      "highlight": "pane.left.status",
+      "hold": 2000
+    },
+    {
+      "unhighlight": true
+    },
+    {
+      "caption": "The focused pane",
+      "sub": "Keys go to the pane with the accent line. Switch Pane moves the focus"
+    },
+    {
+      "keys": [
+        "@switch_panel"
+      ],
+      "hold": 900
+    },
+    {
+      "expect": {
+        "focused": "right"
+      }
+    },
+    {
+      "keys": [
+        "@switch_panel"
+      ],
+      "hold": 700
+    },
+    {
+      "expect": {
+        "focused": "left"
+      }
+    },
+    {
+      "caption": "Toolbar and menus",
+      "sub": "Every command is in the menu bar with its key, and in the command palette"
+    },
+    {
+      "highlight": [
+        "toolbar.copy",
+        "toolbar.command_palette"
+      ],
+      "hold": 2200
+    },
+    {
+      "caption": "Help is always here",
+      "sub": "The graduation cap, or Help in the palette, explains any feature again"
+    },
+    {
+      "highlight": "toolbar.help",
+      "hold": 2400
+    },
+    {
+      "unhighlight": true
+    },
+    {
+      "uncaption": true
+    }
+  ]
+}

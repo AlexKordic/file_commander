@@ -1,5 +1,6 @@
 
 #include "theme.hpp"
+#include "custom_controls.hpp"
 #include <ftxui/dom/elements.hpp>
 #include <ftxui/screen/color.hpp>
 
@@ -59,6 +60,8 @@ const std::vector<ColorToken>& color_tokens_table() {
     {"misty_rose3", Color::MistyRose3},
     {"dark_khaki", Color::DarkKhaki},
     {"medium_purple4", Color::MediumPurple4},
+    {"dark_goldenrod", Color::DarkGoldenrod},
+    {"dark_red", Color::DarkRedBis},
   };
   return tokens;
 }
@@ -119,6 +122,8 @@ const std::vector<std::pair<std::string, std::string>>& editable_color_defs() {
     {"sort_button_bg", "Sort Button Background"},
     {"sort_button_active_bg", "Sort Active Background"},
     {"sort_button_active_fg", "Sort Active Foreground"},
+    {"pause_button_bg", "Pause Button Background"},
+    {"stop_button_bg", "Stop and Cancel Button Background"},
     {"mkdir_errortxt_fg", "Mkdir Error Color"},
     {"clipboard_msg_fg", "Clipboard Message Color"},
     {"copy_destination_fg", "Copy Destination Color"},
@@ -182,6 +187,10 @@ bool set_color_field(Theme& t, const std::string& id, const Color& color) {
     t.sort_button_active_bg = color;
   } else if (id == "sort_button_active_fg") {
     t.sort_button_active_fg = color;
+  } else if (id == "pause_button_bg") {
+    t.pause_button_bg = color;
+  } else if (id == "stop_button_bg") {
+    t.stop_button_bg = color;
   } else if (id == "mkdir_errortxt_fg") {
     t.mkdir_errortxt_fg = color;
   } else if (id == "clipboard_msg_fg") {
@@ -214,6 +223,7 @@ KeyBindings::KeyBindings() {
   key_clear_selection      = Event::Escape;
   key_enter_dir            = Event::Return;
   key_leave_dir            = Event::Character("?");
+  key_open_as_archive      = ctrl_page_down();
   key_refresh_dir          = Event::CtrlR;
   key_toggle_single_panel_mode = Event::CtrlO;
   key_toggle_permissions_column = Event::CtrlL;
@@ -230,6 +240,7 @@ KeyBindings::KeyBindings() {
   key_switch_editor_prev   = Event::CtrlY;
   key_switch_editor_next   = Event::CtrlU;
   key_connect_ssh = Event::Custom;
+  key_transfer_speed = Event::Custom;  // Palette only until rebound.
   key_restart_editor_backend = Event::Custom; // Palette only until rebound.
   key_copy               = Event::F5;
   key_move               = Event::F6;
@@ -291,6 +302,8 @@ void Theme::reset_color_defaults() {
   set_color_token("sort_button_bg", "wheat4");
   set_color_token("sort_button_active_bg", "wheat4");
   set_color_token("sort_button_active_fg", "salmon1");
+  set_color_token("pause_button_bg", "dark_goldenrod");
+  set_color_token("stop_button_bg", "dark_red");
   set_color_token("mkdir_errortxt_fg", "light_pink3");
   set_color_token("clipboard_msg_fg", "light_pink3");
   set_color_token("copy_destination_fg", "light_pink3");
@@ -309,6 +322,8 @@ void Theme::refresh_decorators() {
   progress_current      = color(progress_current_fg);
   sort_button           = bgcolor(sort_button_bg);
   sort_button_active    = bgcolor(sort_button_active_bg) | color(sort_button_active_fg);
+  pause_button          = bgcolor(pause_button_bg) | color(Color::Black);
+  stop_button           = bgcolor(stop_button_bg) | color(Color::White);
   mkdir_errortxt        = color(mkdir_errortxt_fg);
   clipboard_msg         = color(clipboard_msg_fg);
   copy_destination      = color(copy_destination_fg);

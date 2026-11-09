@@ -14,6 +14,14 @@ repo = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(repo / 'tools'))
 from release_gate import required_tests, manual_tests
 
+# Includes interpreter startup and the fixture's child process. These checks
+# assert registry/results/package behavior; they are not latency benchmarks.
+FIXTURE_TIMEOUT = 15
+
+require(required_tests(repo, 'Darwin') - required_tests(repo, 'Linux') == {'fc.macos.native_editor'},
+        'native editor qualification must be required only on macOS')
+require(required_tests(repo, 'Linux') <= required_tests(repo, 'Darwin'), 'macOS registry loses common contracts')
+
 presets = json.loads((repo / 'CMakePresets.json').read_text())['testPresets']
 for preset in presets:
     if preset['name'] == 'manual':
@@ -46,6 +54,10 @@ if '--show-only=json-v1' in sys.argv:
  if mode == 'missing_test': names = names[1:]
  if mode == 'duplicate_test': names.append(names[0])
  if mode == 'missing_manual': names.remove(manual[0])
+ if mode == 'wrong_platform':
+  native = 'fc.macos.native_editor'
+  if native in names: names.remove(native)
+  else: names.append(native)
  tests = [{'name': n, 'command': [sys.executable], 'properties': [{'name': 'LABELS', 'value': ['manual'] if n in manual else []}]} for n in names]
  target = next((t for t in tests if t['name'] in manual), tests[0])
  if mode == 'disabled': target['properties'].append({'name': 'DISABLED', 'value': True})
@@ -70,15 +82,16 @@ else:
     fake.chmod(0o700)
     cache = {'CMAKE_HOME_DIRECTORY': str(repo), 'CMAKE_BUILD_TYPE': 'Release', 'BUILD_TESTING': 'ON',
              'FC_CORE_ONLY': 'OFF', 'FC_ALLOW_UNPINNED_DEPENDENCIES': 'OFF', 'FC_BUILD_FRESH': 'ON',
-             'FC_BUILD_LZMA_TOOL': 'ON', 'FC_TEST_DEPENDENCY_REBUILDS': 'ON',
+             'FC_BUILD_SEVENZIP': 'ON', 'FC_TEST_DEPENDENCY_REBUILDS': 'ON',
              'CMAKE_CACHE_MAJOR_VERSION': '3', 'CMAKE_CACHE_MINOR_VERSION': '30', 'CMAKE_CACHE_PATCH_VERSION': '0'}
+    if platform.system() == 'Darwin': cache['FC_TEST_MACOS_NATIVE'] = 'ON'
     def write_cache(values):
         (build / 'CMakeCache.txt').write_text(''.join(f'{key}:STRING={value}\n' for key, value in values.items()))
     write_cache(cache)
     system = build / 'CMakeFiles/3.30.0/CMakeSystem.cmake'
     system.parent.mkdir(parents=True)
     system.write_text(f'set(CMAKE_SYSTEM_NAME "{platform.system()}")\nset(CMAKE_SYSTEM_PROCESSOR "{platform.machine()}")\nset(CMAKE_CROSSCOMPILING "FALSE")\n')
-    binaries = {'fc': build / 'fc', 'fresh': build / 'third_party/fresh/bin/fresh', '7zr': build / 'third_party/lzma/_o/7zr'}
+    binaries = {'bin/fc': build / 'fc', 'bin/fresh': build / 'third_party/fresh/bin/fresh', 'lib/file-commander/7z.so': build / 'third_party/7zip/_o/7z.so'}
     for path in binaries.values():
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(b'fixture executable')
@@ -92,7 +105,8 @@ else:
                        'share/licenses/ftxui/LICENSE': 'licenses/ftxui/LICENSE',
                        'share/licenses/luajit/COPYRIGHT': 'licenses/luajit/COPYRIGHT',
                        'share/licenses/boost/LICENSE_1_0.txt': 'licenses/boost/LICENSE_1_0.txt',
-                       'share/licenses/lzma-sdk/lzma-sdk.txt': 'licenses/lzma-sdk/lzma-sdk.txt',
+                       'share/licenses/7zip/License.txt': 'licenses/7zip/License.txt',
+                       'share/licenses/7zip/copying.txt': 'licenses/7zip/copying.txt',
                        'share/licenses/fresh/LICENSE': 'licenses/fresh/LICENSE',
                        'share/file-commander/THIRD_PARTY_NOTICES.md': 'THIRD_PARTY_NOTICES.md',
                        'share/file-commander/dependencies.json': 'dependencies.json'}
@@ -103,9 +117,9 @@ else:
                 member.size = len(data); member.mode = 0o644
                 package.addfile(member, io.BytesIO(data))
             for name, path in binaries.items():
-                if missing and name == '7zr': continue
+                if missing and name == 'lib/file-commander/7z.so': continue
                 data = b'old executable' if stale else path.read_bytes()
-                member = tarfile.TarInfo(f'{package_name}/bin/{name}')
+                member = tarfile.TarInfo(f'{package_name}/{name}')
                 member.size = len(data); member.mode = 0o755
                 package.addfile(member, io.BytesIO(data))
     make_package()
@@ -113,12 +127,12 @@ else:
     def run(lane='release', control='pass', valid=False, fake_ctest=True):
         env = dict(os.environ, FC_LANE_CONTROL=control)
         if fake_ctest: env['PATH'] = str(root) + os.pathsep + env['PATH']
-        result = subprocess.run([*base, lane, '--build', str(build)], env=env, capture_output=True, text=True, timeout=5)
+        result = subprocess.run([*base, lane, '--build', str(build)], env=env, capture_output=True, text=True, timeout=FIXTURE_TIMEOUT)
         require((result.returncode == 0) == valid, f'lane control {lane}/{control}: {result.stdout} {result.stderr}')
         return result
     run(valid=True)
     for mode in ('one_test', 'missing_test', 'duplicate_test', 'disabled', 'unbuilt', 'one_result',
-                 'duplicate_result', 'skip', 'failure', 'error', 'empty', 'missing', 'malformed'):
+                 'duplicate_result', 'skip', 'failure', 'error', 'empty', 'missing', 'malformed', 'wrong_platform'):
         run(control=mode)
     for mode in ('missing_manual', 'wrong_manual_label', 'extra_manual_label', 'leak_manual'):
         run(control=mode)
@@ -136,9 +150,13 @@ else:
     for mode in ('empty', 'missing', 'failure', 'malformed'): run('fast', mode)
     for key, value in [('CMAKE_HOME_DIRECTORY', str(root)), ('CMAKE_BUILD_TYPE', 'Debug'), ('BUILD_TESTING', 'OFF'),
                        ('FC_CORE_ONLY', 'ON'), ('FC_ALLOW_UNPINNED_DEPENDENCIES', 'ON'), ('FC_BUILD_FRESH', 'OFF'),
-                       ('FC_BUILD_LZMA_TOOL', 'OFF'), ('FC_TEST_DEPENDENCY_REBUILDS', 'OFF'), ('FETCHCONTENT_SOURCE_DIR_BOOST', '/unchecked')]:
+                       ('FC_BUILD_SEVENZIP', 'OFF'), ('FC_TEST_DEPENDENCY_REBUILDS', 'OFF'), ('FETCHCONTENT_SOURCE_DIR_BOOST', '/unchecked')]:
         write_cache(dict(cache, **{key: value})); run()
     write_cache(cache)
+    if platform.system() == 'Darwin':
+        write_cache(dict(cache, FC_TEST_MACOS_NATIVE='OFF')); run()
+        write_cache({key: value for key, value in cache.items() if key != 'FC_TEST_MACOS_NATIVE'}); run()
+        write_cache(cache)
     native = system.read_text()
     system.write_text(native.replace('"FALSE"', '"TRUE"')); run(); system.write_text(native)
     for path in binaries.values():
@@ -177,7 +195,7 @@ raise SystemExit(97)
     def run_package(valid=True, smoke_status=0):
         smoke_marker.unlink(missing_ok=True)
         result = subprocess.run(package_command, env=dict(package_env, FC_PACKAGE_SMOKE_STATUS=str(smoke_status)),
-                                capture_output=True, text=True, timeout=5)
+                                capture_output=True, text=True, timeout=FIXTURE_TIMEOUT)
         require(not build_marker.exists(), 'manual package test invoked the build toolchain')
         require(smoke_marker.exists() == valid, f'package validation did not guard relocation: {result.stdout} {result.stderr}')
         if valid:
@@ -194,10 +212,10 @@ raise SystemExit(97)
     make_package(missing_notice=True); run_package(valid=False)
     archive.write_bytes(b'invalid archive'); run_package(valid=False)
     archive.unlink(); run_package(valid=False); make_package()
-    binaries['fresh'].chmod(0o600); run_package(valid=False); binaries['fresh'].chmod(0o700)
+    binaries['bin/fresh'].chmod(0o600); run_package(valid=False); binaries['bin/fresh'].chmod(0o700)
     smoke_marker.unlink(missing_ok=True)
     result = subprocess.run([*package_command, '--build-only'], env=package_env,
-                            capture_output=True, text=True, timeout=5)
+                            capture_output=True, text=True, timeout=FIXTURE_TIMEOUT)
     require(result.returncode != 0 and build_marker.exists() and not smoke_marker.exists(),
             'automatic packaging did not build or ignored the build failure')
     # Reproduce the original bug with a real one-test CTest project.
@@ -205,6 +223,6 @@ raise SystemExit(97)
     result = run(fake_ctest=False)
     require('incomplete release suite' in result.stderr, 'unrelated real CTest project accepted')
     wrong = 'Linux' if platform.system() == 'Darwin' else 'Darwin'
-    result = subprocess.run([*base, 'fast', '--expect-os', wrong], capture_output=True, text=True, timeout=5)
+    result = subprocess.run([*base, 'fast', '--expect-os', wrong], capture_output=True, text=True, timeout=FIXTURE_TIMEOUT)
     require(result.returncode != 0 and 'native OS mismatch' in result.stderr, 'cross-host qualification accepted')
 print('PASS complete release registry, configuration, results, artifacts, manual package isolation and native host identity')

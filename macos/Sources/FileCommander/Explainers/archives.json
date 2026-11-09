@@ -1,0 +1,499 @@
+{
+  "id": "archives",
+  "title": "Archives",
+  "order": 12,
+  "duration": 100,
+  "chapter": "files",
+  "needs": {
+    "idle_queue": true
+  },
+  "summary": "Browse a zip, copy files out, extract a compressed tar, open any file as an archive, open an encrypted one, and create a zip.",
+  "covers": {
+    "anchors": [
+      "pane.left.path",
+      "errors.lines",
+      "sheet.extract.destination",
+      "sheet.extract.folder",
+      "sheet.copy.archive"
+    ]
+  },
+  "steps": [
+    {
+      "open_tabs": {
+        "left": "{home}",
+        "right": "{home}/backup",
+        "focus": "left"
+      }
+    },
+    {
+      "chapter": "Files"
+    },
+    {
+      "caption": "Archives open like folders",
+      "sub": "Open on a .zip file browses it, read-only"
+    },
+    {
+      "cursor": {
+        "side": "left",
+        "name": "website-2025.zip"
+      }
+    },
+    {
+      "keys": [
+        "@enter_dir"
+      ]
+    },
+    {
+      "wait": {
+        "rows": {
+          "side": "left",
+          "contains": "app.js"
+        }
+      },
+      "timeout": 20
+    },
+    {
+      "highlight": "pane.left.path",
+      "hold": 1600
+    },
+    {
+      "unhighlight": true
+    },
+    {
+      "caption": "Copy files out",
+      "sub": "Copy works as anywhere else"
+    },
+    {
+      "keys": [
+        "@select_all"
+      ]
+    },
+    {
+      "keys": [
+        "@copy"
+      ]
+    },
+    {
+      "wait": {
+        "sheet": "copy"
+      }
+    },
+    {
+      "wait": {
+        "anchor": "sheet.copy.start"
+      }
+    },
+    {
+      "click": "sheet.copy.start",
+      "as_job": "out"
+    },
+    {
+      "wait": {
+        "sheet": null
+      },
+      "timeout": 30
+    },
+    {
+      "wait": {
+        "rows": {
+          "side": "right",
+          "contains": "index.html"
+        }
+      },
+      "timeout": 20
+    },
+    {
+      "caption": "Read-only",
+      "sub": "Changing files inside an archive is refused; copy them out first"
+    },
+    {
+      "keys": [
+        "@mkdir"
+      ]
+    },
+    {
+      "wait": {
+        "errors_at_least": 1
+      }
+    },
+    {
+      "highlight": "errors.lines",
+      "hold": 2000
+    },
+    {
+      "unhighlight": true
+    },
+    {
+      "click": "errors.clear"
+    },
+    {
+      "keys": [
+        "@leave_dir"
+      ]
+    },
+    {
+      "wait": {
+        "path": {
+          "side": "left",
+          "ends_with": "/home"
+        }
+      }
+    },
+    {
+      "caption": "Compressed tars ask first",
+      "sub": "Listing a .tar.gz reads all of it, so Enter offers to extract it in one pass"
+    },
+    {
+      "navigate": {
+        "side": "left",
+        "to": "{home}/downloads"
+      }
+    },
+    {
+      "cursor": {
+        "side": "left",
+        "name": "logs-2026.tar.gz"
+      }
+    },
+    {
+      "keys": [
+        "@enter_dir"
+      ]
+    },
+    {
+      "wait": {
+        "sheet": "extract"
+      }
+    },
+    {
+      "wait": {
+        "anchor": "sheet.extract.extract"
+      }
+    },
+    {
+      "highlight": "sheet.extract.destination",
+      "hold": 1400
+    },
+    {
+      "pause": 1400
+    },
+    {
+      "highlight": "sheet.extract.folder",
+      "hold": 1400
+    },
+    {
+      "pause": 1400
+    },
+    {
+      "unhighlight": true
+    },
+    {
+      "click": "sheet.extract.extract",
+      "as_job": "logs"
+    },
+    {
+      "wait": {
+        "sheet": null
+      },
+      "timeout": 20
+    },
+    {
+      "wait": {
+        "job": {
+          "name": "logs",
+          "state": "finished"
+        }
+      },
+      "timeout": 40
+    },
+    {
+      "wait": {
+        "rows": {
+          "side": "right",
+          "contains": "logs-2026"
+        }
+      },
+      "timeout": 20
+    },
+    {
+      "caption": "Open any file as an archive",
+      "sub": "A .docx is a zip inside; Open as Archive browses it"
+    },
+    {
+      "cursor": {
+        "side": "left",
+        "name": "report.docx"
+      }
+    },
+    {
+      "keys": [
+        "@open_as_archive"
+      ]
+    },
+    {
+      "wait": {
+        "rows": {
+          "side": "left",
+          "contains": "word"
+        }
+      },
+      "timeout": 20
+    },
+    {
+      "pause": 1400
+    },
+    {
+      "keys": [
+        "@leave_dir"
+      ]
+    },
+    {
+      "wait": {
+        "path": {
+          "side": "left",
+          "ends_with": "/downloads"
+        }
+      }
+    },
+    {
+      "caption": "Encrypted archives ask for the password",
+      "sub": "When a file's data is read; FC remembers it until you quit"
+    },
+    {
+      "cursor": {
+        "side": "left",
+        "name": "private.zip"
+      }
+    },
+    {
+      "keys": [
+        "@enter_dir"
+      ]
+    },
+    {
+      "wait": {
+        "rows": {
+          "side": "left",
+          "contains": "backup.sh"
+        }
+      },
+      "timeout": 20
+    },
+    {
+      "cursor": {
+        "side": "left",
+        "name": "backup.sh"
+      }
+    },
+    {
+      "keys": [
+        "@copy"
+      ]
+    },
+    {
+      "wait": {
+        "sheet": "copy"
+      }
+    },
+    {
+      "wait": {
+        "anchor": "sheet.copy.start"
+      }
+    },
+    {
+      "click": "sheet.copy.start",
+      "as_job": "secret"
+    },
+    {
+      "wait": {
+        "anchor": "sheet.askpass.secret"
+      },
+      "timeout": 20
+    },
+    {
+      "wait": {
+        "text_focus": true
+      }
+    },
+    {
+      "type": "tutorial"
+    },
+    {
+      "keys": [
+        "Enter"
+      ]
+    },
+    {
+      "wait": {
+        "job": {
+          "name": "secret",
+          "state": "finished"
+        }
+      },
+      "timeout": 30
+    },
+    {
+      "wait": {
+        "rows": {
+          "side": "right",
+          "contains": "backup.sh"
+        }
+      },
+      "timeout": 20
+    },
+    {
+      "keys": [
+        "@leave_dir"
+      ]
+    },
+    {
+      "wait": {
+        "path": {
+          "side": "left",
+          "ends_with": "/downloads"
+        }
+      }
+    },
+    {
+      "caption": "Make an archive",
+      "sub": "Copy to a destination named .zip, .7z or .tar.gz, and FC creates that archive"
+    },
+    {
+      "navigate": {
+        "side": "left",
+        "to": "{home}/photos/2026"
+      }
+    },
+    {
+      "keys": [
+        "@glob_select"
+      ]
+    },
+    {
+      "wait": {
+        "glob": true
+      }
+    },
+    {
+      "wait": {
+        "text_focus": true
+      }
+    },
+    {
+      "type": "*.jpg"
+    },
+    {
+      "keys": [
+        "Enter"
+      ]
+    },
+    {
+      "wait": {
+        "glob": false
+      }
+    },
+    {
+      "keys": [
+        "@copy"
+      ]
+    },
+    {
+      "wait": {
+        "sheet": "copy"
+      }
+    },
+    {
+      "wait": {
+        "text_focus": true
+      }
+    },
+    {
+      "keys": [
+        "Cmd+A"
+      ]
+    },
+    {
+      "type": "{home}/backup/photos.zip"
+    },
+    {
+      "wait": {
+        "anchor": "sheet.copy.archive"
+      }
+    },
+    {
+      "highlight": "sheet.copy.archive",
+      "hold": 1600
+    },
+    {
+      "pause": 1600
+    },
+    {
+      "unhighlight": true
+    },
+    {
+      "click": "sheet.copy.start",
+      "as_job": "archive"
+    },
+    {
+      "wait": {
+        "sheet": null
+      },
+      "timeout": 20
+    },
+    {
+      "wait": {
+        "job": {
+          "name": "archive",
+          "state": "finished"
+        }
+      },
+      "timeout": 40
+    },
+    {
+      "wait": {
+        "rows": {
+          "side": "right",
+          "contains": "photos.zip"
+        }
+      }
+    },
+    {
+      "caption": "And it opens like a folder",
+      "sub": ""
+    },
+    {
+      "focus": "right"
+    },
+    {
+      "cursor": {
+        "side": "right",
+        "name": "photos.zip"
+      }
+    },
+    {
+      "keys": [
+        "@enter_dir"
+      ]
+    },
+    {
+      "wait": {
+        "rows": {
+          "side": "right",
+          "contains": "beach.jpg"
+        }
+      },
+      "timeout": 20
+    },
+    {
+      "pause": 1200
+    },
+    {
+      "keys": [
+        "@leave_dir"
+      ]
+    },
+    {
+      "uncaption": true
+    }
+  ]
+}

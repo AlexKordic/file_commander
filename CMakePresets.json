@@ -7,7 +7,8 @@
     {"name": "asan-ubsan", "inherits": "core", "binaryDir": "${sourceDir}/build-asan-ubsan", "cacheVariables": {"CMAKE_CXX_FLAGS": "-fsanitize=address,undefined -fno-omit-frame-pointer", "CMAKE_EXE_LINKER_FLAGS": "-fsanitize=address,undefined"}},
     {"name": "ubsan", "inherits": "core", "binaryDir": "${sourceDir}/build-ubsan", "cacheVariables": {"CMAKE_CXX_FLAGS": "-fsanitize=undefined -fno-omit-frame-pointer", "CMAKE_EXE_LINKER_FLAGS": "-fsanitize=undefined"}},
     {"name": "tsan", "inherits": "core", "binaryDir": "${sourceDir}/build-tsan", "cacheVariables": {"CMAKE_CXX_FLAGS": "-fsanitize=thread -fno-omit-frame-pointer", "CMAKE_EXE_LINKER_FLAGS": "-fsanitize=thread"}},
-    {"name": "release", "inherits": "native", "binaryDir": "${sourceDir}/build-release", "cacheVariables": {"CMAKE_BUILD_TYPE": "Release", "FC_TEST_DEPENDENCY_REBUILDS": "ON"}}
+    {"name": "release", "inherits": "native", "binaryDir": "${sourceDir}/build-release", "cacheVariables": {"CMAKE_BUILD_TYPE": "Release", "FC_TEST_DEPENDENCY_REBUILDS": "ON"}},
+    {"name": "macos-app", "inherits": "native", "binaryDir": "${sourceDir}/build-macos", "cacheVariables": {"CMAKE_BUILD_TYPE": "Release", "CMAKE_OSX_DEPLOYMENT_TARGET": "14.0"}}
   ],
   "buildPresets": [
     {"name": "native", "configurePreset": "native", "jobs": 6},
@@ -15,7 +16,8 @@
     {"name": "asan-ubsan", "configurePreset": "asan-ubsan", "jobs": 6},
     {"name": "ubsan", "configurePreset": "ubsan", "jobs": 6},
     {"name": "tsan", "configurePreset": "tsan", "jobs": 6},
-    {"name": "release", "configurePreset": "release", "jobs": 6}
+    {"name": "release", "configurePreset": "release", "jobs": 6},
+    {"name": "macos-app", "configurePreset": "macos-app", "jobs": 6, "targets": ["fc_engine_bundle", "fc_model_tests", "sevenzip_lib", "fresh_bin", "fc"]}
   ],
   "testPresets": [
     {"name": "native", "configurePreset": "native", "output": {"outputOnFailure": true}, "execution": {"jobs": 6}, "filter": {"exclude": {"label": "slow|extended|benchmark|manual"}}},

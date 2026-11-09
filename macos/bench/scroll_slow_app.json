@@ -1,0 +1,106 @@
+{
+  "id": "bench_scroll_slow_app",
+  "title": "Scroll benchmark: an app slow to show frames",
+  "order": 901,
+  "duration": 90,
+  "chapter": "editor",
+  "needs": {
+    "editor": true
+  },
+  "summary": "Trackpad flicks of file_io_jobs.cpp while each frame takes 25 ms longer on the main thread: Fresh holds newer frames back until the app has applied the ones it has, then sends the newest scene.",
+  "covers": {},
+  "steps": [
+    {
+      "set_preference": {
+        "editor_telemetry": true
+      }
+    },
+    {
+      "editor_bench": {
+        "apply_ms": 25
+      }
+    },
+    {
+      "open_tabs": {
+        "left": "{repo}",
+        "right": "{home}",
+        "focus": "left"
+      }
+    },
+    {
+      "window_frame": {
+        "w": 1600,
+        "h": 1000
+      }
+    },
+    {
+      "cursor": {
+        "side": "left",
+        "name": "file_io_jobs.cpp"
+      }
+    },
+    {
+      "keys": [
+        "@open_in_editor"
+      ]
+    },
+    {
+      "wait": {
+        "editor": {
+          "contains": "traversal\\.hpp"
+        }
+      },
+      "timeout": 25
+    },
+    {
+      "wait": {
+        "editor": {
+          "window": "main"
+        }
+      },
+      "timeout": 5
+    },
+    {
+      "editor_keys": [
+        "Enter"
+      ]
+    },
+    {
+      "pause": 2000
+    },
+    {
+      "notice": "Scrolling an editor slow to show frames"
+    },
+    {
+      "scroll": {
+        "target": "editor",
+        "speed": -8000
+      }
+    },
+    {
+      "pause": 5000
+    },
+    {
+      "scroll": {
+        "target": "editor",
+        "speed": 8000
+      }
+    },
+    {
+      "pause": 5000
+    },
+    {
+      "editor_keys": [
+        "F10"
+      ]
+    },
+    {
+      "wait": {
+        "editor": {
+          "running": false
+        }
+      },
+      "timeout": 10
+    }
+  ]
+}

@@ -1,0 +1,206 @@
+{
+  "id": "pause_resume",
+  "title": "Pause and resume",
+  "order": 15,
+  "duration": 70,
+  "chapter": "jobs",
+  "needs": {
+    "idle_queue": true
+  },
+  "summary": "Pausing holds the whole queue; resume continues; cancel keeps what was copied.",
+  "covers": {
+    "anchors": [
+      "jobs.bar.pause",
+      "jobs.bar.cancel"
+    ]
+  },
+  "steps": [
+    {
+      "open_tabs": {
+        "left": "{home}/music",
+        "right": "{home}/backup",
+        "focus": "left"
+      }
+    },
+    {
+      "chapter": "Jobs"
+    },
+    {
+      "set_transfer_speed": "4 MiB"
+    },
+    {
+      "cursor": {
+        "side": "left",
+        "name": "Night Drive"
+      }
+    },
+    {
+      "keys": [
+        "@copy"
+      ]
+    },
+    {
+      "wait": {
+        "sheet": "copy"
+      }
+    },
+    {
+      "wait": {
+        "anchor": "sheet.copy.start"
+      }
+    },
+    {
+      "click": "sheet.copy.start",
+      "as_job": "music"
+    },
+    {
+      "wait": {
+        "sheet": null
+      },
+      "timeout": 30
+    },
+    {
+      "wait": {
+        "job": {
+          "name": "music",
+          "state": "running",
+          "progress_at_least": 0.08
+        }
+      },
+      "timeout": 30
+    },
+    {
+      "caption": "Pause",
+      "sub": "Pause holds the job between two reads"
+    },
+    {
+      "click": "jobs.bar.pause"
+    },
+    {
+      "wait": {
+        "job": {
+          "name": "music",
+          "state": "paused"
+        }
+      }
+    },
+    {
+      "caption": "Queued jobs wait",
+      "sub": "Jobs run one at a time, so a paused job holds the queue"
+    },
+    {
+      "cursor": {
+        "side": "left",
+        "name": "Field Notes"
+      }
+    },
+    {
+      "keys": [
+        "@copy"
+      ]
+    },
+    {
+      "wait": {
+        "sheet": "copy"
+      }
+    },
+    {
+      "wait": {
+        "anchor": "sheet.copy.start"
+      }
+    },
+    {
+      "click": "sheet.copy.start",
+      "as_job": "notes"
+    },
+    {
+      "wait": {
+        "sheet": null
+      },
+      "timeout": 30
+    },
+    {
+      "wait": {
+        "queued_at_least": 1
+      }
+    },
+    {
+      "pause": 1500
+    },
+    {
+      "try": {
+        "do": "Resume the copy with the Resume button",
+        "hint": "jobs.bar.pause",
+        "accept": {
+          "job": {
+            "name": "music",
+            "state": "running"
+          }
+        },
+        "show": [
+          {
+            "click": "jobs.bar.pause"
+          }
+        ]
+      }
+    },
+    {
+      "wait": {
+        "job": {
+          "name": "music",
+          "state": "running"
+        }
+      },
+      "timeout": 10
+    },
+    {
+      "wait": {
+        "file": {
+          "exists": "{home}/backup/Night Drive/01 Neon Rain.flac"
+        }
+      },
+      "timeout": 60
+    },
+    {
+      "caption": "Cancel keeps what is done",
+      "sub": "Finished files stay; cancelling is not an undo"
+    },
+    {
+      "click": "jobs.bar.cancel"
+    },
+    {
+      "wait": {
+        "job": {
+          "name": "music",
+          "state": "cancelled"
+        }
+      }
+    },
+    {
+      "expect": {
+        "file": {
+          "exists": "{home}/backup/Night Drive/01 Neon Rain.flac"
+        }
+      }
+    },
+    {
+      "caption": "The next job starts",
+      "sub": "The queued copy runs now"
+    },
+    {
+      "set_transfer_speed": 0
+    },
+    {
+      "wait": {
+        "job": {
+          "name": "notes",
+          "state": "finished"
+        }
+      },
+      "timeout": 60
+    },
+    {
+      "uncaption": true
+    }
+  ]
+}

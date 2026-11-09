@@ -4,13 +4,15 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import platform
 import re
 import tarfile
 
 
-def required_tests(repo):
+def required_tests(repo, system=None):
     manifest = json.loads((repo / 'test/release_required.json').read_text())
     names = set(manifest['standalone'])
+    names.update(manifest.get('platforms', {}).get(system or platform.system(), []))
     for group, cases in manifest['groups'].items():
         names.update(f'fc.{group}.{case}' for case in cases)
     names.update('fc.command.' + name for name in re.findall(
@@ -43,8 +45,9 @@ def architecture(value):
 
 
 def built_executables(build):
-    binaries = {'fc': build / 'fc', 'fresh': build / 'third_party/fresh/bin/fresh',
-                '7zr': build / 'third_party/lzma/_o/7zr'}
+    # By their path inside the package.
+    binaries = {'bin/fc': build / 'fc', 'bin/fresh': build / 'third_party/fresh/bin/fresh',
+                'lib/file-commander/7z.so': build / 'third_party/7zip/_o/7z.so'}
     for path in binaries.values():
         if not path.is_file() or not os.access(path, os.X_OK) or not path.stat().st_size:
             raise ValueError(f'missing release executable: {path}')
@@ -57,7 +60,9 @@ def check_build(build, repo, system, arch):
         raise ValueError('release build belongs to a different source tree')
     required = {'CMAKE_BUILD_TYPE': 'Release', 'BUILD_TESTING': 'ON', 'FC_CORE_ONLY': 'OFF',
                 'FC_ALLOW_UNPINNED_DEPENDENCIES': 'OFF', 'FC_BUILD_FRESH': 'ON',
-                'FC_BUILD_LZMA_TOOL': 'ON', 'FC_TEST_DEPENDENCY_REBUILDS': 'ON'}
+                'FC_BUILD_SEVENZIP': 'ON', 'FC_TEST_DEPENDENCY_REBUILDS': 'ON'}
+    if system == 'Darwin':
+        required['FC_TEST_MACOS_NATIVE'] = 'ON'
     for key, value in required.items():
         if cache.get(key) != value:
             raise ValueError(f'release requires {key}={value}, got {cache.get(key)!r}')
@@ -95,7 +100,7 @@ def check_package(archive, binaries):
         # An executable-only archive must not pass distribution qualification.
         notices = ('share/licenses/file-commander/LICENSE', 'share/licenses/ftxui/LICENSE',
                    'share/licenses/luajit/COPYRIGHT', 'share/licenses/boost/LICENSE_1_0.txt',
-                   'share/licenses/lzma-sdk/lzma-sdk.txt', 'share/licenses/fresh/LICENSE',
+                   'share/licenses/7zip/License.txt', 'share/licenses/7zip/copying.txt', 'share/licenses/fresh/LICENSE',
                    'share/file-commander/THIRD_PARTY_NOTICES.md',
                    'share/file-commander/dependencies.json')
         for relative in notices:
@@ -103,7 +108,7 @@ def check_package(archive, binaries):
             if len(members) != 1 or not members[0].isfile() or not members[0].size:
                 raise ValueError(f'package missing license/source notice: {relative}')
         for name, binary in binaries.items():
-            members = [m for m in package.getmembers() if m.name == f'{archive.name[:-7]}/bin/{name}']
+            members = [m for m in package.getmembers() if m.name == f'{archive.name[:-7]}/{name}']
             if len(members) != 1 or not members[0].isfile() or not members[0].mode & 0o111:
                 raise ValueError(f'package missing executable: {name}')
             with binary.open('rb') as stream:

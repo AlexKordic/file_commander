@@ -30,12 +30,13 @@ end
 function M.cd(left_path, right_path)
   if left_path then
     fc.left_cd(left_path)
-    M.wait_event("dir_changed", 2000, "expected dir_changed after left_cd")
+    -- Wait for this directory's event: one from an earlier navigation may still be queued.
+    check(fc.wait_event("dir_changed", 2000, left_path), "expected dir_changed for %s after left_cd", left_path)
     check(fc.left_path() == left_path, "left path mismatch: expected %s got %s", left_path, fc.left_path())
   end
   if right_path then
     fc.right_cd(right_path)
-    M.wait_event("dir_changed", 2000, "expected dir_changed after right_cd")
+    check(fc.wait_event("dir_changed", 2000, right_path), "expected dir_changed for %s after right_cd", right_path)
     check(fc.right_path() == right_path, "right path mismatch: expected %s got %s", right_path, fc.right_path())
   end
 end

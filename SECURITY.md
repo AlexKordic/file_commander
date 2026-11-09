@@ -16,5 +16,4 @@ hostnames and personal paths from attached logs where appropriate.
 FC inherits OpenSSH's host configuration and authentication. Remote operations
 run with the SSH account's permissions; the remote helper is not a privilege
 boundary. Lua scripts, Fresh plugins and editor commands execute code with the
-user's permissions. Archive extraction, checkpoint recovery and cross-host
-transfers are particularly relevant areas for security reports.
+user's permissions. Archives are read by 7-Zip's library (`7z.so`) inside FC's own process, so a flaw in one of its format parsers runs with FC's permissions; FC decides every path it writes, and its extraction refuses entries that would leave the destination. Archive parsing and extraction, checkpoint recovery and cross-host transfers are particularly relevant areas for security reports.

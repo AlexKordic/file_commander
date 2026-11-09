@@ -1,0 +1,218 @@
+{
+  "id": "copy",
+  "title": "Copy files",
+  "order": 7,
+  "duration": 70,
+  "chapter": "files",
+  "needs": {
+    "idle_queue": true
+  },
+  "summary": "The Copy sheet: what will be copied, the destination, links, existing files, and the job bar.",
+  "covers": {
+    "commands": [
+      "copy"
+    ],
+    "anchors": [
+      "sheet.copy.destination",
+      "sheet.copy.conflict",
+      "jobs.bar"
+    ]
+  },
+  "steps": [
+    {
+      "open_tabs": {
+        "left": "{home}/camera",
+        "right": "{home}/backup",
+        "focus": "left"
+      }
+    },
+    {
+      "chapter": "Files"
+    },
+    {
+      "set_transfer_speed": "25 MiB"
+    },
+    {
+      "caption": "Copy to the other pane",
+      "sub": "Select the photos by pattern, then copy them. The other pane is the destination"
+    },
+    {
+      "keys": [
+        "@glob_select"
+      ]
+    },
+    {
+      "wait": {
+        "glob": true
+      }
+    },
+    {
+      "wait": {
+        "text_focus": true
+      }
+    },
+    {
+      "type": "*.jpg"
+    },
+    {
+      "keys": [
+        "Enter"
+      ]
+    },
+    {
+      "wait": {
+        "glob": false
+      }
+    },
+    {
+      "wait": {
+        "selected": {
+          "side": "left",
+          "count": 8
+        }
+      }
+    },
+    {
+      "highlight": "pane.left.status.selection",
+      "hold": 1400
+    },
+    {
+      "keys": [
+        "@copy"
+      ]
+    },
+    {
+      "wait": {
+        "sheet": "copy"
+      }
+    },
+    {
+      "caption": "See it before it happens",
+      "sub": "The sheet lists exactly what will be copied, and how much"
+    },
+    {
+      "highlight": [
+        "sheet.copy.preview",
+        "sheet.copy.status"
+      ],
+      "hold": 2000
+    },
+    {
+      "caption": "Where, and how",
+      "sub": "Edit the destination, follow or keep links, and choose what happens to files that already exist"
+    },
+    {
+      "highlight": [
+        "sheet.copy.destination",
+        "sheet.copy.conflict"
+      ],
+      "hold": 2400
+    },
+    {
+      "unhighlight": true
+    },
+    {
+      "click": "sheet.copy.start",
+      "as_job": "photos"
+    },
+    {
+      "wait": {
+        "sheet": null
+      }
+    },
+    {
+      "caption": "It runs in the background",
+      "sub": "The job bar shows the copy; you can keep browsing meanwhile"
+    },
+    {
+      "highlight": "jobs.bar"
+    },
+    {
+      "wait": {
+        "job": {
+          "name": "photos",
+          "state": "finished"
+        }
+      },
+      "timeout": 60
+    },
+    {
+      "unhighlight": true
+    },
+    {
+      "wait": {
+        "rows": {
+          "side": "right",
+          "contains": "lighthouse.jpg"
+        }
+      }
+    },
+    {
+      "caption": "Copy again: Skip existing",
+      "sub": "Files already in the backup can stay as they are"
+    },
+    {
+      "keys": [
+        "@glob_select"
+      ]
+    },
+    {
+      "wait": {
+        "glob": true
+      }
+    },
+    {
+      "wait": {
+        "text_focus": true
+      }
+    },
+    {
+      "type": "*.jpg"
+    },
+    {
+      "keys": [
+        "Enter"
+      ]
+    },
+    {
+      "wait": {
+        "glob": false
+      }
+    },
+    {
+      "keys": [
+        "@copy"
+      ]
+    },
+    {
+      "wait": {
+        "sheet": "copy"
+      }
+    },
+    {
+      "click": "sheet.copy.conflict[mode=skip]",
+      "hold": 900
+    },
+    {
+      "click": "sheet.copy.start",
+      "as_job": "again"
+    },
+    {
+      "wait": {
+        "job": {
+          "name": "again",
+          "state": "finished"
+        }
+      },
+      "timeout": 30
+    },
+    {
+      "caption": "Safe by design",
+      "sub": "Copies are written under a private name and renamed into place when complete",
+      "hold": 2600
+    },
+    {
+      "uncaption": true
+    }
+  ]
+}

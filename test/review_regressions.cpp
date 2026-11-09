@@ -7,6 +7,7 @@
 #include <ftxui/component/loop.hpp>
 
 #include <fstream>
+#include <random>
 #include <future>
 #include <iostream>
 #include <thread>
@@ -100,6 +101,16 @@ static std::string read_file(const Filepath& path) {
   return std::string(std::istreambuf_iterator<char>(input), {});
 }
 
+// The bytes of a file inside an archive, extracted to a private temporary file.
+static std::string read_archive(const Filepath& path) {
+  Fixture tmp;
+  const auto out = tmp.root / "entry";
+  Err failure;
+  auto error = ArchiveFS::extract({{path, out}}, [&](const ArchiveFS::Item&, Err e) { failure = e; });
+  require(error.ok() && failure.ok(), "archive read failed: " + path.native());
+  return read_file(out);
+}
+
 static void R02() {
   Fixture f;
   auto destination = f.file("destination", "KEEP");
@@ -130,15 +141,16 @@ static void R03() {
   Fixture f;
   auto source = f.file("input", "data");
   auto archive = f.file("existing.7z", "OLD");
-  ArchiveService service;
-  service.set_tool_path("/usr/bin/false");
-  require(!service.create_archive(archive, {source}, f.root).ok(), "failed tool reported success");
-  require(read_file(archive) == "OLD", "failed tool removed old archive");
-  require(service.create_archive(archive, {source}, f.root, ArchiveConflict::Skip).ok(), "Skip invoked failing tool");
+  // An unreadable input makes the archiver fail part-way.
+  fs::permissions(source, fs::no_perms);
+  require(!create_archive(archive, {source}, f.root).ok(), "failed creation reported success");
+  require(read_file(archive) == "OLD", "failed creation removed old archive");
+  fs::permissions(source, fs::owner_read | fs::owner_write);
+  require(create_archive(archive, {source}, f.root, ArchiveConflict::Skip).ok(), "Skip ran the archiver");
   require(read_file(archive) == "OLD", "Skip changed archive");
-  require(!service.create_archive(archive, {archive}, f.root).ok(), "archive allowed self-input");
+  require(!create_archive(archive, {archive}, f.root).ok(), "archive allowed self-input");
   require(read_file(archive) == "OLD", "self-input damaged archive");
-  require(!service.create_archive(archive, {source}, f.root, ArchiveConflict::Update).ok(), "ambiguous archive Update accepted");
+  require(!create_archive(archive, {source}, f.root, ArchiveConflict::Update).ok(), "ambiguous archive Update accepted");
   require(std::distance(fs::directory_iterator(f.root), fs::directory_iterator()) == 2, "archive staging leaked");
 }
 
@@ -149,17 +161,12 @@ static void RELEASE_archive_names() {
     const auto selected = f.file(std::string("input/") + name, "unselected.txt\n");
     f.file("input/unselected.txt", "PRIVATE UNSELECTED BYTES");
     f.file("input/question1.txt", "WILDCARD NEIGHBOR");
-    ArchiveService archives;
     const auto archive = f.root / "selected.7z";
-    auto created = archives.create_archive(archive, {selected}, input);
+    auto created = create_archive(archive, {selected}, input);
     require(created.ok(), std::string("literal archive creation failed: ") + name);
-    Filepath output;
-    ArchiveLease lease;
-    auto extracted = archives.extract_to_cache(archive, output, nullptr, &lease);
-    require(extracted.ok(), "literal archive extraction failed");
-    require(std::distance(fs::directory_iterator(output), fs::directory_iterator()) == 1,
-            std::string("archive included unselected entries for: ") + name);
-    require(read_file(output / name) == "unselected.txt\n", "selected literal filename/bytes were not preserved");
+    auto entries = ArchiveFS::list(archive_root(archive));
+    require(entries.size() == 1 && entries.front().path.filename() == name, std::string("archive included unselected entries for: ") + name);
+    require(read_archive(entries.front().path) == "unselected.txt\n", "selected literal filename/bytes were not preserved");
   }
 }
 
@@ -371,15 +378,17 @@ static void R13() {
   require(move_by_copy(tree, f.root / "moved", options, ec), "staged recursive move failed");
   require(!fs::exists(tree) && fs::is_symlink(f.root / "moved/link") && fs::exists(source), "move link semantics changed");
   auto archive = f.file("old.7z", "OLD");
-  auto fake = f.file("slow-7zr", "#!/bin/sh\nsleep 20\n");
-  fs::permissions(fake, fs::owner_all);
-  ArchiveService service; service.set_tool_path(fake.string());
+  // Enough incompressible data that compressing it outlasts the cancellation.
+  std::string noise(48 * 1024 * 1024, '\0');
+  std::mt19937 random(0xFC);
+  for (auto& c : noise) c = char(random());
+  auto large = f.file("large", noise);
   auto start = std::chrono::steady_clock::now();
   std::thread cancel_archive([&] { std::this_thread::sleep_for(std::chrono::milliseconds(40)); cancelled = true; });
-  auto result = service.create_archive(archive, {source}, f.root, ArchiveConflict::Replace, &cancelled);
+  auto result = create_archive(archive, {large}, f.root, ArchiveConflict::Replace, &cancelled);
   cancel_archive.join();
   require(!result.ok() && read_file(archive) == "OLD", "cancelled archive replaced old output");
-  require(std::chrono::steady_clock::now() - start < std::chrono::seconds(2), "archive subprocess ignored cancellation");
+  require(std::chrono::steady_clock::now() - start < std::chrono::seconds(2), "archive creation ignored cancellation");
 }
 
 static void R14() {
@@ -519,6 +528,209 @@ static void R20() {
   require(*state->get_focused_item() == first / "keep", "surviving focus lost");
 }
 
+static void UX_palette_ranking() {
+  CommandPaletteDialog palette([] {}, [] { return commands().list_all(); }, [](const std::string&) {},
+                               [](const std::string&, const Event&, std::string&) { return false; });
+  auto first = [&](const std::string& query) {
+    palette.OnShow();
+    for (char c : query) palette.navigation->OnEvent(Event::Character(c));
+    require(!palette.visible_ids.empty(), "palette found nothing for " + query);
+    return palette.commands_all.at(palette.visible_ids.front()).id;
+  };
+  require(first("ssh") == "connect_ssh", "letters scattered across words outranked the typed word");
+  require(first("copy") == "copy" && first("refresh") == "refresh_dir" && first("bookmark") == "open_bookmarks", "literal matches lost rank");
+  first("cnssh");
+  bool fuzzy = false;
+  for (auto id : palette.visible_ids) fuzzy |= palette.commands_all.at(id).id == "connect_ssh";
+  require(fuzzy, "subsequence matching stopped working");
+}
+
+static void UX_ssh_dialog_keyboard() {
+  std::vector<std::pair<std::string, std::string>> calls;
+  int closed = 0;
+  ConnectSSHDialog dialog([&] { ++closed; }, [&](const std::string& host, const std::string& path, std::string&) {
+    calls.emplace_back(host, path);
+    return true;
+  });
+  auto type = [&](const std::string& text) { for (char c : text) dialog.navigation->OnEvent(Event::Character(c)); };
+  dialog.OnShow();
+  type("dev");
+  dialog.navigation->OnEvent(Event::Return);
+  require(dialog.host == "dev" && calls.empty(), "Enter in the host field edited the host or connected");
+  type("/tmp/fc");
+  require(dialog.path == "/tmp/fc", "typed path was not entered as typed: " + dialog.path);
+  dialog.navigation->OnEvent(Event::Return);
+  require(calls.size() == 1 && calls[0].first == "dev" && calls[0].second == "/tmp/fc" && closed == 1, "Enter in the path field did not connect");
+  dialog.OnShow();
+  dialog.navigation->OnEvent(Event::ArrowDown);
+  type("/www");
+  require(dialog.host == "dev" && dialog.path == "/tmp/fc/www", "reopened fields did not continue after their text: " + dialog.path);
+  dialog.path.clear();
+  dialog.navigation->OnEvent(Event::Return);
+  require(calls.size() == 2 && calls[1].second == "/", "an empty path did not mean /");
+}
+
+// An encrypted archive asks from the panel's loader thread through a hidden-input dialog; a wrong password asks again, Esc gives up.
+static void UX_archive_password() {
+  Fixture f; auto input = f.file("source/secret.txt", "hidden");
+  const auto archive = f.root / "locked.7z";
+  require(SevenZip::create("7z", {{input, "secret.txt"}}, archive, {}, {"pw", true}).ok(), "encrypted fixture");
+  ArchiveFS::forget_passwords();
+  ArchiveFS::close_unused();
+  UiQueue ui;
+  FileCommander app(f.root, f.root, [&](auto work) { ui.post(std::move(work)); }, [] { return 100; });
+  ui.wait(app.get_left()); ui.wait(app.get_right());
+  auto asked = [&] {
+    auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    while (app._active_dialog_name != "ArchivePassword" && std::chrono::steady_clock::now() < deadline) {
+      ui.drain(); std::this_thread::sleep_for(std::chrono::milliseconds(2));
+    }
+    require(app._active_dialog_name == "ArchivePassword", "the password wasn't asked for");
+    return std::static_pointer_cast<ArchivePasswordDialog>(app.get_overlay_dialog("ArchivePassword"));
+  };
+  auto type = [](Dialog& dialog, const std::string& text) { for (char c : text) dialog.navigation->OnEvent(Event::Character(c)); };
+  app.get_left().move_to(archive_root(archive));
+  auto dialog = asked();
+  require(!dialog->wrong && dialog->archive.find("locked.7z") != std::string::npos, "the first question");
+  type(*dialog, "bad");
+  dialog->navigation->OnEvent(Event::Return);
+  dialog = asked();
+  require(dialog->wrong && dialog->password.empty(), "a wrong password must be asked for again, with an empty field");
+  type(*dialog, "pw");
+  dialog->navigation->OnEvent(Event::Return);
+  ui.wait(app.get_left());
+  const auto& items = app.get_left().dir.items;
+  require(std::any_of(items.begin(), items.end(), [](const DirItem& i) { return i.filename_ref() == "secret.txt"; }), "the archive didn't open");
+  // Esc answers Cancel, and the panel stays where it was.
+  ArchiveFS::forget_passwords();
+  ArchiveFS::close_unused();
+  app.get_left().move_to(f.root); ui.wait(app.get_left());
+  app.get_left().move_to(archive_root(archive));
+  dialog = asked();
+  dialog->navigation->OnEvent(keys().key_cancel_dialog);
+  ui.wait(app.get_left());
+  require(app._active_dialog_name.empty() && !is_archive_path(app.get_left().dir.path), "Esc didn't give up");
+  ArchiveFS::forget_passwords();
+}
+
+static void UX_dialog_click_through() {
+  Fixture f; auto left = f.dir("left"); auto right = f.dir("right");
+  for (int i = 0; i < 30; ++i) { f.file("left/l" + std::to_string(i)); f.file("right/r" + std::to_string(i)); }
+  f.file("left/a_left_target"); f.file("right/a_right_target");
+  UiQueue ui;
+  FileCommander app(left, right, [&](auto work) { ui.post(std::move(work)); }, [] { return 100; });
+  ui.wait(app.get_left()); ui.wait(app.get_right());
+  auto interactive = ScreenInteractive::FixedSize(100, 30);
+  Loop active_screen(&interactive, app.renderer);
+  auto screen = Screen::Create(Dimension::Fixed(100), Dimension::Fixed(30));
+  auto find = [&](const std::string& label) -> std::pair<int, int> {
+    Render(screen, app.renderer->Render());
+    for (int y = 0; y < screen.dimy(); ++y) {
+      std::string line;
+      std::vector<int> columns;
+      for (int x = 0; x < screen.dimx(); ++x) {
+        line += screen.PixelAt(x, y).character;
+        while (columns.size() < line.size()) columns.push_back(x);
+      }
+      if (auto at = line.find(label); at != std::string::npos) return {columns[at + label.size() / 2], y};
+    }
+    return {-1, -1};
+  };
+  auto click = [&](std::pair<int, int> at, Mouse::Motion motion) {
+    Mouse mouse; mouse.button = Mouse::Left; mouse.motion = motion; mouse.x = at.first; mouse.y = at.second;
+    app.renderer->OnEvent(Event::Mouse("", mouse));
+  };
+  // File lists act on every left-button event over a row, the release included.
+  // Use a button that lies over the list rows of a panel.
+  app.execute_palette_command("connect_ssh");
+  auto button = find(" Cancel ");
+  require(button.first >= 0 && button.second >= 6, "Connect SSH Cancel is not over the file rows");
+  // Keep focus on the panel that is not under the button, so a leaked release would move it.
+  Panel& keep = button.first >= 50 ? app.get_left() : app.get_right();
+  keep.navigation->TakeFocus();
+  app.execute_palette_command("connect_ssh");
+  find(" Cancel ");
+  click(button, Mouse::Pressed);
+  require(app._active_dialog == 0, "pressing Cancel did not close the dialog");
+  click(button, Mouse::Released);
+  require(&app.focused_panel() == &keep, "the release of a click that closed a dialog moved focus to the panel beneath");
+  Panel& other = &keep == &app.get_left() ? app.get_right() : app.get_left();
+  auto target = find(&other == &app.get_left() ? "a_left_target" : "a_right_target");
+  click(target, Mouse::Pressed);
+  click(target, Mouse::Released);
+  require(&app.focused_panel() == &other, "the click after the swallowed release did not reach the panel");
+}
+
+static void UX_narrow_status_rows() {
+  Fixture f; auto left = f.dir("left"); auto right = f.dir("right");
+  for (int i = 0; i < 36; ++i) f.file("left/IMG_" + std::to_string(2041 + i) + ".jpg", std::string(4096 + i, 'x'));
+  auto deep = f.dir("a-rather-long-directory-name-for-a-wide-progress-bar");
+  auto source = f.file(deep.filename().native() + "/a-very-long-file-name-that-does-not-fit-the-progress-row.bin", std::string(2 * 1024 * 1024, 'x'));
+  UiQueue ui;
+  FileCommander app(left, right, [&](auto work) { ui.post(std::move(work)); }, [] { return 120; });
+  ui.wait(app.get_left()); ui.wait(app.get_right());
+  auto interactive = ScreenInteractive::FixedSize(120, 34);
+  Loop active_screen(&interactive, app.renderer);
+  for (int i = 0; i < 24; ++i) app.get_left().dir.item_toggle_select(i);
+  auto screen = Screen::Create(Dimension::Fixed(120), Dimension::Fixed(34));
+  auto row = [&](const std::string& marker) {
+    Render(screen, app.renderer->Render());
+    for (int y = 0; y < screen.dimy(); ++y) {
+      std::string line;
+      for (int x = 0; x < screen.dimx(); ++x) line += screen.PixelAt(x, y).character;
+      if (line.find(marker) != std::string::npos) return line;
+    }
+    return std::string();
+  };
+  auto summary = row("Sel 24/36");
+  require(!summary.empty(), "selection count was clipped");
+  for (auto label : {"Name", "Size", "Date"}) require(summary.find(label) != std::string::npos, std::string("sort button clipped: ") + label);
+
+  DirItem item(source); item._set_symlink_target(f.root / "copy.bin");
+  auto job = std::make_shared<JobSpec>(JobSpec::Type::COPY, std::vector<DirItem>{item});
+  file_operations().set_transfer_rate(256 * 1024);
+  auto id = file_operations().add_job(job);
+  while (job->_copy_bytes.load() == 0 && !job->is_stopped()) std::this_thread::yield();
+  auto progress = row("[COPY]");
+  auto pause = row("Pause/Resume"), cancel = row("Cancel");
+  file_operations().cancel(id);
+  wait_job(id);
+  file_operations().set_transfer_rate(0);
+  require(!progress.empty(), "job type was clipped from the progress row");
+  require(!pause.empty() && !cancel.empty(), "progress row buttons were clipped");
+  require(pause == progress && cancel == progress, "progress bar is taller than one row");
+}
+
+static void UX_clipboard_order() {
+  Fixture f; auto left = f.dir("left"); auto right = f.dir("right");
+  f.file("left/b-medium", std::string(200, 'x')); f.file("left/a-small", "x"); f.file("left/c-large", std::string(900, 'x'));
+  std::string copied;
+  FileJobServices services;
+  services.clipboard = [&](const auto& text) { copied = text; return Err(); };
+  auto jobs = make_file_jobs({}, services);
+  UiQueue ui;
+  FileCommander app(left, right, [&](auto work) { ui.post(std::move(work)); }, [] { return 120; });
+  ui.wait(app.get_left()); ui.wait(app.get_right());
+  auto& panel = app.get_left();
+  panel.get_shared_state()->jobs = jobs.get();
+  auto screen = ScreenInteractive::FixedSize(100, 30);
+  Loop loop(&screen, app.renderer);
+  panel.dir.select_all();
+  auto copy = [&](const std::string& id) {
+    copied.clear();
+    require(app.execute_command(id), "clipboard command rejected: " + id);
+    test::until([&] { ui.drain(); return jobs->idle() && !copied.empty(); }, "clipboard timeout");
+    panel.get_shared_state()->action.close_dialog();
+    return copied;
+  };
+  // The clipboard lists items as the panel shows them, under any sort order.
+  require(copy("names_to_clipboard") == "a-small\nb-medium\nc-large", "names left panel order: " + copied);
+  require(copy("paths_to_clipboard") == (left / "a-small").string() + "\n" + (left / "b-medium").string() + "\n" + (left / "c-large").string(),
+          "paths left panel order: " + copied);
+  while (panel.dir.order_by != Orderby::SIZE_DESC) panel.dir.sort_toggle_size_direction();
+  require(copy("names_to_clipboard") == "c-large\nb-medium\na-small", "names ignored the size sort: " + copied);
+}
+
 static void R21() {
   Fixture f; auto old = f.dir("old"); auto current = f.dir("current");
   f.file("current/a", "KEEP");
@@ -625,7 +837,7 @@ static void R25() {
   UiQueue ui;
   Panel panel(f.root, [&](Panel*) { return f.root; }, [&](auto work) { ui.post(std::move(work)); },
     [&](Dir& result, const Filepath& path, const std::atomic<bool>* cancelled) {
-      if (path == slow) {
+      if (path == slow || is_archive_path(path)) {
         entered = true;
         while (!cancelled->load()) std::this_thread::sleep_for(std::chrono::milliseconds(2));
       }
@@ -641,35 +853,56 @@ static void R25() {
     Loop active_screen(&interactive, panel.navigation);
     auto screen = Screen::Create(Dimension::Fixed(100), Dimension::Fixed(30));
     Render(screen, panel.render());
-    require(screen.ToString().find("Esc: cancel") != std::string::npos, "loading view could not redraw");
+    // The Stop button follows the sort buttons; no status row is spent on it.
+    int stop_x = -1, stop_y = -1;
+    for (int y = 0; y < screen.dimy() && stop_x < 0; ++y) {
+      bool sort_seen = false;
+      for (int x = 0; x + 3 < screen.dimx(); ++x) {
+        auto at = [&](int dx) { return screen.PixelAt(x + dx, y).character; };
+        if (at(0) == "D" && at(1) == "a" && at(2) == "t" && at(3) == "e") sort_seen = true;
+        if (sort_seen && at(0) == "S" && at(1) == "t" && at(2) == "o" && at(3) == "p") {
+          stop_x = x;
+          stop_y = y;
+          break;
+        }
+      }
+    }
+    require(stop_x >= 0, "loading view has no Stop button after the sort buttons");
+    Mouse mouse; mouse.button = Mouse::Left; mouse.motion = Mouse::Pressed; mouse.x = stop_x + 1; mouse.y = stop_y;
+    panel.navigation->OnEvent(Event::Mouse("", mouse));
+    require(!panel.loading(), "Stop did not cancel loading");
   }
+  entered = false;
+  panel.move_to(slow);
+  for (int i = 0; i < 500 && !entered; ++i) std::this_thread::sleep_for(std::chrono::milliseconds(2));
+  require(entered && panel.loading(), "second slow scan did not start");
   panel.navigation->OnEvent(Event::Escape);
   require(!panel.loading(), "Escape did not cancel loading");
+  entered = false;
+  panel.load_directory(slow, false, {}, true);
+  for (int i = 0; i < 500 && !entered; ++i) std::this_thread::sleep_for(std::chrono::milliseconds(2));
+  require(entered && panel.loading(), "background refresh did not start");
+  require(!panel.get_shared_state()->loading(), "an automatic refresh showed the Stop button");
+  panel.cancel_loading();
   panel.move_to(fast); ui.wait(panel);
   require(panel.dir.path == fast && panel.dir.items.size() == 1, "superseded scan replaced current directory");
-  auto tool = f.file("slow-tool", "#!/bin/sh\nsleep 20\n");
-  fs::permissions(tool, fs::owner_all);
-  auto archive = f.file("slow.7z");
-  auto previous_tool = archive_service().tool_path(); archive_service().set_tool_path(tool.string());
+  auto archive = f.root / "slow.7z";
+  require(create_archive(archive, {f.file("payload")}, f.root).ok(), "archive fixture failed");
+  entered = false;
   start = std::chrono::steady_clock::now();
   require(panel.enter_archive(archive), "archive load was not scheduled");
   require(std::chrono::steady_clock::now() - start < std::chrono::milliseconds(100), "archive entry blocked UI");
-  std::this_thread::sleep_for(std::chrono::milliseconds(100));
+  for (int i = 0; i < 500 && !entered; ++i) std::this_thread::sleep_for(std::chrono::milliseconds(2));
   panel.move_to(fast); ui.wait(panel);
-  archive_service().set_tool_path(previous_tool);
   require(panel.dir.path == fast && !panel.loading(), "cancelled archive changed panel");
 }
 
 static void R26() {
   Fixture f; auto input = f.file("source/input", "ORIGINAL"); auto archive = f.root / "bundle.7z";
-  auto& service = archive_service();
-  require(service.create_archive(archive, {input}, input.parent_path()).ok(), "archive fixture creation failed");
+  require(create_archive(archive, {input}, input.parent_path()).ok(), "archive fixture creation failed");
   const auto archive_bytes = read_file(archive);
-  Filepath cache;
-  require(service.extract_to_cache(archive, cache).ok(), "archive fixture extraction failed");
-  require(service.is_cached_path(cache / "input"), "cache ownership was not recognized");
-  auto alias = f.root / "alias"; fs::create_directory_symlink(cache, alias);
-  require(service.is_cached_path(alias / "new"), "cache alias bypassed read-only check");
+  const Filepath cache = archive_root(archive);
+  require(!archive_mutation_error(cache / "input").empty() && !archive_mutation_error(cache / "new").empty(), "archive paths are not read-only");
   UiQueue ui;
   FileCommander app(cache, f.root, [&](auto work) { ui.post(std::move(work)); }, [] { return 100; });
   ui.wait(app.get_left()); ui.wait(app.get_right()); app.get_left().navigation->TakeFocus();
@@ -682,9 +915,9 @@ static void R26() {
   Dir dir; dir.move_to(cache);
   auto state = copy_state(dir, cache / "input", f.root);
   MkdirDialog mkdir(state); mkdir.new_dir_name = "created"; mkdir.ok();
-  require(!mkdir.error.empty() && !fs::exists(cache / "created"), "mkdir modified cache");
+  require(!mkdir.error.empty() && !ArchiveFS::inspect(cache / "created").exists, "mkdir modified the archive");
   RenameDialog rename(state); rename.OnShow(); rename.rows[0]->content = "renamed"; rename.ok();
-  require(fs::exists(cache / "input") && !fs::exists(cache / "renamed"), "rename modified cache");
+  require(ArchiveFS::inspect(cache / "input").exists && !ArchiveFS::inspect(cache / "renamed").exists, "rename modified the archive");
   for (auto type : {JobSpec::Type::DELETE, JobSpec::Type::MOVE, JobSpec::Type::COPY, JobSpec::Type::ARCHIVE_CREATE}) {
     DirItem item(type == JobSpec::Type::COPY || type == JobSpec::Type::ARCHIVE_CREATE ? input : cache / "input");
     item._set_symlink_target(type == JobSpec::Type::MOVE ? f.root / "moved" : cache / "new");
@@ -699,29 +932,24 @@ static void R26() {
   auto job = std::make_shared<JobSpec>(JobSpec::Type::COPY, std::vector<DirItem>{item});
   wait_job(file_operations().add_job(job));
   require(read_file(f.root / "extracted") == "ORIGINAL", "copy-out was blocked");
-  require(read_file(cache / "input") == "ORIGINAL" && read_file(archive) == archive_bytes, "archive or cache changed");
+  require(read_archive(cache / "input") == "ORIGINAL" && read_file(archive) == archive_bytes, "archive changed");
 }
 
 static void R27() {
   Fixture f; auto input = f.file("input", "first version"); auto archive = f.root / "bundle.7z";
-  ArchiveService first;
-  require(first.create_archive(archive, {input}, f.root).ok(), "archive fixture failed");
-  Filepath root1, root2, root3;
-  {
-    ArchiveService second;
-    Err error1, error2;
-    std::thread a([&] { error1 = first.extract_to_cache(archive, root1); });
-    std::thread b([&] { error2 = second.extract_to_cache(archive, root2); });
-    a.join(); b.join();
-    require(error1.ok() && error2.ok() && root1 != root2, "service instances shared an extraction root");
-    require(read_file(root1 / "input") == "first version" && read_file(root2 / "input") == "first version", "concurrent extraction damaged cache");
-    f.file("input", "a longer second version");
-    require(second.create_archive(archive, {input}, f.root).ok(), "archive replacement failed");
-    require(second.extract_to_cache(archive, root3).ok() && root3 != root2, "changed archive reused active root");
-    require(read_file(root1 / "input") == "first version" && read_file(root2 / "input") == "first version", "re-extraction removed a live source");
-    require(read_file(root3 / "input") == "a longer second version", "new extraction was stale");
-  }
-  require(fs::exists(root1 / "input") && !fs::exists(root2) && !fs::exists(root3), "service cleanup crossed ownership boundary");
+  require(create_archive(archive, {input}, f.root).ok(), "archive fixture failed");
+  const auto root = archive_root(archive);
+  // Readers on several threads share one open archive.
+  std::string first, second;
+  std::thread a([&] { first = read_archive(root / "input"); });
+  std::thread b([&] { second = read_archive(root / "input"); });
+  a.join(); b.join();
+  require(first == "first version" && second == "first version", "concurrent reads disagreed");
+  // A rewritten archive is read again, not served from the open copy.
+  f.file("input", "a longer second version");
+  require(create_archive(archive, {input}, f.root).ok(), "archive replacement failed");
+  require(read_archive(root / "input") == "a longer second version", "changed archive served stale content");
+  require(ArchiveFS::list(root).size() == 1, "changed archive listed stale entries");
 }
 
 static void R28() {
@@ -941,22 +1169,21 @@ static void TS07_render_sizes() {
 }
 
 static void TS06_archive_contracts() {
-  Fixture f;ArchiveService service;auto input=f.file("input","lease content");
-  for(size_t bytes:{size_t{12},size_t{13},size_t{14}}){
-    service.set_cache_limits(1,bytes);Filepath extracted;ArchiveLease lease;auto archive=f.root/"typed.7z";
-    FileJobServices services;services.archives=&service;auto jobs=make_file_jobs({},services);
+  Fixture f;auto input=f.file("input","lease content");auto archive=f.root/"typed.7z";
+  {
+    auto jobs=make_file_jobs({});
     auto plan=std::make_shared<OperationPlan>(selection_plan(OperationType::ARCHIVE_CREATE,{input},archive));
     auto job=std::make_shared<JobSpec>(plan);jobs->add_job(job);test::until([&]{return jobs->idle();},"typed archive timeout");
     require(job->_state==JobState::COMPLETED && job->snapshot()->_items_done==1,"typed archive create failed");
-    require(service.extract_to_cache(archive,extracted,nullptr,&lease).ok(),"typed archive extract failed");
-    require(test::read(extracted/"input")=="lease content","archive round trip changed bytes");
-    service.trim_cache();require(fs::exists(extracted),"byte eviction invalidated held lease");lease.reset();service.trim_cache();
-    require(service.cached_roots()==(bytes>=13?1:0),"archive byte boundary wrong");
-    service.set_cache_limits(0,0);service.trim_cache();require(!fs::exists(extracted),"released lease root leaked");
+    require(read_archive(archive_root(archive)/"input")=="lease content","archive round trip changed bytes");
+    ArchiveFS::close_unused();require(ArchiveFS::open_count()==0,"closed archives stayed open");
   }
-  service.set_tool_path("/nonexistent/fc-test-archiver");auto jobs=make_file_jobs({},FileJobServices{&service});
-  auto plan=std::make_shared<OperationPlan>(selection_plan(OperationType::ARCHIVE_CREATE,{input},f.root/"failed.7z"));
-  auto job=std::make_shared<JobSpec>(plan);jobs->add_job(job);test::until([&]{return jobs->idle();},"failed archive timeout");require(job->_state==JobState::COMPLETED_WITH_ERRORS&&!fs::exists(f.root/"failed.7z"),"archive failure false success");
+  auto blocked=f.dir("blocked");fs::permissions(blocked,fs::owner_read|fs::owner_exe);
+  auto jobs=make_file_jobs({});
+  auto plan=std::make_shared<OperationPlan>(selection_plan(OperationType::ARCHIVE_CREATE,{input},blocked/"failed.7z"));
+  auto job=std::make_shared<JobSpec>(plan);jobs->add_job(job);test::until([&]{return jobs->idle();},"failed archive timeout");
+  fs::permissions(blocked,fs::owner_all);
+  require(job->_state==JobState::COMPLETED_WITH_ERRORS&&!fs::exists(blocked/"failed.7z"),"archive failure false success");
   EnvOverride config("XDG_CONFIG_HOME",f.dir("config").native());std::map<std::string,std::string> colors{{"panel","#010203"},{"Ω","quoted value"}};SettingsStore::save_colors(colors);require(SettingsStore::load_colors()==colors,"color round trip");
 }
 
@@ -971,7 +1198,7 @@ static void TS06_lua_expiry() {
 
 static void TS05_archive_suspend() {
   Fixture f; auto input=f.file("payload","archive delivery");auto archive=f.root/"fixture.7z";
-  require(archive_service().create_archive(archive,{input},f.root).ok(),"archive fixture failed");
+  require(create_archive(archive,{input},f.root).ok(),"archive fixture failed");
   test::Gate gate;UiDispatcher dispatcher;std::atomic<bool> reading=false,posted=false;
   Panel panel(f.root,[&](Panel*){return f.root;},[&](auto task){dispatcher.poster()(std::move(task));if(reading)posted=true;},
     [&](Dir& result,const Filepath& path,const std::atomic<bool>* cancelled){
@@ -984,7 +1211,7 @@ static void TS05_archive_suspend() {
   test::until([&]{return posted.load();},"archive result was not posted");
   require(panel.loading()&&!dispatcher.drain(),"archive completion ran during suspension");
   dispatcher.resume();dispatcher.drain();require(!panel.loading()&&panel.location().read_only(),"archive completion lost on resume");
-  require(test::read(panel.dir.path/"payload")=="archive delivery","archive publication wrong content");
+  require(read_archive(panel.dir.path/"payload")=="archive delivery","archive publication wrong content");
 }
 
 static void AR02() {
@@ -1041,8 +1268,8 @@ static void AR03() {
 static void AR07() {
   Fixture f; EnvOverride config("XDG_CONFIG_HOME",f.dir("config").native());
   auto input=f.file("inputs/sub/file.txt","original"); auto inner=f.root/"inner.7z", outer=f.root/"outer.7z";
-  require(archive_service().create_archive(inner,{input.parent_path()},input.parent_path().parent_path()).ok(),"inner archive creation failed");
-  require(archive_service().create_archive(outer,{inner},f.root).ok(),"outer archive creation failed");
+  require(create_archive(inner,{input.parent_path()},input.parent_path().parent_path()).ok(),"inner archive creation failed");
+  require(create_archive(outer,{inner},f.root).ok(),"outer archive creation failed");
   UiQueue ui; std::string identity; std::vector<Filepath> roots;
   {
     FileCommander app(f.root,f.root,[&](auto fn){ui.post(std::move(fn));},[]{return 100;});
@@ -1055,67 +1282,44 @@ static void AR07() {
     auto json=read_file(SettingsStore::path());
     require(json.find("extract-")==std::string::npos && json.find("outer.7z")!=std::string::npos,"settings persisted physical cache");
   }
-  for(const auto& root:roots) fs::remove_all(root); // Simulate cache loss between sessions.
+  ArchiveFS::close_unused(); // A new session opens the archives afresh.
   {
     FileCommander restored(f.root,f.root,[&](auto fn){ui.post(std::move(fn));},[]{return 100;},{},true);
     restored.load_settings(true); restored.start_initial_navigation(); ui.wait(restored.get_left()); ui.wait(restored.get_right());
     require(restored.get_left().location().encode()==identity,"archive location failed to restore");
-    require(read_file(restored.get_left().dir.path/"file.txt")=="original","restored archive has wrong content");
+    require(read_archive(restored.get_left().dir.path/"file.txt")=="original","restored archive has wrong content");
     auto bookmarks=restored.list_bookmarks(); require(bookmarks.size()==1 && bookmarks.front().native()==identity,"archive bookmark was lost");
     restored.get_left().move_to(f.root); ui.wait(restored.get_left()); restored.get_left().navigation->TakeFocus();
     restored.open_bookmark(bookmarks.front()); ui.wait(restored.get_left());
     require(restored.get_left().location().encode()==identity,"bookmark failed to reopen");
   }
-  ArchiveLease lease; Filepath retained;
-  { ArchiveService service; require(service.extract_to_cache(inner,retained,nullptr,&lease).ok(),"leased extract failed"); }
-  require(fs::exists(retained),"service destruction invalidated active lease"); lease.reset(); require(!fs::exists(retained),"unowned archive root leaked");
   bool rejected=false; try {Location::decode("fc-archive:%2Ftmp%2Fa.7z!%2E%2E%2Fescape");} catch(...) {rejected=true;}
   require(rejected,"location accepted parent escape");
-  ResolvedLocation result; auto missing=Location::decode(identity); missing.archives[0]=f.root/"missing.7z";
-  require(!archive_service().resolve(missing,result).ok(),"missing archive restored successfully");
+  auto missing=Location::decode(identity); missing.archives[0]=f.root/"missing.7z";
+  Dir gone; require(!gone.move_to(missing.resource()).ok(),"missing archive restored successfully");
 }
 
 static void AR07_cache_identity() {
   Fixture f;
-  // A controlled extractor exposes cache identity separately from compression.
-  auto tool = f.file("extract.sh", "#!/bin/sh\nfor arg in \"$@\"; do\n  case \"$arg\" in -o*) output=${arg#-o};; esac\n  source=$arg\ndone\ncp \"$source\" \"$output/payload\"\n");
-  fs::permissions(tool, fs::owner_all);
-  auto archive = f.file("version.7z", "FIRST");
+  // Archives made in advance, each holding one five-byte payload.
+  auto archive_of = [&](const std::string& name, const std::string& text) {
+    auto input = f.file(name + "/payload", text), out = f.root / (name + ".7z");
+    require(create_archive(out, {input}, input.parent_path()).ok(), "fixture archive failed");
+    return out;
+  };
+  auto archive = archive_of("first", "FIRST"), other = archive_of("other", "OTHER"), third = archive_of("third", "THIRD");
   fs::last_write_time(archive, 1000000000);
-  ArchiveService service;
-  service.set_tool_path(tool.native());
-  ArchiveLease first, second;
-  Filepath root1, root2, unchanged;
-  require(service.extract_to_cache(archive, root1, nullptr, &first).ok(), "initial controlled extract failed");
-  require(service.extract_to_cache(archive, unchanged).ok() && unchanged == root1, "unchanged archive missed the cache");
-  auto replacement = f.file("replacement.7z", "OTHER");
-  fs::last_write_time(replacement, fs::last_write_time(archive));
-  require(fs::file_size(replacement) == fs::file_size(archive), "replacement fixture changed size");
-  fs::rename(replacement, archive);
-  require(service.extract_to_cache(archive, root2, nullptr, &second).ok(), "replacement extraction failed");
-  require(root2 != root1 && read_file(root2 / "payload") == "OTHER", "same-size replacement with preserved mtime reused stale cache");
-  require(read_file(root1 / "payload") == "FIRST", "replacement invalidated the active old lease");
-
-  // An in-place writer retains the inode and can restore the modification time.
-  f.file("version.7z", "THIRD");
+  const auto root = archive_root(archive);
+  require(read_archive(root / "payload") == "FIRST", "initial archive read failed");
+  require(read_archive(root / "payload") == "FIRST", "unchanged archive read failed");
+  // A replacement with the old modification time is still a different file.
+  fs::last_write_time(other, fs::last_write_time(archive));
+  fs::rename(other, archive);
+  require(read_archive(root / "payload") == "OTHER", "replacement with preserved mtime served stale content");
+  // An in-place writer keeps the inode and can restore the modification time.
+  { std::ofstream rewrite(archive.string(), std::ios::binary | std::ios::trunc); rewrite << read_file(third); }
   fs::last_write_time(archive, 1000000000);
-  Filepath root3;
-  ArchiveLease third;
-  require(service.extract_to_cache(archive, root3, nullptr, &third).ok(), "in-place replacement extraction failed");
-  require(root3 != root2 && read_file(root3 / "payload") == "THIRD", "in-place replacement with preserved mtime reused stale cache");
-  require(read_file(root2 / "payload") == "OTHER", "in-place replacement invalidated an active lease");
-
-  auto changing = f.file("changing.7z", "START");
-  auto changing_tool = f.file("changing-extract.sh", read_file(tool) +
-      "printf AFTER > \"$source\"\nprintf '%s' \"$output\" > \"$source.extract-root\"\n");
-  fs::permissions(changing_tool, fs::owner_all);
-  ArchiveService unstable;
-  unstable.set_tool_path(changing_tool.native());
-  Filepath unpublished = "unchanged";
-  require(!unstable.extract_to_cache(changing, unpublished).ok(), "changed source was published after extraction");
-  require(unpublished == Filepath("unchanged") && unstable.cached_roots() == 0, "failed extraction published cache state");
-  auto rejected_root = Filepath(read_file(Filepath(changing.native() + ".extract-root")));
-  require(!rejected_root.empty() && !fs::exists(rejected_root), "changed-source extraction leaked its temporary root");
+  require(read_archive(root / "payload") == "THIRD", "in-place replacement with preserved mtime served stale content");
 }
 
 static void AR04() {
@@ -1165,15 +1369,12 @@ static void AR05() {
   require(manager->events_since(cursor).empty(),"consumed events replayed");
   for(auto& job:history) manager->dismiss_job(job->_job_id);
   require(manager->get_job_history().empty(),"dismissal failed with retention"); manager->shutdown();
-  Fixture f; auto input=f.file("input","first"); auto archive=f.root/"version.7z";
-  ArchiveService service; service.set_cache_limits(0,0); ArchiveLease first,second; Filepath root1,root2;
-  require(service.create_archive(archive,{input},f.root).ok() && service.extract_to_cache(archive,root1,nullptr,&first).ok(),"first version failed");
-  f.file("input","second version with different length");
-  require(service.create_archive(archive,{input},f.root).ok() && service.extract_to_cache(archive,root2,nullptr,&second).ok(),"second version failed");
-  require(root1!=root2 && fs::exists(root1) && fs::exists(root2),"active version lease invalidated");
-  service.trim_cache(); require(service.cached_roots()==2,"cache evicted pinned roots");
-  first.reset(); service.trim_cache(); require(!fs::exists(root1) && fs::exists(root2),"cache did not evict only unpinned version");
-  second.reset(); service.trim_cache(); require(service.cached_roots()==0 && !fs::exists(root2),"cache budget leaked unpinned root");
+  // Open archives are bounded: browsing many keeps only the most recent ones open.
+  Fixture f; auto input=f.file("input","first");
+  ArchiveFS::close_unused();
+  for(int i=0;i<20;++i){auto archive=f.root/("version"+std::to_string(i)+".7z");require(create_archive(archive,{input},f.root).ok(),"archive fixture failed");ArchiveFS::list(archive_root(archive));}
+  require(ArchiveFS::open_count()<=16,"open archives exceeded their bound");
+  ArchiveFS::close_unused(); require(ArchiveFS::open_count()==0,"unused archives stayed open");
 }
 
 static void AR06() {

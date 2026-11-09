@@ -1,0 +1,151 @@
+{
+  "id": "transfer_speed",
+  "title": "Transfer speed",
+  "order": 14,
+  "duration": 40,
+  "chapter": "jobs",
+  "needs": {
+    "idle_queue": true
+  },
+  "summary": "Limit how fast copies run, and change it while a copy is running.",
+  "covers": {
+    "commands": [
+      "transfer_speed"
+    ],
+    "anchors": [
+      "jobs.bar.speed",
+      "speed"
+    ]
+  },
+  "steps": [
+    {
+      "open_tabs": {
+        "left": "{home}/music",
+        "right": "{home}/backup",
+        "focus": "left"
+      }
+    },
+    {
+      "chapter": "Jobs"
+    },
+    {
+      "set_transfer_speed": "6 MiB"
+    },
+    {
+      "cursor": {
+        "side": "left",
+        "name": "Night Drive"
+      }
+    },
+    {
+      "keys": [
+        "@copy"
+      ]
+    },
+    {
+      "wait": {
+        "sheet": "copy"
+      }
+    },
+    {
+      "wait": {
+        "anchor": "sheet.copy.start"
+      }
+    },
+    {
+      "click": "sheet.copy.start",
+      "as_job": "music"
+    },
+    {
+      "wait": {
+        "sheet": null
+      },
+      "timeout": 30
+    },
+    {
+      "wait": {
+        "job": {
+          "name": "music",
+          "state": "running"
+        }
+      }
+    },
+    {
+      "caption": "Change the speed while it runs",
+      "sub": "Transfer Speed limits copies, moves between disks and SSH transfers"
+    },
+    {
+      "highlight": "jobs.bar.speed",
+      "hold": 1400
+    },
+    {
+      "keys": [
+        "@transfer_speed"
+      ]
+    },
+    {
+      "wait": {
+        "sheet": "speed"
+      }
+    },
+    {
+      "click": "speed.preset[1 MB/s]"
+    },
+    {
+      "wait": {
+        "transfer_rate": "1 MiB"
+      }
+    },
+    {
+      "unhighlight": true
+    },
+    {
+      "caption": "The copy slows down at once",
+      "sub": "Even in the middle of a file"
+    },
+    {
+      "pause": 2600
+    },
+    {
+      "click": "speed.preset[Unlimited]"
+    },
+    {
+      "wait": {
+        "transfer_rate": 0
+      }
+    },
+    {
+      "caption": "For now or for good",
+      "sub": "Turn off Keep for future sessions to limit only until you quit"
+    },
+    {
+      "highlight": "speed",
+      "hold": 2200
+    },
+    {
+      "keys": [
+        "Enter"
+      ]
+    },
+    {
+      "wait": {
+        "sheet": null
+      }
+    },
+    {
+      "wait": {
+        "job": {
+          "name": "music",
+          "state": "finished"
+        }
+      },
+      "timeout": 60
+    },
+    {
+      "unhighlight": true
+    },
+    {
+      "uncaption": true
+    }
+  ]
+}

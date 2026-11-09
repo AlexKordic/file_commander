@@ -46,6 +46,7 @@ struct copy_file_options
     copy_options options = copy_options::none;
     const copy_file_io_hooks* io = nullptr;
     uint64_t bytes_per_second = 0;
+    const std::atomic<uint64_t>* bytes_per_second_source = nullptr;
     std::atomic<bool>* cancel_requested = nullptr;
     std::atomic<uint64_t>* bytes_copied = nullptr;
     bool (*checkpoint)(void*) = nullptr;
@@ -94,6 +95,7 @@ layout change affects FC code too.
 | `options` | Stock `copy_options`. With `overwrite_existing` or `update_existing` the commit is an atomic replace; otherwise it never replaces. `synchronize` and `synchronize_data` sync the private output before commit. |
 | `io` | Optional `copy_file_io_hooks`. |
 | `bytes_per_second` | Rate limit; 0 means unlimited. |
+| `bytes_per_second_source` | When set, the rate is read from it before every chunk instead of from `bytes_per_second`, so the limit can change while a file is being copied. FC points it at the job manager's limit. |
 | `cancel_requested` | When it becomes true, the copy fails with `ECANCELED`. |
 | `bytes_copied` | Set to 0 at the start, then increased after each chunk is written to the private output. It counts staged bytes, not committed ones. |
 | `checkpoint` | Called with `checkpoint_context` before each read and while throttling. Returning `false` fails the copy with `ECANCELED`. It may block; FC holds a paused job here. |
@@ -106,7 +108,7 @@ layout change affects FC code too.
 
 ### Fast path
 
-If `bytes_per_second` is 0 and `io`, `cancel_requested`, `bytes_copied`,
+If `bytes_per_second` is 0, `bytes_per_second_source` is null, and `io`, `cancel_requested`, `bytes_copied`,
 `checkpoint` and `transaction` are all null, the overload calls stock
 `copy_file(from, to, opts.options, ec)`. That writes directly into `to`, with
 no private output and no atomic commit. `remove_source` and the two context
@@ -175,7 +177,8 @@ version, it may pick `sendfile` or `copy_file_range`.
   in steps of at most 50 ms until the bytes written match the target rate,
   checking `cancel_requested` and `checkpoint` between steps. The measuring
   window restarts after every `bytes_per_second` bytes, so long transfers do
-  not drift.
+  not drift, and whenever the rate read from `bytes_per_second_source`
+  changes, so a lower limit doesn't stall and a higher one doesn't burst.
 
 `copy_file_data_sendfile::impl` and `copy_file_data_copy_file_range::impl`
 hand the copy to the read/write loop as soon as a context is installed. They

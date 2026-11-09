@@ -1,4 +1,6 @@
 #include "app.hpp"
+#include "archive_formats.hpp"
+#include "dialog_support.hpp"
 #include "remote_fs.hpp"
 #include "settings.hpp"
 #include <algorithm>
@@ -11,6 +13,33 @@
 #include <regex>
 #include <sstream>
 
+namespace {
+// Buttons act on mouse press. When that press closes a dialog, the rest of the
+// click must not reach what was beneath it: file lists act on any left-button
+// event over a row, so the release would move focus and the file cursor.
+struct ClosingClick {
+  bool press_in_flight = false;
+  bool swallow         = false;
+} closing_click;
+
+bool swallow_closing_click(Event event) {
+  if (!event.is_mouse()) {
+    closing_click.press_in_flight = false;
+    return false;
+  }
+  const auto& mouse = event.mouse();
+  const bool button = mouse.button == Mouse::Left || mouse.button == Mouse::Middle || mouse.button == Mouse::Right;
+  if (button && mouse.motion == Mouse::Pressed) {
+    closing_click = {true, false};
+    return false;
+  }
+  closing_click.press_in_flight = false;
+  if (!closing_click.swallow) return false;
+  if (mouse.motion == Mouse::Released) closing_click.swallow = false;
+  return true;
+}
+}  // namespace
+
 ftxui::Dialog::P DialogOverlay::get_overlay_dialog(const std::string& name) {
   auto it = _overlay_dialogs.find(name);
   if (it != _overlay_dialogs.end()) return it->second;
@@ -20,7 +49,9 @@ ftxui::Dialog::P DialogOverlay::get_overlay_dialog(const std::string& name) {
 bool DialogOverlay::dialog_active() { return _active_dialog > 0; }
 
 void DialogOverlay::close_dialog() {
+  if (closing_click.press_in_flight) closing_click.swallow = true;
   std::string closed_dialog_name = _active_dialog_name;
+  if (auto shown = _overlay_dialogs.find(closed_dialog_name); shown != _overlay_dialogs.end()) shown->second->OnHide();
   // Move navigation to main document
   _active_dialog                 = 0;
   _active_dialog_name.clear();
@@ -35,6 +66,8 @@ void DialogOverlay::show_dialog(std::string name) {
     Perun::l.e("show_dialog() name not registered", name);
     return;
   }
+  if (auto shown = _overlay_dialogs.find(_active_dialog_name); _active_dialog && name != _active_dialog_name && shown != _overlay_dialogs.end())
+    shown->second->OnHide();
   _active_dialog      = 1;
   _active_dialog_name = name;
   // Remove all dialogs, child index > 0
@@ -77,8 +110,12 @@ Panel::Panel(Filepath location, TargetFunc get_target, ExecuteOnUiThread e, Dire
   navigation                  = Container::Tab({}, &_active_dialog);
   _state->move_to             = [this](Filepath where, Filepath focus) { this->move_to(where, focus); };
   _state->enter_archive       = [this](const Filepath& where) { return this->enter_archive(where); };
+  _state->browse_archive      = [this](const Filepath& where) { return this->browse_archive(where); };
   _state->leave_virtual_dir   = [this](int64_t& focused_id) { return this->leave_virtual_dir(focused_id); };
   _state->action.close_dialog = [this]() { close_dialog(); };
+  _state->loading             = [this] { return _loading && !_loading_unattended; };
+  _state->load_percent        = [this] { return _loading ? _load_percent->load() : -1; };
+  _state->stop_loading        = [this] { cancel_loading(); };
   _state->action.show_dialog  = [this]() {
     const auto& name = _state->action.dialog;
     if (name == "Mkdir" || name == "Rename" || name == "Move" || name == "Delete") {
@@ -102,6 +139,7 @@ Panel::Panel(Filepath location, TargetFunc get_target, ExecuteOnUiThread e, Dire
   }));
   // register dialogs
   _overlay_dialogs["Mkdir"]           = std::make_shared<MkdirDialog>(_state);
+  _overlay_dialogs["Extract"]         = std::make_shared<ExtractDialog>(_state);
   _overlay_dialogs["Rename"]          = std::make_shared<RenameDialog>(_state);
   _overlay_dialogs["Copy"]            = std::make_shared<CopyDialog>(_state);
   _overlay_dialogs["Move"]            = std::make_shared<MoveDialog>(_state);
@@ -141,16 +179,16 @@ PanelWorkspace Panel::capture_workspace() const {
     const bool active = int(i) == _active_tab;
     const auto& directory = active ? dir : tab.dir;
     TabWorkspace saved;
-    saved.path = archive_service().logical_location(directory.path).encode();
+    saved.path = location_of(directory.path).encode();
     saved.sort = directory.order_by;
     saved.filter = active ? _state->filter_txt : tab.filter_txt;
     saved.permissions = active ? _state->show_permissions_column : tab.show_permissions_column;
     saved.owner_group = active ? _state->show_owner_group_column : tab.show_owner_group_column;
     int focused = active && _state->get_focused_index ? _state->get_focused_index() : tab.focused_index;
     if (focused >= 0 && size_t(focused) < directory.items.size())
-      saved.focused = archive_service().logical_location(directory.items[focused].path_ref()).encode();
+      saved.focused = location_of(directory.items[focused].path_ref()).encode();
     for (const auto& item : directory.items)
-      if (item.selected()) saved.selected.push_back(archive_service().logical_location(item.path_ref()).encode());
+      if (item.selected()) saved.selected.push_back(location_of(item.path_ref()).encode());
     out.tabs.push_back(std::move(saved));
   }
   return out;
@@ -222,14 +260,14 @@ void Panel::switch_to_tab(int index) {
   if (on_event) on_event("tab_switched", std::to_string(_active_tab));
 }
 
-Location Panel::location() const { return archive_service().logical_location(dir.path); }
+Location Panel::location() const { return location_of(dir.path); }
 
 void Panel::move_to(const Filepath& where, Filepath focus) {
   if (!_tabs.empty()) _tabs[_active_tab].restore.reset();
-  load_directory(where, false, false, std::move(focus));
+  load_directory(where, false, std::move(focus));
 }
 
-void Panel::load_directory(Filepath where, bool archive, bool recover, Filepath focus, bool background_refresh) {
+void Panel::load_directory(Filepath where, bool recover, Filepath focus, bool background_refresh) {
   try {
     where = normalize_location(where);
   } catch (const std::exception &e) {
@@ -243,36 +281,23 @@ void Panel::load_directory(Filepath where, bool archive, bool recover, Filepath 
   }
   const auto generation = ++_load_generation;
   if (!background_refresh) _refresh_after_load = false;
-  if (archive || where != dir.path) {
+  if (where != dir.path) {
     ++_watch_generation;
     update_funnel.reset();
     pending_changes.erase_if([](const UpdatedFiles&) { return true; });
   }
   _loading      = true;
-  _loading_path = where;
+  _loading_unattended = background_refresh;
   auto result   = std::make_shared<Dir>();
-  auto stack    = _archive_stack;
-  _loader.submit([this, alive = _callback_alive, post = run_on_ui, reader = _read_directory, generation, result, where, archive, recover, stack, focus, background_refresh](const LatestWork::Token& cancelled) mutable {
+  _load_percent->store(-1);
+  _loader.submit([this, alive = _callback_alive, post = run_on_ui, reader = _read_directory, generation, result, where, recover, focus, background_refresh, percent = _load_percent](const LatestWork::Token& cancelled) mutable {
     Err error;
+    ArchiveFS::ReadProgress progress([post, percent](double fraction) {
+      const int now = int(fraction * 100);
+      if (percent->exchange(now) != now) post([] {});  // Redraws the percentage.
+    });
     try {
-      if (where.native().rfind("fc-archive:", 0) == 0) {
-        ResolvedLocation resolved;
-        error = archive_service().resolve(Location::decode(where.native()), resolved, cancelled.get());
-        if (error.ok()) {
-          where = resolved.path;
-          stack = std::move(resolved.archives);
-        }
-      }
-      if (archive) {
-        Filepath     extracted;
-        ArchiveLease lease;
-        error = archive_service().extract_to_cache(where, extracted, cancelled.get(), &lease);
-        if (error.ok()) {
-          stack.push_back(ArchiveView{where.lexically_normal(), extracted.lexically_normal(), std::move(lease)});
-          where = extracted;
-        }
-      }
-      if (recover && !is_remote(where)) {
+      if (recover && !is_virtual_path(where)) {
         for (;;) {
           boost::system::error_code ec;
           if (boost::filesystem::is_directory(where, ec) && !ec) break;
@@ -284,7 +309,7 @@ void Panel::load_directory(Filepath where, bool archive, bool recover, Filepath 
       if (error.ok() && !cancelled->load()) error = reader(*result, where, cancelled.get());
     } catch (const std::exception& e) { error = Err(e.what()); }
     if (cancelled->load() || !alive->load()) return;
-    post([this, alive, cancelled, generation, result, where, stack, focus, error, recover, background_refresh]() mutable {
+    post([this, alive, cancelled, generation, result, where, focus, error, recover, background_refresh]() mutable {
       if (!alive->load() || cancelled->load() || generation != _load_generation) return;
       _loading = false;
       if (!error.ok()) {
@@ -298,7 +323,7 @@ void Panel::load_directory(Filepath where, bool archive, bool recover, Filepath 
           start_watcher(where);
         }
         if (recover && !_tabs.empty() && _tabs[_active_tab].restore && Location::decode(_tabs[_active_tab].restore->path).read_only())
-          load_directory(boost::filesystem::current_path(), false, false);
+          load_directory(boost::filesystem::current_path(), false);
         return;
       }
       remote_error.clear();
@@ -318,15 +343,13 @@ void Panel::load_directory(Filepath where, bool archive, bool recover, Filepath 
       ++items_revision;
       dir.apply_filter(_state->filter_txt, true);
       dir.restore_selection(selected);
-      _archive_stack = stack;
-      _prune_archive_stack(where);
       dir.path_txt = location().display();
       if (!_tabs.empty() && _tabs[_active_tab].restore) {
         const auto& saved = *_tabs[_active_tab].restore;
         std::unordered_set<std::string> wanted(saved.selected.begin(), saved.selected.end());
         std::unordered_set<std::string> actual;
         for (const auto& item : dir.items) {
-          auto logical = archive_service().logical_location(item.path_ref()).encode();
+          auto logical = location_of(item.path_ref()).encode();
           if (wanted.contains(logical)) actual.insert(item.path_ref().native());
           if (logical == saved.focused) old_focus = item.path_ref();
         }
@@ -337,20 +360,17 @@ void Panel::load_directory(Filepath where, bool archive, bool recover, Filepath 
       start_watcher(where);
       sync_active_tab_state();
       if (on_event && (!background_refresh || !same)) on_event("dir_changed", where.native());
-      if (std::exchange(_refresh_after_load, false)) load_directory(dir.path, false, true, {}, true);
+      if (std::exchange(_refresh_after_load, false)) load_directory(dir.path, true, {}, true);
     });
   });
 }
 
 Element Panel::render() {
   // Panel is always shown
+  // A directory read shows a Stop button in the selection row; SSH failures
+  // go to the error lines at the bottom.
   Element document = vbox({
       render_tabs(),
-      _loading ? hbox({text(" Loading "), text(Location::decode(_loading_path.native()).display()) | xflex,
-                       text(" Esc: cancel ")}) |
-                     dim
-      : remote_error.empty() ? text("")
-                             : text(" SSH disconnected — retrying; " + remote_error) | color(Color::Red),
       _main_document->renderer->Render() | yflex,
   });
   // Overwrite with active dialog
@@ -365,7 +385,7 @@ Filepath Panel::focused_dir() {
   // get focused item, if its dir return item's path
   auto focused = _state->get_focused_item();
   if (!focused) return dir.path;
-  if (is_remote(*focused)) {
+  if (is_virtual_path(*focused)) {
     for (auto &item : dir.items)
       if (item.path_ref() == *focused)
         return item.is_dir() ? *focused : location_parent(*focused);
@@ -378,21 +398,48 @@ Filepath Panel::focused_dir() {
   return focused->parent_path();
 }
 
-bool Panel::enter_archive(const Filepath& archive_candidate) {
+int Panel::enter_archive(const Filepath& archive_candidate) {
+  const auto action = enter_action(archive_candidate);
+  if (action == EnterAction::None) return 0;
   if (is_remote(archive_candidate)) {
+    file_operations().report_error("Copy remote archives to a local tab before opening them");
+    return 2;
+  }
+  if (action == EnterAction::Refuse) {
+    file_operations().report_error(std::string(archive_format_of(archive_candidate)->refusal) + ": " + archive_candidate.filename().native());
+    return 2;
+  }
+  if (action == EnterAction::OfferExtraction) {
+    offer_extraction(archive_candidate);
+    return 2;
+  }
+  move_to(archive_root(archive_candidate));
+  return 1;
+}
+
+bool Panel::browse_archive(const Filepath& archive) {
+  if (is_remote(archive)) {
     file_operations().report_error("Copy remote archives to a local tab before opening them");
     return false;
   }
-  if (!is_archive_file_path(archive_candidate)) return false;
-  load_directory(archive_candidate, true, false);
+  move_to(archive_root(archive));
   return true;
 }
 
-bool Panel::leave_virtual_dir(int64_t& focused_id) {
-  if (_archive_stack.empty()) return false;
-  const auto top = _archive_stack.back();
-  if (dir.path.lexically_normal() != top.extracted_root.lexically_normal()) return false;
-  move_to(top.archive_file.parent_path(), top.archive_file);
+void Panel::offer_extraction(const Filepath& archive) {
+  _state->action.dialog              = "Extract";
+  _state->action.arguments           = std::make_shared<CommandArgs>();
+  _state->action.arguments->selected = {archive};
+  _state->action.arguments->focused  = archive;
+  _state->action.arguments->origin   = dir.path;
+  _state->action.show_dialog();
+}
+
+// Leaving an archive's root lands on the archive file itself.
+bool Panel::leave_virtual_dir(int64_t&) {
+  const auto file = archive_file_of(dir.path);
+  if (file.empty()) return false;
+  move_to(location_parent(dir.path), file);
   return true;
 }
 
@@ -459,7 +506,6 @@ void Panel::sync_active_tab_state() {
     tab.show_permissions_column = _state->show_permissions_column;
     tab.show_owner_group_column = _state->show_owner_group_column;
   }
-  tab.archive_stack = _archive_stack;
   tab.remote_error = remote_error;
 }
 
@@ -467,7 +513,7 @@ void Panel::start_watcher(const Filepath& where) {
   const auto generation = ++_watch_generation;
   update_funnel.reset();  // Stop the previous producer before draining its queue.
   pending_changes.erase_if([](const UpdatedFiles&) { return true; });
-  if (in_archive_view(where)) return;
+  if (in_archive_view(where)) return;  // Archives don't change while browsed; a rewritten file is reopened on the next load.
   try {
     update_funnel = FileChangeFunnel::create(where, [this, alive = _callback_alive, generation](UpdatedFiles changes) {
       if (!alive->load()) return;
@@ -496,7 +542,7 @@ void Panel::apply_changes(UpdatedFiles batch) {
   }
   if (relevant) {
     if (_loading) _refresh_after_load = true;
-    else if (recover || batch->size() > 512) load_directory(dir.path, false, recover, {}, true);
+    else if (recover || batch->size() > 512) load_directory(dir.path, recover, {}, true);
     else load_delta(std::move(batch));
   }
 }
@@ -507,7 +553,7 @@ void Panel::load_delta(UpdatedFiles batch) {
     if (change.path.parent_path().lexically_normal() == dir.path.lexically_normal()) paths.insert(change.path.native());
   const auto generation = ++_load_generation;
   _loading              = true;
-  _loading_path         = dir.path;
+  _loading_unattended   = true;
   _loader.submit([this, alive = _callback_alive, post = run_on_ui, generation, paths = std::move(paths)](const LatestWork::Token& cancelled) {
     auto delta = std::make_shared<std::vector<DirectoryDelta>>();
     for (const auto& path : paths) {
@@ -532,7 +578,7 @@ void Panel::load_delta(UpdatedFiles batch) {
       ++items_revision;
       _loading = false;
       _restore_focus_after_update(focus, index);
-      if (std::exchange(_refresh_after_load, false)) load_directory(dir.path, false, true, {}, true);
+      if (std::exchange(_refresh_after_load, false)) load_directory(dir.path, true, {}, true);
     });
   });
 }
@@ -542,8 +588,6 @@ void Panel::load_active_tab() {
   TabState& tab  = _tabs[_active_tab];
   dir            = std::move(tab.dir);
   remote_error = tab.remote_error;
-  _archive_stack = tab.archive_stack;
-  _prune_archive_stack(dir.path);
   if (_state) {
     _state->filter_txt = tab.filter_txt.empty() ? dir.filter.phrase : tab.filter_txt;
     dir.apply_filter(_state->filter_txt);
@@ -553,7 +597,7 @@ void Panel::load_active_tab() {
   }
   if (!dir.path.empty()) {
     auto where = dir.path;
-    load_directory(where, false, tab.restore.has_value());  // Reconcile inactive/restored tabs.
+    load_directory(where, tab.restore.has_value());  // Reconcile inactive/restored tabs.
   } else {
     update_funnel.reset();
   }
@@ -587,25 +631,18 @@ void Panel::_restore_focus_after_update(const Filepath& focused_path_before, int
   _state->set_focused_index(restore_index);
 }
 
-bool Panel::in_archive_view(const Filepath& path) const {
-  if (_archive_stack.empty()) return false;
-  return path_is_under(_archive_stack.back().extracted_root, path.lexically_normal());
-}
-
-void Panel::_prune_archive_stack(const Filepath& path) {
-  const Filepath normalized = path.lexically_normal();
-  while (!_archive_stack.empty() && !path_is_under(_archive_stack.back().extracted_root, normalized)) { _archive_stack.pop_back(); }
-}
+bool Panel::in_archive_view(const Filepath& path) const { return is_archive_path(path); }
 
 JobProgressBar::JobProgressBar() {
-  cancel_button = Button(" Cancel ", [] {
+  // One-row buttons keep the whole progress bar on a single row.
+  cancel_button = Button("Cancel", [] {
     auto jobinfo = file_operations().get_running_job();
     if (jobinfo.job && !jobinfo.job->is_stopped()) { file_operations().cancel(jobinfo.job->_job_id); }
-  });
-  pause_button  = Button(" Pause/Resume ", [] {
+  }, theme_button(&Theme::stop_button));
+  pause_button  = Button("Pause/Resume", [] {
     auto jobinfo = file_operations().get_running_job();
     if (jobinfo.job && !jobinfo.job->is_stopped()) { file_operations().pause(jobinfo.job->_job_id); }
-  });
+  }, theme_button(&Theme::pause_button));
 }
 
 Element JobProgressBar::render() {
@@ -618,8 +655,7 @@ Element JobProgressBar::render() {
   const DirItem& item        = *job->_focused_item;
   const int64_t  items_total = job->item_count();
 
-  auto cancel_el = cancel_button->Render();
-  auto pause_el  = pause_button->Render();
+  auto buttons = hbox({pause_button->Render(), text(" "), cancel_button->Render()});
 
   switch (job->_type) {
   case JobInstructions::Type::COPY: {
@@ -630,10 +666,9 @@ Element JobProgressBar::render() {
       text("|"),
       bgGaugeLeft(job->_total.percentage / 100, theme().size_gauge_full, theme().size_gauge_empty, text(total_info)) | theme().progress_total,
       text("|"),
-      bgGaugeLeft(job->_current_item.percentage / 100, theme().size_gauge_full, theme().size_gauge_empty, text(curr_info)) | xflex_grow | theme().progress_current,
+      bgGaugeLeft(job->_current_item.percentage / 100, theme().size_gauge_full, theme().size_gauge_empty, text(curr_info)) | xflex | theme().progress_current,
       text("|"),
-      pause_el,
-      cancel_el,
+      buttons,
     });
   } break;
   case JobInstructions::Type::MKDIR:
@@ -646,12 +681,12 @@ Element JobProgressBar::render() {
     return hbox({
       text(task_info) | theme().progress_operation,
       text("|"),
-      bgGaugeLeft(item_percentage / 100, theme().size_gauge_full, theme().size_gauge_empty, text(count_info)) | xflex_grow | theme().progress_current,
+      bgGaugeLeft(item_percentage / 100, theme().size_gauge_full, theme().size_gauge_empty, text(count_info)) | xflex | theme().progress_current,
       text("|"),
-      pause_el,
-      cancel_el,
+      buttons,
     });
   } break;
+  case JobInstructions::Type::EXTRACT:
   case JobInstructions::Type::DELETE: {
     float       byte_percentage = std::max(0.0, std::min(100.0, 100.0 * job->_bytes_processed / job->_bytes_total));
     float       item_percentage = std::max(0.0, std::min(100.0, job->_items_done * 100.0 / items_total));
@@ -660,12 +695,11 @@ Element JobProgressBar::render() {
     return hbox({
       text(task_info) | theme().progress_operation,
       text("|"),
-      bgGaugeLeft(item_percentage / 100, theme().size_gauge_full, theme().size_gauge_empty, text(byte_info)) | theme().progress_total,
+      bgGaugeLeft(byte_percentage / 100, theme().size_gauge_full, theme().size_gauge_empty, text(byte_info)) | theme().progress_total,
       text("|"),
-      bgGaugeLeft(byte_percentage / 100, theme().size_gauge_full, theme().size_gauge_empty, text(count_info)) | xflex_grow | theme().progress_current,
+      bgGaugeLeft(item_percentage / 100, theme().size_gauge_full, theme().size_gauge_empty, text(count_info)) | xflex | theme().progress_current,
       text("|"),
-      pause_el,
-      cancel_el,
+      buttons,
     });
   } break;
   case JobInstructions::Type::ARCHIVE_CREATE: {
@@ -674,10 +708,9 @@ Element JobProgressBar::render() {
     return hbox({
       text(task_info) | theme().progress_operation,
       text("|"),
-      bgGaugeLeft(item_percentage / 100, theme().size_gauge_full, theme().size_gauge_empty, text(count_info)) | xflex_grow | theme().progress_current,
+      bgGaugeLeft(item_percentage / 100, theme().size_gauge_full, theme().size_gauge_empty, text(count_info)) | xflex | theme().progress_current,
       text("|"),
-      pause_el,
-      cancel_el,
+      buttons,
     });
   } break;
   }
@@ -731,7 +764,7 @@ bool FileCommander::open_in_editor(std::string& error) {
   }
 
   auto is_directory = [&panel](const Filepath &p) -> bool {
-    if (is_remote(p)) {
+    if (is_virtual_path(p)) {
       for (auto &item : panel.dir.items)
         if (item.path_ref() == p)
           return item.is_dir();
@@ -837,6 +870,8 @@ void FileCommander::load_settings(bool restore_paths) {
       if (!p.empty()) add_bookmark(p);
     for (const auto& [id, count] : s.command_use_count) commands().set_use_count(id, count);
     _editor_manager.set_binary_override(s.fresh_binary_path);
+    _transfer_rate_limit = s.transfer_rate_limit;
+    file_operations().set_transfer_rate(_transfer_rate_limit);
     if (_editor_manager.last_session_id().empty()) _editor_manager.set_last_session_id(s.last_editor_session_id);
     theme().import_color_tokens(colors);
     if (restore_paths) {
@@ -870,6 +905,7 @@ void FileCommander::save_settings() const {
     }
     s.fresh_binary_path      = _editor_manager.binary_override();
     s.last_editor_session_id = _editor_manager.last_session_id();
+    s.transfer_rate_limit    = _transfer_rate_limit;
     SettingsStore::save(SettingsStore::path(), s);
     save_theme_colors();
   } catch (const std::exception& e) { file_operations().report_error("[Settings] " + std::string(e.what())); }
@@ -916,7 +952,7 @@ std::vector<Filepath> FileCommander::list_bookmarks() const {
 void FileCommander::add_bookmark(const Filepath& path) {
   auto location = Location::decode(path.native());
   if (!location.read_only() && !location.remote())
-    location = archive_service().logical_location(location.local);
+    location = location_of(location.local);
   if (std::find(_bookmarks.begin(), _bookmarks.end(), location) == _bookmarks.end()) {
     _bookmarks.push_back(std::move(location));
     std::sort(_bookmarks.begin(), _bookmarks.end(), [](const auto& a, const auto& b) { return a.display() < b.display(); });
@@ -1052,6 +1088,15 @@ void FileCommander::observe_state() {
 
 FileCommander::FileCommander(Filepath l, Filepath r, ExecuteOnUiThread exec, std::function<int()> dimx, RunWithRestoredIO run_with_restored_io, bool defer_load) : left(l, get_target(), exec, {}, defer_load), right(r, get_target(), exec, {}, defer_load), _get_dimx(dimx), _run_with_restored_io(std::move(run_with_restored_io)) {
   _close_dialog = [this]() { close_dialog(); };
+  // Encrypted archives: the reader's thread waits (ArchiveFS) while this thread asks.
+  ArchiveFS::set_password_prompt([this, alive = _alive, exec](const std::string& archive, bool wrong, ArchiveFS::PasswordAnswer answer) {
+    exec([this, alive, archive, wrong, answer] {
+      if (!alive->load()) return answer(std::nullopt);
+      auto dialog = std::static_pointer_cast<ArchivePasswordDialog>(_overlay_dialogs.at("ArchivePassword"));
+      dialog->ask(archive, wrong, answer);
+      show_dialog("ArchivePassword");
+    });
+  });
   auto emit     = [weak = std::weak_ptr<ApplicationEvents>(events)](std::string name, std::string detail, uint64_t request = 0) {
     if (auto bus = weak.lock()) bus->publish(std::move(name), std::move(detail), request);
   };
@@ -1123,6 +1168,7 @@ FileCommander::FileCommander(Filepath l, Filepath r, ExecuteOnUiThread exec, std
 
   navigation->Add(panels_with_cancel);
   _overlay_dialogs["ErrorList"]      = std::make_shared<ErrorListDialog>(_close_dialog);
+  _overlay_dialogs["ArchivePassword"] = std::make_shared<ArchivePasswordDialog>(_close_dialog);
   _overlay_dialogs["JobList"]        = std::make_shared<JobListDialog>(_close_dialog);
   _overlay_dialogs["Bookmarks"]      = std::make_shared<BookmarksDialog>(_close_dialog, [this]() { return this->list_bookmarks(); }, [this]() { this->add_current_focused_dir_bookmark(); }, [this](const Filepath& path) { this->remove_bookmark(path); }, [this](const Filepath& path) { this->open_bookmark(path); });
   _overlay_dialogs["ThemeColors"]    = std::make_shared<ThemeColorsDialog>(_close_dialog, [this]() { return this->list_theme_colors(); }, []() { return theme().available_color_tokens(); }, [this](const std::string& id, const std::string& token, std::string& error) { return this->set_theme_color(id, token, error); }, [this]() { this->reset_theme_colors(); }, [this]() { this->save_theme_colors(); });
@@ -1133,6 +1179,12 @@ FileCommander::FileCommander(Filepath l, Filepath r, ExecuteOnUiThread exec, std
       std::string error;
       if (!_editor_manager.switch_to_editor(focused_panel().dir.path, error) && !error.empty()) file_operations().report_error(error);
     });
+  _overlay_dialogs["TransferSpeed"] = std::make_shared<TransferSpeedDialog>(
+      _close_dialog, [] { return file_operations().transfer_rate(); },
+      [this](uint64_t bytes_per_second, bool persist) {
+        file_operations().set_transfer_rate(bytes_per_second);
+        if (persist) _transfer_rate_limit = bytes_per_second;  // Saved with the other settings on exit.
+      });
   _overlay_dialogs["ConnectSSH"] = std::make_shared<ConnectSSHDialog>(
       _close_dialog, [this](const std::string &host, const std::string &path, std::string &error) {
         try {
@@ -1155,7 +1207,7 @@ FileCommander::FileCommander(Filepath l, Filepath r, ExecuteOnUiThread exec, std
           return false;
         }
       });
-  renderer                           = Renderer(navigation, [=, this]() -> Element {
+  renderer                           = Renderer(CatchEvent(navigation, swallow_closing_click), [=, this]() -> Element {
     // check for resize:
     int screen_w = _get_dimx();
     if (screen_w != _screen_dimx) {
@@ -1175,6 +1227,11 @@ FileCommander::FileCommander(Filepath l, Filepath r, ExecuteOnUiThread exec, std
     if (!_overlay_renderer) return document;
     return dbox({document, _overlay_renderer->Render() | yflex | clear_under_colors | hcenter});
   }) | yflex;  // Fill the startup container for both panels and global overlays.
+}
+
+FileCommander::~FileCommander() {
+  _alive->store(false);
+  ArchiveFS::set_password_prompt({});
 }
 
 TargetFunc FileCommander::get_target() {

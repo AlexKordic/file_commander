@@ -557,6 +557,7 @@ int LuaScripting::l_state(lua_State* L) {
     case JobInstructions::Type::MKDIR: jtype = "mkdir"; break;
     case JobInstructions::Type::RENAME: jtype = "rename"; break;
     case JobInstructions::Type::CLIPBOARD: jtype = "clipboard"; break;
+    case JobInstructions::Type::EXTRACT: jtype = "extract"; break;
     }
     lua_pushstring(L, jtype);
     lua_setfield(L, -2, "type");
@@ -735,6 +736,7 @@ int LuaScripting::l_job_history(lua_State* L) {
     case JobInstructions::Type::MKDIR: type_str = "mkdir"; break;
     case JobInstructions::Type::RENAME: type_str = "rename"; break;
     case JobInstructions::Type::CLIPBOARD: type_str = "clipboard"; break;
+    case JobInstructions::Type::EXTRACT: type_str = "extract"; break;
     }
     lua_pushstring(L, type_str);
     lua_setfield(L, -2, "type");

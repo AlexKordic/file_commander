@@ -8,6 +8,18 @@ DirItem operation_display(const Operation& op) {
   if (op.kind == Operation::Kind::DiscoveryFailure) item._set_warning(op.message);
   return item;
 }
+OperationPlan extraction_plan(const Filepath& archive, const Filepath& folder, CopyConflictMode conflict, int64_t archive_bytes) {
+  OperationPlan plan;
+  plan.type     = OperationType::EXTRACT;
+  plan.conflict = conflict;
+  Operation op;
+  op.kind        = Operation::Kind::ExtractArchive;
+  op.source      = archive;
+  op.destination = folder;
+  op.bytes       = archive_bytes;
+  plan.steps.push_back(std::move(op));
+  return plan;
+}
 OperationPlan selection_plan(OperationType type, const std::vector<Filepath>& paths, const Filepath& destination) {
   OperationPlan plan;
   plan.type = type;

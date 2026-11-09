@@ -1,0 +1,169 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {};
+	objectVersion = 56;
+	objects = {
+
+/* Begin PBXFileReference section */
+		FC0000000000000000000001 /* File Commander.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "File Commander.app"; sourceTree = BUILT_PRODUCTS_DIR; };
+		FC0000000000000000000002 /* Package.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Package.swift; sourceTree = "<group>"; };
+		FC0000000000000000000003 /* Sources */ = {isa = PBXFileReference; lastKnownFileType = folder; path = Sources; sourceTree = "<group>"; };
+		FC0000000000000000000004 /* xcode_build_app.sh */ = {isa = PBXFileReference; lastKnownFileType = text.script.sh; path = tools/xcode_build_app.sh; sourceTree = "<group>"; };
+		FC0000000000000000000005 /* Helpers.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = Xcode/Helpers.entitlements; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXGroup section */
+		FC0000000000000000000010 = {
+			isa = PBXGroup;
+			children = (FC0000000000000000000003, FC0000000000000000000002, FC0000000000000000000004, FC0000000000000000000005, FC0000000000000000000011);
+			sourceTree = "<group>";
+		};
+		FC0000000000000000000011 /* Products */ = {
+			isa = PBXGroup;
+			children = (FC0000000000000000000001);
+			name = Products;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		FC0000000000000000000020 /* FileCommander */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = FC0000000000000000000051;
+			buildPhases = (FC0000000000000000000040);
+			buildRules = ();
+			dependencies = ();
+			name = FileCommander;
+			productName = "File Commander";
+			productReference = FC0000000000000000000001;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		FC0000000000000000000030 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = YES;
+				LastUpgradeCheck = 2700;
+				TargetAttributes = { FC0000000000000000000020 = {CreatedOnToolsVersion = 27.0; ProvisioningStyle = Automatic; }; };
+			};
+			buildConfigurationList = FC0000000000000000000050;
+			compatibilityVersion = "Xcode 14.0";
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (en, Base);
+			mainGroup = FC0000000000000000000010;
+			productRefGroup = FC0000000000000000000011;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (FC0000000000000000000020);
+		};
+/* End PBXProject section */
+
+/* Begin PBXShellScriptBuildPhase section */
+		FC0000000000000000000040 /* Build and stage File Commander */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = ();
+			inputPaths = ("$(SRCROOT)/tools/xcode_build_app.sh");
+			name = "Build and stage File Commander";
+			outputPaths = (
+				"$(DERIVED_FILE_DIR)/FC-Info.plist",
+				"$(TARGET_BUILD_DIR)/$(EXECUTABLE_PATH)",
+				"$(TARGET_BUILD_DIR)/$(EXECUTABLE_FOLDER_PATH)/fc",
+				"$(TARGET_BUILD_DIR)/$(EXECUTABLE_FOLDER_PATH)/fresh",
+				"$(TARGET_BUILD_DIR)/$(EXECUTABLE_FOLDER_PATH)/7z.so",
+				"$(TARGET_BUILD_DIR)/$(EXECUTABLE_FOLDER_PATH)/fc-relaunch",
+				"$(TARGET_BUILD_DIR)/$(EXECUTABLE_FOLDER_PATH)/fc-askpass",
+				"$(TARGET_BUILD_DIR)/$(UNLOCALIZED_RESOURCES_FOLDER_PATH)",
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/bash;
+			shellScript = "\"$SRCROOT/tools/xcode_build_app.sh\"\n";
+		};
+/* End PBXShellScriptBuildPhase section */
+
+/* Begin XCBuildConfiguration section */
+		FC0000000000000000000060 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ARCHS = "$(NATIVE_ARCH_ACTUAL)";
+				CODE_SIGN_STYLE = Automatic;
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				SDKROOT = macosx;
+			};
+			name = Debug;
+		};
+		FC0000000000000000000061 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ARCHS = "$(NATIVE_ARCH_ACTUAL)";
+				CODE_SIGN_STYLE = Automatic;
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				SDKROOT = macosx;
+			};
+			name = Release;
+		};
+		FC0000000000000000000062 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_IDENTITY = "Apple Development";
+				COMBINE_HIDPI_IMAGES = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_APP_SANDBOX = NO;
+				ENABLE_HARDENED_RUNTIME = NO;
+				EXECUTABLE_NAME = FileCommander;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = "$(DERIVED_FILE_DIR)/FC-Info.plist";
+				LD_RUNPATH_SEARCH_PATHS = ("$(inherited)", "@executable_path/../Frameworks");
+				PRODUCT_BUNDLE_IDENTIFIER = com.perun.filecommander;
+				PRODUCT_NAME = "File Commander";
+				SKIP_INSTALL = NO;
+				SUPPORTED_PLATFORMS = macosx;
+			};
+			name = Debug;
+		};
+		FC0000000000000000000063 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_IDENTITY = "Apple Development";
+				CODE_SIGN_INJECT_BASE_ENTITLEMENTS = NO;
+				COMBINE_HIDPI_IMAGES = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_APP_SANDBOX = NO;
+				ENABLE_HARDENED_RUNTIME = YES;
+				EXECUTABLE_NAME = FileCommander;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = "$(DERIVED_FILE_DIR)/FC-Info.plist";
+				LD_RUNPATH_SEARCH_PATHS = ("$(inherited)", "@executable_path/../Frameworks");
+				PRODUCT_BUNDLE_IDENTIFIER = com.perun.filecommander;
+				PRODUCT_NAME = "File Commander";
+				SKIP_INSTALL = NO;
+				SUPPORTED_PLATFORMS = macosx;
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		FC0000000000000000000050 = {
+			isa = XCConfigurationList;
+			buildConfigurations = (FC0000000000000000000060, FC0000000000000000000061);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		FC0000000000000000000051 = {
+			isa = XCConfigurationList;
+			buildConfigurations = (FC0000000000000000000062, FC0000000000000000000063);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = FC0000000000000000000030;
+}

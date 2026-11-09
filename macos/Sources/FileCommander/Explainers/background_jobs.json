@@ -1,0 +1,234 @@
+{
+  "id": "background_jobs",
+  "title": "Background jobs",
+  "order": 13,
+  "duration": 75,
+  "chapter": "jobs",
+  "needs": {
+    "idle_queue": true
+  },
+  "summary": "Jobs run in order while you work; Activity shows them; errors are recorded, not fatal.",
+  "covers": {
+    "commands": [
+      "toggle_job_list",
+      "toggle_errors",
+      "clear_errors"
+    ],
+    "anchors": [
+      "activity.list",
+      "errors.lines"
+    ]
+  },
+  "steps": [
+    {
+      "open_tabs": {
+        "left": "{home}",
+        "right": "{home}/backup",
+        "focus": "left"
+      }
+    },
+    {
+      "chapter": "Jobs"
+    },
+    {
+      "set_transfer_speed": "12 MiB"
+    },
+    {
+      "caption": "Everything runs in the background",
+      "sub": "Start a copy and keep working. Jobs run one at a time, in order"
+    },
+    {
+      "cursor": {
+        "side": "left",
+        "name": "camera"
+      }
+    },
+    {
+      "keys": [
+        "@copy"
+      ]
+    },
+    {
+      "wait": {
+        "sheet": "copy"
+      }
+    },
+    {
+      "wait": {
+        "anchor": "sheet.copy.start"
+      }
+    },
+    {
+      "click": "sheet.copy.start",
+      "as_job": "camera"
+    },
+    {
+      "wait": {
+        "sheet": null
+      },
+      "timeout": 30
+    },
+    {
+      "wait": {
+        "job": {
+          "name": "camera",
+          "state": "running"
+        }
+      }
+    },
+    {
+      "caption": "Queue another",
+      "sub": "A second copy waits for the first"
+    },
+    {
+      "cursor": {
+        "side": "left",
+        "name": "photos"
+      }
+    },
+    {
+      "keys": [
+        "@copy"
+      ]
+    },
+    {
+      "wait": {
+        "sheet": "copy"
+      }
+    },
+    {
+      "wait": {
+        "anchor": "sheet.copy.start"
+      }
+    },
+    {
+      "click": "sheet.copy.start",
+      "as_job": "photos"
+    },
+    {
+      "wait": {
+        "sheet": null
+      },
+      "timeout": 30
+    },
+    {
+      "wait": {
+        "queued_at_least": 1
+      }
+    },
+    {
+      "highlight": "jobs.bar",
+      "hold": 1800
+    },
+    {
+      "unhighlight": true
+    },
+    {
+      "caption": "Keep browsing",
+      "sub": "The panes stay responsive while jobs run"
+    },
+    {
+      "navigate": {
+        "side": "left",
+        "to": "{home}/music"
+      }
+    },
+    {
+      "pause": 900
+    },
+    {
+      "navigate": {
+        "side": "left",
+        "to": "{home}",
+        "focus": "{home}/music"
+      }
+    },
+    {
+      "caption": "The Activity window",
+      "sub": "Every job, its progress and details; pause, resume, cancel or dismiss"
+    },
+    {
+      "keys": [
+        "@toggle_job_list"
+      ]
+    },
+    {
+      "wait": {
+        "window": "activity"
+      }
+    },
+    {
+      "highlight": "activity.list",
+      "hold": 2600
+    },
+    {
+      "unhighlight": true
+    },
+    {
+      "caption": "Errors don't stop a job",
+      "sub": "photos/2025 holds a file nobody can read: the copy records it and goes on"
+    },
+    {
+      "set_transfer_speed": 0
+    },
+    {
+      "wait": {
+        "job": {
+          "name": "photos",
+          "state": "completed_with_errors"
+        }
+      },
+      "timeout": 90
+    },
+    {
+      "close_window": "activity"
+    },
+    {
+      "wait": {
+        "errors_at_least": 1
+      }
+    },
+    {
+      "highlight": "errors.lines",
+      "hold": 2000
+    },
+    {
+      "caption": "The Errors window lists them all",
+      "sub": ""
+    },
+    {
+      "keys": [
+        "@toggle_errors"
+      ]
+    },
+    {
+      "wait": {
+        "window": "errors"
+      }
+    },
+    {
+      "pause": 2000
+    },
+    {
+      "close_window": "errors"
+    },
+    {
+      "caption": "Clear them when you are done",
+      "sub": ""
+    },
+    {
+      "click": "errors.clear"
+    },
+    {
+      "wait": {
+        "no_errors": true
+      }
+    },
+    {
+      "unhighlight": true
+    },
+    {
+      "uncaption": true
+    }
+  ]
+}

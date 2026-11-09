@@ -1,9 +1,59 @@
 #include "traversal.hpp"
 #include "remote_fs.hpp"
+#include "archive.hpp"
 #include <algorithm>
 #include <unordered_map>
 
 TraversalResult traverse(const std::vector<Filepath>& roots, const TraversalPolicy& policy, const TraversalCallbacks& cb) {
+  if (std::any_of(roots.begin(), roots.end(), is_archive_path)) {
+    // Inside an archive: the index answers, nothing is extracted. Archives hold no links to follow and no cycles.
+    struct Frame {
+      TraversalEntry entry;
+      std::vector<ArchiveFS::Entry> children;
+      size_t next = 0;
+    };
+    std::vector<Frame> stack;
+    TraversalResult result;
+    auto enter = [&](const Filepath& p, const Filepath& relative, const ArchiveFS::Metadata* known = nullptr) {
+      if (result.entries >= policy.max_entries || stack.size() >= policy.max_depth) {
+        result.truncated = true;
+        ++result.errors;
+        cb.error(p, "Traversal budget exceeded");
+        return;
+      }
+      try {
+        ++result.entries;
+        auto m = known ? *known : ArchiveFS::inspect(p);
+        if (!m.exists) throw std::runtime_error("No such entry in the archive");
+        TraversalEntry e{p, relative, m.status(), {}, {}, int64_t(m.size), std::time_t(m.mtime_ns / 1000000000)};
+        if (m.symlink()) e.link_text = m.link;
+        if (cb.enter(e) && m.directory && !cb.cancelled())
+          stack.push_back({e, ArchiveFS::list(p), 0});
+        else
+          cb.leave(e);
+      } catch (const std::exception& error) {
+        ++result.errors;
+        cb.error(p, error.what());
+      }
+    };
+    for (auto& root : roots) {
+      if (cb.cancelled() || result.truncated) break;
+      enter(root, root.filename());
+      while (!stack.empty() && !cb.cancelled() && !result.truncated) {
+        auto& f = stack.back();
+        if (f.next == f.children.size()) {
+          cb.leave(f.entry);
+          stack.pop_back();
+          continue;
+        }
+        auto child = f.children[f.next++];
+        auto relative = f.entry.relative / child.path.filename();
+        enter(child.path, relative, &child.metadata);
+      }
+    }
+    result.cancelled = cb.cancelled();
+    return result;
+  }
   if (std::any_of(roots.begin(), roots.end(), is_remote)) {
     struct Frame {
       TraversalEntry entry;

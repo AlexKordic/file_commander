@@ -67,7 +67,6 @@ class DialogOverlay {
 // DialogOverlay supports drawing overlay dialogs on top of this Panel.
 class Panel : public DialogOverlay {
  public:
-  using ArchiveView = ResolvedArchive;
 
   struct TabState {
     Dir                      dir;
@@ -75,7 +74,6 @@ class Panel : public DialogOverlay {
     std::string              filter_txt;
     bool                     show_permissions_column = false;
     bool                     show_owner_group_column = false;
-    std::vector<ArchiveView> archive_stack;
     std::optional<TabWorkspace> restore;
     std::string remote_error;
   };
@@ -95,8 +93,9 @@ class Panel : public DialogOverlay {
   uint64_t        _load_generation    = 0;
   uint64_t        items_revision      = 0;
   bool            _loading            = false;
+  bool            _loading_unattended = false;  // An automatic refresh, not a read the user started.
+  std::shared_ptr<std::atomic<int>> _load_percent = std::make_shared<std::atomic<int>>(-1);  // A long read's progress, or -1.
   bool            _refresh_after_load = false;
-  Filepath        _loading_path;
   bool            loading() const;
   void            cancel_loading();
 
@@ -125,11 +124,14 @@ class Panel : public DialogOverlay {
 
   void move_to(const Filepath& where, Filepath focus = {});
 
-  void     load_directory(Filepath where, bool archive, bool recover, Filepath focus = {}, bool background_refresh = false);
+  void     load_directory(Filepath where, bool recover, Filepath focus = {}, bool background_refresh = false);
   Element  render();
   Filepath focused_dir();
 
-  bool enter_archive(const Filepath& archive_candidate);
+  // 0: not an archive; 1: went into it; 2: handled here (the extraction popup, or a refusal).
+  int  enter_archive(const Filepath& archive_candidate);
+  bool browse_archive(const Filepath& archive);  // Open as archive, whatever the name.
+  void offer_extraction(const Filepath& archive);  // The extraction popup.
 
   bool leave_virtual_dir(int64_t& focused_id);
 
@@ -161,12 +163,10 @@ class Panel : public DialogOverlay {
 
   bool in_archive_view(const Filepath& path) const;
 
-  void _prune_archive_stack(const Filepath& path);
 
   PanelSharedState::P      _state;
   std::shared_ptr<Files>   _files;
   std::vector<TabState>    _tabs;
-  std::vector<ArchiveView> _archive_stack;
   mutable std::vector<Box> _tab_boxes;
   int                      _active_tab = 0;
 };
@@ -180,6 +180,7 @@ inline std::string job_type_to_string(JobInstructions::Type type) {
   case JobInstructions::Type::MKDIR: return "MKDIR";
   case JobInstructions::Type::RENAME: return "RENAME";
   case JobInstructions::Type::CLIPBOARD: return "CLIPBOARD";
+  case JobInstructions::Type::EXTRACT: return "EXTRACT";
   default: return "?";
   }
 }
@@ -202,11 +203,13 @@ class FileCommander : public DialogOverlay {
   std::vector<Location> _bookmarks;
   bool                  _last_main_focus_left = true;
   bool                  _single_panel_mode    = false;
+  std::uint64_t         _transfer_rate_limit  = 0;
   EditorManager         _editor_manager;
   RunWithRestoredIO     _run_with_restored_io;
 
   std::function<void()> _close_dialog;
   std::function<int()>  _get_dimx;
+  std::shared_ptr<std::atomic<bool>> _alive = std::make_shared<std::atomic<bool>>(true);
 
  public:
   int       _left_size   = 20;
@@ -271,6 +274,7 @@ class FileCommander : public DialogOverlay {
   void                           observe_state();
 
   FileCommander(Filepath l, Filepath r, ExecuteOnUiThread exec, std::function<int()> dimx, RunWithRestoredIO run_with_restored_io = {}, bool defer_load = false);
+  ~FileCommander();
   // returns
   TargetFunc get_target();
 

@@ -30,7 +30,7 @@ with tempfile.TemporaryDirectory(prefix="fc-package-test-") as temp:
     (root/'source/alpha').write_bytes(b'archive\0payload\xff')
     (root/'source/sub/Ω-file').write_bytes(b'nested bytes')
     trace=root/'helper-trace'
-    for name in ('7zr','fresh'):
+    for name in ('fresh',):
         helper=binary.parent/name
         if not helper.is_file():
             print(f'SKIP package tools: missing bundled {name}')
@@ -38,7 +38,6 @@ with tempfile.TemporaryDirectory(prefix="fc-package-test-") as temp:
         real=helper.with_name(name+'.real');helper.rename(real)
         helper.write_text('#!/bin/sh\n' +
           'printf "%s\\n" "$0 $*" >> '+shlex.quote(str(trace))+'\n' +
-          ('if [ "${FC_HELPER_FAIL:-0}" = 1 ]; then exit 11; fi\n' if name=='7zr' else '')+
           'exec '+shlex.quote(str(real))+(' --version\n' if name=='fresh' else ' "$@"\n'))
         helper.chmod(0o755)
     env={'HOME':str(root/'home'),'XDG_DATA_HOME':str(root/'data'),'XDG_CACHE_HOME':str(root/'cache'),
@@ -63,7 +62,7 @@ for _,e in ipairs(fc.errors()) do print('ERROR DETAIL',e) end
 assert(#fc.errors()==0,'packaged Fresh version adapter failed')
 test_pass('packaged_script')
 ''')
-    denied=[repo.resolve(),*( (repo/path).resolve() for path in ('../alex_ftxui','../editor-fresh','../luajit','../lzma2600'))]
+    denied=[repo.resolve(),*( (repo/path).resolve() for path in ('../alex_ftxui','../editor-fresh','../luajit','../7zip2604'))]
     prefix=[]
     if platform.system()=='Darwin' and shutil.which('sandbox-exec'):
         profile='(version 1)(allow default)' + ''.join('(deny file-read* (subpath '+json.dumps(str(path))+'))' for path in denied)
@@ -88,16 +87,12 @@ test_pass('packaged_script')
     validate_result('package',rc,killed,output,debug)
     require(manifest(root/'source')==manifest(root/'output'),'packaged archive changed tree/bytes')
     observed=trace.read_text();(logs/'helpers.log').write_text(observed)
-    for name in ('7zr','fresh'):
-        require(str(binary.parent/name) in observed,f'build/PATH helper bypassed relocated {name}')
-    require(' a ' in observed and ' x ' in observed,'real archive create/extract not executed')
+    require(str(binary.parent/'fresh') in observed,'build/PATH helper bypassed relocated fresh')
+    # The archive round trip above used the package's own 7z.so: the sandbox denies the build tree that holds the other copy.
+    library=binary.parent.parent/'lib/file-commander/7z.so'
+    require(library.is_file() and library.stat().st_size>1024,'package has no 7-Zip library')
     require(not (unrelated/'fc_framework.lua').exists(),'framework unexpectedly external')
-    # Invoke both relocated executables directly, including their failure path.
-    archive_tool=binary.parent/'7zr'
-    failed=subprocess.run([str(archive_tool),'x',str(root/'missing.7z')],cwd=unrelated,env=dict(os.environ,**env),capture_output=True,timeout=10)
-    require(failed.returncode>0,'missing archive falsely succeeded')
-    for name in ('7zr','fresh'):
-        require((binary.parent/(name+'.real')).stat().st_size>1024,'helper was not a real binary')
+    require((binary.parent/'fresh.real').stat().st_size>1024,'helper was not a real binary')
     print(f'PASS relocated package archive tree, helper provenance and Fresh version; isolation={isolated}; logs: {logs}')
     if not isolated:
         print('SKIP full isolation: bwrap/sandbox-exec unavailable')

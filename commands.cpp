@@ -10,6 +10,7 @@ Commands::Commands() {
   available.push_back({"select_all", keys().key_select_all, "", "Select All", CommandScope::PANEL, CommandKind::EXECUTE_CALLBACK});
   available.push_back({"enter_dir", keys().key_enter_dir, "", "Enter Directory", CommandScope::PANEL, CommandKind::EXECUTE_CALLBACK});
   available.push_back({"leave_dir", keys().key_leave_dir, "", "Leave Directory", CommandScope::PANEL, CommandKind::EXECUTE_CALLBACK});
+  available.push_back({"open_as_archive", keys().key_open_as_archive, "", "Open as Archive", CommandScope::PANEL, CommandKind::EXECUTE_CALLBACK});
   available.push_back({"toggle_permissions_column", keys().key_toggle_permissions_column, "", "Toggle Permissions Column", CommandScope::PANEL, CommandKind::EXECUTE_CALLBACK});
   available.push_back({"toggle_owner_group_column", keys().key_toggle_owner_group_column, "", "Toggle Owner/Group Column", CommandScope::PANEL, CommandKind::EXECUTE_CALLBACK});
 
@@ -40,6 +41,7 @@ Commands::Commands() {
   available.push_back({"open_in_editor", keys().key_open_in_editor, "", "Open in Fresh Editor", CommandScope::GLOBAL, CommandKind::EXECUTE_CALLBACK});
   available.push_back({"connect_ssh", keys().key_connect_ssh, "ConnectSSH", "Connect SSH",
                        CommandScope::GLOBAL, CommandKind::SHOW_DIALOG});
+  available.push_back({"transfer_speed", keys().key_transfer_speed, "TransferSpeed", "Transfer Speed", CommandScope::GLOBAL, CommandKind::SHOW_DIALOG});
   available.push_back({"restart_editor_backend", keys().key_restart_editor_backend, "RestartEditor", "Restart editor backend", CommandScope::GLOBAL, CommandKind::SHOW_DIALOG});
   available.push_back({"switch_to_file_commander", keys().key_switch_to_file_commander, "", "Switch to Editor / Back (detach)", CommandScope::GLOBAL, CommandKind::EXECUTE_CALLBACK});
   available.push_back({"switch_editor_prev", keys().key_switch_editor_prev, "", "Switch to Editor (previous-session alias)", CommandScope::GLOBAL, CommandKind::EXECUTE_CALLBACK});
