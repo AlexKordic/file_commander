@@ -69,7 +69,7 @@ cat > "$app/Contents/Info.plist" <<PLIST
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-  <key>CFBundleIdentifier</key><string>com.perun.filecommander</string>
+  <key>CFBundleIdentifier</key><string>me.h264.filecommander</string>
   <key>CFBundleName</key><string>File Commander</string>
   <key>CFBundleDisplayName</key><string>File Commander</string>
   <key>CFBundleExecutable</key><string>FileCommander</string>

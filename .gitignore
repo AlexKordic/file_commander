@@ -9,3 +9,5 @@ __pycache__/
 CMakeUserPresets.json
 macos/.build/
 macos/.swiftpm/
+macos/Xcode/Signing.local.xcconfig
+macos/FileCommander.xcodeproj/project.xcworkspace/

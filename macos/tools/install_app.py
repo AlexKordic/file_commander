@@ -5,13 +5,14 @@ import ctypes
 import os
 from pathlib import Path
 import plistlib
+import re
 import subprocess
 import sys
 import tempfile
 
 
 APP_NAME = 'File Commander.app'
-BUNDLE_ID = 'com.perun.filecommander'
+BUNDLE_ID = 'me.h264.filecommander'
 
 
 def default_directory():
@@ -35,6 +36,13 @@ def check_bundle(app):
 
 def verify_signature(app):
     subprocess.run(['/usr/bin/codesign', '--verify', '--deep', '--strict', str(app)], check=True)
+
+
+def signature_team(app):
+    result = subprocess.run(['/usr/bin/codesign', '--display', '--verbose=4', str(app)],
+                            capture_output=True, text=True, check=True)
+    match = re.search(r'^TeamIdentifier=([A-Z0-9]{10})$', result.stderr, re.MULTILINE)
+    return match.group(1) if match else None
 
 
 def check_not_running():
@@ -61,7 +69,7 @@ def place_bundle(staged, destination):
         raise OSError(error, os.strerror(error), str(destination))
 
 
-def install(app, directory):
+def install(app, directory, expected_team=None):
     if sys.platform != 'darwin':
         raise ValueError('Installing the macOS app requires macOS.')
     check_bundle(app)
@@ -74,6 +82,13 @@ def install(app, directory):
         check_bundle(destination)
 
     verify_signature(app)
+    source_team = signature_team(app)
+    destination_team = signature_team(destination) if destination.exists() else None
+    required_team = expected_team or destination_team
+    if required_team and source_team != required_team:
+        raise ValueError('The new app must be signed by the expected team; refusing a signing identity change.')
+    if expected_team and destination_team and destination_team != expected_team:
+        raise ValueError('The installed app belongs to another team; refusing to replace it.')
     check_not_running()
     directory.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix='.fc-install-', dir=directory,
@@ -86,6 +101,8 @@ def install(app, directory):
         check_not_running()
         if destination.exists() or destination.is_symlink():
             check_bundle(destination)
+            if signature_team(destination) != destination_team:
+                raise ValueError('The installed signing identity changed during preparation; retry installation.')
         place_bundle(staged, destination)
         # After a swap the old bundle is at staged, inside our temporary dir.
     return destination
@@ -96,9 +113,10 @@ def main():
     parser.add_argument('app', type=Path)
     parser.add_argument('--directory', type=Path,
                         default=os.environ.get('FC_APP_INSTALL_DIR') or None)
+    parser.add_argument('--expected-team', help='Require a signing team; never stored in the repository.')
     args = parser.parse_args()
     try:
-        destination = install(args.app, args.directory if args.directory is not None else default_directory())
+        destination = install(args.app, args.directory if args.directory is not None else default_directory(), args.expected_team)
     except (OSError, ValueError, subprocess.CalledProcessError, plistlib.InvalidFileException) as error:
         print(f'install_app: {error}', file=sys.stderr)
         return 1

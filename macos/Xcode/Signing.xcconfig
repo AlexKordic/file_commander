@@ -1,0 +1,2 @@
+// Keep team IDs, identity hashes and provisioning choices in the ignored file.
+#include? "Signing.local.xcconfig"

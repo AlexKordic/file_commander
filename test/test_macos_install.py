@@ -72,6 +72,25 @@ class InstallTests(unittest.TestCase):
         installer.verify_signature(destination)
         self.assertEqual(list(directory.iterdir()), [destination])
 
+    def test_certificate_install_rejects_an_ad_hoc_replacement(self):
+        def team(app):
+            return 'TESTTEAM01' if app == self.old else None
+        with mock.patch.object(installer, 'signature_team', side_effect=team), self.assertRaisesRegex(ValueError, 'expected team'):
+            installer.install(self.source, self.directory)
+        self.unchanged()
+
+    def test_matching_team_replacement(self):
+        with mock.patch.object(installer, 'signature_team', return_value='TESTTEAM01'), \
+             mock.patch.object(installer.subprocess, 'run', side_effect=self.no_app_running):
+            self.assertEqual(installer.install(self.source, self.directory, expected_team='TESTTEAM01'), self.old)
+        self.assertTrue((self.old / 'Contents/Resources/new.txt').exists())
+
+    def test_explicit_team_rejects_another_certificate(self):
+        with mock.patch.object(installer, 'signature_team', return_value='TESTTEAM02'), \
+             self.assertRaisesRegex(ValueError, 'expected team'):
+            installer.install(self.source, self.directory, expected_team='TESTTEAM01')
+        self.unchanged()
+
     def test_invalid_source_signature_preserves_install(self):
         (self.source / 'Contents/Resources/new.txt').write_text('tampered')
         with self.assertRaises(subprocess.CalledProcessError):

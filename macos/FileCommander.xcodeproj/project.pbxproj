@@ -11,12 +11,13 @@
 		FC0000000000000000000003 /* Sources */ = {isa = PBXFileReference; lastKnownFileType = folder; path = Sources; sourceTree = "<group>"; };
 		FC0000000000000000000004 /* xcode_build_app.sh */ = {isa = PBXFileReference; lastKnownFileType = text.script.sh; path = tools/xcode_build_app.sh; sourceTree = "<group>"; };
 		FC0000000000000000000005 /* Helpers.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = Xcode/Helpers.entitlements; sourceTree = "<group>"; };
+		FC0000000000000000000006 /* Signing.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Xcode/Signing.xcconfig; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXGroup section */
 		FC0000000000000000000010 = {
 			isa = PBXGroup;
-			children = (FC0000000000000000000003, FC0000000000000000000002, FC0000000000000000000004, FC0000000000000000000005, FC0000000000000000000011);
+			children = (FC0000000000000000000003, FC0000000000000000000002, FC0000000000000000000004, FC0000000000000000000005, FC0000000000000000000006, FC0000000000000000000011);
 			sourceTree = "<group>";
 		};
 		FC0000000000000000000011 /* Products */ = {
@@ -111,6 +112,7 @@
 		};
 		FC0000000000000000000062 /* Debug */ = {
 			isa = XCBuildConfiguration;
+			baseConfigurationReference = FC0000000000000000000006 /* Signing.xcconfig */;
 			buildSettings = {
 				CODE_SIGN_IDENTITY = "Apple Development";
 				COMBINE_HIDPI_IMAGES = NO;
@@ -121,7 +123,7 @@
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = "$(DERIVED_FILE_DIR)/FC-Info.plist";
 				LD_RUNPATH_SEARCH_PATHS = ("$(inherited)", "@executable_path/../Frameworks");
-				PRODUCT_BUNDLE_IDENTIFIER = com.perun.filecommander;
+				PRODUCT_BUNDLE_IDENTIFIER = me.h264.filecommander;
 				PRODUCT_NAME = "File Commander";
 				SKIP_INSTALL = NO;
 				SUPPORTED_PLATFORMS = macosx;
@@ -130,6 +132,7 @@
 		};
 		FC0000000000000000000063 /* Release */ = {
 			isa = XCBuildConfiguration;
+			baseConfigurationReference = FC0000000000000000000006 /* Signing.xcconfig */;
 			buildSettings = {
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_INJECT_BASE_ENTITLEMENTS = NO;
@@ -141,7 +144,7 @@
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = "$(DERIVED_FILE_DIR)/FC-Info.plist";
 				LD_RUNPATH_SEARCH_PATHS = ("$(inherited)", "@executable_path/../Frameworks");
-				PRODUCT_BUNDLE_IDENTIFIER = com.perun.filecommander;
+				PRODUCT_BUNDLE_IDENTIFIER = me.h264.filecommander;
 				PRODUCT_NAME = "File Commander";
 				SKIP_INSTALL = NO;
 				SUPPORTED_PLATFORMS = macosx;
