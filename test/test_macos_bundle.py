@@ -69,6 +69,14 @@ class BundleTests(unittest.TestCase):
         self.executable('consumer', provider); provider.unlink()
         with self.assertRaises(FileNotFoundError): bundler.bundle(self.app)
 
+    def test_staged_shared_library_identity_is_not_an_external_dependency(self):
+        provider = self.library(self.root / 'external', 'archive', 'int answer(void) { return 42; }')
+        staged = self.app / 'Contents/MacOS/archive.so'
+        shutil.copyfile(provider, staged)
+        self.assertEqual(bundler.bundle(self.app), [])
+        self.assertEqual(bundler.library_ids(staged), {'@rpath/archive.so'})
+        self.assertNotIn(str(provider), bundler.dependencies(staged))
+
     def test_bundle_minimum_matches_a_newer_native_dependency(self):
         provider = self.library(self.root / 'external', 'provider', 'int answer(void) { return 42; }', deployment='15.0')
         self.executable('consumer', provider)

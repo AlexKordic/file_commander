@@ -26,7 +26,13 @@ def macho(path):
 def dependencies(path):
     text = subprocess.check_output(['/usr/bin/otool', '-L', str(path)], text=True)
     return {line.strip().split(' (compatibility version ', 1)[0]
-            for line in text.splitlines() if line.startswith('\t')}
+            for line in text.splitlines() if line.startswith('\t')} - library_ids(path)
+
+
+def library_ids(path):
+    text = subprocess.check_output(['/usr/bin/otool', '-D', str(path)], text=True)
+    return {line.strip() for line in text.splitlines()
+            if line.strip().startswith(('/', '@')) and not line.rstrip().endswith(':')}
 
 
 def minimum_macos(path):
@@ -60,6 +66,9 @@ def bundle(app):
              for path in sorted(folder.iterdir()) if macho(path)]
     pending = [(path, path) for path in roots]
     origins = {}
+    for path in roots:
+        if any(identifier.startswith('/') for identifier in library_ids(path)):
+            patch(path, ['-id', '@rpath/' + path.name])
     while pending:
         target, original = pending.pop(0)
         changes = []
