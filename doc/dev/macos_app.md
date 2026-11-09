@@ -374,9 +374,9 @@ include provisional length changes at earlier carets, including offscreen ones.
 **Edit > Copy Uninserted Text** is available in the editor's menu and FC's
 menu after disconnection. Text stays in memory for the application session;
 copying neither clears it nor happens automatically. Application restart
-does not preserve this native recovery list. Repeated compositions during
-pending edits and live IME/recovery qualification remain
-unfinished and keep rich Compose gated.
+does not preserve this native recovery list. Private backend checks cover
+repeated compositions during pending edits. Live IME and interactive recovery
+qualification remains separate from those checks.
 Tooltip rectangles share the attachment geometry and are replaced only when
 their positions or descriptions change.
 

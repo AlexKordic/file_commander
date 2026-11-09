@@ -1444,11 +1444,11 @@ can still request the ordinary measured retry. No protocol field changes.
 Native Compose must wrap using measured fonts and available pixel width.
 Terminal Markdown column counts, padded or truncated table replacements and
 character-sized frames are not a native layout contract. Parsed tables
-currently bypass those terminal conceals, retaining editable source, semantic
-fonts and image overrides. Native list prefixes also bypass terminal indent
-expansion. The native client keeps this source fallback unless its separate
-measured-table development switch is enabled; product opt-in awaits workflow
-qualification. The native default
+also bypass those terminal conceals, retaining semantic fonts and image
+overrides. Native list prefixes bypass terminal indent expansion. The native
+client uses measured table cells by default; `FC_NATIVE_MEASURED_TABLES=0`
+requests editable source instead. Interactive workflows remain a separate
+qualification step. The native default
 uses all available pane width; a reading limit is optional and measured in points.
 
 List continuation indentation is measured from the displayed marker with its
@@ -1629,7 +1629,7 @@ it does not change source coordinates or navigation's pixel goals. Accepted
 caret moves and provisional marked-text updates can reveal both axes. A marked
 caret reveal sends only a viewport request, and an acknowledgment keeps the
 provisional text and pan intact. Interactive trackpad, source reveal and image
-workflows still require the broader native qualification before table opt-in.
+workflows remain part of the broader interactive native qualification.
 
 Visible images are checked on a five-second prototype interval and when the
 editor is shown again. POSIX local/SSH stats include file identity plus
@@ -1789,7 +1789,7 @@ not impose a Markdown width or truncate source.
 
 ### Native pending-input admission
 
-The opt-in native Compose path admits at most 128 pending input events and
+The native Compose path admits at most 128 pending input events and
 8 MiB of charged input/draft text. The first event remains the only event in
 flight. The byte reservation counts literal message text and the cumulative
 attributed drafts captured at admission, including chain previews; shared
