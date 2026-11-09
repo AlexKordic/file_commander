@@ -22,21 +22,32 @@
         "left": "{home}/projects/notes",
         "right": "{home}",
         "focus": "left"
+      },
+      "id": "editor_restart.a-910b94f083-1",
+      "presentation": {
+        "id": "editor_restart.introduction",
+        "title": "Restart the editor",
+        "narration": "After upgrading Fresh, restart its backend; unsaved text survives.",
+        "trailing_hold": 0.35,
+        "lead_in": 0.12
       }
     },
     {
-      "chapter": "Editor"
+      "chapter": "Editor",
+      "id": "editor_restart.a-33e07ec139-1"
     },
     {
       "cursor": {
         "side": "left",
         "name": "ideas.md"
-      }
+      },
+      "id": "editor_restart.a-950b652ee9-1"
     },
     {
       "keys": [
         "@open_in_editor"
-      ]
+      ],
+      "id": "editor_restart.a-416334d49e-1"
     },
     {
       "wait": {
@@ -44,7 +55,8 @@
           "contains": "Ideas"
         }
       },
-      "timeout": 25
+      "timeout": 25,
+      "id": "editor_restart.a-c5527582a7-1"
     },
     {
       "wait": {
@@ -52,20 +64,24 @@
           "window": "main"
         }
       },
-      "timeout": 5
+      "timeout": 5,
+      "id": "editor_restart.a-2de7a75908-1"
     },
     {
       "editor_keys": [
         "End"
-      ]
+      ],
+      "id": "editor_restart.a-2dd302cb33-1"
     },
     {
-      "editor_type": " (unsaved)"
+      "editor_type": " (unsaved)",
+      "id": "editor_restart.a-746b25895a-1"
     },
     {
       "editor_keys": [
         "F10"
-      ]
+      ],
+      "id": "editor_restart.a-cc9ffb3357-1"
     },
     {
       "wait": {
@@ -73,24 +89,36 @@
           "running": false
         }
       },
-      "timeout": 10
+      "timeout": 10,
+      "id": "editor_restart.a-df0d45c496-1"
     },
     {
       "caption": "Restart the backend",
-      "sub": "A running editor keeps the old Fresh until it restarts"
+      "sub": "A running editor keeps the old Fresh until it restarts",
+      "id": "editor_restart.a-0b7d6582f9-1",
+      "presentation": {
+        "id": "editor_restart.restart-the-backend",
+        "title": "Restart the backend",
+        "narration": "Restart the backend. A running editor keeps the old Fresh until it restarts.",
+        "trailing_hold": 0.35,
+        "lead_in": 0.12
+      }
     },
     {
       "keys": [
         "@restart_editor_backend"
-      ]
+      ],
+      "id": "editor_restart.a-e8b4095e06-1"
     },
     {
       "wait": {
         "sheet": "restart"
-      }
+      },
+      "id": "editor_restart.a-27793957e8-1"
     },
     {
-      "click": "sheet.restart.confirm"
+      "click": "sheet.restart.confirm",
+      "id": "editor_restart.a-9c927708b0-1"
     },
     {
       "wait": {
@@ -98,7 +126,8 @@
           "running": true
         }
       },
-      "timeout": 30
+      "timeout": 30,
+      "id": "editor_restart.a-e309863ca7-1"
     },
     {
       "wait": {
@@ -106,19 +135,30 @@
           "contains": "unsaved"
         }
       },
-      "timeout": 20
+      "timeout": 20,
+      "id": "editor_restart.a-3f8ef56dcb-1"
     },
     {
       "caption": "Your text is still there",
-      "sub": "Fresh saved its recovery data before stopping"
+      "sub": "Fresh saved its recovery data before stopping",
+      "id": "editor_restart.a-b857d18d90-1",
+      "presentation": {
+        "id": "editor_restart.your-text-is-still-there",
+        "title": "Your text is still there",
+        "narration": "Your text is still there. Fresh saved its recovery data before stopping.",
+        "trailing_hold": 0.35,
+        "lead_in": 0.12
+      }
     },
     {
-      "pause": 1800
+      "pause": 1800,
+      "id": "editor_restart.a-85c632065e-1"
     },
     {
       "editor_keys": [
         "F10"
-      ]
+      ],
+      "id": "editor_restart.a-cc9ffb3357-2"
     },
     {
       "wait": {
@@ -126,10 +166,12 @@
           "running": false
         }
       },
-      "timeout": 10
+      "timeout": 10,
+      "id": "editor_restart.a-df0d45c496-2"
     },
     {
-      "uncaption": true
+      "uncaption": true,
+      "id": "editor_restart.a-4df2c52c18-1"
     }
   ]
 }

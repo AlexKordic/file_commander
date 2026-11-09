@@ -22,105 +22,183 @@
         "left": "{home}",
         "right": "{home}/camera",
         "focus": "left"
+      },
+      "id": "welcome.a-f5d2afef79-1",
+      "presentation": {
+        "id": "welcome.introduction",
+        "title": "The window",
+        "narration": "Panes, tabs, the path bar, the filter, the status line, the toolbar and Help.",
+        "trailing_hold": 0.35,
+        "lead_in": 0.12
       }
     },
     {
-      "chapter": "Basics"
+      "chapter": "Basics",
+      "id": "welcome.a-95f5554c81-1"
     },
     {
       "caption": "Two panes",
-      "sub": "Each pane has its own tabs, folder, selection and sort order"
+      "sub": "Each pane has its own tabs, folder, selection and sort order",
+      "id": "welcome.a-a3553a5355-1",
+      "presentation": {
+        "id": "welcome.two-panes",
+        "title": "Two panes",
+        "narration": "Two panes. Each pane has its own tabs, folder, selection and sort order.",
+        "trailing_hold": 0.35,
+        "lead_in": 0.12
+      }
     },
     {
       "highlight": [
         "pane.left",
         "pane.right"
       ],
-      "hold": 2000
+      "hold": 2000,
+      "id": "welcome.a-e8e03cf129-1"
     },
     {
       "caption": "Tabs",
-      "sub": "Every pane keeps its own tabs. The graduation cap marks the tutorial's tabs"
+      "sub": "Every pane keeps its own tabs. The graduation cap marks the tutorial's tabs",
+      "id": "welcome.a-0600be02cf-1",
+      "presentation": {
+        "id": "welcome.tabs",
+        "title": "Tabs",
+        "narration": "Tabs. Every pane keeps its own tabs. The graduation cap marks the tutorial's tabs.",
+        "trailing_hold": 0.35,
+        "lead_in": 0.12
+      }
     },
     {
       "highlight": [
         "pane.left.tabs",
         "pane.right.tabs"
       ],
-      "hold": 2000
+      "hold": 2000,
+      "id": "welcome.a-ac422cfd31-1"
     },
     {
       "caption": "Path bar and filter",
-      "sub": "Click a folder in the path to go there; type to filter the list"
+      "sub": "Click a folder in the path to go there; type to filter the list",
+      "id": "welcome.a-e7b434db03-1",
+      "presentation": {
+        "id": "welcome.path-bar-and-filter",
+        "title": "Path bar and filter",
+        "narration": "Path bar and filter. Click a folder in the path to go there; type to filter the list.",
+        "trailing_hold": 0.35,
+        "lead_in": 0.12
+      }
     },
     {
       "highlight": [
         "pane.left.path",
         "pane.left.filter"
       ],
-      "hold": 2200
+      "hold": 2200,
+      "id": "welcome.a-dd4557f6f4-1"
     },
     {
       "caption": "Status line",
-      "sub": "What is selected, how many bytes, and how long the folder took to read"
+      "sub": "What is selected, how many bytes, and how long the folder took to read",
+      "id": "welcome.a-00f14af42f-1",
+      "presentation": {
+        "id": "welcome.status-line",
+        "title": "Status line",
+        "narration": "Status line. What is selected, how many bytes, and how long the folder took to read.",
+        "trailing_hold": 0.35,
+        "lead_in": 0.12
+      }
     },
     {
       "highlight": "pane.left.status",
-      "hold": 2000
+      "hold": 2000,
+      "id": "welcome.a-3a5c78ee90-1"
     },
     {
-      "unhighlight": true
+      "unhighlight": true,
+      "id": "welcome.a-c572606fa8-1"
     },
     {
       "caption": "The focused pane",
-      "sub": "Keys go to the pane with the accent line. Switch Pane moves the focus"
+      "sub": "Keys go to the pane with the accent line. Switch Pane moves the focus",
+      "id": "welcome.a-612b44fc98-1",
+      "presentation": {
+        "id": "welcome.the-focused-pane",
+        "title": "The focused pane",
+        "narration": "The focused pane. Keys go to the pane with the accent line. Switch Pane moves the focus.",
+        "trailing_hold": 0.35,
+        "lead_in": 0.12
+      }
     },
     {
       "keys": [
         "@switch_panel"
       ],
-      "hold": 900
+      "hold": 900,
+      "id": "welcome.a-fe7a46483c-1"
     },
     {
       "expect": {
         "focused": "right"
-      }
+      },
+      "id": "welcome.a-ae88647a59-1"
     },
     {
       "keys": [
         "@switch_panel"
       ],
-      "hold": 700
+      "hold": 700,
+      "id": "welcome.a-9d26754d78-1"
     },
     {
       "expect": {
         "focused": "left"
-      }
+      },
+      "id": "welcome.a-eacaa4a8fa-1"
     },
     {
       "caption": "Toolbar and menus",
-      "sub": "Every command is in the menu bar with its key, and in the command palette"
+      "sub": "Every command is in the menu bar with its key, and in the command palette",
+      "id": "welcome.a-048fe46eda-1",
+      "presentation": {
+        "id": "welcome.toolbar-and-menus",
+        "title": "Toolbar and menus",
+        "narration": "Toolbar and menus. Every command is in the menu bar with its key, and in the command palette.",
+        "trailing_hold": 0.35,
+        "lead_in": 0.12
+      }
     },
     {
       "highlight": [
         "toolbar.copy",
         "toolbar.command_palette"
       ],
-      "hold": 2200
+      "hold": 2200,
+      "id": "welcome.a-ba62e751be-1"
     },
     {
       "caption": "Help is always here",
-      "sub": "The graduation cap, or Help in the palette, explains any feature again"
+      "sub": "The graduation cap, or Help in the palette, explains any feature again",
+      "id": "welcome.a-bc5941abf7-1",
+      "presentation": {
+        "id": "welcome.help-is-always-here",
+        "title": "Help is always here",
+        "narration": "Help is always here. The graduation cap, or Help in the palette, explains any feature again.",
+        "trailing_hold": 0.35,
+        "lead_in": 0.12
+      }
     },
     {
       "highlight": "toolbar.help",
-      "hold": 2400
+      "hold": 2400,
+      "id": "welcome.a-9a29e7d21a-1"
     },
     {
-      "unhighlight": true
+      "unhighlight": true,
+      "id": "welcome.a-c572606fa8-2"
     },
     {
-      "uncaption": true
+      "uncaption": true,
+      "id": "welcome.a-4df2c52c18-1"
     }
   ]
 }

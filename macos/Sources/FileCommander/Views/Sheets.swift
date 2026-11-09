@@ -494,6 +494,7 @@ struct ConnectSheet: View {
 enum SSHConfig {
   /// Host aliases from ~/.ssh/config, without wildcards.
   static func aliases() -> [String] {
+    if CommandLine.arguments.contains("--record-session") { return ["demo-server"] }
     let url = URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent(".ssh/config")
     guard let text = try? String(contentsOf: url, encoding: .utf8) else { return [] }
     var out: [String] = []

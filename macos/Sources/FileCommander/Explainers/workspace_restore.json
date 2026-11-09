@@ -1,7 +1,7 @@
 {
   "id": "workspace_restore",
   "title": "Quit and come back",
-  "order": 27,
+  "order": 28,
   "duration": 40,
   "chapter": "recovery",
   "needs": {
@@ -19,45 +19,69 @@
         "left": "{home}/camera",
         "right": "{home}/music",
         "focus": "left"
+      },
+      "id": "workspace_restore.a-3f35bbb35d-1",
+      "presentation": {
+        "id": "workspace_restore.introduction",
+        "title": "Quit and come back",
+        "narration": "Tabs, folders, selections and filters come back after a quit.",
+        "trailing_hold": 0.35,
+        "lead_in": 0.12
       }
     },
     {
-      "chapter": "Recovery"
+      "chapter": "Recovery",
+      "id": "workspace_restore.a-3419237cea-1"
     },
     {
       "caption": "Leave it as it is",
-      "sub": "Select some photos and filter the list"
+      "sub": "Select some photos and filter the list",
+      "id": "workspace_restore.a-0b5140930e-1",
+      "presentation": {
+        "id": "workspace_restore.leave-it-as-it-is",
+        "title": "Leave it as it is",
+        "narration": "Leave it as it is. Select some photos and filter the list.",
+        "trailing_hold": 0.35,
+        "lead_in": 0.12
+      }
     },
     {
       "keys": [
         "@glob_select"
-      ]
+      ],
+      "id": "workspace_restore.a-d9874f6ca6-1"
     },
     {
       "wait": {
         "glob": true
-      }
+      },
+      "id": "workspace_restore.a-1efa89e6ff-1"
     },
     {
       "wait": {
         "text_focus": true
-      }
+      },
+      "id": "workspace_restore.a-0be37b237d-1"
     },
     {
-      "type": "*.jpg"
+      "type": "*.jpg",
+      "id": "workspace_restore.a-af89ee575e-1"
     },
     {
       "keys": [
         "Enter"
-      ]
+      ],
+      "id": "workspace_restore.a-332a45bb8d-1"
     },
     {
       "wait": {
         "glob": false
-      }
+      },
+      "id": "workspace_restore.a-ccea205bb8-1"
     },
     {
-      "type": "or"
+      "type": "or",
+      "id": "workspace_restore.a-84921add17-1"
     },
     {
       "wait": {
@@ -65,18 +89,36 @@
           "side": "left",
           "is": "or"
         }
-      }
+      },
+      "id": "workspace_restore.a-a78c55b099-1"
     },
     {
       "caption": "Quit and open again",
-      "sub": "File Commander saves where you are every half second"
+      "sub": "File Commander saves where you are every half second",
+      "id": "workspace_restore.a-8c2a405807-1",
+      "presentation": {
+        "id": "workspace_restore.quit-and-open-again",
+        "title": "Quit and open again",
+        "narration": "Quit and open again. File Commander saves where you are every half second.",
+        "trailing_hold": 0.35,
+        "lead_in": 0.12
+      }
     },
     {
-      "relaunch": true
+      "relaunch": true,
+      "id": "workspace_restore.a-81851e1411-1"
     },
     {
       "caption": "Everything is back",
-      "sub": "Tabs, folders, selections, filters, sort order and the layout"
+      "sub": "Tabs, folders, selections, filters, sort order and the layout",
+      "id": "workspace_restore.a-368309e25f-1",
+      "presentation": {
+        "id": "workspace_restore.everything-is-back",
+        "title": "Everything is back",
+        "narration": "Everything is back. Tabs, folders, selections, filters, sort order and the layout.",
+        "trailing_hold": 0.35,
+        "lead_in": 0.12
+      }
     },
     {
       "wait": {
@@ -85,7 +127,8 @@
           "ends_with": "/camera"
         }
       },
-      "timeout": 20
+      "timeout": 20,
+      "id": "workspace_restore.a-34a64ae9bb-1"
     },
     {
       "wait": {
@@ -93,7 +136,8 @@
           "side": "left",
           "is": "or"
         }
-      }
+      },
+      "id": "workspace_restore.a-a78c55b099-2"
     },
     {
       "highlight": [
@@ -101,25 +145,30 @@
         "pane.left.filter",
         "pane.left.status"
       ],
-      "hold": 2600
+      "hold": 2600,
+      "id": "workspace_restore.a-23cd50fe53-1"
     },
     {
-      "unhighlight": true
+      "unhighlight": true,
+      "id": "workspace_restore.a-c572606fa8-1"
     },
     {
       "keys": [
         "Backspace",
         "Backspace"
       ],
-      "gap": 120
+      "gap": 120,
+      "id": "workspace_restore.a-f6d69fd9d3-1"
     },
     {
       "keys": [
         "@clear_selection"
-      ]
+      ],
+      "id": "workspace_restore.a-3feb2c4814-1"
     },
     {
-      "uncaption": true
+      "uncaption": true,
+      "id": "workspace_restore.a-4df2c52c18-1"
     }
   ]
 }

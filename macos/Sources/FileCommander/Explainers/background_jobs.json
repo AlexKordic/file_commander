@@ -25,48 +25,72 @@
         "left": "{home}",
         "right": "{home}/backup",
         "focus": "left"
+      },
+      "id": "background_jobs.a-cdcdfde8d2-1",
+      "presentation": {
+        "id": "background_jobs.introduction",
+        "title": "Background jobs",
+        "narration": "Jobs run in order while you work; Activity shows them; errors are recorded, not fatal.",
+        "trailing_hold": 0.35,
+        "lead_in": 0.12
       }
     },
     {
-      "chapter": "Jobs"
+      "chapter": "Jobs",
+      "id": "background_jobs.a-8d2ea1a532-1"
     },
     {
-      "set_transfer_speed": "12 MiB"
+      "set_transfer_speed": "12 MiB",
+      "id": "background_jobs.a-e36b59cefa-1"
     },
     {
       "caption": "Everything runs in the background",
-      "sub": "Start a copy and keep working. Jobs run one at a time, in order"
+      "sub": "Start a copy and keep working. Jobs run one at a time, in order",
+      "id": "background_jobs.a-52b6edf79b-1",
+      "presentation": {
+        "id": "background_jobs.everything-runs-in-the-background",
+        "title": "Everything runs in the background",
+        "narration": "Everything runs in the background. Start a copy and keep working. Jobs run one at a time, in order.",
+        "trailing_hold": 0.35,
+        "lead_in": 0.12
+      }
     },
     {
       "cursor": {
         "side": "left",
         "name": "camera"
-      }
+      },
+      "id": "background_jobs.a-65f5399862-1"
     },
     {
       "keys": [
         "@copy"
-      ]
+      ],
+      "id": "background_jobs.a-76288993ef-1"
     },
     {
       "wait": {
         "sheet": "copy"
-      }
+      },
+      "id": "background_jobs.a-ffb688e0c0-1"
     },
     {
       "wait": {
         "anchor": "sheet.copy.start"
-      }
+      },
+      "id": "background_jobs.a-8febfbdaf6-1"
     },
     {
       "click": "sheet.copy.start",
-      "as_job": "camera"
+      "as_job": "camera",
+      "id": "background_jobs.a-7351ffa629-1"
     },
     {
       "wait": {
         "sheet": null
       },
-      "timeout": 30
+      "timeout": 30,
+      "id": "background_jobs.a-c11a2e6caa-1"
     },
     {
       "wait": {
@@ -74,102 +98,152 @@
           "name": "camera",
           "state": "running"
         }
-      }
+      },
+      "id": "background_jobs.a-cb795a6e28-1"
     },
     {
       "caption": "Queue another",
-      "sub": "A second copy waits for the first"
+      "sub": "A second copy waits for the first",
+      "id": "background_jobs.a-a7fce5cb78-1",
+      "presentation": {
+        "id": "background_jobs.queue-another",
+        "title": "Queue another",
+        "narration": "Queue another. A second copy waits for the first.",
+        "trailing_hold": 0.35,
+        "lead_in": 0.12
+      }
     },
     {
       "cursor": {
         "side": "left",
         "name": "photos"
-      }
+      },
+      "id": "background_jobs.a-a77aea6979-1"
     },
     {
       "keys": [
         "@copy"
-      ]
+      ],
+      "id": "background_jobs.a-76288993ef-2"
     },
     {
       "wait": {
         "sheet": "copy"
-      }
+      },
+      "id": "background_jobs.a-ffb688e0c0-2"
     },
     {
       "wait": {
         "anchor": "sheet.copy.start"
-      }
+      },
+      "id": "background_jobs.a-8febfbdaf6-2"
     },
     {
       "click": "sheet.copy.start",
-      "as_job": "photos"
+      "as_job": "photos",
+      "id": "background_jobs.a-488305e1c3-1"
     },
     {
       "wait": {
         "sheet": null
       },
-      "timeout": 30
+      "timeout": 30,
+      "id": "background_jobs.a-c11a2e6caa-2"
     },
     {
       "wait": {
         "queued_at_least": 1
-      }
+      },
+      "id": "background_jobs.a-63a72df2c0-1"
     },
     {
       "highlight": "jobs.bar",
-      "hold": 1800
+      "hold": 1800,
+      "id": "background_jobs.a-e93b53d449-1"
     },
     {
-      "unhighlight": true
+      "unhighlight": true,
+      "id": "background_jobs.a-c572606fa8-1"
     },
     {
       "caption": "Keep browsing",
-      "sub": "The panes stay responsive while jobs run"
+      "sub": "The panes stay responsive while jobs run",
+      "id": "background_jobs.a-43feaef042-1",
+      "presentation": {
+        "id": "background_jobs.keep-browsing",
+        "title": "Keep browsing",
+        "narration": "Keep browsing. The panes stay responsive while jobs run.",
+        "trailing_hold": 0.35,
+        "lead_in": 0.12
+      }
     },
     {
       "navigate": {
         "side": "left",
         "to": "{home}/music"
-      }
+      },
+      "id": "background_jobs.a-b7def79fc4-1"
     },
     {
-      "pause": 900
+      "pause": 900,
+      "id": "background_jobs.a-aec4a9cde4-1"
     },
     {
       "navigate": {
         "side": "left",
         "to": "{home}",
         "focus": "{home}/music"
-      }
+      },
+      "id": "background_jobs.a-013fa7ef25-1"
     },
     {
       "caption": "The Activity window",
-      "sub": "Every job, its progress and details; pause, resume, cancel or dismiss"
+      "sub": "Every job, its progress and details; pause, resume, cancel or dismiss",
+      "id": "background_jobs.a-b4a7d1d333-1",
+      "presentation": {
+        "id": "background_jobs.the-activity-window",
+        "title": "The Activity window",
+        "narration": "The Activity window. Every job, its progress and details; pause, resume, cancel or dismiss.",
+        "trailing_hold": 0.35,
+        "lead_in": 0.12
+      }
     },
     {
       "keys": [
         "@toggle_job_list"
-      ]
+      ],
+      "id": "background_jobs.a-423e34a9c2-1"
     },
     {
       "wait": {
         "window": "activity"
-      }
+      },
+      "id": "background_jobs.a-bec1d26b01-1"
     },
     {
       "highlight": "activity.list",
-      "hold": 2600
+      "hold": 2600,
+      "id": "background_jobs.a-3dff60f0a7-1"
     },
     {
-      "unhighlight": true
+      "unhighlight": true,
+      "id": "background_jobs.a-c572606fa8-2"
     },
     {
       "caption": "Errors don't stop a job",
-      "sub": "photos/2025 holds a file nobody can read: the copy records it and goes on"
+      "sub": "photos/2025 holds a file nobody can read: the copy records it and goes on",
+      "id": "background_jobs.a-1a2460bcc8-1",
+      "presentation": {
+        "id": "background_jobs.errors-don-t-stop-a-job",
+        "title": "Errors don't stop a job",
+        "narration": "Errors don't stop a job. photos/2025 holds a file nobody can read: the copy records it and goes on.",
+        "trailing_hold": 0.35,
+        "lead_in": 0.12
+      }
     },
     {
-      "set_transfer_speed": 0
+      "set_transfer_speed": 0,
+      "id": "background_jobs.a-3dc76a5a2d-1"
     },
     {
       "wait": {
@@ -178,57 +252,85 @@
           "state": "completed_with_errors"
         }
       },
-      "timeout": 90
+      "timeout": 90,
+      "id": "background_jobs.a-7467aa671b-1"
     },
     {
-      "close_window": "activity"
+      "close_window": "activity",
+      "id": "background_jobs.a-35e14a173e-1"
     },
     {
       "wait": {
         "errors_at_least": 1
-      }
+      },
+      "id": "background_jobs.a-5ca0b98da8-1"
     },
     {
       "highlight": "errors.lines",
-      "hold": 2000
+      "hold": 2000,
+      "id": "background_jobs.a-ec99710fa4-1"
     },
     {
       "caption": "The Errors window lists them all",
-      "sub": ""
+      "sub": "",
+      "id": "background_jobs.a-48256e53e4-1",
+      "presentation": {
+        "id": "background_jobs.the-errors-window-lists-them-all",
+        "title": "The Errors window lists them all",
+        "narration": "The Errors window lists them all.",
+        "trailing_hold": 0.35,
+        "lead_in": 0.12
+      }
     },
     {
       "keys": [
         "@toggle_errors"
-      ]
+      ],
+      "id": "background_jobs.a-fae4e9ba96-1"
     },
     {
       "wait": {
         "window": "errors"
-      }
+      },
+      "id": "background_jobs.a-e638d5bca1-1"
     },
     {
-      "pause": 2000
+      "pause": 2000,
+      "id": "background_jobs.a-d8f0f76503-1"
     },
     {
-      "close_window": "errors"
+      "close_window": "errors",
+      "id": "background_jobs.a-5b7938d5d1-1"
     },
     {
       "caption": "Clear them when you are done",
-      "sub": ""
+      "sub": "",
+      "id": "background_jobs.a-fe2cdb1637-1",
+      "presentation": {
+        "id": "background_jobs.clear-them-when-you-are-done",
+        "title": "Clear them when you are done",
+        "narration": "Clear them when you are done.",
+        "trailing_hold": 0.35,
+        "lead_in": 0.12
+      }
     },
     {
-      "click": "errors.clear"
+      "click": "errors.clear",
+      "id": "background_jobs.a-0551aed163-1"
     },
     {
       "wait": {
         "no_errors": true
-      }
+      },
+      "id": "background_jobs.a-6bdd866871-1"
     },
     {
-      "unhighlight": true
+      "unhighlight": true,
+      "id": "background_jobs.a-c572606fa8-3"
     },
     {
-      "uncaption": true
+      "uncaption": true,
+      "id": "background_jobs.a-4df2c52c18-1"
     }
   ]
 }

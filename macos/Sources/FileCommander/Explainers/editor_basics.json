@@ -22,25 +22,44 @@
         "left": "{home}/projects/website",
         "right": "{home}/projects/notes",
         "focus": "left"
+      },
+      "id": "editor_basics.a-8cc99f5b30-1",
+      "presentation": {
+        "id": "editor_basics.introduction",
+        "title": "The editor",
+        "narration": "Fresh shares File Commander’s window and keeps its own tabs and unsaved text.",
+        "trailing_hold": 0.35,
+        "lead_in": 0.12
       }
     },
     {
-      "chapter": "Editor"
+      "chapter": "Editor",
+      "id": "editor_basics.a-33e07ec139-1"
     },
     {
       "caption": "Open files in the editor",
-      "sub": "Open in Editor shows them in Fresh, in place of the panes"
+      "sub": "Open in Editor shows them in Fresh, in place of the panes",
+      "id": "editor_basics.a-504846ea32-1",
+      "presentation": {
+        "id": "editor_basics.open-files-in-the-editor",
+        "title": "Open files in the editor",
+        "narration": "Open a file in Fresh to replace the file panes with the editor. The file opens as an editor tab.",
+        "trailing_hold": 0.35,
+        "lead_in": 0.12
+      }
     },
     {
       "cursor": {
         "side": "left",
         "name": "index.html"
-      }
+      },
+      "id": "editor_basics.a-8c5244f8ab-1"
     },
     {
       "keys": [
         "@open_in_editor"
-      ]
+      ],
+      "id": "editor_basics.a-416334d49e-1"
     },
     {
       "wait": {
@@ -48,7 +67,8 @@
           "running": true
         }
       },
-      "timeout": 25
+      "timeout": 25,
+      "id": "editor_basics.a-4e658cd5d7-1"
     },
     {
       "wait": {
@@ -56,7 +76,8 @@
           "window": "main"
         }
       },
-      "timeout": 5
+      "timeout": 5,
+      "id": "editor_basics.a-2de7a75908-1"
     },
     {
       "wait": {
@@ -64,31 +85,52 @@
           "contains": "Field Notes"
         }
       },
-      "timeout": 25
+      "timeout": 25,
+      "id": "editor_basics.a-d04c8ce7b3-1"
     },
     {
       "caption": "Edit",
-      "sub": "Fresh is a full editor: tabs, search, multiple cursors, syntax colors"
+      "sub": "Fresh is a full editor: tabs, search, multiple cursors, syntax colors",
+      "id": "editor_basics.a-85d86a4184-1",
+      "presentation": {
+        "id": "editor_basics.edit",
+        "title": "Edit",
+        "narration": "Edit normally with syntax colors, search, and multiple cursors. File Commander leaves the lifetime of editor tabs to Fresh.",
+        "trailing_hold": 0.35,
+        "lead_in": 0.12
+      }
     },
     {
       "editor_keys": [
         "End"
-      ]
+      ],
+      "id": "editor_basics.a-2dd302cb33-1"
     },
     {
-      "editor_type": " <!-- draft -->"
+      "editor_type": " <!-- draft -->",
+      "id": "editor_basics.a-8c21268479-1"
     },
     {
-      "pause": 900
+      "pause": 900,
+      "id": "editor_basics.a-aec4a9cde4-1"
     },
     {
       "caption": "Switch back",
-      "sub": "F10 in the editor comes back to File Commander"
+      "sub": "F10 in the editor comes back to File Commander",
+      "id": "editor_basics.a-c43ac36738-1",
+      "presentation": {
+        "id": "editor_basics.switch-back",
+        "title": "Switch back",
+        "narration": "Press F ten to return to the file panes. Switching back keeps the editor session running.",
+        "trailing_hold": 0.35,
+        "lead_in": 0.12
+      }
     },
     {
       "editor_keys": [
         "F10"
-      ]
+      ],
+      "id": "editor_basics.a-cc9ffb3357-1"
     },
     {
       "wait": {
@@ -96,16 +138,26 @@
           "running": false
         }
       },
-      "timeout": 10
+      "timeout": 10,
+      "id": "editor_basics.a-df0d45c496-1"
     },
     {
       "caption": "Unsaved text survives",
-      "sub": "Switching only hides the editor; its tabs and unsaved text stay"
+      "sub": "Switching only hides the editor; its tabs and unsaved text stay",
+      "id": "editor_basics.a-da44f196d2-1",
+      "presentation": {
+        "id": "editor_basics.unsaved-text-survives",
+        "title": "Unsaved text survives",
+        "narration": "Return to the editor and your unsaved changes are still there. Switching views hides the editor without closing its tabs.",
+        "trailing_hold": 0.35,
+        "lead_in": 0.12
+      }
     },
     {
       "keys": [
         "@switch_to_file_commander"
-      ]
+      ],
+      "id": "editor_basics.a-13399a5092-1"
     },
     {
       "wait": {
@@ -113,7 +165,8 @@
           "running": true
         }
       },
-      "timeout": 20
+      "timeout": 20,
+      "id": "editor_basics.a-2ba142047c-1"
     },
     {
       "wait": {
@@ -121,15 +174,18 @@
           "contains": "draft"
         }
       },
-      "timeout": 15
+      "timeout": 15,
+      "id": "editor_basics.a-25479f3d46-1"
     },
     {
-      "pause": 1500
+      "pause": 1500,
+      "id": "editor_basics.a-c25a6c3880-1"
     },
     {
       "editor_keys": [
         "F10"
-      ]
+      ],
+      "id": "editor_basics.a-cc9ffb3357-2"
     },
     {
       "wait": {
@@ -137,10 +193,12 @@
           "running": false
         }
       },
-      "timeout": 10
+      "timeout": 10,
+      "id": "editor_basics.a-df0d45c496-2"
     },
     {
-      "uncaption": true
+      "uncaption": true,
+      "id": "editor_basics.a-4df2c52c18-1"
     }
   ]
 }

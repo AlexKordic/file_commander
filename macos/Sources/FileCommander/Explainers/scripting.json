@@ -1,7 +1,7 @@
 {
   "id": "scripting",
   "title": "Lua scripts",
-  "order": 26,
+  "order": 27,
   "duration": 40,
   "chapter": "yours",
   "needs": {
@@ -19,35 +19,64 @@
         "left": "{home}/projects/tools",
         "right": "{home}/backup",
         "focus": "left"
+      },
+      "id": "scripting.a-5363e6f730-1",
+      "presentation": {
+        "id": "scripting.introduction",
+        "title": "Lua scripts",
+        "narration": "Automate File Commander with Loo ah: a script copies the camera's photos.",
+        "trailing_hold": 0.35,
+        "lead_in": 0.12
       }
     },
     {
-      "chapter": "Make It Yours"
+      "chapter": "Make It Yours",
+      "id": "scripting.a-17d61eebdc-1"
     },
     {
       "caption": "Scripts drive File Commander",
-      "sub": "A Lua script runs commands, presses keys and waits for jobs"
+      "sub": "A Lua script runs commands, presses keys and waits for jobs",
+      "id": "scripting.a-7799e41b9c-1",
+      "presentation": {
+        "id": "scripting.scripts-drive-file-commander",
+        "title": "Scripts drive File Commander",
+        "narration": "Scripts drive File Commander. A Loo ah script runs commands, presses keys and waits for jobs.",
+        "trailing_hold": 0.35,
+        "lead_in": 0.12
+      }
     },
     {
       "cursor": {
         "side": "left",
         "name": "copy-jpg.lua"
-      }
+      },
+      "id": "scripting.a-1b8ce21ff2-1"
     },
     {
-      "pause": 1200
+      "pause": 1200,
+      "id": "scripting.a-538d34278b-1"
     },
     {
       "caption": "Run Lua Script",
-      "sub": "Runs it with fc run, in a terminal window. This one copies every photo to the backup"
+      "sub": "Runs it with fc run, in a terminal window. This one copies every photo to the backup",
+      "id": "scripting.a-997890c397-1",
+      "presentation": {
+        "id": "scripting.run-lua-script",
+        "title": "Run Lua Script",
+        "narration": "Run Loo ah Script. Runs it with fc run, in a terminal window. This one copies every photo to the backup.",
+        "trailing_hold": 0.35,
+        "lead_in": 0.12
+      }
     },
     {
-      "run_script": "{home}/projects/tools/copy-jpg.lua"
+      "run_script": "{home}/projects/tools/copy-jpg.lua",
+      "id": "scripting.a-59168bcaa9-1"
     },
     {
       "wait": {
         "window": "script"
-      }
+      },
+      "id": "scripting.a-55080f1311-1"
     },
     {
       "wait": {
@@ -55,24 +84,37 @@
           "exists": "{home}/backup/street-musicians.jpg"
         }
       },
-      "timeout": 60
+      "timeout": 60,
+      "id": "scripting.a-61bbee663f-1"
     },
     {
-      "pause": 2000
+      "pause": 2000,
+      "id": "scripting.a-d8f0f76503-1"
     },
     {
-      "close_window": "script"
+      "close_window": "script",
+      "id": "scripting.a-a0124ad3d6-1"
     },
     {
-      "front": true
+      "front": true,
+      "id": "scripting.a-84ddbb6474-1"
     },
     {
       "caption": "The scripting guide",
       "sub": "doc/scripting.md describes the API, events and the state table",
-      "hold": 2400
+      "hold": 2400,
+      "id": "scripting.a-28b4dc29c7-1",
+      "presentation": {
+        "id": "scripting.the-scripting-guide",
+        "title": "The scripting guide",
+        "narration": "The scripting guide. doc/scripting.md describes the API, events and the state table.",
+        "trailing_hold": 0.35,
+        "lead_in": 0.12
+      }
     },
     {
-      "uncaption": true
+      "uncaption": true,
+      "id": "scripting.a-4df2c52c18-1"
     }
   ]
 }

@@ -22,22 +22,41 @@
         "left": "{home}/camera",
         "right": "{home}/music",
         "focus": "left"
+      },
+      "id": "tabs.a-3f35bbb35d-1",
+      "presentation": {
+        "id": "tabs.introduction",
+        "title": "Tabs",
+        "narration": "Open, switch, reorder and close tabs; a tab can show a folder, a server or an archive.",
+        "trailing_hold": 0.35,
+        "lead_in": 0.12
       }
     },
     {
-      "chapter": "Basics"
+      "chapter": "Basics",
+      "id": "tabs.a-95f5554c81-1"
     },
     {
-      "remember": true
+      "remember": true,
+      "id": "tabs.a-ad94cd7cd6-1"
     },
     {
       "caption": "New tab",
-      "sub": "New Tab opens a tab beside the current one, in the focused pane"
+      "sub": "New Tab opens a tab beside the current one, in the focused pane",
+      "id": "tabs.a-bb10f364f4-1",
+      "presentation": {
+        "id": "tabs.new-tab",
+        "title": "New tab",
+        "narration": "New tab. New Tab opens a tab beside the current one, in the focused pane.",
+        "trailing_hold": 0.35,
+        "lead_in": 0.12
+      }
     },
     {
       "keys": [
         "@tab_new"
-      ]
+      ],
+      "id": "tabs.a-eb0a496ede-1"
     },
     {
       "wait": {
@@ -45,29 +64,42 @@
           "side": "left",
           "added": 1
         }
-      }
+      },
+      "id": "tabs.a-16cb26f2e6-1"
     },
     {
       "navigate": {
         "side": "left",
         "to": "{home}/photos"
-      }
+      },
+      "id": "tabs.a-fe3f5ccf1a-1"
     },
     {
       "highlight": "pane.left.tabs",
-      "hold": 1500
+      "hold": 1500,
+      "id": "tabs.a-cd27d748d6-1"
     },
     {
-      "unhighlight": true
+      "unhighlight": true,
+      "id": "tabs.a-c572606fa8-1"
     },
     {
       "caption": "Switch tabs",
-      "sub": "Previous Tab and Next Tab cycle through them; a click works too"
+      "sub": "Previous Tab and Next Tab cycle through them; a click works too",
+      "id": "tabs.a-f237b2ed65-1",
+      "presentation": {
+        "id": "tabs.switch-tabs",
+        "title": "Switch tabs",
+        "narration": "Switch tabs. Previous Tab and Next Tab cycle through them; a click works too.",
+        "trailing_hold": 0.35,
+        "lead_in": 0.12
+      }
     },
     {
       "keys": [
         "@tab_prev"
-      ]
+      ],
+      "id": "tabs.a-3dd04c9198-1"
     },
     {
       "wait": {
@@ -75,15 +107,18 @@
           "side": "left",
           "ends_with": "/camera"
         }
-      }
+      },
+      "id": "tabs.a-a5cb511ec3-1"
     },
     {
-      "pause": 700
+      "pause": 700,
+      "id": "tabs.a-d528edc5cd-1"
     },
     {
       "keys": [
         "@tab_next"
-      ]
+      ],
+      "id": "tabs.a-6498b4390b-1"
     },
     {
       "wait": {
@@ -91,16 +126,26 @@
           "side": "left",
           "ends_with": "/photos"
         }
-      }
+      },
+      "id": "tabs.a-382c09a029-1"
     },
     {
       "caption": "Close a tab",
-      "sub": ""
+      "sub": "",
+      "id": "tabs.a-7860536337-1",
+      "presentation": {
+        "id": "tabs.close-a-tab",
+        "title": "Close a tab",
+        "narration": "Close a tab.",
+        "trailing_hold": 0.35,
+        "lead_in": 0.12
+      }
     },
     {
       "keys": [
         "@tab_close"
-      ]
+      ],
+      "id": "tabs.a-d1ea987d32-1"
     },
     {
       "wait": {
@@ -108,24 +153,36 @@
           "side": "left",
           "added": 0
         }
-      }
+      },
+      "id": "tabs.a-2ca5b6c8d0-1"
     },
     {
       "caption": "Any kind of place",
-      "sub": "A tab shows a local folder, an SSH server or an archive. Drag a tab to reorder it"
+      "sub": "A tab shows a local folder, an SSH server or an archive. Drag a tab to reorder it",
+      "id": "tabs.a-274c90a74c-1",
+      "presentation": {
+        "id": "tabs.any-kind-of-place",
+        "title": "Any kind of place",
+        "narration": "Any kind of place. A tab shows a local folder, an S S H server or an archive. Drag a tab to reorder it.",
+        "trailing_hold": 0.35,
+        "lead_in": 0.12
+      }
     },
     {
       "highlight": [
         "pane.left.tabs",
         "pane.right.tabs"
       ],
-      "hold": 2400
+      "hold": 2400,
+      "id": "tabs.a-3ab044de10-1"
     },
     {
-      "unhighlight": true
+      "unhighlight": true,
+      "id": "tabs.a-c572606fa8-2"
     },
     {
-      "uncaption": true
+      "uncaption": true,
+      "id": "tabs.a-4df2c52c18-1"
     }
   ]
 }

@@ -19,49 +19,74 @@
         "left": "{home}/projects/notes",
         "right": "{home}",
         "focus": "left"
+      },
+      "id": "editor_terminal.a-910b94f083-1",
+      "presentation": {
+        "id": "editor_terminal.introduction",
+        "title": "The editor as a terminal",
+        "narration": "Settings › Editor can show Fresh's own terminal interface in place of the native editor.",
+        "trailing_hold": 0.35,
+        "lead_in": 0.12
       }
     },
     {
-      "chapter": "Editor"
+      "chapter": "Editor",
+      "id": "editor_terminal.a-33e07ec139-1"
     },
     {
       "caption": "Fresh's own look",
-      "sub": "Settings › Editor › Show the editor as a terminal runs its terminal interface instead"
+      "sub": "Settings › Editor › Show the editor as a terminal runs its terminal interface instead",
+      "id": "editor_terminal.a-ac2b2f3332-1",
+      "presentation": {
+        "id": "editor_terminal.fresh-s-own-look",
+        "title": "Fresh's own look",
+        "narration": "Fresh's own look. Settings › Editor › Show the editor as a terminal runs its terminal interface instead.",
+        "trailing_hold": 0.35,
+        "lead_in": 0.12
+      }
     },
     {
       "open_window": "settings",
-      "note": "editor"
+      "note": "editor",
+      "id": "editor_terminal.a-0fe4a57672-1"
     },
     {
       "wait": {
         "window": "settings"
-      }
+      },
+      "id": "editor_terminal.a-dc7482375f-1"
     },
     {
       "highlight": "settings.editor.terminal",
-      "hold": 2000
+      "hold": 2000,
+      "id": "editor_terminal.a-7f88cd10f1-1"
     },
     {
       "set_preference": {
         "terminal_editor": true
-      }
+      },
+      "id": "editor_terminal.a-e7414cff95-1"
     },
     {
-      "pause": 1200
+      "pause": 1200,
+      "id": "editor_terminal.a-538d34278b-1"
     },
     {
-      "close_window": "settings"
+      "close_window": "settings",
+      "id": "editor_terminal.a-6821e08217-1"
     },
     {
       "cursor": {
         "side": "left",
         "name": "ideas.md"
-      }
+      },
+      "id": "editor_terminal.a-950b652ee9-1"
     },
     {
       "keys": [
         "@open_in_editor"
-      ]
+      ],
+      "id": "editor_terminal.a-416334d49e-1"
     },
     {
       "wait": {
@@ -69,7 +94,8 @@
           "contains": "Ideas"
         }
       },
-      "timeout": 25
+      "timeout": 25,
+      "id": "editor_terminal.a-c5527582a7-1"
     },
     {
       "wait": {
@@ -77,26 +103,46 @@
           "window": "main"
         }
       },
-      "timeout": 5
+      "timeout": 5,
+      "id": "editor_terminal.a-2de7a75908-1"
     },
     {
       "caption": "Same place, same Fresh",
-      "sub": "It takes the panes' place too, with the same tabs and unsaved text"
+      "sub": "It takes the panes' place too, with the same tabs and unsaved text",
+      "id": "editor_terminal.a-c1a3614fa3-1",
+      "presentation": {
+        "id": "editor_terminal.same-place-same-fresh",
+        "title": "Same place, same Fresh",
+        "narration": "Same place, same Fresh. It takes the panes' place too, with the same tabs and unsaved text.",
+        "trailing_hold": 0.35,
+        "lead_in": 0.12
+      }
     },
     {
-      "pause": 1500
+      "pause": 1500,
+      "id": "editor_terminal.a-c25a6c3880-1"
     },
     {
       "caption": "Its own keys",
-      "sub": "Typing, F-keys and Control keys go to Fresh, ahead of File Commander's menus"
+      "sub": "Typing, F-keys and Control keys go to Fresh, ahead of File Commander's menus",
+      "id": "editor_terminal.a-d5d2eb8154-1",
+      "presentation": {
+        "id": "editor_terminal.its-own-keys",
+        "title": "Its own keys",
+        "narration": "Its own keys. Typing, F-keys and Control keys go to Fresh, ahead of File Commander's menus.",
+        "trailing_hold": 0.35,
+        "lead_in": 0.12
+      }
     },
     {
       "editor_keys": [
         "End"
-      ]
+      ],
+      "id": "editor_terminal.a-2dd302cb33-1"
     },
     {
-      "type": " (typed)"
+      "type": " (typed)",
+      "id": "editor_terminal.a-4caad6e3c5-1"
     },
     {
       "wait": {
@@ -104,19 +150,30 @@
           "contains": "\\(typed\\)"
         }
       },
-      "timeout": 10
+      "timeout": 10,
+      "id": "editor_terminal.a-c23b7e02c8-1"
     },
     {
-      "pause": 900
+      "pause": 900,
+      "id": "editor_terminal.a-aec4a9cde4-1"
     },
     {
       "caption": "F10 comes back",
-      "sub": "Fresh's own switch key detaches it, and the panes return"
+      "sub": "Fresh's own switch key detaches it, and the panes return",
+      "id": "editor_terminal.a-0359a602bd-1",
+      "presentation": {
+        "id": "editor_terminal.f10-comes-back",
+        "title": "F10 comes back",
+        "narration": "F ten comes back. Fresh's own switch key detaches it, and the panes return.",
+        "trailing_hold": 0.35,
+        "lead_in": 0.12
+      }
     },
     {
       "keys": [
         "F10"
-      ]
+      ],
+      "id": "editor_terminal.a-af7f1d18a3-1"
     },
     {
       "wait": {
@@ -124,7 +181,8 @@
           "running": false
         }
       },
-      "timeout": 10
+      "timeout": 10,
+      "id": "editor_terminal.a-df0d45c496-1"
     },
     {
       "wait": {
@@ -132,18 +190,22 @@
           "side": "left",
           "name": "ideas.md"
         }
-      }
+      },
+      "id": "editor_terminal.a-1a2d2ac50e-1"
     },
     {
       "set_preference": {
         "terminal_editor": false
-      }
+      },
+      "id": "editor_terminal.a-d671940d7e-1"
     },
     {
-      "pause": 600
+      "pause": 600,
+      "id": "editor_terminal.a-79e624f018-1"
     },
     {
-      "uncaption": true
+      "uncaption": true,
+      "id": "editor_terminal.a-4df2c52c18-1"
     }
   ]
 }

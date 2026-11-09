@@ -15,7 +15,7 @@ the layers below the app are in [architecture.md](architecture.md).
 ```
 File Commander.app   macos/Sources/FileCommander   SwiftUI views, menus, sheets, settings,
                                                    key router, themes, native editor, tutorial
-ExplainerKit         macos/Sources/ExplainerKit    anchors, annotation window, runner, recorder
+ExplainerKit         packages/ExplainerKit        anchors, annotations, runner, image capture, media compiler
 FreshKit             macos/Sources/FreshKit        client of a Fresh session's scene: socket, store, keys
 FCKit                macos/Sources/FCKit           Engine: Swift values, drain on the main actor
 fc_engine            fc_engine.hpp/.cpp            the facade Swift imports (value types only)
@@ -499,12 +499,18 @@ the jobs it started, restores the transfer speed, preferences, theme and
 bookmarks it found, closes its tabs, removes the demo files and stops its Fresh
 session.
 
-**Recording**: `--export-explainer <id|all> --out DIR [--appearance
-light|dark|both] [--speed N]` records each explainer (except those that
-restart the app) at 1280×800 with ScreenCaptureKit and writes a movie, SRT
-and VTT captions, a still per caption, a preview GIF and a `README.md`, plus
-`DIR/index.md`. With `both`, the pages use `<picture>` so GitHub shows the
-reader's appearance. Recording asks for the Screen Recording permission.
+**Recording**: Help › **Record Tutorial…** exports selected lessons or the full
+course as a narrated video reconstructed from retained timestamped PNGs, plus
+an offline `standalone.html` with chapter and step controls. Resize the main
+window before starting; the panel shows points and native video pixels. The
+external recorder survives both quit/crash lessons. It uses disposable profiles,
+demo files and editor sessions. Screen Recording permission, Python 3.11+, FFmpeg
+and an installed speech voice are export prerequisites, not runtime dependencies.
+The compatibility `--export-explainer <id|all> --out DIR` entry point uses this
+pipeline; `--appearance light|dark|both`, `--voice NAME` and `--silent` are supported.
+Measured narration controls export pacing; normal Watch/Guided runs retain their
+own timing. See [tutorial_recording.md](../tutorial_recording.md) for operation,
+outputs, reconstruction, browser qualification and publication handoff.
 
 ## Editor timing
 
@@ -637,9 +643,11 @@ frame and 2.5–3.5% less CPU, with frame times unchanged.
 
 ## ExplainerKit in other projects
 
-ExplainerKit (`macos/Package.swift`, library product `ExplainerKit`) has no
-File Commander code. A host implements `ExplainerHost`: the window to cover,
-pressing keys and typing, conditions on its state, its own steps, and setup
-and cleanup; views name themselves with `.explainerAnchor`. The runner, the
-annotation window, the recorder and the exporter come with the package, so
-another app gets explainers, videos and GitHub pages from JSON scripts.
+ExplainerKit is the independent local Swift package at
+[`packages/ExplainerKit`](../../packages/ExplainerKit/README.md). The old
+`macos/Sources/ExplainerKit` path remains a compatibility symlink. A host implements
+`ExplainerHost` for input, conditions and lifecycle, and names anchors. The generic
+capture client, external recorder, narration providers, image compiler and HTML
+player have no FC/Fresh dependency. `tutorial-example` supplies a real independent
+counter/text-field host. A portable JSON format also accepts non-Swift capture
+producers. See the package's README and FORMAT.md for the integration contract.

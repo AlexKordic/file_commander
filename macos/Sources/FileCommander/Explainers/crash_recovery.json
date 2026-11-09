@@ -1,7 +1,7 @@
 {
   "id": "crash_recovery",
   "title": "Crash recovery",
-  "order": 28,
+  "order": 29,
   "duration": 75,
   "chapter": "recovery",
   "needs": {
@@ -24,48 +24,72 @@
         "left": "{home}/music",
         "right": "{home}/backup",
         "focus": "left"
+      },
+      "id": "crash_recovery.a-a6c768f640-1",
+      "presentation": {
+        "id": "crash_recovery.introduction",
+        "title": "Crash recovery",
+        "narration": "A real crash in the middle of a copy: what comes back, and how the copy continues.",
+        "trailing_hold": 0.35,
+        "lead_in": 0.12
       }
     },
     {
-      "chapter": "Recovery"
+      "chapter": "Recovery",
+      "id": "crash_recovery.a-3419237cea-1"
     },
     {
-      "set_transfer_speed": "3 MiB"
+      "set_transfer_speed": "3 MiB",
+      "id": "crash_recovery.a-7a7a56956c-1"
     },
     {
       "caption": "A long copy",
-      "sub": "Every copy is journaled on disk before it starts"
+      "sub": "Every copy is journaled on disk before it starts",
+      "id": "crash_recovery.a-6d1780c744-1",
+      "presentation": {
+        "id": "crash_recovery.a-long-copy",
+        "title": "A long copy",
+        "narration": "A long copy. Every copy is journaled on disk before it starts.",
+        "trailing_hold": 0.35,
+        "lead_in": 0.12
+      }
     },
     {
       "cursor": {
         "side": "left",
         "name": "Night Drive"
-      }
+      },
+      "id": "crash_recovery.a-aca7e46b8d-1"
     },
     {
       "keys": [
         "@copy"
-      ]
+      ],
+      "id": "crash_recovery.a-76288993ef-1"
     },
     {
       "wait": {
         "sheet": "copy"
-      }
+      },
+      "id": "crash_recovery.a-ffb688e0c0-1"
     },
     {
       "wait": {
         "anchor": "sheet.copy.start"
-      }
+      },
+      "id": "crash_recovery.a-8febfbdaf6-1"
     },
     {
       "click": "sheet.copy.start",
-      "as_job": "music"
+      "as_job": "music",
+      "id": "crash_recovery.a-6465298df0-1"
     },
     {
       "wait": {
         "sheet": null
       },
-      "timeout": 30
+      "timeout": 30,
+      "id": "crash_recovery.a-c11a2e6caa-1"
     },
     {
       "wait": {
@@ -75,28 +99,48 @@
           "progress_at_least": 0.3
         }
       },
-      "timeout": 60
+      "timeout": 60,
+      "id": "crash_recovery.a-c8af525926-1"
     },
     {
       "caption": "Now File Commander is killed",
-      "sub": "SIGKILL: no warning, no chance to save"
+      "sub": "SIGKILL: no warning, no chance to save",
+      "id": "crash_recovery.a-68ab3e6ce1-1",
+      "presentation": {
+        "id": "crash_recovery.now-file-commander-is-killed",
+        "title": "Now File Commander is killed",
+        "narration": "Now File Commander is killed. sig kill: no warning, no chance to save.",
+        "trailing_hold": 0.35,
+        "lead_in": 0.12
+      }
     },
     {
-      "crash": "Kill File Commander"
+      "crash": "Kill File Commander",
+      "id": "crash_recovery.a-d5fce16689-1"
     },
     {
       "caption": "Back where you were",
-      "sub": "The tabs came back, and the copy is waiting, paused"
+      "sub": "The tabs came back, and the copy is waiting, paused",
+      "id": "crash_recovery.a-f6a3528617-1",
+      "presentation": {
+        "id": "crash_recovery.back-where-you-were",
+        "title": "Back where you were",
+        "narration": "Back where you were. The tabs came back, and the copy is waiting, paused.",
+        "trailing_hold": 0.35,
+        "lead_in": 0.12
+      }
     },
     {
       "keys": [
         "@toggle_job_list"
-      ]
+      ],
+      "id": "crash_recovery.a-423e34a9c2-1"
     },
     {
       "wait": {
         "window": "activity"
-      }
+      },
+      "id": "crash_recovery.a-bec1d26b01-1"
     },
     {
       "wait": {
@@ -105,51 +149,76 @@
           "state": "paused"
         }
       },
-      "timeout": 10
+      "timeout": 10,
+      "id": "crash_recovery.a-7a696b3e85-1"
     },
     {
       "highlight": "activity.list",
-      "hold": 2000
+      "hold": 2000,
+      "id": "crash_recovery.a-856856e9a3-1"
     },
     {
-      "unhighlight": true
+      "unhighlight": true,
+      "id": "crash_recovery.a-c572606fa8-1"
     },
     {
       "caption": "Resume checks first",
-      "sub": "FC makes sure the files didn’t change, then continues file by file"
+      "sub": "FC makes sure the files didn’t change, then continues file by file",
+      "id": "crash_recovery.a-170a61571d-1",
+      "presentation": {
+        "id": "crash_recovery.resume-checks-first",
+        "title": "Resume checks first",
+        "narration": "Resume checks first. File Commander makes sure the files didn’t change, then continues file by file.",
+        "trailing_hold": 0.35,
+        "lead_in": 0.12
+      }
     },
     {
-      "click": "activity.resume"
+      "click": "activity.resume",
+      "id": "crash_recovery.a-43d0b2ee7d-1"
     },
     {
       "wait": {
         "running_job": true
       },
-      "timeout": 10
+      "timeout": 10,
+      "id": "crash_recovery.a-8467040ef5-1"
     },
     {
       "wait": {
         "running_job": false
       },
-      "timeout": 90
+      "timeout": 90,
+      "id": "crash_recovery.a-d92c9b84a4-1"
     },
     {
-      "close_window": "activity"
+      "close_window": "activity",
+      "id": "crash_recovery.a-35e14a173e-1"
     },
     {
       "expect": {
         "file": {
           "exists": "{home}/backup/Night Drive/04 Slow Lights.flac"
         }
-      }
+      },
+      "id": "crash_recovery.a-11f6051410-1"
     },
     {
       "caption": "Nothing was lost",
       "sub": "Finished files were kept; the interrupted one was copied again",
-      "hold": 2400
+      "hold": 2400,
+      "id": "crash_recovery.a-81a15ee3cc-1",
+      "presentation": {
+        "id": "crash_recovery.nothing-was-lost",
+        "title": "Nothing was lost",
+        "narration": "Nothing was lost. Finished files were kept; the interrupted one was copied again.",
+        "trailing_hold": 0.35,
+        "lead_in": 0.12
+      }
     },
     {
-      "uncaption": true
+      "uncaption": true,
+      "id": "crash_recovery.a-4df2c52c18-1"
     }
   ]
 }

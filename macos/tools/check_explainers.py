@@ -26,7 +26,7 @@ RUNNER_STEPS = {'caption', 'uncaption', 'chapter', 'highlight', 'unhighlight', '
 HOST_STEPS = {'open_tabs', 'navigate', 'focus', 'cursor', 'command', 'set_transfer_speed', 'set_preference', 'open_window',
               'close_window', 'front', 'dismiss_sheet', 'touch', 'crash', 'relaunch', 'editor_type', 'notice', 'editor_keys',
               'remove_bookmark', 'remember', 'run_script'}
-OPTIONS = {'hold', 'timeout', 'gap', 'ms', 'as_job', 'sub', 'nth', 'approach_ms', 'speed', 'note'}
+OPTIONS = {'hold', 'timeout', 'gap', 'ms', 'as_job', 'sub', 'nth', 'approach_ms', 'speed', 'note', 'id', 'presentation'}
 CONDITIONS = {'all', 'any', 'not', 'rows', 'listing', 'selected', 'cursor', 'path', 'filter', 'loaded', 'loading', 'tabs', 'focused',
               'single', 'sort', 'columns', 'sheet', 'palette', 'glob', 'text_focus', 'anchor', 'job', 'running_job', 'queued_at_least',
               'event', 'clipboard', 'hud', 'errors_at_least', 'no_errors', 'window', 'editor', 'bookmark', 'no_bookmark',
@@ -99,6 +99,7 @@ def main():
     chapters = {c['id'] for c in json.loads((EXPLAINERS / 'chapters.json').read_text())}
     exercised = set()
     orders = {}
+    action_ids, presentation_ids = set(), set()
 
     def anchor(script, where, raw):
         name = raw.replace('pane.focused', 'pane.left').replace('pane.other', 'pane.right')
@@ -126,6 +127,24 @@ def main():
 
     def step(script, index, s):
         where = f'step {index + 1}'
+        identity = s.get('id')
+        if identity is not None:
+            if not isinstance(identity, str) or not re.fullmatch(r'[a-zA-Z0-9_.-]+', identity):
+                problems.append(f'{script}: {where}: invalid or duplicate action id {identity}')
+            elif identity in action_ids:
+                problems.append(f'{script}: {where}: duplicate action id {identity}')
+            else:
+                action_ids.add(identity)
+        if 'presentation' in s:
+            p = s['presentation']
+            if not isinstance(p, dict) or not isinstance(p.get('id'), str) or not re.fullmatch(r'[a-zA-Z0-9_.-]+', p['id']):
+                problems.append(f'{script}: {where}: presentation needs a filename-safe id')
+            else:
+                if p['id'] in presentation_ids:
+                    problems.append(f'{script}: {where}: duplicate presentation id {p["id"]}')
+                presentation_ids.add(p['id'])
+            if not isinstance(p, dict) or not p.get('title') or not p.get('narration'):
+                problems.append(f'{script}: {where}: presentation needs a title and spoken narration')
         actions = [k for k in s if k not in OPTIONS]
         if len(actions) != 1:
             problems.append(f'{script}: {where}: needs exactly one action, has {actions}')

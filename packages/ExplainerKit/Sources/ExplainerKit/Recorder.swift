@@ -94,15 +94,25 @@ public final class ExplainerRecorder: NSObject, SCStreamOutput, @unchecked Senda
     CGImageDestinationFinalize(destination)
   }
 
-  private static func setup(region: CGRect) async throws -> (SCContentFilter, SCStreamConfiguration) {
+  static func setup(region: CGRect, excludingWindows: Set<UInt32> = [],
+                    includingProcessIDs: Set<pid_t>? = nil, includingWindowIDs: Set<UInt32>? = nil) async throws -> (SCContentFilter, SCStreamConfiguration) {
     let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
     let screens = await MainActor.run { NSScreen.screens.map { ($0.frame, $0.backingScaleFactor, $0.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? CGDirectDisplayID) } }
-    guard let (screenFrame, scale, displayID) = screens.first(where: { $0.0.intersects(region) }) ?? screens.first,
-          let display = content.displays.first(where: { $0.displayID == displayID }) ?? content.displays.first else {
-      throw NSError(domain: "ExplainerKit", code: 2, userInfo: [NSLocalizedDescriptionKey: "No display to record"])
+    guard let (screenFrame, scale, displayID) = screens.first(where: { $0.0.contains(region) }),
+          let display = content.displays.first(where: { $0.displayID == displayID }) else {
+      throw NSError(domain: "ExplainerKit", code: 2, userInfo: [NSLocalizedDescriptionKey: "Keep the complete recording window inside one display before starting"])
     }
-    let apps = content.applications.filter { $0.processID == getpid() }
-    let filter = SCContentFilter(display: display, including: apps, exceptingWindows: [])
+    let allowed = includingProcessIDs ?? [getpid()]
+    // Explicit windows keep another instance with the same bundle identifier
+    // out of the movie, including while the owned host is being relaunched.
+    let windows = content.windows.filter {
+      allowed.contains($0.owningApplication?.processID ?? -1) && !excludingWindows.contains($0.windowID) &&
+        (includingWindowIDs == nil || includingWindowIDs!.contains($0.windowID))
+    }
+    guard !windows.isEmpty else {
+      throw NSError(domain: "ExplainerKit", code: 3, userInfo: [NSLocalizedDescriptionKey: "No owned tutorial windows are visible"])
+    }
+    let filter = SCContentFilter(display: display, including: windows)
     let configuration = SCStreamConfiguration()
     // ScreenCaptureKit measures from the display's top left, in points.
     let local = CGRect(x: region.minX - screenFrame.minX, y: screenFrame.maxY - region.maxY, width: region.width, height: region.height)

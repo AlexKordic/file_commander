@@ -49,7 +49,7 @@ public struct ExplainerStep: Codable, Hashable, Sendable {
   public var value: JSONValue
   public var options: [String: JSONValue]
 
-  static let optionKeys: Set<String> = ["hold", "timeout", "gap", "ms", "as_job", "sub", "nth", "approach_ms", "speed", "note"]
+  static let optionKeys: Set<String> = ["hold", "timeout", "gap", "ms", "as_job", "sub", "nth", "approach_ms", "speed", "note", "id", "presentation"]
 
   public init(action: String, value: JSONValue, options: [String: JSONValue] = [:]) {
     self.action = action
@@ -77,6 +77,9 @@ public struct ExplainerStep: Codable, Hashable, Sendable {
   }
 
   public func option(_ key: String) -> JSONValue? { options[key] }
+  /// Authored identity is independent of a step's position in the lesson.
+  public var id: String? { options["id"]?.string }
+  public var presentation: JSONValue? { options["presentation"] }
   public var hold: Double { (options["hold"]?.number ?? 0) / 1000 }
   public var timeout: Double { options["timeout"]?.number ?? 15 }
 }

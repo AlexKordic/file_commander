@@ -23,44 +23,60 @@
         "left": "{home}/music",
         "right": "{home}/backup",
         "focus": "left"
+      },
+      "id": "transfer_speed.a-a6c768f640-1",
+      "presentation": {
+        "id": "transfer_speed.introduction",
+        "title": "Transfer speed",
+        "narration": "Limit how fast copies run, and change it while a copy is running.",
+        "trailing_hold": 0.35,
+        "lead_in": 0.12
       }
     },
     {
-      "chapter": "Jobs"
+      "chapter": "Jobs",
+      "id": "transfer_speed.a-8d2ea1a532-1"
     },
     {
-      "set_transfer_speed": "6 MiB"
+      "set_transfer_speed": "6 MiB",
+      "id": "transfer_speed.a-d55fd6e0f4-1"
     },
     {
       "cursor": {
         "side": "left",
         "name": "Night Drive"
-      }
+      },
+      "id": "transfer_speed.a-aca7e46b8d-1"
     },
     {
       "keys": [
         "@copy"
-      ]
+      ],
+      "id": "transfer_speed.a-76288993ef-1"
     },
     {
       "wait": {
         "sheet": "copy"
-      }
+      },
+      "id": "transfer_speed.a-ffb688e0c0-1"
     },
     {
       "wait": {
         "anchor": "sheet.copy.start"
-      }
+      },
+      "id": "transfer_speed.a-8febfbdaf6-1"
     },
     {
       "click": "sheet.copy.start",
-      "as_job": "music"
+      "as_job": "music",
+      "id": "transfer_speed.a-6465298df0-1"
     },
     {
       "wait": {
         "sheet": null
       },
-      "timeout": 30
+      "timeout": 30,
+      "id": "transfer_speed.a-c11a2e6caa-1"
     },
     {
       "wait": {
@@ -68,69 +84,106 @@
           "name": "music",
           "state": "running"
         }
-      }
+      },
+      "id": "transfer_speed.a-6f75e8bb52-1"
     },
     {
       "caption": "Change the speed while it runs",
-      "sub": "Transfer Speed limits copies, moves between disks and SSH transfers"
+      "sub": "Transfer Speed limits copies, moves between disks and SSH transfers",
+      "id": "transfer_speed.a-70dc77f4a4-1",
+      "presentation": {
+        "id": "transfer_speed.change-the-speed-while-it-runs",
+        "title": "Change the speed while it runs",
+        "narration": "Change the speed while it runs. Transfer Speed limits copies, moves between disks and S S H transfers.",
+        "trailing_hold": 0.35,
+        "lead_in": 0.12
+      }
     },
     {
       "highlight": "jobs.bar.speed",
-      "hold": 1400
+      "hold": 1400,
+      "id": "transfer_speed.a-74e44b2efe-1"
     },
     {
       "keys": [
         "@transfer_speed"
-      ]
+      ],
+      "id": "transfer_speed.a-d11ea0d523-1"
     },
     {
       "wait": {
         "sheet": "speed"
-      }
+      },
+      "id": "transfer_speed.a-bd51a78eeb-1"
     },
     {
-      "click": "speed.preset[1 MB/s]"
+      "click": "speed.preset[1 MB/s]",
+      "id": "transfer_speed.a-14aa5ba5c3-1"
     },
     {
       "wait": {
         "transfer_rate": "1 MiB"
-      }
+      },
+      "id": "transfer_speed.a-792d58a324-1"
     },
     {
-      "unhighlight": true
+      "unhighlight": true,
+      "id": "transfer_speed.a-c572606fa8-1"
     },
     {
       "caption": "The copy slows down at once",
-      "sub": "Even in the middle of a file"
+      "sub": "Even in the middle of a file",
+      "id": "transfer_speed.a-1f2b3a0648-1",
+      "presentation": {
+        "id": "transfer_speed.the-copy-slows-down-at-once",
+        "title": "The copy slows down at once",
+        "narration": "The copy slows down at once. Even in the middle of a file.",
+        "trailing_hold": 0.35,
+        "lead_in": 0.12
+      }
     },
     {
-      "pause": 2600
+      "pause": 2600,
+      "id": "transfer_speed.a-51c4a2cfab-1"
     },
     {
-      "click": "speed.preset[Unlimited]"
+      "click": "speed.preset[Unlimited]",
+      "id": "transfer_speed.a-4565351f2d-1"
     },
     {
       "wait": {
         "transfer_rate": 0
-      }
+      },
+      "id": "transfer_speed.a-60ab344ddb-1"
     },
     {
       "caption": "For now or for good",
-      "sub": "Turn off Keep for future sessions to limit only until you quit"
+      "sub": "Turn off Keep for future sessions to limit only until you quit",
+      "id": "transfer_speed.a-73677bf5d9-1",
+      "presentation": {
+        "id": "transfer_speed.for-now-or-for-good",
+        "title": "For now or for good",
+        "narration": "For now or for good. Turn off Keep for future sessions to limit only until you quit.",
+        "trailing_hold": 0.35,
+        "lead_in": 0.12
+      }
     },
     {
       "highlight": "speed",
-      "hold": 2200
+      "hold": 2200,
+      "id": "transfer_speed.a-213f12dae2-1"
     },
     {
       "keys": [
         "Enter"
-      ]
+      ],
+      "id": "transfer_speed.a-332a45bb8d-1"
     },
     {
       "wait": {
         "sheet": null
-      }
+      },
+      "id": "transfer_speed.a-0f1fbb49b0-1"
     },
     {
       "wait": {
@@ -139,13 +192,16 @@
           "state": "finished"
         }
       },
-      "timeout": 60
+      "timeout": 60,
+      "id": "transfer_speed.a-49d70b9691-1"
     },
     {
-      "unhighlight": true
+      "unhighlight": true,
+      "id": "transfer_speed.a-c572606fa8-2"
     },
     {
-      "uncaption": true
+      "uncaption": true,
+      "id": "transfer_speed.a-4df2c52c18-1"
     }
   ]
 }

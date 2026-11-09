@@ -13,7 +13,9 @@ final class TutorialCoordinator: ExplainerHost {
   unowned let app: AppController
   let runner = ExplainerRunner()
   let annotations = AnnotationWindowController()
-  let world = TutorialWorld()
+  let world: TutorialWorld
+  private var recordingClient: TutorialCaptureClient?
+  lazy var recording = TutorialRecordingController(app: app, tutorial: self)
   weak var mainWindow: NSWindow?
   private(set) lazy var catalog: ExplainerCatalog = TutorialCoordinator.loadCatalog()
 
@@ -44,6 +46,10 @@ final class TutorialCoordinator: ExplainerHost {
 
   init(app: AppController) {
     self.app = app
+    let arguments = CommandLine.arguments
+    if let index = arguments.firstIndex(of: "--tutorial-world"), index + 1 < arguments.count {
+      world = TutorialWorld(root: URL(fileURLWithPath: arguments[index + 1], isDirectory: true))
+    } else { world = TutorialWorld() }
     let world = self.world
     AnchorRegistry.shared.alias = { [weak app] raw in
       guard let app else { return raw }
@@ -332,7 +338,11 @@ final class TutorialCoordinator: ExplainerHost {
     if script.needs("editor") {
       let path = world.bin.path + ":" + (ProcessInfo.processInfo.environment["PATH"] ?? "/usr/bin:/bin")
       app.engine.setEditorSession(store: world.profile.appendingPathComponent("editor_session.json").path,
-                                  environment: ["HOME=\(world.profile.path)", "PATH=\(path)"])
+                                  environment: ["HOME=\(world.profile.path)", "PATH=\(path)",
+                                                "XDG_CONFIG_HOME=\(world.profile.appendingPathComponent(".config").path)",
+                                                "XDG_DATA_HOME=\(world.profile.appendingPathComponent(".local/share").path)",
+                                                "XDG_STATE_HOME=\(world.profile.appendingPathComponent(".local/state").path)",
+                                                "XDG_CACHE_HOME=\(world.profile.appendingPathComponent(".cache").path)"])
     }
     app.engine.setKeepTutorialTabs(script.needs("crash") || script.needs("restart"))
     app.engine.setTransferRate(0, persist: false)
@@ -535,6 +545,14 @@ final class TutorialCoordinator: ExplainerHost {
         app.openWindowAction?(id: id)
       }
       try await Task.sleep(for: .milliseconds(400))
+      if app.isTutorialRecording, let main = mainWindow,
+         let auxiliary = NSApp.windows.first(where: { $0.isVisible && $0 !== main && TutorialCoordinator.matches($0, id) }) {
+        var frame = auxiliary.frame
+        frame.size.width = min(frame.width, main.frame.width)
+        frame.size.height = min(frame.height, main.frame.height)
+        frame.origin = CGPoint(x: main.frame.midX - frame.width / 2, y: main.frame.midY - frame.height / 2)
+        auxiliary.setFrame(frame, display: true)
+      }
     case "close_window":
       let id = v.string ?? ""
       NSApp.windows.first { $0.isVisible && TutorialCoordinator.matches($0, id) }?.close()
@@ -824,6 +842,10 @@ final class TutorialCoordinator: ExplainerHost {
         if summary != lastEditorTrace { lastEditorTrace = summary; Trace.write(summary) }
       }
       if let running = value["running"]?.bool { return app.editor.running == running }
+      if let compose = value["compose"]?.bool {
+        let showing = app.editor.isNative && app.editor.running && !(app.editor.native.grid?.composePanes.isEmpty ?? true)
+        return showing == compose
+      }
       // The editor has the keyboard in this window ("main").
       if let id = value["window"]?.string {
         guard let window = app.editor.window else { return false }
@@ -889,6 +911,7 @@ final class TutorialCoordinator: ExplainerHost {
     runner.overlay.stamp = "KILLED"
     runner.record("crash", message)
     try await Task.sleep(for: .milliseconds(900))
+    try await recordingClient?.prepareRelaunch()
     try writeResume(script: script)
     try spawnRelauncher()
     // A real crash: no checkpoint, no goodbye. Recovery must work from what is on disk.
@@ -899,6 +922,7 @@ final class TutorialCoordinator: ExplainerHost {
     guard let script = runner.script else { return }
     runner.overlay.caption = OverlayModel.Caption(title: "Quitting…", subtitle: "File Commander saves the workspace and starts again")
     try await Task.sleep(for: .milliseconds(600))
+    try await recordingClient?.prepareRelaunch()
     try writeResume(script: script)
     try spawnRelauncher()
     annotations.hide()
@@ -1089,5 +1113,112 @@ enum TerminalKeys {
     if parsed.modifiers == [.shift], parsed.key == "Tab" { return "\u{1b}[Z" }
     if parsed.modifiers == [.option], parsed.key.count == 1 { return "\u{1b}" + parsed.key.lowercased() }
     return nil
+  }
+}
+
+// The external recorder owns the take. This host can quit or crash and resume
+// the lesson without losing its image sequence, narration clock, or geometry.
+extension TutorialCoordinator {
+  private func arrangeRecordingWindows(inside main: NSWindow) throws {
+    let bounds = main.frame.insetBy(dx: 10, dy: 10)
+    for auxiliary in NSApp.windows where auxiliary.isVisible && auxiliary !== main &&
+      ["activity", "errors", "find", "settings"].contains(where: { TutorialCoordinator.matches(auxiliary, $0) }) {
+      var frame = auxiliary.frame
+      frame.size.width = min(frame.width, bounds.width)
+      frame.size.height = min(frame.height, bounds.height)
+      frame.origin = CGPoint(x: bounds.midX - frame.width / 2, y: bounds.midY - frame.height / 2)
+      auxiliary.setFrame(frame, display: true)
+      guard main.frame.contains(auxiliary.frame) else {
+        throw TutorialFrameRecorder.Failure.recording("The \(auxiliary.title) window cannot fit in this recording. Enlarge the main window and start a new take.")
+      }
+    }
+  }
+
+  func recordTake(configuration url: URL) {
+    quitWhenDone = true
+    task = Task { [weak self] in
+      guard let self else { return }
+      var configuration: TutorialCaptureConfiguration?
+      do {
+        let config = try TutorialCaptureConfiguration.read(url)
+        configuration = config
+        if let appearance = config.appearance.flatMap(AppPreferences.Appearance.init(rawValue:)) {
+          app.preferences.appearance = appearance
+          app.applyAppearance()
+        }
+        let script: ExplainerScript
+        if let path = config.scriptPath {
+          script = try JSONDecoder().decode(ExplainerScript.self, from: Data(contentsOf: URL(fileURLWithPath: path)))
+        } else if let found = catalog.script(config.lesson["id"] ?? "") { script = found }
+        else { throw TutorialFrameRecorder.Failure.recording("Unknown recording lesson") }
+        guard script.id == config.lesson["id"] else { throw TutorialFrameRecorder.Failure.recording("Recording lesson identity changed") }
+        var window = mainWindow
+        for _ in 0..<100 where window == nil {
+          window = NSApp.windows.first { $0.identifier?.rawValue.hasPrefix("main") == true }
+          if window == nil { try await Task.sleep(for: .milliseconds(50)) }
+        }
+        guard let window else { throw TutorialFrameRecorder.Failure.recording("No application window is available to record") }
+        mainWindow = window
+        window.setFrame(config.geometry.frame, display: true)
+        NSApp.activate(ignoringOtherApps: true)
+        window.makeKeyAndOrderFront(nil)
+        runner.mode = .watch; runner.speed = 1
+        if observer == nil { observer = app.engine.observeEvents { [weak self] batch in self?.events.append(contentsOf: batch) } }
+        jobFloor = app.engine.jobs.map(\.id).max() ?? 0
+        let resumed = CommandLine.arguments.contains("--resume-explainer")
+        var start = 0
+        if resumed {
+          let record = try JSONDecoder().decode(ResumeRecord.self, from: Data(contentsOf: resumeURL))
+          guard Date().timeIntervalSince(record.time) < 120, record.queue.first == script.id else {
+            throw TutorialFrameRecorder.Failure.recording("Recording resume checkpoint expired or belongs to another lesson")
+          }
+          snapshot = record.snapshot; startedJobs = Set(record.jobs); start = record.step
+          app.engine.adoptTutorialTabs(prefix: world.root.path)
+          Engine.setEndpointCommand(host: TutorialWorld.demoHost, command: world.demoSSH.path)
+          try FileManager.default.removeItem(at: resumeURL)
+        } else {
+          snapshot = takeSnapshot()
+          try await prepare(script)
+        }
+        app.preferences.collapsedSidebarSections = []
+        if !app.editorShown { app.sidebarVisible = .all }
+        annotations.show(over: window, runner: runner, style: overlayStyle, controlsView: AnyView(EmptyView()))
+        let client = try TutorialCaptureClient(configuration: config)
+        client.prepareCaptureWindows = { [weak self, weak window] in
+          guard let self, let window else { throw CancellationError() }
+          try self.arrangeRecordingWindows(inside: window)
+        }
+        recordingClient = client
+        try client.announceReady(window: window)
+        try await client.waitForRecorder()
+        client.connect(runner)
+        try await runner.run(script, host: self, from: start, prepared: true)
+        try await Task.sleep(for: .milliseconds(450))
+        try await client.finish()
+        recordingClient = nil
+        annotations.hide()
+        await finish(script, keepTabs: false)
+        restore(closeTabs: true)
+        task = nil
+        NSApp.terminate(nil)
+      } catch {
+        let message = error.localizedDescription
+        lastFailure = message
+        Trace.write("recording failed: \(message)")
+        FileHandle.standardError.write(Data("Recording failed: \(message)\n".utf8))
+        if let recordingClient { try? await recordingClient.finish(error: message) }
+        if let config = configuration {
+          let status: [String: Any] = ["schema": 1, "status": "failed", "pid": getpid(), "error": message]
+          if let data = try? JSONSerialization.data(withJSONObject: status) {
+            try? data.write(to: URL(fileURLWithPath: config.session).appendingPathComponent("host.json"), options: .atomic)
+          }
+        }
+        recordingClient = nil
+        annotations.hide()
+        restore(closeTabs: true)
+        task = nil
+        NSApp.terminate(nil)
+      }
+    }
   }
 }

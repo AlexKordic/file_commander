@@ -70,7 +70,7 @@ struct AppCommands: Commands {
       Divider()
       item("open_bookmarks")
       item("add_bookmark")
-      Button("Home") { app.engine.navigate(app.engine.focusedSide, to: NSHomeDirectory()) }.keyboardShortcut("h", modifiers: [.command, .shift])
+      Button("Home") { app.engine.navigate(app.engine.focusedSide, to: app.presentedHomeDirectory) }.keyboardShortcut("h", modifiers: [.command, .shift])
     }
     CommandMenu("Transfers") {
       item("transfer_speed")
@@ -96,6 +96,7 @@ struct AppCommands: Commands {
     }
     CommandGroup(replacing: .help) {
       Button("File Commander Tutorial") { app.tutorial.start(TutorialCoordinator.entireID) }
+      Button("Record Tutorial…") { app.tutorial.recording.show() }
       item("help")
       Divider()
       ForEach(app.tutorial.catalog.chapters) { chapter in

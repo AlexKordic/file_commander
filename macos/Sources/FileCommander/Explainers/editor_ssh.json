@@ -19,57 +19,84 @@
         "left": "{home}",
         "right": "{home}/projects",
         "focus": "left"
+      },
+      "id": "editor_ssh.a-ccd2fa9b7a-1",
+      "presentation": {
+        "id": "editor_ssh.introduction",
+        "title": "Edit files on a server",
+        "narration": "Open a file of an S S H tab in the editor; Fresh works on the server and saves there.",
+        "trailing_hold": 0.35,
+        "lead_in": 0.12
       }
     },
     {
-      "chapter": "Editor"
+      "chapter": "Editor",
+      "id": "editor_ssh.a-33e07ec139-1"
     },
     {
       "caption": "Edit on a server",
-      "sub": "Files in an SSH tab open in the editor too"
+      "sub": "Files in an SSH tab open in the editor too",
+      "id": "editor_ssh.a-aea79dc50c-1",
+      "presentation": {
+        "id": "editor_ssh.edit-on-a-server",
+        "title": "Edit on a server",
+        "narration": "Edit on a server. Files in an S S H tab open in the editor too.",
+        "trailing_hold": 0.35,
+        "lead_in": 0.12
+      }
     },
     {
       "keys": [
         "@connect_ssh"
-      ]
+      ],
+      "id": "editor_ssh.a-f977285ac5-1"
     },
     {
       "wait": {
         "sheet": "ssh"
-      }
+      },
+      "id": "editor_ssh.a-92f1bea30b-1"
     },
     {
       "wait": {
         "text_focus": true
-      }
+      },
+      "id": "editor_ssh.a-0be37b237d-1"
     },
     {
-      "type": "demo-server"
+      "type": "demo-server",
+      "id": "editor_ssh.a-0c11f830ce-1"
     },
     {
       "keys": [
         "Tab"
-      ]
+      ],
+      "id": "editor_ssh.a-13319fd151-1"
     },
     {
       "keys": [
         "Cmd+A"
-      ]
+      ],
+      "id": "editor_ssh.a-a0667a4b25-1"
     },
     {
-      "type": "{server}"
+      "type": "{server}",
+      "id": "editor_ssh.a-ba5985b1ca-1"
     },
     {
-      "pause": 400
+      "pause": 400,
+      "id": "editor_ssh.a-087cd8c716-1"
     },
     {
-      "click": "sheet.ssh.connect"
+      "click": "sheet.ssh.connect",
+      "id": "editor_ssh.a-1a470970c1-1"
     },
     {
       "wait": {
         "sheet": null
       },
-      "timeout": 25
+      "timeout": 25,
+      "id": "editor_ssh.a-442f16a67c-1"
     },
     {
       "wait": {
@@ -78,18 +105,21 @@
           "contains": "index.html"
         }
       },
-      "timeout": 25
+      "timeout": 25,
+      "id": "editor_ssh.a-22583cf0d3-1"
     },
     {
       "cursor": {
         "side": "left",
         "name": "index.html"
-      }
+      },
+      "id": "editor_ssh.a-8c5244f8ab-1"
     },
     {
       "keys": [
         "@open_in_editor"
-      ]
+      ],
+      "id": "editor_ssh.a-416334d49e-1"
     },
     {
       "wait": {
@@ -97,7 +127,8 @@
           "contains": "Coming soon"
         }
       },
-      "timeout": 30
+      "timeout": 30,
+      "id": "editor_ssh.a-eccfd72af6-1"
     },
     {
       "wait": {
@@ -105,40 +136,63 @@
           "window": "main"
         }
       },
-      "timeout": 5
+      "timeout": 5,
+      "id": "editor_ssh.a-2de7a75908-1"
     },
     {
       "caption": "Fresh works on the server",
-      "sub": "Saving, searching and language servers run there; the status bar names it"
+      "sub": "Saving, searching and language servers run there; the status bar names it",
+      "id": "editor_ssh.a-40710182f6-1",
+      "presentation": {
+        "id": "editor_ssh.fresh-works-on-the-server",
+        "title": "Fresh works on the server",
+        "narration": "Fresh works on the server. Saving, searching and language servers run there; the status bar names it.",
+        "trailing_hold": 0.35,
+        "lead_in": 0.12
+      }
     },
     {
       "highlight": "editor.status",
-      "hold": 2200
+      "hold": 2200,
+      "id": "editor_ssh.a-600d507ce9-1"
     },
     {
-      "pause": 1600
+      "pause": 1600,
+      "id": "editor_ssh.a-4b7635c5c1-1"
     },
     {
       "editor_keys": [
         "Down",
         "Down",
         "End"
-      ]
+      ],
+      "id": "editor_ssh.a-33195613fa-1"
     },
     {
-      "editor_type": " (draft)"
+      "editor_type": " (draft)",
+      "id": "editor_ssh.a-50da08c809-1"
     },
     {
-      "pause": 500
+      "pause": 500,
+      "id": "editor_ssh.a-2df379c034-1"
     },
     {
       "caption": "Save on the server",
-      "sub": "⌘S writes the file on the server, over the same connection"
+      "sub": "⌘S writes the file on the server, over the same connection",
+      "id": "editor_ssh.a-0c2d70f900-1",
+      "presentation": {
+        "id": "editor_ssh.save-on-the-server",
+        "title": "Save on the server",
+        "narration": "Save on the server. Command S writes the file on the server, over the same connection.",
+        "trailing_hold": 0.35,
+        "lead_in": 0.12
+      }
     },
     {
       "editor_keys": [
         "Cmd+S"
-      ]
+      ],
+      "id": "editor_ssh.a-3841a45ad5-1"
     },
     {
       "wait": {
@@ -147,15 +201,18 @@
           "contains": "(draft)"
         }
       },
-      "timeout": 15
+      "timeout": 15,
+      "id": "editor_ssh.a-2ef07e4fea-1"
     },
     {
-      "pause": 1400
+      "pause": 1400,
+      "id": "editor_ssh.a-33aa6d95be-1"
     },
     {
       "editor_keys": [
         "F10"
-      ]
+      ],
+      "id": "editor_ssh.a-cc9ffb3357-1"
     },
     {
       "wait": {
@@ -163,10 +220,12 @@
           "running": false
         }
       },
-      "timeout": 10
+      "timeout": 10,
+      "id": "editor_ssh.a-df0d45c496-1"
     },
     {
-      "uncaption": true
+      "uncaption": true,
+      "id": "editor_ssh.a-4df2c52c18-1"
     }
   ]
 }

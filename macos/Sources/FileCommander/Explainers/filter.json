@@ -16,17 +16,35 @@
         "left": "{home}/camera",
         "right": "{home}/photos/2026",
         "focus": "left"
+      },
+      "id": "filter.a-a44f2b4e0e-1",
+      "presentation": {
+        "id": "filter.introduction",
+        "title": "Filter the list",
+        "narration": "Type to show only matching names; Backspace edits; a new folder clears the filter.",
+        "trailing_hold": 0.35,
+        "lead_in": 0.12
       }
     },
     {
-      "chapter": "Basics"
+      "chapter": "Basics",
+      "id": "filter.a-95f5554c81-1"
     },
     {
       "caption": "Type to filter",
-      "sub": "Typing in a list shows only the names containing what you type. Case is ignored"
+      "sub": "Typing in a list shows only the names containing what you type. Case is ignored",
+      "id": "filter.a-8d81f8f4db-1",
+      "presentation": {
+        "id": "filter.type-to-filter",
+        "title": "Type to filter",
+        "narration": "Type to filter. Typing in a list shows only the names containing what you type. Case is ignored.",
+        "trailing_hold": 0.35,
+        "lead_in": 0.12
+      }
     },
     {
-      "type": "night"
+      "type": "night",
+      "id": "filter.a-676f1a9236-1"
     },
     {
       "wait": {
@@ -34,7 +52,8 @@
           "side": "left",
           "is": "night"
         }
-      }
+      },
+      "id": "filter.a-385b9b2ac1-1"
     },
     {
       "expect": {
@@ -42,18 +61,29 @@
           "side": "left",
           "count": 1
         }
-      }
+      },
+      "id": "filter.a-a3a0627904-1"
     },
     {
       "highlight": "pane.left.filter",
-      "hold": 1600
+      "hold": 1600,
+      "id": "filter.a-89fa75abcf-1"
     },
     {
-      "unhighlight": true
+      "unhighlight": true,
+      "id": "filter.a-c572606fa8-1"
     },
     {
       "caption": "Backspace edits it",
-      "sub": ""
+      "sub": "",
+      "id": "filter.a-38409cd1c5-1",
+      "presentation": {
+        "id": "filter.backspace-edits-it",
+        "title": "Backspace edits it",
+        "narration": "Backspace edits it.",
+        "trailing_hold": 0.35,
+        "lead_in": 0.12
+      }
     },
     {
       "keys": [
@@ -63,7 +93,8 @@
         "Backspace",
         "Backspace"
       ],
-      "gap": 160
+      "gap": 160,
+      "id": "filter.a-c7635cea0f-1"
     },
     {
       "wait": {
@@ -71,10 +102,12 @@
           "side": "left",
           "is": ""
         }
-      }
+      },
+      "id": "filter.a-17c1923773-1"
     },
     {
-      "type": "jpg"
+      "type": "jpg",
+      "id": "filter.a-2d242b8f1b-1"
     },
     {
       "wait": {
@@ -82,28 +115,48 @@
           "side": "left",
           "count": 8
         }
-      }
+      },
+      "id": "filter.a-64572bf91f-1"
     },
     {
       "highlight": "pane.left.status",
-      "hold": 1800
+      "hold": 1800,
+      "id": "filter.a-3182923ad3-1"
     },
     {
-      "unhighlight": true
+      "unhighlight": true,
+      "id": "filter.a-c572606fa8-2"
     },
     {
       "caption": "Some keys are commands",
       "sub": "Keys bound to commands, such as Space, + and ?, run them instead. Rebind them to filter with them",
-      "hold": 2600
+      "hold": 2600,
+      "id": "filter.a-38faaff6a2-1",
+      "presentation": {
+        "id": "filter.some-keys-are-commands",
+        "title": "Some keys are commands",
+        "narration": "Some keys are commands. Keys bound to commands, such as Space, + and ?, run them instead. Rebind them to filter with them.",
+        "trailing_hold": 0.35,
+        "lead_in": 0.12
+      }
     },
     {
       "caption": "A new folder starts unfiltered",
-      "sub": ""
+      "sub": "",
+      "id": "filter.a-16a0487bb6-1",
+      "presentation": {
+        "id": "filter.a-new-folder-starts-unfiltered",
+        "title": "A new folder starts unfiltered",
+        "narration": "A new folder starts unfiltered.",
+        "trailing_hold": 0.35,
+        "lead_in": 0.12
+      }
     },
     {
       "keys": [
         "@leave_dir"
-      ]
+      ],
+      "id": "filter.a-1c3562a1da-1"
     },
     {
       "wait": {
@@ -111,7 +164,8 @@
           "side": "left",
           "ends_with": "/home"
         }
-      }
+      },
+      "id": "filter.a-c439cbe446-1"
     },
     {
       "expect": {
@@ -119,10 +173,12 @@
           "side": "left",
           "is": ""
         }
-      }
+      },
+      "id": "filter.a-d0fc6005bf-1"
     },
     {
-      "uncaption": true
+      "uncaption": true,
+      "id": "filter.a-4df2c52c18-1"
     }
   ]
 }

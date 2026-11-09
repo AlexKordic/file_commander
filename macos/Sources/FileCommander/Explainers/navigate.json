@@ -20,28 +20,48 @@
         "left": "{home}",
         "right": "{home}/projects",
         "focus": "left"
+      },
+      "id": "navigate.a-ccd2fa9b7a-1",
+      "presentation": {
+        "id": "navigate.introduction",
+        "title": "Move around",
+        "narration": "Let us explore how to move through folders with the keyboard and the path bar.",
+        "trailing_hold": 0.35,
+        "lead_in": 0.12
       }
     },
     {
-      "chapter": "Basics"
+      "chapter": "Basics",
+      "id": "navigate.a-95f5554c81-1"
     },
     {
       "caption": "Open a folder",
-      "sub": "Move the cursor with the arrow keys, then Open. Double-click works too"
+      "sub": "Move the cursor with the arrow keys, then Open. Double-click works too",
+      "id": "navigate.a-3e75ce4dd6-1",
+      "presentation": {
+        "id": "navigate.open-a-folder",
+        "title": "Open a folder",
+        "narration": "Move the cursor to a folder and press Enter to open it. You can also open folders with a double click.",
+        "trailing_hold": 0.35,
+        "lead_in": 0.12
+      }
     },
     {
       "cursor": {
         "side": "left",
         "name": "photos"
-      }
+      },
+      "id": "navigate.a-a77aea6979-1"
     },
     {
-      "pause": 600
+      "pause": 600,
+      "id": "navigate.a-79e624f018-1"
     },
     {
       "keys": [
         "@enter_dir"
-      ]
+      ],
+      "id": "navigate.a-3547fcf013-1"
     },
     {
       "wait": {
@@ -49,7 +69,8 @@
           "side": "left",
           "ends_with": "/photos"
         }
-      }
+      },
+      "id": "navigate.a-382c09a029-1"
     },
     {
       "expect": {
@@ -57,16 +78,26 @@
           "side": "left",
           "contains": "2026"
         }
-      }
+      },
+      "id": "navigate.a-219e63f91d-1"
     },
     {
       "caption": "Back up",
-      "sub": "Enclosing Folder goes to the parent and puts the cursor on the folder you came from"
+      "sub": "Enclosing Folder goes to the parent and puts the cursor on the folder you came from",
+      "id": "navigate.a-089820a540-1",
+      "presentation": {
+        "id": "navigate.back-up",
+        "title": "Back up",
+        "narration": "Go to the enclosing folder to move up one level. The cursor returns to the folder you just left.",
+        "trailing_hold": 0.35,
+        "lead_in": 0.12
+      }
     },
     {
       "keys": [
         "@leave_dir"
-      ]
+      ],
+      "id": "navigate.a-1c3562a1da-1"
     },
     {
       "wait": {
@@ -74,7 +105,8 @@
           "side": "left",
           "ends_with": "/home"
         }
-      }
+      },
+      "id": "navigate.a-c439cbe446-1"
     },
     {
       "wait": {
@@ -82,33 +114,54 @@
           "side": "left",
           "name": "photos"
         }
-      }
+      },
+      "id": "navigate.a-86dcb1160d-1"
     },
     {
       "caption": "The path bar",
-      "sub": "Click any folder in the path to jump straight there"
+      "sub": "Click any folder in the path to jump straight there",
+      "id": "navigate.a-49cc9bab99-1",
+      "presentation": {
+        "id": "navigate.the-path-bar",
+        "title": "The path bar",
+        "narration": "The path bar shows where you are. Click any folder in the path to jump directly to that level.",
+        "trailing_hold": 0.35,
+        "lead_in": 0.12
+      }
     },
     {
       "highlight": "pane.left.path",
-      "hold": 1800
+      "hold": 1800,
+      "id": "navigate.a-2bde3b34d2-1"
     },
     {
-      "unhighlight": true
+      "unhighlight": true,
+      "id": "navigate.a-c572606fa8-1"
     },
     {
       "caption": "Show it in the other pane",
-      "sub": "Show in Right Pane opens the folder under the cursor on the right"
+      "sub": "Show in Right Pane opens the folder under the cursor on the right",
+      "id": "navigate.a-c4610e500c-1",
+      "presentation": {
+        "id": "navigate.show-it-in-the-other-pane",
+        "title": "Show it in the other pane",
+        "narration": "Keep your current pane in place and open the folder under the cursor in the opposite pane.",
+        "trailing_hold": 0.35,
+        "lead_in": 0.12
+      }
     },
     {
       "cursor": {
         "side": "left",
         "name": "music"
-      }
+      },
+      "id": "navigate.a-85d98d2ccf-1"
     },
     {
       "keys": [
         "@target_right"
-      ]
+      ],
+      "id": "navigate.a-3bfc08fd87-1"
     },
     {
       "wait": {
@@ -116,25 +169,37 @@
           "side": "right",
           "ends_with": "/music"
         }
-      }
+      },
+      "id": "navigate.a-9cdaae0250-1"
     },
     {
-      "focus": "right"
+      "focus": "right",
+      "id": "navigate.a-95ef89dd41-1"
     },
     {
       "cursor": {
         "side": "right",
         "name": "Field Notes"
-      }
+      },
+      "id": "navigate.a-bcf8e9f5e9-1"
     },
     {
       "caption": "And the other way",
-      "sub": "Show in Left Pane does the same for the left pane"
+      "sub": "Show in Left Pane does the same for the left pane",
+      "id": "navigate.a-ec7e619ccb-1",
+      "presentation": {
+        "id": "navigate.and-the-other-way",
+        "title": "And the other way",
+        "narration": "The same command works in either direction, so you can arrange a source and destination quickly.",
+        "trailing_hold": 0.35,
+        "lead_in": 0.12
+      }
     },
     {
       "keys": [
         "@target_left"
-      ]
+      ],
+      "id": "navigate.a-f4344c677f-1"
     },
     {
       "wait": {
@@ -142,34 +207,55 @@
           "side": "left",
           "ends_with": "/Field Notes"
         }
-      }
+      },
+      "id": "navigate.a-567db169d0-1"
     },
     {
-      "focus": "left"
+      "focus": "left",
+      "id": "navigate.a-fb32a2bed6-1"
     },
     {
       "caption": "Folders keep themselves up to date",
-      "sub": "FC watches the folder; Refresh reads it again on demand"
+      "sub": "FC watches the folder; Refresh reads it again on demand",
+      "id": "navigate.a-5608c1ae11-1",
+      "presentation": {
+        "id": "navigate.folders-keep-themselves-up-to-date",
+        "title": "Folders keep themselves up to date",
+        "narration": "File Commander watches folders for changes. Refresh also reads the directory again when you need it.",
+        "trailing_hold": 0.35,
+        "lead_in": 0.12
+      }
     },
     {
       "keys": [
         "@refresh_dir"
-      ]
+      ],
+      "id": "navigate.a-0740528ac4-1"
     },
     {
       "wait": {
         "loaded": "left"
-      }
+      },
+      "id": "navigate.a-0c677646f5-1"
     },
     {
       "caption": "Page by page",
-      "sub": "Page Up and Page Down (fn+↑ ↓ on a laptop) move the cursor a screenful; Home and End jump to the ends"
+      "sub": "Page Up and Page Down (fn+↑ ↓ on a laptop) move the cursor a screenful; Home and End jump to the ends",
+      "id": "navigate.a-cd571fad11-1",
+      "presentation": {
+        "id": "navigate.page-by-page",
+        "title": "Page by page",
+        "narration": "Page Up and Page Down move through a long list a screen at a time. Home and End jump to its beginning and end.",
+        "trailing_hold": 0.35,
+        "lead_in": 0.12
+      }
     },
     {
       "navigate": {
         "side": "left",
         "to": "{home}/projects/logs"
-      }
+      },
+      "id": "navigate.a-da37370bf9-1"
     },
     {
       "wait": {
@@ -177,25 +263,36 @@
           "side": "left",
           "count": 120
         }
-      }
+      },
+      "id": "navigate.a-85fa31081d-1"
     },
     {
       "keys": [
         "PageDown",
         "PageDown"
       ],
-      "gap": 600
+      "gap": 600,
+      "id": "navigate.a-4e9b55b3ec-1"
     },
     {
       "wait": {
         "cursor_visible": {
           "side": "left"
         }
-      }
+      },
+      "id": "navigate.a-7317b9f752-1"
     },
     {
       "caption": "Hold an arrow key",
-      "sub": "The list keeps the cursor in view; Settings › General › Cursor margin decides how far from the edge"
+      "sub": "The list keeps the cursor in view; Settings › General › Cursor margin decides how far from the edge",
+      "id": "navigate.a-58de99b211-1",
+      "presentation": {
+        "id": "navigate.hold-an-arrow-key",
+        "title": "Hold an arrow key",
+        "narration": "Hold an arrow key to move continuously. The list scrolls to keep the cursor in view.",
+        "trailing_hold": 0.35,
+        "lead_in": 0.12
+      }
     },
     {
       "keys": [
@@ -240,22 +337,26 @@
         "Down",
         "Down"
       ],
-      "gap": 35
+      "gap": 35,
+      "id": "navigate.a-cf2cf8e1ac-1"
     },
     {
       "wait": {
         "cursor_visible": {
           "side": "left"
         }
-      }
+      },
+      "id": "navigate.a-7317b9f752-2"
     },
     {
-      "pause": 600
+      "pause": 600,
+      "id": "navigate.a-79e624f018-2"
     },
     {
       "keys": [
         "End"
-      ]
+      ],
+      "id": "navigate.a-67079929c1-1"
     },
     {
       "wait": {
@@ -263,19 +364,22 @@
           "side": "left",
           "name": "2026-08-28.log"
         }
-      }
+      },
+      "id": "navigate.a-084b0a1ef7-1"
     },
     {
       "wait": {
         "cursor_visible": {
           "side": "left"
         }
-      }
+      },
+      "id": "navigate.a-7317b9f752-3"
     },
     {
       "keys": [
         "Home"
-      ]
+      ],
+      "id": "navigate.a-4b9307ce6d-1"
     },
     {
       "wait": {
@@ -283,14 +387,16 @@
           "side": "left",
           "name": "2026-05-01.log"
         }
-      }
+      },
+      "id": "navigate.a-2c9e148a89-1"
     },
     {
       "wait": {
         "cursor_visible": {
           "side": "left"
         }
-      }
+      },
+      "id": "navigate.a-7317b9f752-4"
     },
     {
       "keys": [
@@ -325,7 +431,8 @@
         "Down",
         "Down"
       ],
-      "gap": 35
+      "gap": 35,
+      "id": "navigate.a-95cb893567-1"
     },
     {
       "keys": [
@@ -360,7 +467,8 @@
         "Up",
         "Up"
       ],
-      "gap": 35
+      "gap": 35,
+      "id": "navigate.a-65fb809c91-1"
     },
     {
       "wait": {
@@ -368,36 +476,49 @@
           "side": "left",
           "name": "2026-05-01.log"
         }
-      }
+      },
+      "id": "navigate.a-2c9e148a89-2"
     },
     {
       "wait": {
         "cursor_visible": {
           "side": "left"
         }
-      }
+      },
+      "id": "navigate.a-7317b9f752-5"
     },
     {
       "caption": "Archives open like folders",
-      "sub": "Open on a .zip file browses it, read-only. The Archives explainer shows more"
+      "sub": "Open on a .zip file browses it, read-only. The Archives explainer shows more",
+      "id": "navigate.a-a32f43c5f7-1",
+      "presentation": {
+        "id": "navigate.archives-open-like-folders",
+        "title": "Archives open like folders",
+        "narration": "Open a zip archive just like a folder to browse its contents. The archive lesson covers extraction and creation.",
+        "trailing_hold": 0.35,
+        "lead_in": 0.12
+      }
     },
     {
       "navigate": {
         "side": "left",
         "to": "{home}",
         "focus": "{home}/website-2025.zip"
-      }
+      },
+      "id": "navigate.a-2e0b781253-1"
     },
     {
       "cursor": {
         "side": "left",
         "name": "website-2025.zip"
-      }
+      },
+      "id": "navigate.a-e2ce5a085f-1"
     },
     {
       "keys": [
         "@enter_dir"
-      ]
+      ],
+      "id": "navigate.a-3547fcf013-2"
     },
     {
       "wait": {
@@ -406,19 +527,23 @@
           "contains": "app.js"
         }
       },
-      "timeout": 20
+      "timeout": 20,
+      "id": "navigate.a-22fd0a0f1f-1"
     },
     {
       "highlight": "pane.left.path",
-      "hold": 1800
+      "hold": 1800,
+      "id": "navigate.a-2bde3b34d2-2"
     },
     {
-      "unhighlight": true
+      "unhighlight": true,
+      "id": "navigate.a-c572606fa8-2"
     },
     {
       "keys": [
         "@leave_dir"
-      ]
+      ],
+      "id": "navigate.a-1c3562a1da-2"
     },
     {
       "wait": {
@@ -426,10 +551,12 @@
           "side": "left",
           "ends_with": "/home"
         }
-      }
+      },
+      "id": "navigate.a-c439cbe446-2"
     },
     {
-      "uncaption": true
+      "uncaption": true,
+      "id": "navigate.a-4df2c52c18-1"
     }
   ]
 }

@@ -20,44 +20,60 @@
         "left": "{home}/music",
         "right": "{home}/backup",
         "focus": "left"
+      },
+      "id": "pause_resume.a-a6c768f640-1",
+      "presentation": {
+        "id": "pause_resume.introduction",
+        "title": "Pause and resume",
+        "narration": "Pausing holds the whole queue; resume continues; cancel keeps what was copied.",
+        "trailing_hold": 0.35,
+        "lead_in": 0.12
       }
     },
     {
-      "chapter": "Jobs"
+      "chapter": "Jobs",
+      "id": "pause_resume.a-8d2ea1a532-1"
     },
     {
-      "set_transfer_speed": "4 MiB"
+      "set_transfer_speed": "4 MiB",
+      "id": "pause_resume.a-1ec3f0788b-1"
     },
     {
       "cursor": {
         "side": "left",
         "name": "Night Drive"
-      }
+      },
+      "id": "pause_resume.a-aca7e46b8d-1"
     },
     {
       "keys": [
         "@copy"
-      ]
+      ],
+      "id": "pause_resume.a-76288993ef-1"
     },
     {
       "wait": {
         "sheet": "copy"
-      }
+      },
+      "id": "pause_resume.a-ffb688e0c0-1"
     },
     {
       "wait": {
         "anchor": "sheet.copy.start"
-      }
+      },
+      "id": "pause_resume.a-8febfbdaf6-1"
     },
     {
       "click": "sheet.copy.start",
-      "as_job": "music"
+      "as_job": "music",
+      "id": "pause_resume.a-6465298df0-1"
     },
     {
       "wait": {
         "sheet": null
       },
-      "timeout": 30
+      "timeout": 30,
+      "id": "pause_resume.a-c11a2e6caa-1"
     },
     {
       "wait": {
@@ -67,14 +83,24 @@
           "progress_at_least": 0.08
         }
       },
-      "timeout": 30
+      "timeout": 30,
+      "id": "pause_resume.a-5507046b08-1"
     },
     {
       "caption": "Pause",
-      "sub": "Pause holds the job between two reads"
+      "sub": "Pause holds the job between two reads",
+      "id": "pause_resume.a-cb288406b6-1",
+      "presentation": {
+        "id": "pause_resume.pause",
+        "title": "Pause",
+        "narration": "Pause. Pause holds the job between two reads.",
+        "trailing_hold": 0.35,
+        "lead_in": 0.12
+      }
     },
     {
-      "click": "jobs.bar.pause"
+      "click": "jobs.bar.pause",
+      "id": "pause_resume.a-ff21553b04-1"
     },
     {
       "wait": {
@@ -82,50 +108,67 @@
           "name": "music",
           "state": "paused"
         }
-      }
+      },
+      "id": "pause_resume.a-c6cff357c3-1"
     },
     {
       "caption": "Queued jobs wait",
-      "sub": "Jobs run one at a time, so a paused job holds the queue"
+      "sub": "Jobs run one at a time, so a paused job holds the queue",
+      "id": "pause_resume.a-c8b3293292-1",
+      "presentation": {
+        "id": "pause_resume.queued-jobs-wait",
+        "title": "Queued jobs wait",
+        "narration": "Queued jobs wait. Jobs run one at a time, so a paused job holds the queue.",
+        "trailing_hold": 0.35,
+        "lead_in": 0.12
+      }
     },
     {
       "cursor": {
         "side": "left",
         "name": "Field Notes"
-      }
+      },
+      "id": "pause_resume.a-649f5e61f0-1"
     },
     {
       "keys": [
         "@copy"
-      ]
+      ],
+      "id": "pause_resume.a-76288993ef-2"
     },
     {
       "wait": {
         "sheet": "copy"
-      }
+      },
+      "id": "pause_resume.a-ffb688e0c0-2"
     },
     {
       "wait": {
         "anchor": "sheet.copy.start"
-      }
+      },
+      "id": "pause_resume.a-8febfbdaf6-2"
     },
     {
       "click": "sheet.copy.start",
-      "as_job": "notes"
+      "as_job": "notes",
+      "id": "pause_resume.a-557023e552-1"
     },
     {
       "wait": {
         "sheet": null
       },
-      "timeout": 30
+      "timeout": 30,
+      "id": "pause_resume.a-c11a2e6caa-2"
     },
     {
       "wait": {
         "queued_at_least": 1
-      }
+      },
+      "id": "pause_resume.a-63a72df2c0-1"
     },
     {
-      "pause": 1500
+      "pause": 1500,
+      "id": "pause_resume.a-c25a6c3880-1"
     },
     {
       "try": {
@@ -142,7 +185,8 @@
             "click": "jobs.bar.pause"
           }
         ]
-      }
+      },
+      "id": "pause_resume.a-235272fc29-1"
     },
     {
       "wait": {
@@ -151,7 +195,8 @@
           "state": "running"
         }
       },
-      "timeout": 10
+      "timeout": 10,
+      "id": "pause_resume.a-d29ac3498c-1"
     },
     {
       "wait": {
@@ -159,14 +204,24 @@
           "exists": "{home}/backup/Night Drive/01 Neon Rain.flac"
         }
       },
-      "timeout": 60
+      "timeout": 60,
+      "id": "pause_resume.a-8ab5f71fed-1"
     },
     {
       "caption": "Cancel keeps what is done",
-      "sub": "Finished files stay; cancelling is not an undo"
+      "sub": "Finished files stay; cancelling is not an undo",
+      "id": "pause_resume.a-90de446adb-1",
+      "presentation": {
+        "id": "pause_resume.cancel-keeps-what-is-done",
+        "title": "Cancel keeps what is done",
+        "narration": "Cancel keeps what is done. Finished files stay; cancelling is not an undo.",
+        "trailing_hold": 0.35,
+        "lead_in": 0.12
+      }
     },
     {
-      "click": "jobs.bar.cancel"
+      "click": "jobs.bar.cancel",
+      "id": "pause_resume.a-24da8c5554-1"
     },
     {
       "wait": {
@@ -174,21 +229,32 @@
           "name": "music",
           "state": "cancelled"
         }
-      }
+      },
+      "id": "pause_resume.a-04416fbe57-1"
     },
     {
       "expect": {
         "file": {
           "exists": "{home}/backup/Night Drive/01 Neon Rain.flac"
         }
-      }
+      },
+      "id": "pause_resume.a-52e66f5a11-1"
     },
     {
       "caption": "The next job starts",
-      "sub": "The queued copy runs now"
+      "sub": "The queued copy runs now",
+      "id": "pause_resume.a-32b32634c7-1",
+      "presentation": {
+        "id": "pause_resume.the-next-job-starts",
+        "title": "The next job starts",
+        "narration": "The next job starts. The queued copy runs now.",
+        "trailing_hold": 0.35,
+        "lead_in": 0.12
+      }
     },
     {
-      "set_transfer_speed": 0
+      "set_transfer_speed": 0,
+      "id": "pause_resume.a-3dc76a5a2d-1"
     },
     {
       "wait": {
@@ -197,10 +263,12 @@
           "state": "finished"
         }
       },
-      "timeout": 60
+      "timeout": 60,
+      "id": "pause_resume.a-fac86e33ab-1"
     },
     {
-      "uncaption": true
+      "uncaption": true,
+      "id": "pause_resume.a-4df2c52c18-1"
     }
   ]
 }

@@ -48,6 +48,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
       let app = AppController.shared
       app.applyAppearance()
       let arguments = CommandLine.arguments
+      if let index = arguments.firstIndex(of: "--record-session"), index + 1 < arguments.count {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+          app.tutorial.recordTake(configuration: URL(fileURLWithPath: arguments[index + 1]))
+        }
+      }
       if let index = arguments.firstIndex(of: "--run-explainer"), index + 1 < arguments.count {
         app.tutorial.quitWhenDone = true
         if let speed = arguments.firstIndex(of: "--speed").flatMap({ $0 + 1 < arguments.count ? Double(arguments[$0 + 1]) : nil }) {

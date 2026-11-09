@@ -260,6 +260,12 @@ after asking. Both continue by themselves after the restart. The *Copy names
 and paths* and *Multiple cursors* explainers put demo paths on your
 clipboard.
 
+**Help › Record Tutorial…** turns selected lessons into timestamped images,
+measured voice narration, a video and a standalone HTML chapter/step player.
+Resize the main window before recording to choose the video resolution. Export
+uses a separate disposable app/editor session, including both recovery lessons.
+See [tutorial_recording.md](tutorial_recording.md) for requirements and outputs.
+
 ## Settings and the profile
 
 The app uses the same profile as the terminal interface:

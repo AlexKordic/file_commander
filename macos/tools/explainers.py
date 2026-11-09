@@ -6,9 +6,37 @@ less JSON noise. Run it after editing, then check them with check_explainers.py.
 Keys written "@command" press whatever key the user's preset binds to it.
 """
 import json
+import re
 from pathlib import Path
 
 OUT = Path(__file__).resolve().parents[1] / 'Sources/FileCommander/Explainers'
+
+# Spoken explanations can differ from short on-screen captions. The remaining
+# captions use their title and explanatory subtitle as the authored first draft.
+NARRATION = {
+    'navigate.introduction': 'Let us explore how to move through folders with the keyboard and the path bar.',
+    'navigate.open-a-folder': 'Move the cursor to a folder and press Enter to open it. You can also open folders with a double click.',
+    'navigate.back-up': 'Go to the enclosing folder to move up one level. The cursor returns to the folder you just left.',
+    'navigate.the-path-bar': 'The path bar shows where you are. Click any folder in the path to jump directly to that level.',
+    'navigate.show-it-in-the-other-pane': 'Keep your current pane in place and open the folder under the cursor in the opposite pane.',
+    'navigate.and-the-other-way': 'The same command works in either direction, so you can arrange a source and destination quickly.',
+    'navigate.folders-keep-themselves-up-to-date': 'File Commander watches folders for changes. Refresh also reads the directory again when you need it.',
+    'navigate.page-by-page': 'Page Up and Page Down move through a long list a screen at a time. Home and End jump to its beginning and end.',
+    'navigate.hold-an-arrow-key': 'Hold an arrow key to move continuously. The list scrolls to keep the cursor in view.',
+    'navigate.archives-open-like-folders': 'Open a zip archive just like a folder to browse its contents. The archive lesson covers extraction and creation.',
+    'copy.introduction': 'We will copy photos to a backup folder while continuing to use the file manager.',
+    'copy.copy-to-the-other-pane': 'Select the photos you want to copy. The folder in the other pane becomes the initial destination.',
+    'copy.see-it-before-it-happens': 'Before the transfer starts, review exactly which files will be copied and their total size.',
+    'copy.where-and-how': 'You can change the destination, choose how links are handled, and decide what to do with files that already exist.',
+    'copy.it-runs-in-the-background': 'The copy runs as a background job. Its progress appears below the panes, while browsing stays available.',
+    'copy.copy-again-skip-existing': 'When you copy the same selection again, Skip Existing keeps files that are already in the backup.',
+    'copy.safe-by-design': 'A copied file is written under a temporary name, then renamed into place when complete. An incomplete copy does not replace a finished file.',
+    'editor_basics.introduction': 'Fresh shares File Commander’s window and keeps its own tabs and unsaved text.',
+    'editor_basics.open-files-in-the-editor': 'Open a file in Fresh to replace the file panes with the editor. The file opens as an editor tab.',
+    'editor_basics.edit': 'Edit normally with syntax colors, search, and multiple cursors. File Commander leaves the lifetime of editor tabs to Fresh.',
+    'editor_basics.switch-back': 'Press F10 to return to the file panes. Switching back keeps the editor session running.',
+    'editor_basics.unsaved-text-survives': 'Return to the editor and your unsaved changes are still there. Switching views hides the editor without closing its tabs.',
+}
 
 
 def cap(title, sub='', **kw):
@@ -518,6 +546,25 @@ E['editor_terminal'] = dict(
            wait({'cursor': {'side': 'left', 'name': 'ideas.md'}}), {'set_preference': {'terminal_editor': False}},
            {'pause': 600}, {'uncaption': True}])
 
+E['editor_compose'] = dict(
+    title='Markdown Compose', order=24, duration=65, chapter='editor', needs={'editor': True},
+    summary='Read and edit Markdown with proportional text, larger headings, images and tables, using the available pane width.',
+    steps=[tabs('{home}/projects/notes', '{home}/camera'), {'chapter': 'Editor'},
+           cap('Start with Markdown', 'One file can be read as source or edited as a composed page'),
+           cursor('left', 'compose.md'), keys('@open_in_editor'), wait({'editor': {'running': True}}, timeout=25),
+           wait({'editor': {'contains': 'Field Notes'}}, timeout=25),
+           cap('Open Compose', 'The editor palette contains Markdown: Toggle Compose/Preview'),
+           {'editor_keys': ['Cmd+Shift+P']}, wait({'editor': {'shows': 'palette'}}, timeout=10),
+           {'editor_type': 'toggle compose'}, {'pause': 500}, {'editor_keys': ['Enter']},
+           wait({'editor': {'compose': True}}, timeout=25),
+           cap('Room for the page', 'Proportional text and larger headings use the available pane width'), {'pause': 1800},
+           cap('Edit in place', 'Typing changes the Markdown document while the composed view stays visible'),
+           {'editor_keys': ['End']}, {'editor_type': ' — draft'}, wait({'editor': {'contains': 'draft'}}, timeout=15),
+           cap('Images and tables', 'Images and measured table cells are part of the document flow'),
+           {'editor_keys': ['PageDown']}, {'pause': 2000},
+           cap('Back to the files', 'The editor keeps this document and its unsaved changes'),
+           {'editor_keys': ['F10']}, wait({'editor': {'running': False}}, timeout=10), {'uncaption': True}])
+
 E['palette_keys'] = dict(
     title='Commands and keys', order=24, duration=55, chapter='yours',
     summary='Find any command in the palette, rebind its key, and pick a key preset.',
@@ -601,12 +648,19 @@ E['crash_recovery'] = dict(
 
 
 def main():
+    import sys
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'tools'))
+    from tutorial_media.authoring import with_presentations, spoken
     OUT.mkdir(parents=True, exist_ok=True)
     for path in OUT.glob('*.json'):
         if path.name != 'chapters.json':
             path.unlink()
     for id, body in E.items():
-        script = {'id': id, **body}
+        # Keep existing chapters together after the new Compose lesson.
+        if id != 'editor_compose' and body.get('order', 0) >= 24:
+            body = {**body, 'order': body['order'] + 1}
+        script = with_presentations({'id': id, **body}, narration=NARRATION,
+                                    speech_transform=lambda text: spoken(re.sub(r'\bFC\b', 'File Commander', text)))
         (OUT / f'{id}.json').write_text(json.dumps(script, indent=2, ensure_ascii=False) + '\n')
     print(f'wrote {len(E)} explainers to {OUT}')
 

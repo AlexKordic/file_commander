@@ -19,70 +19,106 @@
         "left": "{home}/camera",
         "right": "{home}/projects/website",
         "focus": "left"
+      },
+      "id": "editor_multicursor.a-8d4955868f-1",
+      "presentation": {
+        "id": "editor_multicursor.introduction",
+        "title": "Multiple cursors",
+        "narration": "Paste photo paths into code, then edit every line at once with multiple cursors.",
+        "trailing_hold": 0.35,
+        "lead_in": 0.12
       }
     },
     {
-      "chapter": "Editor"
+      "chapter": "Editor",
+      "id": "editor_multicursor.a-33e07ec139-1"
     },
     {
       "caption": "Copy the photo paths",
-      "sub": "Select the photos and Copy Paths"
+      "sub": "Select the photos and Copy Paths",
+      "id": "editor_multicursor.a-f82598f24b-1",
+      "presentation": {
+        "id": "editor_multicursor.copy-the-photo-paths",
+        "title": "Copy the photo paths",
+        "narration": "Copy the photo paths. Select the photos and Copy Paths.",
+        "trailing_hold": 0.35,
+        "lead_in": 0.12
+      }
     },
     {
       "keys": [
         "@glob_select"
-      ]
+      ],
+      "id": "editor_multicursor.a-d9874f6ca6-1"
     },
     {
       "wait": {
         "glob": true
-      }
+      },
+      "id": "editor_multicursor.a-1efa89e6ff-1"
     },
     {
       "wait": {
         "text_focus": true
-      }
+      },
+      "id": "editor_multicursor.a-0be37b237d-1"
     },
     {
-      "type": "*.jpg"
+      "type": "*.jpg",
+      "id": "editor_multicursor.a-af89ee575e-1"
     },
     {
       "keys": [
         "Enter"
-      ]
+      ],
+      "id": "editor_multicursor.a-332a45bb8d-1"
     },
     {
       "wait": {
         "glob": false
-      }
+      },
+      "id": "editor_multicursor.a-ccea205bb8-1"
     },
     {
       "keys": [
         "@paths_to_clipboard"
-      ]
+      ],
+      "id": "editor_multicursor.a-a0280e1403-1"
     },
     {
       "wait": {
         "hud": "8 paths copied"
-      }
+      },
+      "id": "editor_multicursor.a-6624c6d072-1"
     },
     {
       "caption": "Open the code",
-      "sub": "app.js builds the photo grid"
+      "sub": "app.js builds the photo grid",
+      "id": "editor_multicursor.a-ffbcada99b-1",
+      "presentation": {
+        "id": "editor_multicursor.open-the-code",
+        "title": "Open the code",
+        "narration": "Open the code. app.js builds the photo grid.",
+        "trailing_hold": 0.35,
+        "lead_in": 0.12
+      }
     },
     {
-      "focus": "right"
+      "focus": "right",
+      "id": "editor_multicursor.a-95ef89dd41-1"
     },
     {
       "cursor": {
         "side": "right",
         "name": "app.js"
-      }
+      },
+      "id": "editor_multicursor.a-d98d4d120a-1"
     },
     {
       "keys": [
         "@open_in_editor"
-      ]
+      ],
+      "id": "editor_multicursor.a-416334d49e-1"
     },
     {
       "wait": {
@@ -90,7 +126,8 @@
           "contains": "Builds the photo grid"
         }
       },
-      "timeout": 25
+      "timeout": 25,
+      "id": "editor_multicursor.a-894a4f66cf-1"
     },
     {
       "wait": {
@@ -98,56 +135,88 @@
           "window": "main"
         }
       },
-      "timeout": 5
+      "timeout": 5,
+      "id": "editor_multicursor.a-2de7a75908-1"
     },
     {
       "caption": "Paste them as an array",
-      "sub": ""
+      "sub": "",
+      "id": "editor_multicursor.a-cb72b36485-1",
+      "presentation": {
+        "id": "editor_multicursor.paste-them-as-an-array",
+        "title": "Paste them as an array",
+        "narration": "Paste them as an array.",
+        "trailing_hold": 0.35,
+        "lead_in": 0.12
+      }
     },
     {
       "editor_keys": [
         "Down",
         "Down",
         "Down"
-      ]
+      ],
+      "id": "editor_multicursor.a-2313ce0a4e-1"
     },
     {
-      "editor_type": "const photos = ["
+      "editor_type": "const photos = [",
+      "id": "editor_multicursor.a-2341c96557-1"
     },
     {
       "editor_keys": [
         "Enter",
         "Ctrl+V"
-      ]
+      ],
+      "id": "editor_multicursor.a-f1824f0a8b-1"
     },
     {
       "wait": {
         "editor": {
           "contains": "street-musicians\\.jpg"
         }
-      }
+      },
+      "id": "editor_multicursor.a-9ff9b34b38-1"
     },
     {
       "editor_keys": [
         "Enter"
-      ]
+      ],
+      "id": "editor_multicursor.a-b748c133a3-1"
     },
     {
-      "editor_type": "];"
+      "editor_type": "];",
+      "id": "editor_multicursor.a-2d7c8da652-1"
     },
     {
       "caption": "Select the common prefix with the mouse",
-      "sub": ""
+      "sub": "",
+      "id": "editor_multicursor.a-59013d9bdb-1",
+      "presentation": {
+        "id": "editor_multicursor.select-the-common-prefix-with-the-mouse",
+        "title": "Select the common prefix with the mouse",
+        "narration": "Select the common prefix with the mouse.",
+        "trailing_hold": 0.35,
+        "lead_in": 0.12
+      }
     },
     {
       "drag": {
         "from": "editor.text[{home}/camera/]",
         "to": "editor.text[{home}/camera/]"
-      }
+      },
+      "id": "editor_multicursor.a-33365cc4a5-1"
     },
     {
       "caption": "Every line at once",
-      "sub": "Ctrl+D adds a cursor at the next match"
+      "sub": "Ctrl+D adds a cursor at the next match",
+      "id": "editor_multicursor.a-3f00091806-1",
+      "presentation": {
+        "id": "editor_multicursor.every-line-at-once",
+        "title": "Every line at once",
+        "narration": "Every line at once. Ctrl+D adds a cursor at the next match.",
+        "trailing_hold": 0.35,
+        "lead_in": 0.12
+      }
     },
     {
       "editor_keys": [
@@ -159,62 +228,82 @@
         "Ctrl+D",
         "Ctrl+D"
       ],
-      "gap": 280
+      "gap": 280,
+      "id": "editor_multicursor.a-b73169dcf2-1"
     },
     {
       "editor_keys": [
         "Backspace"
-      ]
+      ],
+      "id": "editor_multicursor.a-0c03064c28-1"
     },
     {
       "caption": "End and Home move every cursor",
-      "sub": "Quote each name, whatever its length"
+      "sub": "Quote each name, whatever its length",
+      "id": "editor_multicursor.a-d046be23dc-1",
+      "presentation": {
+        "id": "editor_multicursor.end-and-home-move-every-cursor",
+        "title": "End and Home move every cursor",
+        "narration": "End and Home move every cursor. Quote each name, whatever its length.",
+        "trailing_hold": 0.35,
+        "lead_in": 0.12
+      }
     },
     {
       "editor_keys": [
         "End"
-      ]
+      ],
+      "id": "editor_multicursor.a-2dd302cb33-1"
     },
     {
-      "editor_type": "\","
+      "editor_type": "\",",
+      "id": "editor_multicursor.a-c949e0b9ed-1"
     },
     {
       "editor_keys": [
         "Home"
-      ]
+      ],
+      "id": "editor_multicursor.a-53fc8236d3-1"
     },
     {
-      "editor_type": "\""
+      "editor_type": "\"",
+      "id": "editor_multicursor.a-357c676a8e-1"
     },
     {
       "editor_keys": [
         "Home",
         "Tab",
         "Esc"
-      ]
+      ],
+      "id": "editor_multicursor.a-980c59021c-1"
     },
     {
       "wait": {
         "editor": {
           "contains": "\"lighthouse\\.jpg\","
         }
-      }
+      },
+      "id": "editor_multicursor.a-6286ed97b5-1"
     },
     {
-      "pause": 1500
+      "pause": 1500,
+      "id": "editor_multicursor.a-c25a6c3880-1"
     },
     {
       "editor_keys": [
         "Ctrl+S"
-      ]
+      ],
+      "id": "editor_multicursor.a-22e679a8d8-1"
     },
     {
-      "pause": 600
+      "pause": 600,
+      "id": "editor_multicursor.a-79e624f018-1"
     },
     {
       "editor_keys": [
         "F10"
-      ]
+      ],
+      "id": "editor_multicursor.a-cc9ffb3357-1"
     },
     {
       "wait": {
@@ -222,10 +311,12 @@
           "running": false
         }
       },
-      "timeout": 10
+      "timeout": 10,
+      "id": "editor_multicursor.a-df0d45c496-1"
     },
     {
-      "uncaption": true
+      "uncaption": true,
+      "id": "editor_multicursor.a-4df2c52c18-1"
     }
   ]
 }

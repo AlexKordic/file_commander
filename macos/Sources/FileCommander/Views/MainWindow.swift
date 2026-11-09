@@ -176,8 +176,8 @@ struct Sidebar: View {
         }
       }
       Section(isExpanded: expanded("locations")) {
-        SidebarRow(title: "Home", subtitle: NSHomeDirectory(), icon: "house") {
-          app.engine.navigate(app.engine.focusedSide, to: NSHomeDirectory())
+        SidebarRow(title: "Home", subtitle: app.presentedHomeDirectory, icon: "house") {
+          app.engine.navigate(app.engine.focusedSide, to: app.presentedHomeDirectory)
         }
         ForEach(volumes, id: \.path) { volume in
           SidebarRow(title: (try? volume.resourceValues(forKeys: [.volumeNameKey]).volumeName) ?? volume.lastPathComponent, subtitle: volume.path,
@@ -211,7 +211,7 @@ struct Sidebar: View {
   }
 
   private var volumes: [URL] {
-    FileManager.default.mountedVolumeURLs(includingResourceValuesForKeys: nil, options: [.skipHiddenVolumes]) ?? []
+    app.isTutorialRecording ? [] : (FileManager.default.mountedVolumeURLs(includingResourceValuesForKeys: nil, options: [.skipHiddenVolumes]) ?? [])
   }
 
   private func icon(_ kind: LocationKind, fallback: String) -> String {

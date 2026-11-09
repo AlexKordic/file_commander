@@ -1,0 +1,165 @@
+<!doctype html>
+<html lang="__LANGUAGE__">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>__TITLE__</title>
+<style>
+:root{color-scheme:light dark;font:16px/1.5 system-ui,sans-serif;background:#10141c;color:#f3f5fa}
+*{box-sizing:border-box}body{margin:0 auto;max-width:1200px;padding:24px}video{display:block;width:100%;height:auto;background:#05070a;border-radius:12px}
+button,a,input{font:inherit}button{color:inherit;background:#243047;border:1px solid #52627d;border-radius:7px;padding:.45rem .8rem;cursor:pointer}
+button:hover{background:#324563}button:disabled{opacity:.4;cursor:default}:focus-visible{outline:3px solid #ffd479;outline-offset:3px}a{color:#9ecbff}
+h1{font-size:1.6rem;margin:1.2rem 0 .3rem}h2{font-size:1.1rem}p{margin:.4rem 0}.controls{display:flex;align-items:center;gap:.65rem;flex-wrap:wrap;margin:1rem 0}
+nav{margin:1.2rem 0}.chapters{display:flex;flex-wrap:wrap;gap:.5rem}.chapter[aria-current=true],.step[aria-current=true]{border-color:#ffd479;background:#3c3424}
+.lesson{border-top:1px solid #3b4558;margin:1rem 0;padding-top:.5rem}.lesson>summary{cursor:pointer;padding:.4rem 0;font-weight:600}
+.step{display:flex;gap:1rem;justify-content:space-between;align-items:center;border:1px solid #344057;border-radius:8px;padding:.65rem;margin:.5rem 0}
+.time{font-variant-numeric:tabular-nums;color:#b7c2d8;font-size:.85rem;white-space:nowrap}.step p{font-size:.95rem;color:#d1d8e7}.step button{flex-shrink:0}
+.transcript{max-height:28rem;overflow:auto}.transcript button{display:block;width:100%;text-align:left;margin:.4rem 0;background:transparent}
+#status{min-height:1.5em;color:#ffd479}footer{margin:2rem 0;color:#b7c2d8;font-size:.85rem}@media(max-width:600px){body{padding:10px}.step{align-items:flex-start;gap:.5rem}.step button{font-size:.85rem}}
+@media(prefers-reduced-motion:reduce){*{scroll-behavior:auto!important}}
+</style>
+<body>
+<video id="video" controls playsinline preload="metadata" tabindex="0" poster="__POSTER__" aria-label="__TITLE__"></video>
+<nav aria-label="Tutorial chapters"><h2>Chapters</h2><div id="chapters" class="chapters"></div></nav>
+<h1>__TITLE__</h1>
+<p id="current" aria-live="polite" aria-atomic="true">Choose a chapter or step.</p>
+<div class="controls" role="group" aria-label="Playback controls">
+  <button id="playAll">Play tutorial</button><button id="pause">Pause / Resume</button>
+  <button id="previous">Previous step</button><button id="playStep">Play this step</button>
+  <button id="replay">Replay current step</button><button id="next">Next step</button>
+  <label><input id="continuous" type="checkbox"> Continue automatically</label>
+  <button id="captions" aria-pressed="false">Captions</button>
+  <label>Speed <select id="speed"><option value="0.5">0.5×</option><option value="1" selected>1×</option><option value="1.5">1.5×</option><option value="2">2×</option></select></label>
+</div>
+<p id="status" role="status"></p>
+<section id="lessons" aria-label="Lessons and steps"></section>
+<details><summary>Transcript</summary><div id="transcript" class="transcript"></div></details>
+<footer>Recorded application demonstrations. Step buttons replay the video; no application commands are executed.</footer>
+<script id="timeline" type="application/json">__TIMELINE__</script>
+<script id="captionsData" type="application/octet-stream">__CAPTIONS__</script>
+<script id="movieData" type="application/octet-stream">__MOVIE__</script>
+<script>
+'use strict';
+(() => {
+  const data=JSON.parse(document.getElementById('timeline').textContent), video=document.getElementById('video');
+  const steps=data.steps, byId=new Map(steps.map(s=>[s.id,s])), ns=1e9;
+  const element=id=>document.getElementById(id), status=message=>{element('status').textContent=message;};
+  let selected=0,generation=0,boundary=null,frameCallback=null,guardTimer=null,ownSeek=false,readyPromise=null,announced=null,lastBoundaryStop=null;
+  const urls=[];
+  function blobData(id,type){
+    const node=element(id),encoded=node.textContent.trim(),parts=[];
+    for(let at=0;at<encoded.length;at+=65536){
+      const raw=atob(encoded.slice(at,at+65536)),part=new Uint8Array(raw.length);
+      for(let n=0;n<raw.length;n++)part[n]=raw.charCodeAt(n);
+      parts.push(part);
+    }
+    node.textContent='';const url=URL.createObjectURL(new Blob(parts,{type}));urls.push(url);return url;
+  }
+  function format(seconds){const n=Math.max(0,Math.floor(seconds));return `${Math.floor(n/60)}:${String(n%60).padStart(2,'0')}`;}
+  function button(text,action){const b=document.createElement('button');b.type='button';b.textContent=text;b.addEventListener('click',()=>action().catch(fail));return b;}
+  function fail(error){status(error.message||String(error));}
+  function revealVideo(){video.scrollIntoView({block:'start',behavior:'auto'});video.focus({preventScroll:true});}
+  function select(index){
+    selected=Math.max(0,Math.min(steps.length-1,index));const step=steps[selected];
+    if(!step)return;
+    if(announced===selected)return;announced=selected;
+    element('current').textContent=`${step.title} · ${format(step.start_ns/ns)}–${format(step.end_ns/ns)}`;
+    document.querySelectorAll('.step').forEach(row=>row.setAttribute('aria-current',String(row.dataset.step===step.id)));
+    document.querySelectorAll('.chapter').forEach(row=>row.setAttribute('aria-current',String(row.dataset.chapter===step.chapter)));
+    element('previous').disabled=selected===0;element('next').disabled=selected===steps.length-1;
+  }
+  function indexAt(time){let i=steps.findIndex(s=>time>=s.start_ns/ns&&time<s.end_ns/ns);return i<0?selected:i;}
+  function cancelWatch(){
+    if(frameCallback!==null&&video.cancelVideoFrameCallback)video.cancelVideoFrameCallback(frameCallback);
+    frameCallback=null;if(guardTimer!==null)clearInterval(guardTimer);guardTimer=null;
+  }
+  function checkBoundary(time){
+    if(!boundary||boundary.generation!==generation)return;
+    if(time>=boundary.end-0.004){
+      const observed=Math.max(time,video.currentTime);
+      lastBoundaryStop={target:boundary.end,observed,error_ms:(observed-boundary.end)*1000,generation};
+      const end=boundary.end,start=boundary.start;boundary=null;video.pause();cancelWatch();
+      ownSeek=true;video.currentTime=Math.max(start,end-1/data.fps);
+      status('Step finished. Replay it or choose another step.');
+    }
+  }
+  function watch(){
+    cancelWatch();const token=generation;
+    function frame(_,metadata){if(token!==generation)return;checkBoundary(metadata.mediaTime);if(!video.paused&&token===generation)frameCallback=video.requestVideoFrameCallback(frame);}
+    if(video.requestVideoFrameCallback)frameCallback=video.requestVideoFrameCallback(frame);
+    guardTimer=setInterval(()=>{if(token===generation)checkBoundary(video.currentTime);},20);
+  }
+  async function ready(){
+    if(!video.src){
+      const external=__EXTERNAL_VIDEO__;
+      video.src=external||blobData('movieData','video/mp4');
+      const track=document.createElement('track');track.kind='captions';track.label=data.language||'en';track.srclang=data.language||'en';track.src=blobData('captionsData','text/vtt');video.append(track);
+    }
+    if(video.readyState>=1)return;
+    if(!readyPromise)readyPromise=new Promise((resolve,reject)=>{
+      const timer=setTimeout(()=>reject(new Error('Video metadata did not load.')),30000);
+      video.addEventListener('loadedmetadata',()=>{clearTimeout(timer);resolve();},{once:true});
+      video.addEventListener('error',()=>{clearTimeout(timer);reject(new Error('The browser could not decode the recorded video.'));},{once:true});
+    });
+    await readyPromise;
+  }
+  async function seek(time,token){
+    await ready();if(token!==generation)return false;
+    video.pause();cancelWatch();ownSeek=true;
+    if(Math.abs(video.currentTime-time)<.001&&!video.seeking){ownSeek=false;return true;}
+    await new Promise((resolve,reject)=>{
+      const timer=setTimeout(()=>{video.removeEventListener('seeked',done);reject(new Error('Seeking timed out.'));},10000);
+      function done(){clearTimeout(timer);video.removeEventListener('seeked',done);ownSeek=false;resolve();}
+      video.addEventListener('seeked',done);video.currentTime=Math.max(0,Math.min(time,video.duration));
+    });
+    return token===generation;
+  }
+  async function playStep(index,forceBounded=false){
+    const token=++generation;boundary=null;select(index);const step=steps[selected];status('');
+    lastBoundaryStop=null;
+    revealVideo();
+    if(!await seek(step.start_ns/ns,token))return;
+    if(forceBounded||!element('continuous').checked)boundary={generation:token,start:step.start_ns/ns,end:step.end_ns/ns};
+    location.hash=new URLSearchParams({step:step.id}).toString();await video.play();
+  }
+  async function jump(time,fragment={t:String(time)}){const token=++generation;boundary=null;status('');revealVideo();location.hash=new URLSearchParams(fragment).toString();if(await seek(time,token)){select(indexAt(time));await video.play();}}
+  async function neighbor(delta){const token=++generation;boundary=null;select(selected+delta);status('');await seek(steps[selected].start_ns/ns,token);}
+  element('playAll').onclick=async()=>{try{++generation;boundary=null;status('');await ready();await video.play();}catch(e){fail(e);}};
+  element('playStep').onclick=()=>playStep(selected).catch(fail);
+  element('replay').onclick=()=>playStep(selected,true).catch(fail);
+  element('previous').onclick=()=>neighbor(-1).catch(fail);element('next').onclick=()=>neighbor(1).catch(fail);
+  element('pause').onclick=async()=>{try{await ready();if(video.paused)await video.play();else video.pause();}catch(e){fail(e);}};
+  element('continuous').onchange=()=>{if(element('continuous').checked)boundary=null;else if(!video.paused){const s=steps[indexAt(video.currentTime)];boundary={generation,start:s.start_ns/ns,end:s.end_ns/ns};}};
+  element('speed').onchange=()=>{video.playbackRate=Number(element('speed').value);};
+  element('captions').onclick=async()=>{try{await ready();const showing=element('captions').getAttribute('aria-pressed')!=='true';for(const track of video.textTracks)track.mode=showing?'showing':'hidden';element('captions').setAttribute('aria-pressed',String(showing));}catch(e){fail(e);}};
+  video.addEventListener('play',watch);video.addEventListener('pause',cancelWatch);video.addEventListener('ended',cancelWatch);
+  video.addEventListener('seeked',()=>{ownSeek=false;});
+  video.addEventListener('seeking',()=>{if(!ownSeek){++generation;boundary=null;cancelWatch();}});
+  video.addEventListener('timeupdate',()=>{if(!boundary)select(indexAt(video.currentTime));checkBoundary(video.currentTime);});
+  for(const chapter of data.chapters){const b=button(chapter.title,()=>jump(chapter.start_ns/ns,{chapter:chapter.id}));b.className='chapter';b.dataset.chapter=chapter.id;element('chapters').append(b);}
+  for(const lesson of data.lessons){
+    const group=document.createElement('details');group.className='lesson';group.open=true;
+    const heading=document.createElement('summary');heading.textContent=lesson.title;group.append(heading);
+    group.append(button(`Watch lesson · ${format(lesson.start_ns/ns)}`,()=>jump(lesson.start_ns/ns)));
+    for(const step of steps.filter(s=>s.lesson===lesson.id)){
+      const row=document.createElement('div');row.className='step';row.dataset.step=step.id;
+      const description=document.createElement('div'),title=document.createElement('strong'),time=document.createElement('div'),text=document.createElement('p');
+      title.textContent=step.title;time.className='time';time.textContent=`${format(step.start_ns/ns)} · ${((step.end_ns-step.start_ns)/ns).toFixed(1)} s`;text.textContent=step.text;
+      description.append(title,time,text);row.append(description,button('Play this step',()=>playStep(steps.indexOf(step))));group.append(row);
+      element('transcript').append(button(`${format(step.start_ns/ns)} — ${step.text||step.title}`,()=>playStep(steps.indexOf(step))));
+    }
+    element('lessons').append(group);
+  }
+  select(0);
+  const fragment=new URLSearchParams(location.hash.slice(1));let initial=null;
+  if(byId.has(fragment.get('step')))initial=byId.get(fragment.get('step')).start_ns/ns;
+  else if(fragment.has('chapter'))initial=data.chapters.find(c=>c.id===fragment.get('chapter'))?.start_ns/ns;
+  else if(fragment.has('t')&&Number.isFinite(Number(fragment.get('t'))))initial=Math.max(0,Number(fragment.get('t')));
+  if(initial!==null&&initial!==undefined){const token=++generation;select(indexAt(initial));seek(initial,token).catch(fail);}
+  // Read-only diagnostics and explicit controls for automated browser qualification.
+  window.tutorialPlayer={data,playStep:(id)=>playStep(steps.findIndex(s=>s.id===id),true),jump,
+    get selected(){return steps[selected]?.id;},get boundary(){return boundary;},get lastBoundaryStop(){return lastBoundaryStop;},ready};
+  window.addEventListener('pagehide',()=>{cancelWatch();urls.forEach(url=>URL.revokeObjectURL(url));});
+})();
+</script>
+</body>
+</html>

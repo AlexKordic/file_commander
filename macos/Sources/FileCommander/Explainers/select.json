@@ -20,25 +20,44 @@
         "left": "{home}/camera",
         "right": "{home}/backup",
         "focus": "left"
+      },
+      "id": "select.a-77a7b51399-1",
+      "presentation": {
+        "id": "select.introduction",
+        "title": "Select files",
+        "narration": "Mark items with Space, by pattern, or all at once; commands act on the selection.",
+        "trailing_hold": 0.35,
+        "lead_in": 0.12
       }
     },
     {
-      "chapter": "Basics"
+      "chapter": "Basics",
+      "id": "select.a-95f5554c81-1"
     },
     {
       "set_preference": {
         "selection": "commander"
-      }
+      },
+      "id": "select.a-454145dce2-1"
     },
     {
       "caption": "Mark items",
-      "sub": "Select or Deselect marks the item under the cursor and moves down"
+      "sub": "Select or Deselect marks the item under the cursor and moves down",
+      "id": "select.a-28182c2467-1",
+      "presentation": {
+        "id": "select.mark-items",
+        "title": "Mark items",
+        "narration": "Mark items. Select or Deselect marks the item under the cursor and moves down.",
+        "trailing_hold": 0.35,
+        "lead_in": 0.12
+      }
     },
     {
       "cursor": {
         "side": "left",
         "name": "cathedral-steps.jpg"
-      }
+      },
+      "id": "select.a-42f212fda9-1"
     },
     {
       "keys": [
@@ -46,7 +65,8 @@
         "@select_toggle",
         "@select_toggle"
       ],
-      "gap": 380
+      "gap": 380,
+      "id": "select.a-a2878159dc-1"
     },
     {
       "wait": {
@@ -54,23 +74,35 @@
           "side": "left",
           "count": 3
         }
-      }
+      },
+      "id": "select.a-efbdc89f28-1"
     },
     {
       "highlight": "pane.left.status.selection",
-      "hold": 1600
+      "hold": 1600,
+      "id": "select.a-13395ad569-1"
     },
     {
-      "unhighlight": true
+      "unhighlight": true,
+      "id": "select.a-c572606fa8-1"
     },
     {
       "caption": "Deselect All clears it",
-      "sub": ""
+      "sub": "",
+      "id": "select.a-8a2c85bf5d-1",
+      "presentation": {
+        "id": "select.deselect-all-clears-it",
+        "title": "Deselect All clears it",
+        "narration": "Deselect All clears it.",
+        "trailing_hold": 0.35,
+        "lead_in": 0.12
+      }
     },
     {
       "keys": [
         "@clear_selection"
-      ]
+      ],
+      "id": "select.a-3feb2c4814-1"
     },
     {
       "wait": {
@@ -78,39 +110,54 @@
           "side": "left",
           "count": 0
         }
-      }
+      },
+      "id": "select.a-fd65a0b5da-1"
     },
     {
       "caption": "Select by pattern",
-      "sub": "Every name that matches *.mov. Case is ignored"
+      "sub": "Every name that matches *.mov. Case is ignored",
+      "id": "select.a-f55f80b9fe-1",
+      "presentation": {
+        "id": "select.select-by-pattern",
+        "title": "Select by pattern",
+        "narration": "Select by pattern. Every name that matches *.mov. Case is ignored.",
+        "trailing_hold": 0.35,
+        "lead_in": 0.12
+      }
     },
     {
       "keys": [
         "@glob_select"
-      ]
+      ],
+      "id": "select.a-d9874f6ca6-1"
     },
     {
       "wait": {
         "glob": true
-      }
+      },
+      "id": "select.a-1efa89e6ff-1"
     },
     {
       "wait": {
         "text_focus": true
-      }
+      },
+      "id": "select.a-0be37b237d-1"
     },
     {
-      "type": "*.mov"
+      "type": "*.mov",
+      "id": "select.a-78327af49b-1"
     },
     {
       "keys": [
         "Enter"
-      ]
+      ],
+      "id": "select.a-332a45bb8d-1"
     },
     {
       "wait": {
         "glob": false
-      }
+      },
+      "id": "select.a-ccea205bb8-1"
     },
     {
       "wait": {
@@ -118,39 +165,54 @@
           "side": "left",
           "count": 6
         }
-      }
+      },
+      "id": "select.a-cb4d78dd1e-1"
     },
     {
       "caption": "Deselect by pattern",
-      "sub": "Takes matches out of the selection again"
+      "sub": "Takes matches out of the selection again",
+      "id": "select.a-ae73499017-1",
+      "presentation": {
+        "id": "select.deselect-by-pattern",
+        "title": "Deselect by pattern",
+        "narration": "Deselect by pattern. Takes matches out of the selection again.",
+        "trailing_hold": 0.35,
+        "lead_in": 0.12
+      }
     },
     {
       "keys": [
         "@glob_deselect"
-      ]
+      ],
+      "id": "select.a-910ddb9f3a-1"
     },
     {
       "wait": {
         "glob": true
-      }
+      },
+      "id": "select.a-1efa89e6ff-2"
     },
     {
       "wait": {
         "text_focus": true
-      }
+      },
+      "id": "select.a-0be37b237d-2"
     },
     {
-      "type": "MOV_0031*"
+      "type": "MOV_0031*",
+      "id": "select.a-04eeb06596-1"
     },
     {
       "keys": [
         "Enter"
-      ]
+      ],
+      "id": "select.a-332a45bb8d-2"
     },
     {
       "wait": {
         "glob": false
-      }
+      },
+      "id": "select.a-ccea205bb8-2"
     },
     {
       "wait": {
@@ -158,24 +220,36 @@
           "side": "left",
           "count": 5
         }
-      }
+      },
+      "id": "select.a-a7b31e8cb8-1"
     },
     {
       "keys": [
         "@clear_selection"
-      ]
+      ],
+      "id": "select.a-3feb2c4814-2"
     },
     {
       "caption": "Select All respects the filter",
-      "sub": "With a filter, Select All marks only what you see"
+      "sub": "With a filter, Select All marks only what you see",
+      "id": "select.a-72b917a10a-1",
+      "presentation": {
+        "id": "select.select-all-respects-the-filter",
+        "title": "Select All respects the filter",
+        "narration": "Select All respects the filter. With a filter, Select All marks only what you see.",
+        "trailing_hold": 0.35,
+        "lead_in": 0.12
+      }
     },
     {
-      "type": "harbour"
+      "type": "harbour",
+      "id": "select.a-26c02f7c22-1"
     },
     {
       "keys": [
         "@select_all"
-      ]
+      ],
+      "id": "select.a-2e5eec1398-1"
     },
     {
       "wait": {
@@ -183,7 +257,8 @@
           "side": "left",
           "count": 1
         }
-      }
+      },
+      "id": "select.a-b9d87f2879-1"
     },
     {
       "keys": [
@@ -195,7 +270,8 @@
         "Backspace",
         "Backspace"
       ],
-      "gap": 90
+      "gap": 90,
+      "id": "select.a-2e03d9bb8d-1"
     },
     {
       "wait": {
@@ -203,35 +279,56 @@
           "side": "left",
           "is": ""
         }
-      }
+      },
+      "id": "select.a-17c1923773-1"
     },
     {
       "caption": "Commands act on the selection",
       "sub": "With nothing selected, they act on the item under the cursor",
-      "hold": 2400
+      "hold": 2400,
+      "id": "select.a-02cafa1da4-1",
+      "presentation": {
+        "id": "select.commands-act-on-the-selection",
+        "title": "Commands act on the selection",
+        "narration": "Commands act on the selection. With nothing selected, they act on the item under the cursor.",
+        "trailing_hold": 0.35,
+        "lead_in": 0.12
+      }
     },
     {
       "caption": "Prefer Finder-style selection?",
-      "sub": "Settings › General › Selection style: arrow keys select, ⌘-click adds"
+      "sub": "Settings › General › Selection style: arrow keys select, ⌘-click adds",
+      "id": "select.a-f6ffd3cb0c-1",
+      "presentation": {
+        "id": "select.prefer-finder-style-selection",
+        "title": "Prefer Finder-style selection?",
+        "narration": "Prefer Finder-style selection?. Settings › General › Selection style: arrow keys select, Command -click adds.",
+        "trailing_hold": 0.35,
+        "lead_in": 0.12
+      }
     },
     {
       "set_preference": {
         "selection": "finder"
       },
-      "hold": 1800
+      "hold": 1800,
+      "id": "select.a-ae74f5b444-1"
     },
     {
       "set_preference": {
         "selection": "commander"
-      }
+      },
+      "id": "select.a-454145dce2-2"
     },
     {
       "keys": [
         "@clear_selection"
-      ]
+      ],
+      "id": "select.a-3feb2c4814-3"
     },
     {
-      "uncaption": true
+      "uncaption": true,
+      "id": "select.a-4df2c52c18-1"
     }
   ]
 }

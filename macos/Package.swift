@@ -9,15 +9,16 @@ import Foundation
 // potentially stale archive in the interactive app's default build directory.
 let engineLibraries = ProcessInfo.processInfo.environment["FC_ENGINE_LIBRARY_DIR"]
   ?? Context.packageDirectory + "/../build-macos"
+let explainerKit: Target.Dependency = .product(name: "ExplainerKit", package: "ExplainerKit")
 
 let package = Package(
   name: "FileCommander",
   platforms: [.macOS(.v14)],
   products: [
     .executable(name: "FileCommander", targets: ["FileCommander"]),
-    .library(name: "ExplainerKit", targets: ["ExplainerKit"]),
   ],
   dependencies: [
+    .package(path: "../packages/ExplainerKit"),
     .package(url: "https://github.com/migueldeicaza/SwiftTerm", exact: "1.11.2"),
     // The scene channel's protobuf runtime; FreshKit's types are generated
     // from Fresh's scene.proto (macos/tools/gen_scene_proto.sh).
@@ -33,13 +34,11 @@ let package = Package(
         .unsafeFlags(["-L", engineLibraries]),
         .linkedFramework("CoreServices"),
       ]),
-    // Annotation engine for explainers: no dependency on File Commander.
-    .target(name: "ExplainerKit"),
     // Client of a Fresh session's scene channel: socket, scene model, key mapping.
     .target(name: "FreshKit", dependencies: [.product(name: "SwiftProtobuf", package: "swift-protobuf")]),
     .executableTarget(
       name: "FileCommander",
-      dependencies: ["FCKit", "ExplainerKit", "FreshKit", .product(name: "SwiftTerm", package: "SwiftTerm")],
+      dependencies: ["FCKit", explainerKit, "FreshKit", .product(name: "SwiftTerm", package: "SwiftTerm")],
       resources: [.copy("Explainers"), .copy("Themes")],
       swiftSettings: [.interoperabilityMode(.Cxx)]),
     .executableTarget(name: "fc-relaunch"),
@@ -47,7 +46,7 @@ let package = Package(
     // Explicit development resource profile; not included in the app bundle.
     .executableTarget(name: "fc-compose-profile", dependencies: ["FreshKit"]),
     .testTarget(name: "FCKitTests", dependencies: ["FCKit"], swiftSettings: [.interoperabilityMode(.Cxx)]),
-    .testTarget(name: "ExplainerKitTests", dependencies: ["ExplainerKit"]),
+    .testTarget(name: "ExplainerKitTests", dependencies: [explainerKit]),
     .testTarget(name: "FreshKitTests", dependencies: ["FreshKit"], resources: [.copy("Fixtures")]),
     .testTarget(name: "NativeEditorTests", dependencies: ["FileCommander", "FreshKit"], swiftSettings: [.interoperabilityMode(.Cxx)]),
   ],

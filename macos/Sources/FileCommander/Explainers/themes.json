@@ -1,7 +1,7 @@
 {
   "id": "themes",
   "title": "Themes, colors and fonts",
-  "order": 25,
+  "order": 26,
   "duration": 60,
   "chapter": "yours",
   "needs": {
@@ -23,64 +23,107 @@
         "left": "{home}/camera",
         "right": "{home}/music",
         "focus": "left"
+      },
+      "id": "themes.a-3f35bbb35d-1",
+      "presentation": {
+        "id": "themes.introduction",
+        "title": "Themes, colors and fonts",
+        "narration": "Light and dark, colors for both, and a font and size for every element.",
+        "trailing_hold": 0.35,
+        "lead_in": 0.12
       }
     },
     {
-      "chapter": "Make It Yours"
+      "chapter": "Make It Yours",
+      "id": "themes.a-17d61eebdc-1"
     },
     {
       "caption": "Light or dark",
-      "sub": "Follow the system, or choose one in Settings › General"
+      "sub": "Follow the system, or choose one in Settings › General",
+      "id": "themes.a-e3595a8c71-1",
+      "presentation": {
+        "id": "themes.light-or-dark",
+        "title": "Light or dark",
+        "narration": "Light or dark. Follow the system, or choose one in Settings › General.",
+        "trailing_hold": 0.35,
+        "lead_in": 0.12
+      }
     },
     {
       "set_preference": {
         "appearance": "dark"
       },
-      "hold": 1800
+      "hold": 1800,
+      "id": "themes.a-79fe14fd79-1"
     },
     {
       "set_preference": {
         "appearance": "light"
       },
-      "hold": 1500
+      "hold": 1500,
+      "id": "themes.a-b9f4bc10e5-1"
     },
     {
       "set_preference": {
         "appearance": "system"
-      }
+      },
+      "id": "themes.a-dec5c55cd1-1"
     },
     {
       "caption": "The theme editor",
-      "sub": "Every element has a color for light and for dark, and a font and size"
+      "sub": "Every element has a color for light and for dark, and a font and size",
+      "id": "themes.a-2150555297-1",
+      "presentation": {
+        "id": "themes.the-theme-editor",
+        "title": "The theme editor",
+        "narration": "The theme editor. Every element has a color for light and for dark, and a font and size.",
+        "trailing_hold": 0.35,
+        "lead_in": 0.12
+      }
     },
     {
       "keys": [
         "@edit_theme_colors"
-      ]
+      ],
+      "id": "themes.a-5416473361-1"
     },
     {
       "wait": {
         "window": "settings"
-      }
+      },
+      "id": "themes.a-dc7482375f-1"
     },
     {
-      "pause": 800
+      "pause": 800,
+      "id": "themes.a-2bd2de6e60-1"
     },
     {
-      "click": "settings.appearance.element[listing.name#font]"
+      "click": "settings.appearance.element[listing.name#font]",
+      "id": "themes.a-59d60e6830-1"
     },
     {
       "caption": "Bigger names in the list",
-      "sub": "Changes show at once, in the preview and in the window"
+      "sub": "Changes show at once, in the preview and in the window",
+      "id": "themes.a-06ba3c88cd-1",
+      "presentation": {
+        "id": "themes.bigger-names-in-the-list",
+        "title": "Bigger names in the list",
+        "narration": "Bigger names in the list. Changes show at once, in the preview and in the window.",
+        "trailing_hold": 0.35,
+        "lead_in": 0.12
+      }
     },
     {
-      "click": "settings.appearance.font.bigger"
+      "click": "settings.appearance.font.bigger",
+      "id": "themes.a-51ceecddea-1"
     },
     {
-      "click": "settings.appearance.font.bigger"
+      "click": "settings.appearance.font.bigger",
+      "id": "themes.a-51ceecddea-2"
     },
     {
-      "click": "settings.appearance.font.bigger"
+      "click": "settings.appearance.font.bigger",
+      "id": "themes.a-51ceecddea-3"
     },
     {
       "wait": {
@@ -88,47 +131,73 @@
           "element": "listing.name",
           "is": 16
         }
-      }
+      },
+      "id": "themes.a-2447a9e9fe-1"
     },
     {
       "highlight": "settings.appearance.preview",
-      "hold": 2200
+      "hold": 2200,
+      "id": "themes.a-1f81c5ff8a-1"
     },
     {
-      "unhighlight": true
+      "unhighlight": true,
+      "id": "themes.a-c572606fa8-1"
     },
     {
       "caption": "Colors",
-      "sub": "Pick a color for light and dark, or a system color that follows your accent color"
+      "sub": "Pick a color for light and dark, or a system color that follows your accent color",
+      "id": "themes.a-757b1a1558-1",
+      "presentation": {
+        "id": "themes.colors",
+        "title": "Colors",
+        "narration": "Colors. Pick a color for light and dark, or a system color that follows your accent color.",
+        "trailing_hold": 0.35,
+        "lead_in": 0.12
+      }
     },
     {
-      "click": "settings.appearance.element[listing.directory]"
+      "click": "settings.appearance.element[listing.directory]",
+      "id": "themes.a-bc79a28b13-1"
     },
     {
       "highlight": [
         "settings.appearance.color.light",
         "settings.appearance.color.dark"
       ],
-      "hold": 2400
+      "hold": 2400,
+      "id": "themes.a-9f39ac8201-1"
     },
     {
       "caption": "Save, revert or reset",
-      "sub": "Save keeps it as your own theme; Revert drops the edits"
+      "sub": "Save keeps it as your own theme; Revert drops the edits",
+      "id": "themes.a-d153423a13-1",
+      "presentation": {
+        "id": "themes.save-revert-or-reset",
+        "title": "Save, revert or reset",
+        "narration": "Save, revert or reset. Save keeps it as your own theme; Revert drops the edits.",
+        "trailing_hold": 0.35,
+        "lead_in": 0.12
+      }
     },
     {
-      "click": "settings.appearance.revert"
+      "click": "settings.appearance.revert",
+      "id": "themes.a-f34a259029-1"
     },
     {
-      "pause": 900
+      "pause": 900,
+      "id": "themes.a-aec4a9cde4-1"
     },
     {
-      "close_window": "settings"
+      "close_window": "settings",
+      "id": "themes.a-6821e08217-1"
     },
     {
-      "unhighlight": true
+      "unhighlight": true,
+      "id": "themes.a-c572606fa8-2"
     },
     {
-      "uncaption": true
+      "uncaption": true,
+      "id": "themes.a-4df2c52c18-1"
     }
   ]
 }

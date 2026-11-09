@@ -20,42 +20,65 @@
         "left": "{home}/camera",
         "right": "{home}/backup",
         "focus": "left"
+      },
+      "id": "clipboard.a-77a7b51399-1",
+      "presentation": {
+        "id": "clipboard.introduction",
+        "title": "Copy names and paths",
+        "narration": "Put the selected names or full paths on the clipboard, in the order you see them.",
+        "trailing_hold": 0.35,
+        "lead_in": 0.12
       }
     },
     {
-      "chapter": "Files"
+      "chapter": "Files",
+      "id": "clipboard.a-ded5fddc77-1"
     },
     {
       "caption": "Copy paths",
-      "sub": "Copy Paths puts the selected full paths on the clipboard, one per line"
+      "sub": "Copy Paths puts the selected full paths on the clipboard, one per line",
+      "id": "clipboard.a-3e0cb697e8-1",
+      "presentation": {
+        "id": "clipboard.copy-paths",
+        "title": "Copy paths",
+        "narration": "Copy paths. Copy Paths puts the selected full paths on the clipboard, one per line.",
+        "trailing_hold": 0.35,
+        "lead_in": 0.12
+      }
     },
     {
       "keys": [
         "@glob_select"
-      ]
+      ],
+      "id": "clipboard.a-d9874f6ca6-1"
     },
     {
       "wait": {
         "glob": true
-      }
+      },
+      "id": "clipboard.a-1efa89e6ff-1"
     },
     {
       "wait": {
         "text_focus": true
-      }
+      },
+      "id": "clipboard.a-0be37b237d-1"
     },
     {
-      "type": "*.jpg"
+      "type": "*.jpg",
+      "id": "clipboard.a-af89ee575e-1"
     },
     {
       "keys": [
         "Enter"
-      ]
+      ],
+      "id": "clipboard.a-332a45bb8d-1"
     },
     {
       "wait": {
         "glob": false
-      }
+      },
+      "id": "clipboard.a-ccea205bb8-1"
     },
     {
       "wait": {
@@ -63,87 +86,119 @@
           "side": "left",
           "count": 8
         }
-      }
+      },
+      "id": "clipboard.a-f7a1325875-1"
     },
     {
       "keys": [
         "@paths_to_clipboard"
-      ]
+      ],
+      "id": "clipboard.a-a0280e1403-1"
     },
     {
       "wait": {
         "hud": "8 paths copied"
-      }
+      },
+      "id": "clipboard.a-6624c6d072-1"
     },
     {
       "wait": {
         "clipboard": {
           "contains": "{home}/camera/cathedral-steps.jpg"
         }
-      }
+      },
+      "id": "clipboard.a-459afa3d97-1"
     },
     {
       "highlight": "hud",
-      "hold": 1500
+      "hold": 1500,
+      "id": "clipboard.a-08df824505-1"
     },
     {
       "caption": "Or just the names",
-      "sub": ""
+      "sub": "",
+      "id": "clipboard.a-fb6387d117-1",
+      "presentation": {
+        "id": "clipboard.or-just-the-names",
+        "title": "Or just the names",
+        "narration": "Or just the names.",
+        "trailing_hold": 0.35,
+        "lead_in": 0.12
+      }
     },
     {
       "keys": [
         "@names_to_clipboard"
-      ]
+      ],
+      "id": "clipboard.a-fb28e22ed4-1"
     },
     {
       "wait": {
         "hud": "8 names copied"
-      }
+      },
+      "id": "clipboard.a-75680cbbd1-1"
     },
     {
       "wait": {
         "clipboard": {
           "contains": "street-musicians.jpg"
         }
-      }
+      },
+      "id": "clipboard.a-c65466259d-1"
     },
     {
       "caption": "In the order you see",
-      "sub": "Sort by size first, and the clipboard lists the photos by size"
+      "sub": "Sort by size first, and the clipboard lists the photos by size",
+      "id": "clipboard.a-b0460b12bd-1",
+      "presentation": {
+        "id": "clipboard.in-the-order-you-see",
+        "title": "In the order you see",
+        "narration": "In the order you see. Sort by size first, and the clipboard lists the photos by size.",
+        "trailing_hold": 0.35,
+        "lead_in": 0.12
+      }
     },
     {
       "keys": [
         "@sort_by_size"
-      ]
+      ],
+      "id": "clipboard.a-58159b6ad7-1"
     },
     {
       "keys": [
         "@paths_to_clipboard"
-      ]
+      ],
+      "id": "clipboard.a-a0280e1403-2"
     },
     {
       "wait": {
         "hud": "8 paths copied"
-      }
+      },
+      "id": "clipboard.a-6624c6d072-2"
     },
     {
-      "pause": 1500
+      "pause": 1500,
+      "id": "clipboard.a-c25a6c3880-1"
     },
     {
       "keys": [
         "@sort_by_name"
-      ]
+      ],
+      "id": "clipboard.a-3350d01992-1"
     },
     {
       "keys": [
         "@clear_selection"
-      ]
+      ],
+      "id": "clipboard.a-3feb2c4814-1"
     },
     {
-      "unhighlight": true
+      "unhighlight": true,
+      "id": "clipboard.a-c572606fa8-1"
     },
     {
-      "uncaption": true
+      "uncaption": true,
+      "id": "clipboard.a-4df2c52c18-1"
     }
   ]
 }

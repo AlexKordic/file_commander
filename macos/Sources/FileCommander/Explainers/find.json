@@ -21,57 +21,91 @@
         "left": "{home}",
         "right": "{home}/backup",
         "focus": "left"
+      },
+      "id": "find.a-cdcdfde8d2-1",
+      "presentation": {
+        "id": "find.introduction",
+        "title": "Find files",
+        "narration": "Search names below a folder and show a result in the pane.",
+        "trailing_hold": 0.35,
+        "lead_in": 0.12
       }
     },
     {
-      "chapter": "Files"
+      "chapter": "Files",
+      "id": "find.a-ded5fddc77-1"
     },
     {
       "caption": "Find files by name",
-      "sub": "Find searches below the current folder. * and ? work; case is ignored"
+      "sub": "Find searches below the current folder. * and ? work; case is ignored",
+      "id": "find.a-be6e6a0a5f-1",
+      "presentation": {
+        "id": "find.find-files-by-name",
+        "title": "Find files by name",
+        "narration": "Find files by name. Find searches below the current folder. * and ? work; case is ignored.",
+        "trailing_hold": 0.35,
+        "lead_in": 0.12
+      }
     },
     {
       "keys": [
         "@find"
-      ]
+      ],
+      "id": "find.a-717e65d207-1"
     },
     {
       "wait": {
         "window": "find"
-      }
+      },
+      "id": "find.a-ff97469062-1"
     },
     {
       "wait": {
         "text_focus": true
-      }
+      },
+      "id": "find.a-0be37b237d-1"
     },
     {
-      "type": "*.jpg"
+      "type": "*.jpg",
+      "id": "find.a-af89ee575e-1"
     },
     {
       "keys": [
         "Enter"
-      ]
+      ],
+      "id": "find.a-332a45bb8d-1"
     },
     {
       "wait": {
         "anchor": "find.result[name=lighthouse.jpg]"
       },
-      "timeout": 20
+      "timeout": 20,
+      "id": "find.a-a0959a9cbf-1"
     },
     {
       "highlight": "find.results",
-      "hold": 1800
+      "hold": 1800,
+      "id": "find.a-52dbb320f6-1"
     },
     {
       "caption": "Show it in the pane",
-      "sub": "Show in Pane opens the folder with the cursor on the file"
+      "sub": "Show in Pane opens the folder with the cursor on the file",
+      "id": "find.a-8cc9d2342d-1",
+      "presentation": {
+        "id": "find.show-it-in-the-pane",
+        "title": "Show it in the pane",
+        "narration": "Show it in the pane. Show in Pane opens the folder with the cursor on the file.",
+        "trailing_hold": 0.35,
+        "lead_in": 0.12
+      }
     },
     {
-      "click": "find.result[name=lighthouse.jpg]"
+      "click": "find.result[name=lighthouse.jpg]",
+      "id": "find.a-1fc3198f4a-1"
     },
     {
-      "click": "find.reveal"
+      "click": "find.reveal",
+      "id": "find.a-97d8a42d01-1"
     },
     {
       "wait": {
@@ -79,7 +113,8 @@
           "side": "left",
           "ends_with": "/camera"
         }
-      }
+      },
+      "id": "find.a-a5cb511ec3-1"
     },
     {
       "wait": {
@@ -87,16 +122,20 @@
           "side": "left",
           "name": "lighthouse.jpg"
         }
-      }
+      },
+      "id": "find.a-60e7f3e7ea-1"
     },
     {
-      "close_window": "find"
+      "close_window": "find",
+      "id": "find.a-8ec8f6fbe1-1"
     },
     {
-      "unhighlight": true
+      "unhighlight": true,
+      "id": "find.a-c572606fa8-1"
     },
     {
-      "uncaption": true
+      "uncaption": true,
+      "id": "find.a-4df2c52c18-1"
     }
   ]
 }

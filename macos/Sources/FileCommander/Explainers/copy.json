@@ -24,45 +24,69 @@
         "left": "{home}/camera",
         "right": "{home}/backup",
         "focus": "left"
+      },
+      "id": "copy.a-77a7b51399-1",
+      "presentation": {
+        "id": "copy.introduction",
+        "title": "Copy files",
+        "narration": "We will copy photos to a backup folder while continuing to use the file manager.",
+        "trailing_hold": 0.35,
+        "lead_in": 0.12
       }
     },
     {
-      "chapter": "Files"
+      "chapter": "Files",
+      "id": "copy.a-ded5fddc77-1"
     },
     {
-      "set_transfer_speed": "25 MiB"
+      "set_transfer_speed": "25 MiB",
+      "id": "copy.a-dd65971114-1"
     },
     {
       "caption": "Copy to the other pane",
-      "sub": "Select the photos by pattern, then copy them. The other pane is the destination"
+      "sub": "Select the photos by pattern, then copy them. The other pane is the destination",
+      "id": "copy.a-4fee36691b-1",
+      "presentation": {
+        "id": "copy.copy-to-the-other-pane",
+        "title": "Copy to the other pane",
+        "narration": "Select the photos you want to copy. The folder in the other pane becomes the initial destination.",
+        "trailing_hold": 0.35,
+        "lead_in": 0.12
+      }
     },
     {
       "keys": [
         "@glob_select"
-      ]
+      ],
+      "id": "copy.a-d9874f6ca6-1"
     },
     {
       "wait": {
         "glob": true
-      }
+      },
+      "id": "copy.a-1efa89e6ff-1"
     },
     {
       "wait": {
         "text_focus": true
-      }
+      },
+      "id": "copy.a-0be37b237d-1"
     },
     {
-      "type": "*.jpg"
+      "type": "*.jpg",
+      "id": "copy.a-af89ee575e-1"
     },
     {
       "keys": [
         "Enter"
-      ]
+      ],
+      "id": "copy.a-332a45bb8d-1"
     },
     {
       "wait": {
         "glob": false
-      }
+      },
+      "id": "copy.a-ccea205bb8-1"
     },
     {
       "wait": {
@@ -70,62 +94,96 @@
           "side": "left",
           "count": 8
         }
-      }
+      },
+      "id": "copy.a-f7a1325875-1"
     },
     {
       "highlight": "pane.left.status.selection",
-      "hold": 1400
+      "hold": 1400,
+      "id": "copy.a-b9765e6119-1"
     },
     {
       "keys": [
         "@copy"
-      ]
+      ],
+      "id": "copy.a-76288993ef-1"
     },
     {
       "wait": {
         "sheet": "copy"
-      }
+      },
+      "id": "copy.a-ffb688e0c0-1"
     },
     {
       "caption": "See it before it happens",
-      "sub": "The sheet lists exactly what will be copied, and how much"
+      "sub": "The sheet lists exactly what will be copied, and how much",
+      "id": "copy.a-be00b68936-1",
+      "presentation": {
+        "id": "copy.see-it-before-it-happens",
+        "title": "See it before it happens",
+        "narration": "Before the transfer starts, review exactly which files will be copied and their total size.",
+        "trailing_hold": 0.35,
+        "lead_in": 0.12
+      }
     },
     {
       "highlight": [
         "sheet.copy.preview",
         "sheet.copy.status"
       ],
-      "hold": 2000
+      "hold": 2000,
+      "id": "copy.a-6313a7c3a9-1"
     },
     {
       "caption": "Where, and how",
-      "sub": "Edit the destination, follow or keep links, and choose what happens to files that already exist"
+      "sub": "Edit the destination, follow or keep links, and choose what happens to files that already exist",
+      "id": "copy.a-e0d7a587f9-1",
+      "presentation": {
+        "id": "copy.where-and-how",
+        "title": "Where, and how",
+        "narration": "You can change the destination, choose how links are handled, and decide what to do with files that already exist.",
+        "trailing_hold": 0.35,
+        "lead_in": 0.12
+      }
     },
     {
       "highlight": [
         "sheet.copy.destination",
         "sheet.copy.conflict"
       ],
-      "hold": 2400
+      "hold": 2400,
+      "id": "copy.a-5fbf9dcda8-1"
     },
     {
-      "unhighlight": true
+      "unhighlight": true,
+      "id": "copy.a-c572606fa8-1"
     },
     {
       "click": "sheet.copy.start",
-      "as_job": "photos"
+      "as_job": "photos",
+      "id": "copy.a-488305e1c3-1"
     },
     {
       "wait": {
         "sheet": null
-      }
+      },
+      "id": "copy.a-0f1fbb49b0-1"
     },
     {
       "caption": "It runs in the background",
-      "sub": "The job bar shows the copy; you can keep browsing meanwhile"
+      "sub": "The job bar shows the copy; you can keep browsing meanwhile",
+      "id": "copy.a-df14efaff7-1",
+      "presentation": {
+        "id": "copy.it-runs-in-the-background",
+        "title": "It runs in the background",
+        "narration": "The copy runs as a background job. Its progress appears below the panes, while browsing stays available.",
+        "trailing_hold": 0.35,
+        "lead_in": 0.12
+      }
     },
     {
-      "highlight": "jobs.bar"
+      "highlight": "jobs.bar",
+      "id": "copy.a-7604918954-1"
     },
     {
       "wait": {
@@ -134,10 +192,12 @@
           "state": "finished"
         }
       },
-      "timeout": 60
+      "timeout": 60,
+      "id": "copy.a-6a99a40798-1"
     },
     {
-      "unhighlight": true
+      "unhighlight": true,
+      "id": "copy.a-c572606fa8-2"
     },
     {
       "wait": {
@@ -145,57 +205,76 @@
           "side": "right",
           "contains": "lighthouse.jpg"
         }
-      }
+      },
+      "id": "copy.a-77d09f6d00-1"
     },
     {
       "caption": "Copy again: Skip existing",
-      "sub": "Files already in the backup can stay as they are"
+      "sub": "Files already in the backup can stay as they are",
+      "id": "copy.a-caa82645e2-1",
+      "presentation": {
+        "id": "copy.copy-again-skip-existing",
+        "title": "Copy again: Skip existing",
+        "narration": "When you copy the same selection again, Skip Existing keeps files that are already in the backup.",
+        "trailing_hold": 0.35,
+        "lead_in": 0.12
+      }
     },
     {
       "keys": [
         "@glob_select"
-      ]
+      ],
+      "id": "copy.a-d9874f6ca6-2"
     },
     {
       "wait": {
         "glob": true
-      }
+      },
+      "id": "copy.a-1efa89e6ff-2"
     },
     {
       "wait": {
         "text_focus": true
-      }
+      },
+      "id": "copy.a-0be37b237d-2"
     },
     {
-      "type": "*.jpg"
+      "type": "*.jpg",
+      "id": "copy.a-af89ee575e-2"
     },
     {
       "keys": [
         "Enter"
-      ]
+      ],
+      "id": "copy.a-332a45bb8d-2"
     },
     {
       "wait": {
         "glob": false
-      }
+      },
+      "id": "copy.a-ccea205bb8-2"
     },
     {
       "keys": [
         "@copy"
-      ]
+      ],
+      "id": "copy.a-76288993ef-2"
     },
     {
       "wait": {
         "sheet": "copy"
-      }
+      },
+      "id": "copy.a-ffb688e0c0-2"
     },
     {
       "click": "sheet.copy.conflict[mode=skip]",
-      "hold": 900
+      "hold": 900,
+      "id": "copy.a-b2e5bb9d70-1"
     },
     {
       "click": "sheet.copy.start",
-      "as_job": "again"
+      "as_job": "again",
+      "id": "copy.a-ea00c1ad07-1"
     },
     {
       "wait": {
@@ -204,15 +283,25 @@
           "state": "finished"
         }
       },
-      "timeout": 30
+      "timeout": 30,
+      "id": "copy.a-38cade66ef-1"
     },
     {
       "caption": "Safe by design",
       "sub": "Copies are written under a private name and renamed into place when complete",
-      "hold": 2600
+      "hold": 2600,
+      "id": "copy.a-66dbe2edbe-1",
+      "presentation": {
+        "id": "copy.safe-by-design",
+        "title": "Safe by design",
+        "narration": "A copied file is written under a temporary name, then renamed into place when complete. An incomplete copy does not replace a finished file.",
+        "trailing_hold": 0.35,
+        "lead_in": 0.12
+      }
     },
     {
-      "uncaption": true
+      "uncaption": true,
+      "id": "copy.a-4df2c52c18-1"
     }
   ]
 }

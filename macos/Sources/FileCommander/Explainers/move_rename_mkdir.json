@@ -25,42 +25,65 @@
         "left": "{home}/photos/2026",
         "right": "{home}/backup",
         "focus": "left"
+      },
+      "id": "move_rename_mkdir.a-c4b7d6ca37-1",
+      "presentation": {
+        "id": "move_rename_mkdir.introduction",
+        "title": "New folder, rename and move",
+        "narration": "Create a folder, rename files, and move them to the other pane.",
+        "trailing_hold": 0.35,
+        "lead_in": 0.12
       }
     },
     {
-      "chapter": "Files"
+      "chapter": "Files",
+      "id": "move_rename_mkdir.a-ded5fddc77-1"
     },
     {
       "caption": "New folder",
-      "sub": ""
+      "sub": "",
+      "id": "move_rename_mkdir.a-96f0d7290c-1",
+      "presentation": {
+        "id": "move_rename_mkdir.new-folder",
+        "title": "New folder",
+        "narration": "New folder.",
+        "trailing_hold": 0.35,
+        "lead_in": 0.12
+      }
     },
     {
       "keys": [
         "@mkdir"
-      ]
+      ],
+      "id": "move_rename_mkdir.a-701bb26de0-1"
     },
     {
       "wait": {
         "sheet": "mkdir"
-      }
+      },
+      "id": "move_rename_mkdir.a-a570277347-1"
     },
     {
       "wait": {
         "text_focus": true
-      }
+      },
+      "id": "move_rename_mkdir.a-0be37b237d-1"
     },
     {
-      "type": "Summer"
+      "type": "Summer",
+      "id": "move_rename_mkdir.a-4d31ba950c-1"
     },
     {
       "keys": [
         "Enter"
-      ]
+      ],
+      "id": "move_rename_mkdir.a-332a45bb8d-1"
     },
     {
       "wait": {
         "sheet": null
-      }
+      },
+      "id": "move_rename_mkdir.a-0f1fbb49b0-1"
     },
     {
       "wait": {
@@ -68,50 +91,67 @@
           "side": "left",
           "contains": "Summer"
         }
-      }
+      },
+      "id": "move_rename_mkdir.a-8f2dfea5b4-1"
     },
     {
       "caption": "Rename",
-      "sub": "Rename works on one item or on the whole selection"
+      "sub": "Rename works on one item or on the whole selection",
+      "id": "move_rename_mkdir.a-d4fac2be6e-1",
+      "presentation": {
+        "id": "move_rename_mkdir.rename",
+        "title": "Rename",
+        "narration": "Rename. Rename works on one item or on the whole selection.",
+        "trailing_hold": 0.35,
+        "lead_in": 0.12
+      }
     },
     {
       "cursor": {
         "side": "left",
         "name": "beach.jpg"
-      }
+      },
+      "id": "move_rename_mkdir.a-652db8e574-1"
     },
     {
       "keys": [
         "@rename"
-      ]
+      ],
+      "id": "move_rename_mkdir.a-2cb8d96b0f-1"
     },
     {
       "wait": {
         "sheet": "rename"
-      }
+      },
+      "id": "move_rename_mkdir.a-b4b0ccb6e0-1"
     },
     {
       "wait": {
         "text_focus": true
-      }
+      },
+      "id": "move_rename_mkdir.a-0be37b237d-2"
     },
     {
       "keys": [
         "Cmd+A"
-      ]
+      ],
+      "id": "move_rename_mkdir.a-a0667a4b25-1"
     },
     {
-      "type": "beach-day.jpg"
+      "type": "beach-day.jpg",
+      "id": "move_rename_mkdir.a-5dccdc715c-1"
     },
     {
       "keys": [
         "Enter"
-      ]
+      ],
+      "id": "move_rename_mkdir.a-332a45bb8d-2"
     },
     {
       "wait": {
         "sheet": null
-      }
+      },
+      "id": "move_rename_mkdir.a-0f1fbb49b0-2"
     },
     {
       "wait": {
@@ -119,38 +159,53 @@
           "side": "left",
           "contains": "beach-day.jpg"
         }
-      }
+      },
+      "id": "move_rename_mkdir.a-406baa4c52-1"
     },
     {
       "caption": "Move to the other pane",
-      "sub": "Within one disk a move is a rename; across disks FC copies first, then removes"
+      "sub": "Within one disk a move is a rename; across disks FC copies first, then removes",
+      "id": "move_rename_mkdir.a-7a79408b63-1",
+      "presentation": {
+        "id": "move_rename_mkdir.move-to-the-other-pane",
+        "title": "Move to the other pane",
+        "narration": "Move to the other pane. Within one disk a move is a rename; across disks File Commander copies first, then removes.",
+        "trailing_hold": 0.35,
+        "lead_in": 0.12
+      }
     },
     {
       "cursor": {
         "side": "left",
         "name": "city.jpg"
-      }
+      },
+      "id": "move_rename_mkdir.a-ae11e8c265-1"
     },
     {
       "keys": [
         "@move"
-      ]
+      ],
+      "id": "move_rename_mkdir.a-c516f2a6e6-1"
     },
     {
       "wait": {
         "sheet": "move"
-      }
+      },
+      "id": "move_rename_mkdir.a-105f1d211c-1"
     },
     {
-      "pause": 1200
+      "pause": 1200,
+      "id": "move_rename_mkdir.a-538d34278b-1"
     },
     {
-      "click": "sheet.move.start"
+      "click": "sheet.move.start",
+      "id": "move_rename_mkdir.a-25a60f8aec-1"
     },
     {
       "wait": {
         "sheet": null
-      }
+      },
+      "id": "move_rename_mkdir.a-0f1fbb49b0-3"
     },
     {
       "wait": {
@@ -158,7 +213,8 @@
           "side": "right",
           "contains": "city.jpg"
         }
-      }
+      },
+      "id": "move_rename_mkdir.a-9abb6cfc3e-1"
     },
     {
       "wait": {
@@ -166,10 +222,12 @@
           "side": "left",
           "lacks": "city.jpg"
         }
-      }
+      },
+      "id": "move_rename_mkdir.a-78984454c1-1"
     },
     {
-      "uncaption": true
+      "uncaption": true,
+      "id": "move_rename_mkdir.a-4df2c52c18-1"
     }
   ]
 }

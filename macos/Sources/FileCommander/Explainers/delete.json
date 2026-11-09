@@ -22,42 +22,65 @@
         "left": "{home}",
         "right": "{home}/photos",
         "focus": "left"
+      },
+      "id": "delete.a-a730d72075-1",
+      "presentation": {
+        "id": "delete.introduction",
+        "title": "Delete",
+        "narration": "Delete asks first and is permanent; links go, not what they point to.",
+        "trailing_hold": 0.35,
+        "lead_in": 0.12
       }
     },
     {
-      "chapter": "Files"
+      "chapter": "Files",
+      "id": "delete.a-ded5fddc77-1"
     },
     {
       "caption": "Delete is permanent",
-      "sub": "There is no trash. FC lists what it will delete and asks first"
+      "sub": "There is no trash. FC lists what it will delete and asks first",
+      "id": "delete.a-203264aa8d-1",
+      "presentation": {
+        "id": "delete.delete-is-permanent",
+        "title": "Delete is permanent",
+        "narration": "Delete is permanent. There is no trash. File Commander lists what it will delete and asks first.",
+        "trailing_hold": 0.35,
+        "lead_in": 0.12
+      }
     },
     {
       "cursor": {
         "side": "left",
         "name": "old-link"
-      }
+      },
+      "id": "delete.a-7c47435a70-1"
     },
     {
       "keys": [
         "@delete"
-      ]
+      ],
+      "id": "delete.a-6b28978c02-1"
     },
     {
       "wait": {
         "sheet": "delete"
-      }
+      },
+      "id": "delete.a-1f8f41d28e-1"
     },
     {
       "highlight": "sheet.delete.start",
-      "hold": 2200
+      "hold": 2200,
+      "id": "delete.a-0ac362dc60-1"
     },
     {
-      "click": "sheet.delete.start"
+      "click": "sheet.delete.start",
+      "id": "delete.a-1f21f80b9c-1"
     },
     {
       "wait": {
         "sheet": null
-      }
+      },
+      "id": "delete.a-0f1fbb49b0-1"
     },
     {
       "wait": {
@@ -65,33 +88,47 @@
           "side": "left",
           "lacks": "old-link"
         }
-      }
+      },
+      "id": "delete.a-acb6dcb9f8-1"
     },
     {
-      "unhighlight": true
+      "unhighlight": true,
+      "id": "delete.a-c572606fa8-1"
     },
     {
       "caption": "Links go, not what they point to",
-      "sub": "Deleting latest-photos removes the link; photos/2026 stays"
+      "sub": "Deleting latest-photos removes the link; photos/2026 stays",
+      "id": "delete.a-90de26a455-1",
+      "presentation": {
+        "id": "delete.links-go-not-what-they-point-to",
+        "title": "Links go, not what they point to",
+        "narration": "Links go, not what they point to. Deleting latest-photos removes the link; photos/2026 stays.",
+        "trailing_hold": 0.35,
+        "lead_in": 0.12
+      }
     },
     {
       "cursor": {
         "side": "left",
         "name": "latest-photos"
-      }
+      },
+      "id": "delete.a-df99dd872f-1"
     },
     {
       "keys": [
         "@delete"
-      ]
+      ],
+      "id": "delete.a-6b28978c02-2"
     },
     {
       "wait": {
         "sheet": "delete"
-      }
+      },
+      "id": "delete.a-1f8f41d28e-2"
     },
     {
-      "click": "sheet.delete.start"
+      "click": "sheet.delete.start",
+      "id": "delete.a-1f21f80b9c-2"
     },
     {
       "wait": {
@@ -99,43 +136,58 @@
           "side": "left",
           "lacks": "latest-photos"
         }
-      }
+      },
+      "id": "delete.a-256abb580a-1"
     },
     {
       "expect": {
         "file": {
           "exists": "{home}/photos/2026/beach.jpg"
         }
-      }
+      },
+      "id": "delete.a-4bfe3109ad-1"
     },
     {
       "caption": "Folders too",
-      "sub": "A folder is deleted from the inside out, as a background job"
+      "sub": "A folder is deleted from the inside out, as a background job",
+      "id": "delete.a-88c7ab11c9-1",
+      "presentation": {
+        "id": "delete.folders-too",
+        "title": "Folders too",
+        "narration": "Folders too. A folder is deleted from the inside out, as a background job.",
+        "trailing_hold": 0.35,
+        "lead_in": 0.12
+      }
     },
     {
       "navigate": {
         "side": "left",
         "to": "{home}/projects"
-      }
+      },
+      "id": "delete.a-c37fd4481b-1"
     },
     {
       "cursor": {
         "side": "left",
         "name": "notes"
-      }
+      },
+      "id": "delete.a-38a5accf4a-1"
     },
     {
       "keys": [
         "@delete"
-      ]
+      ],
+      "id": "delete.a-6b28978c02-3"
     },
     {
       "wait": {
         "sheet": "delete"
-      }
+      },
+      "id": "delete.a-1f8f41d28e-3"
     },
     {
-      "click": "sheet.delete.start"
+      "click": "sheet.delete.start",
+      "id": "delete.a-1f21f80b9c-3"
     },
     {
       "wait": {
@@ -143,10 +195,12 @@
           "side": "left",
           "lacks": "notes"
         }
-      }
+      },
+      "id": "delete.a-f7aa189923-1"
     },
     {
-      "uncaption": true
+      "uncaption": true,
+      "id": "delete.a-4df2c52c18-1"
     }
   ]
 }

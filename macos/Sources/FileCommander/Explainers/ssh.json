@@ -23,57 +23,84 @@
         "left": "{home}",
         "right": "{home}/projects",
         "focus": "left"
+      },
+      "id": "ssh.a-ccd2fa9b7a-1",
+      "presentation": {
+        "id": "ssh.introduction",
+        "title": "SSH servers",
+        "narration": "Connect to a server, browse it, upload a folder, and watch it refresh.",
+        "trailing_hold": 0.35,
+        "lead_in": 0.12
       }
     },
     {
-      "chapter": "Places"
+      "chapter": "Places",
+      "id": "ssh.a-bb1daaca13-1"
     },
     {
       "caption": "Connect to a server",
-      "sub": "SSH locations open in a tab. The server needs only Python 3"
+      "sub": "SSH locations open in a tab. The server needs only Python 3",
+      "id": "ssh.a-f2c1df2b71-1",
+      "presentation": {
+        "id": "ssh.connect-to-a-server",
+        "title": "Connect to a server",
+        "narration": "Connect to a server. S S H locations open in a tab. The server needs only Python 3.",
+        "trailing_hold": 0.35,
+        "lead_in": 0.12
+      }
     },
     {
       "keys": [
         "@connect_ssh"
-      ]
+      ],
+      "id": "ssh.a-f977285ac5-1"
     },
     {
       "wait": {
         "sheet": "ssh"
-      }
+      },
+      "id": "ssh.a-92f1bea30b-1"
     },
     {
       "wait": {
         "text_focus": true
-      }
+      },
+      "id": "ssh.a-0be37b237d-1"
     },
     {
-      "type": "demo-server"
+      "type": "demo-server",
+      "id": "ssh.a-0c11f830ce-1"
     },
     {
       "keys": [
         "Tab"
-      ]
+      ],
+      "id": "ssh.a-13319fd151-1"
     },
     {
       "keys": [
         "Cmd+A"
-      ]
+      ],
+      "id": "ssh.a-a0667a4b25-1"
     },
     {
-      "type": "{server}"
+      "type": "{server}",
+      "id": "ssh.a-ba5985b1ca-1"
     },
     {
-      "pause": 600
+      "pause": 600,
+      "id": "ssh.a-79e624f018-1"
     },
     {
-      "click": "sheet.ssh.connect"
+      "click": "sheet.ssh.connect",
+      "id": "ssh.a-1a470970c1-1"
     },
     {
       "wait": {
         "sheet": null
       },
-      "timeout": 25
+      "timeout": 25,
+      "id": "ssh.a-442f16a67c-1"
     },
     {
       "wait": {
@@ -82,59 +109,85 @@
           "contains": "index.html"
         }
       },
-      "timeout": 25
+      "timeout": 25,
+      "id": "ssh.a-22583cf0d3-1"
     },
     {
       "caption": "A demo server",
-      "sub": "It runs FC's real remote agent on your Mac instead of over the network"
+      "sub": "It runs FC's real remote agent on your Mac instead of over the network",
+      "id": "ssh.a-969c6f081e-1",
+      "presentation": {
+        "id": "ssh.a-demo-server",
+        "title": "A demo server",
+        "narration": "A demo server. It runs File Commander's real remote agent on your Mac instead of over the network.",
+        "trailing_hold": 0.35,
+        "lead_in": 0.12
+      }
     },
     {
       "highlight": [
         "pane.left.tabs",
         "pane.left.path"
       ],
-      "hold": 2200
+      "hold": 2200,
+      "id": "ssh.a-d38aaa0fbf-1"
     },
     {
-      "unhighlight": true
+      "unhighlight": true,
+      "id": "ssh.a-c572606fa8-1"
     },
     {
       "caption": "Upload a folder",
-      "sub": "Copy works between local and remote tabs, and between two servers"
+      "sub": "Copy works between local and remote tabs, and between two servers",
+      "id": "ssh.a-1c920633bf-1",
+      "presentation": {
+        "id": "ssh.upload-a-folder",
+        "title": "Upload a folder",
+        "narration": "Upload a folder. Copy works between local and remote tabs, and between two servers.",
+        "trailing_hold": 0.35,
+        "lead_in": 0.12
+      }
     },
     {
-      "focus": "right"
+      "focus": "right",
+      "id": "ssh.a-95ef89dd41-1"
     },
     {
       "cursor": {
         "side": "right",
         "name": "website"
-      }
+      },
+      "id": "ssh.a-815247de63-1"
     },
     {
       "keys": [
         "@copy"
-      ]
+      ],
+      "id": "ssh.a-76288993ef-1"
     },
     {
       "wait": {
         "sheet": "copy"
-      }
+      },
+      "id": "ssh.a-ffb688e0c0-1"
     },
     {
       "wait": {
         "anchor": "sheet.copy.start"
-      }
+      },
+      "id": "ssh.a-8febfbdaf6-1"
     },
     {
       "click": "sheet.copy.start",
-      "as_job": "upload"
+      "as_job": "upload",
+      "id": "ssh.a-4d72b02a2c-1"
     },
     {
       "wait": {
         "sheet": null
       },
-      "timeout": 30
+      "timeout": 30,
+      "id": "ssh.a-c11a2e6caa-1"
     },
     {
       "wait": {
@@ -143,14 +196,24 @@
           "contains": "website"
         }
       },
-      "timeout": 40
+      "timeout": 40,
+      "id": "ssh.a-45d2d88647-1"
     },
     {
       "caption": "It refreshes by itself",
-      "sub": "The active SSH tab is checked every three seconds"
+      "sub": "The active SSH tab is checked every three seconds",
+      "id": "ssh.a-43effe5c95-1",
+      "presentation": {
+        "id": "ssh.it-refreshes-by-itself",
+        "title": "It refreshes by itself",
+        "narration": "It refreshes by itself. The active S S H tab is checked every three seconds.",
+        "trailing_hold": 0.35,
+        "lead_in": 0.12
+      }
     },
     {
-      "touch": "{server}/new-page.html"
+      "touch": "{server}/new-page.html",
+      "id": "ssh.a-f58834ee9a-1"
     },
     {
       "wait": {
@@ -159,15 +222,25 @@
           "contains": "new-page.html"
         }
       },
-      "timeout": 12
+      "timeout": 12,
+      "id": "ssh.a-57ba1bbefe-1"
     },
     {
       "caption": "Your own servers",
       "sub": "Hosts, users, keys and jump hosts come from ~/.ssh/config. Passwords are asked in a sheet",
-      "hold": 2800
+      "hold": 2800,
+      "id": "ssh.a-68fa9e52dd-1",
+      "presentation": {
+        "id": "ssh.your-own-servers",
+        "title": "Your own servers",
+        "narration": "Your own servers. Hosts, users, keys and jump hosts come from ~/.ssh/config. Passwords are asked in a sheet.",
+        "trailing_hold": 0.35,
+        "lead_in": 0.12
+      }
     },
     {
-      "uncaption": true
+      "uncaption": true,
+      "id": "ssh.a-4df2c52c18-1"
     }
   ]
 }

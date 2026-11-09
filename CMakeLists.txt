@@ -277,6 +277,8 @@ if(BUILD_TESTING)
     set_tests_properties(fc.macos.compose_fixtures PROPERTIES LABELS "unit;macos" TIMEOUT 30)
     add_test(NAME fc.macos.native_harness COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/macos/tools/test_native_editor_gate.py")
     set_tests_properties(fc.macos.native_harness PROPERTIES LABELS "unit;macos" TIMEOUT 30)
+    add_test(NAME fc.tutorial.media COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/test/test_tutorial_media.py")
+    set_tests_properties(fc.tutorial.media PROPERTIES LABELS "unit;tutorial" TIMEOUT 120)
   endif()
 endif()
 

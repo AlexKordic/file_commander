@@ -24,7 +24,8 @@
     "fc.extended.ssh_editor",
     "fc.macos.explainers",
     "fc.macos.compose_fixtures",
-    "fc.macos.native_harness"
+    "fc.macos.native_harness",
+    "fc.tutorial.media"
   ],
   "platforms": {
     "Darwin": ["fc.macos.native_editor"]

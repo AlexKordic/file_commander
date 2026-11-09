@@ -1,0 +1,18 @@
+{
+  "id": "counter",
+  "title": "A small application",
+  "summary": "Record another application's tutorial with the same tools.",
+  "chapter": "example",
+  "order": 1,
+  "duration": 20,
+  "steps": [
+    {"id":"counter.intro","caption":"A second application","sub":"The recorder and player work without the file manager.","presentation":{"id":"counter.introduction","title":"A second application","narration":"This small application uses the same tutorial recorder and player, without the file manager or its editor.","trailing_hold":0.4}},
+    {"id":"counter.choose","caption":"Change the counter","sub":"The highlighted button performs the application's real action.","presentation":{"id":"counter.increment","title":"Change the counter","narration":"Click Add One to increase the counter. The tutorial checks the application state before continuing.","trailing_hold":0.4}},
+    {"id":"counter.click","click":"example.increment"},
+    {"id":"counter.check","expect":{"count":1}},
+    {"id":"counter.describe","caption":"Enter a name","sub":"Text entry and its result use the host's own controls.","presentation":{"id":"counter.name","title":"Enter a name","narration":"Enter a name in the text field. This demonstration has its own controls, anchors, and completion checks.","trailing_hold":0.4}},
+    {"id":"counter.focus","click":"example.name"},
+    {"id":"counter.type","type":"Ada"},
+    {"id":"counter.result","expect":{"name":"Ada"}}
+  ]
+}

@@ -24,19 +24,37 @@
         "left": "{home}/camera",
         "right": "{home}/music/Night Drive",
         "focus": "left"
+      },
+      "id": "view.a-835d564fef-1",
+      "presentation": {
+        "id": "view.introduction",
+        "title": "Sort and columns",
+        "narration": "Sort by name, size or date, show more columns, use one pane, and resize the panes.",
+        "trailing_hold": 0.35,
+        "lead_in": 0.12
       }
     },
     {
-      "chapter": "Basics"
+      "chapter": "Basics",
+      "id": "view.a-95f5554c81-1"
     },
     {
       "caption": "Sort by size",
-      "sub": "Click a column header, or use View › Sort By. Again reverses the order"
+      "sub": "Click a column header, or use View › Sort By. Again reverses the order",
+      "id": "view.a-dac4a2e1e4-1",
+      "presentation": {
+        "id": "view.sort-by-size",
+        "title": "Sort by size",
+        "narration": "Sort by size. Click a column header, or use View › Sort By. Again reverses the order.",
+        "trailing_hold": 0.35,
+        "lead_in": 0.12
+      }
     },
     {
       "keys": [
         "@sort_by_size"
-      ]
+      ],
+      "id": "view.a-58159b6ad7-1"
     },
     {
       "wait": {
@@ -44,15 +62,18 @@
           "side": "left",
           "is": "size"
         }
-      }
+      },
+      "id": "view.a-676546d9e7-1"
     },
     {
-      "pause": 1200
+      "pause": 1200,
+      "id": "view.a-538d34278b-1"
     },
     {
       "keys": [
         "@sort_by_size"
-      ]
+      ],
+      "id": "view.a-58159b6ad7-2"
     },
     {
       "wait": {
@@ -60,19 +81,30 @@
           "side": "left",
           "is": "size_desc"
         }
-      }
+      },
+      "id": "view.a-8e88576cd8-1"
     },
     {
-      "pause": 1200
+      "pause": 1200,
+      "id": "view.a-538d34278b-2"
     },
     {
       "caption": "Or by date",
-      "sub": ""
+      "sub": "",
+      "id": "view.a-d7d0f1f41e-1",
+      "presentation": {
+        "id": "view.or-by-date",
+        "title": "Or by date",
+        "narration": "Or by date.",
+        "trailing_hold": 0.35,
+        "lead_in": 0.12
+      }
     },
     {
       "keys": [
         "@sort_by_date"
-      ]
+      ],
+      "id": "view.a-7579277e71-1"
     },
     {
       "wait": {
@@ -80,15 +112,18 @@
           "side": "left",
           "is": "date"
         }
-      }
+      },
+      "id": "view.a-2de96c370c-1"
     },
     {
-      "pause": 1200
+      "pause": 1200,
+      "id": "view.a-538d34278b-3"
     },
     {
       "keys": [
         "@sort_by_name"
-      ]
+      ],
+      "id": "view.a-3350d01992-1"
     },
     {
       "wait": {
@@ -96,16 +131,26 @@
           "side": "left",
           "is": "name"
         }
-      }
+      },
+      "id": "view.a-888bc47798-1"
     },
     {
       "caption": "More columns",
-      "sub": "Show permissions and owner:group, or right-click a column header"
+      "sub": "Show permissions and owner:group, or right-click a column header",
+      "id": "view.a-89b3a71299-1",
+      "presentation": {
+        "id": "view.more-columns",
+        "title": "More columns",
+        "narration": "More columns. Show permissions and owner:group, or right-click a column header.",
+        "trailing_hold": 0.35,
+        "lead_in": 0.12
+      }
     },
     {
       "keys": [
         "@toggle_permissions_column"
-      ]
+      ],
+      "id": "view.a-3f29c366e1-1"
     },
     {
       "wait": {
@@ -113,12 +158,14 @@
           "side": "left",
           "permissions": true
         }
-      }
+      },
+      "id": "view.a-6c2c6c3078-1"
     },
     {
       "keys": [
         "@toggle_owner_group_column"
-      ]
+      ],
+      "id": "view.a-d86a64eed4-1"
     },
     {
       "wait": {
@@ -126,20 +173,24 @@
           "side": "left",
           "owner": true
         }
-      }
+      },
+      "id": "view.a-4b493b6e6e-1"
     },
     {
-      "pause": 1800
+      "pause": 1800,
+      "id": "view.a-85c632065e-1"
     },
     {
       "keys": [
         "@toggle_permissions_column"
-      ]
+      ],
+      "id": "view.a-3f29c366e1-2"
     },
     {
       "keys": [
         "@toggle_owner_group_column"
-      ]
+      ],
+      "id": "view.a-d86a64eed4-2"
     },
     {
       "wait": {
@@ -148,91 +199,140 @@
           "permissions": false,
           "owner": false
         }
-      }
+      },
+      "id": "view.a-d39aa49bea-1"
     },
     {
       "caption": "One pane, full width",
-      "sub": "Single Pane shows only the focused pane. Again brings both back"
+      "sub": "Single Pane shows only the focused pane. Again brings both back",
+      "id": "view.a-ba07067b8f-1",
+      "presentation": {
+        "id": "view.one-pane-full-width",
+        "title": "One pane, full width",
+        "narration": "One pane, full width. Single Pane shows only the focused pane. Again brings both back.",
+        "trailing_hold": 0.35,
+        "lead_in": 0.12
+      }
     },
     {
       "keys": [
         "@toggle_single_panel_mode"
-      ]
+      ],
+      "id": "view.a-f70d5663c6-1"
     },
     {
       "wait": {
         "single": true
-      }
+      },
+      "id": "view.a-3cf3477444-1"
     },
     {
-      "pause": 1200
+      "pause": 1200,
+      "id": "view.a-538d34278b-4"
     },
     {
       "caption": "The other pane is still the destination",
-      "sub": "The bar above the path says where copies and moves go"
+      "sub": "The bar above the path says where copies and moves go",
+      "id": "view.a-2c63e99de4-1",
+      "presentation": {
+        "id": "view.the-other-pane-is-still-the-destination",
+        "title": "The other pane is still the destination",
+        "narration": "The other pane is still the destination. The bar above the path says where copies and moves go.",
+        "trailing_hold": 0.35,
+        "lead_in": 0.12
+      }
     },
     {
       "highlight": "pane.target",
-      "hold": 2000
+      "hold": 2000,
+      "id": "view.a-66b797dabc-1"
     },
     {
-      "unhighlight": true
+      "unhighlight": true,
+      "id": "view.a-c572606fa8-1"
     },
     {
       "caption": "Switch Pane shows it",
-      "sub": "Still one pane, full width"
+      "sub": "Still one pane, full width",
+      "id": "view.a-c65fa7f91a-1",
+      "presentation": {
+        "id": "view.switch-pane-shows-it",
+        "title": "Switch Pane shows it",
+        "narration": "Switch Pane shows it. Still one pane, full width.",
+        "trailing_hold": 0.35,
+        "lead_in": 0.12
+      }
     },
     {
       "keys": [
         "@switch_panel"
-      ]
+      ],
+      "id": "view.a-d373ee8e5f-1"
     },
     {
       "wait": {
         "focused": "right"
-      }
+      },
+      "id": "view.a-cdc9093535-1"
     },
     {
       "expect": {
         "single": true
-      }
+      },
+      "id": "view.a-f03ace9dd1-1"
     },
     {
-      "pause": 1400
+      "pause": 1400,
+      "id": "view.a-33aa6d95be-1"
     },
     {
       "keys": [
         "@switch_panel"
-      ]
+      ],
+      "id": "view.a-d373ee8e5f-2"
     },
     {
       "wait": {
         "focused": "left"
-      }
+      },
+      "id": "view.a-c4a599e602-1"
     },
     {
       "keys": [
         "@toggle_single_panel_mode"
-      ]
+      ],
+      "id": "view.a-f70d5663c6-2"
     },
     {
       "wait": {
         "single": false
-      }
+      },
+      "id": "view.a-fae18c00f3-1"
     },
     {
       "caption": "Resize the panes",
-      "sub": "Drag the line between them"
+      "sub": "Drag the line between them",
+      "id": "view.a-53ab047f4d-1",
+      "presentation": {
+        "id": "view.resize-the-panes",
+        "title": "Resize the panes",
+        "narration": "Resize the panes. Drag the line between them.",
+        "trailing_hold": 0.35,
+        "lead_in": 0.12
+      }
     },
     {
       "highlight": "panes.divider",
-      "hold": 2000
+      "hold": 2000,
+      "id": "view.a-06a00159c0-1"
     },
     {
-      "unhighlight": true
+      "unhighlight": true,
+      "id": "view.a-c572606fa8-2"
     },
     {
-      "uncaption": true
+      "uncaption": true,
+      "id": "view.a-4df2c52c18-1"
     }
   ]
 }

@@ -1,0 +1,225 @@
+{
+  "id": "editor_compose",
+  "title": "Markdown Compose",
+  "order": 24,
+  "duration": 65,
+  "chapter": "editor",
+  "needs": {
+    "editor": true
+  },
+  "summary": "Read and edit Markdown with proportional text, larger headings, images and tables, using the available pane width.",
+  "steps": [
+    {
+      "open_tabs": {
+        "left": "{home}/projects/notes",
+        "right": "{home}/camera",
+        "focus": "left"
+      },
+      "id": "editor_compose.a-ba98c8d215-1",
+      "presentation": {
+        "id": "editor_compose.introduction",
+        "title": "Markdown Compose",
+        "narration": "Read and edit Markdown with proportional text, larger headings, images and tables, using the available pane width.",
+        "trailing_hold": 0.35,
+        "lead_in": 0.12
+      }
+    },
+    {
+      "chapter": "Editor",
+      "id": "editor_compose.a-33e07ec139-1"
+    },
+    {
+      "caption": "Start with Markdown",
+      "sub": "One file can be read as source or edited as a composed page",
+      "id": "editor_compose.a-ac7067bd12-1",
+      "presentation": {
+        "id": "editor_compose.start-with-markdown",
+        "title": "Start with Markdown",
+        "narration": "Start with Markdown. One file can be read as source or edited as a composed page.",
+        "trailing_hold": 0.35,
+        "lead_in": 0.12
+      }
+    },
+    {
+      "cursor": {
+        "side": "left",
+        "name": "compose.md"
+      },
+      "id": "editor_compose.a-51c34c3741-1"
+    },
+    {
+      "keys": [
+        "@open_in_editor"
+      ],
+      "id": "editor_compose.a-416334d49e-1"
+    },
+    {
+      "wait": {
+        "editor": {
+          "running": true
+        }
+      },
+      "timeout": 25,
+      "id": "editor_compose.a-4e658cd5d7-1"
+    },
+    {
+      "wait": {
+        "editor": {
+          "contains": "Field Notes"
+        }
+      },
+      "timeout": 25,
+      "id": "editor_compose.a-d04c8ce7b3-1"
+    },
+    {
+      "caption": "Open Compose",
+      "sub": "The editor palette contains Markdown: Toggle Compose/Preview",
+      "id": "editor_compose.a-423fe9bf78-1",
+      "presentation": {
+        "id": "editor_compose.open-compose",
+        "title": "Open Compose",
+        "narration": "Open Compose. The editor palette contains Markdown: Toggle Compose/Preview.",
+        "trailing_hold": 0.35,
+        "lead_in": 0.12
+      }
+    },
+    {
+      "editor_keys": [
+        "Cmd+Shift+P"
+      ],
+      "id": "editor_compose.a-84c0190e85-1"
+    },
+    {
+      "wait": {
+        "editor": {
+          "shows": "palette"
+        }
+      },
+      "timeout": 10,
+      "id": "editor_compose.a-5300d3329a-1"
+    },
+    {
+      "editor_type": "toggle compose",
+      "id": "editor_compose.a-84796afb5e-1"
+    },
+    {
+      "pause": 500,
+      "id": "editor_compose.a-2df379c034-1"
+    },
+    {
+      "editor_keys": [
+        "Enter"
+      ],
+      "id": "editor_compose.a-b748c133a3-1"
+    },
+    {
+      "wait": {
+        "editor": {
+          "compose": true
+        }
+      },
+      "timeout": 25,
+      "id": "editor_compose.a-c79bbddfbf-1"
+    },
+    {
+      "caption": "Room for the page",
+      "sub": "Proportional text and larger headings use the available pane width",
+      "id": "editor_compose.a-67e574ed3f-1",
+      "presentation": {
+        "id": "editor_compose.room-for-the-page",
+        "title": "Room for the page",
+        "narration": "Room for the page. Proportional text and larger headings use the available pane width.",
+        "trailing_hold": 0.35,
+        "lead_in": 0.12
+      }
+    },
+    {
+      "pause": 1800,
+      "id": "editor_compose.a-85c632065e-1"
+    },
+    {
+      "caption": "Edit in place",
+      "sub": "Typing changes the Markdown document while the composed view stays visible",
+      "id": "editor_compose.a-0007978292-1",
+      "presentation": {
+        "id": "editor_compose.edit-in-place",
+        "title": "Edit in place",
+        "narration": "Edit in place. Typing changes the Markdown document while the composed view stays visible.",
+        "trailing_hold": 0.35,
+        "lead_in": 0.12
+      }
+    },
+    {
+      "editor_keys": [
+        "End"
+      ],
+      "id": "editor_compose.a-2dd302cb33-1"
+    },
+    {
+      "editor_type": " — draft",
+      "id": "editor_compose.a-7ff87b03d2-1"
+    },
+    {
+      "wait": {
+        "editor": {
+          "contains": "draft"
+        }
+      },
+      "timeout": 15,
+      "id": "editor_compose.a-25479f3d46-1"
+    },
+    {
+      "caption": "Images and tables",
+      "sub": "Images and measured table cells are part of the document flow",
+      "id": "editor_compose.a-0f40871152-1",
+      "presentation": {
+        "id": "editor_compose.images-and-tables",
+        "title": "Images and tables",
+        "narration": "Images and tables. Images and measured table cells are part of the document flow.",
+        "trailing_hold": 0.35,
+        "lead_in": 0.12
+      }
+    },
+    {
+      "editor_keys": [
+        "PageDown"
+      ],
+      "id": "editor_compose.a-d5d70f56c7-1"
+    },
+    {
+      "pause": 2000,
+      "id": "editor_compose.a-d8f0f76503-1"
+    },
+    {
+      "caption": "Back to the files",
+      "sub": "The editor keeps this document and its unsaved changes",
+      "id": "editor_compose.a-0c5427dcf4-1",
+      "presentation": {
+        "id": "editor_compose.back-to-the-files",
+        "title": "Back to the files",
+        "narration": "Back to the files. The editor keeps this document and its unsaved changes.",
+        "trailing_hold": 0.35,
+        "lead_in": 0.12
+      }
+    },
+    {
+      "editor_keys": [
+        "F10"
+      ],
+      "id": "editor_compose.a-cc9ffb3357-1"
+    },
+    {
+      "wait": {
+        "editor": {
+          "running": false
+        }
+      },
+      "timeout": 10,
+      "id": "editor_compose.a-df0d45c496-1"
+    },
+    {
+      "uncaption": true,
+      "id": "editor_compose.a-4df2c52c18-1"
+    }
+  ]
+}

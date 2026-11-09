@@ -1,0 +1,52 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:explainerkit:capture:1",
+  "title": "ExplainerKit image capture, version 1",
+  "type": "object",
+  "required": ["schema", "status", "width", "height", "lesson", "frames"],
+  "properties": {
+    "schema": {"const": 1},
+    "status": {"enum": ["recording", "complete", "failed"]},
+    "width": {"type": "integer", "minimum": 2, "multipleOf": 2},
+    "height": {"type": "integer", "minimum": 2, "multipleOf": 2},
+    "fps": {"type": "integer", "minimum": 1, "maximum": 60},
+    "duration_ns": {"type": "integer", "minimum": 0},
+    "lesson": {
+      "type": "object", "required": ["id"],
+      "properties": {"id": {"type": "string", "minLength": 1}, "title": {"type": "string"},
+                     "chapter": {"type": "string"}, "chapter_title": {"type": "string"}}
+    },
+    "frames": {
+      "type": "array",
+      "items": {
+        "type": "object", "required": ["pts_ns", "sequence", "path", "sha256"],
+        "properties": {
+          "pts_ns": {"type": "integer", "minimum": 0},
+          "sequence": {"type": "integer", "minimum": 0},
+          "path": {"type": "string", "minLength": 1},
+          "sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+          "utc": {"type": "string"}, "lesson": {"type": "string"}, "step": {"type": "string"},
+          "generated": {"type": "string"},
+          "source_timestamp": {
+            "type": "object", "required": ["value", "timescale"],
+            "properties": {"value": {"type": "integer"}, "timescale": {"type": "integer", "minimum": 1}}
+          }
+        }
+      }
+    },
+    "clock": {
+      "type": "object",
+      "properties": {"origin_host_ns": {"type": "integer"}, "anchor_host_ns": {"type": "integer"},
+                     "anchor_utc_ns": {"type": "integer"}}
+    },
+    "errors": {"type": "array", "items": {"type": "string"}},
+    "provenance": {"type": "object"}
+  },
+  "allOf": [{
+    "if": {"properties": {"status": {"const": "complete"}}},
+    "then": {"required": ["duration_ns"], "properties": {
+      "duration_ns": {"minimum": 1}, "frames": {"minItems": 1}, "errors": {"maxItems": 0}
+    }}
+  }],
+  "$comment": "Recording checkpoints and failed takes may have no frames. Completed takes additionally require duration, frames and no errors. Semantic validation checks strictly increasing frame times, relative in-root assets, hashes, PNG chunk checksums, geometry, source-frame accounting, ordered events and complete action/segment pairs."
+}

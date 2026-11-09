@@ -65,8 +65,13 @@ public final class ExplainerRunner {
   public private(set) var timeline: [TimelineEvent] = []
   /// Called after every step, so the host can checkpoint for restarts.
   @ObservationIgnored public var onStep: ((ExplainerScript, Int) -> Void)?
+  /// Export adapters can wait for narration or capture readiness without changing
+  /// the host's commands. Hooks run on the same actor and preserve action order.
+  @ObservationIgnored public var beforeStep: ((ExplainerScript, ExplainerStep, Int) async throws -> Void)?
+  @ObservationIgnored public var afterStep: ((ExplainerScript, ExplainerStep, Int) async throws -> Void)?
+  @ObservationIgnored public var afterLesson: ((ExplainerScript) async throws -> Void)?
 
-  @ObservationIgnored private var started = Date()
+  @ObservationIgnored private var started = ProcessInfo.processInfo.systemUptime
   @ObservationIgnored private var skipRequested = false
   @ObservationIgnored private var stopRequested = false
   @ObservationIgnored private var showMeRequested = false
@@ -99,7 +104,7 @@ public final class ExplainerRunner {
     self.host = host
     stopRequested = false
     skipRequested = false
-    started = Date()
+    started = ProcessInfo.processInfo.systemUptime
     timeline = []
     overlay.reset()
     overlay.title = script.title
@@ -110,6 +115,7 @@ public final class ExplainerRunner {
       while stepIndex < script.steps.count {
         try await gate()
         let step = script.steps[stepIndex]
+        try await beforeStep?(script, step, stepIndex)
         overlay.progress = "\(stepIndex + 1)/\(script.steps.count)"
         record("step", step.action)
         if Trace.enabled {
@@ -126,9 +132,11 @@ public final class ExplainerRunner {
           throw ExplainerFailure(script: script.id, step: stepIndex, message: error.localizedDescription)
         }
         if step.hold > 0 { try await sleep(step.hold) }
+        try await afterStep?(script, step, stepIndex)
         stepIndex += 1
         onStep?(script, stepIndex)
       }
+      try await afterLesson?(script)
       overlay.caption = nil
       overlay.highlights = []
       overlay.spotlight = nil
@@ -143,7 +151,7 @@ public final class ExplainerRunner {
   }
 
   public func record(_ kind: String, _ text: String, _ detail: String = "") {
-    timeline.append(TimelineEvent(time: Date().timeIntervalSince(started), kind: kind, text: text, detail: detail))
+    timeline.append(TimelineEvent(time: ProcessInfo.processInfo.systemUptime - started, kind: kind, text: text, detail: detail))
   }
 
   /// Sleeps for script time, honouring speed, pause, skip and stop.
@@ -277,16 +285,30 @@ public final class ExplainerRunner {
         if showMeRequested {
           showMeRequested = false
           state = .running
-          for step in fallback { try await execute(step, host: host) }
+          for (index, step) in fallback.enumerated() { try await fallbackStep(step, index: index, host: host) }
           break
         }
         try await Task.sleep(for: .milliseconds(60))
       }
       overlay.caption = previous
     } else {
-      for step in fallback { try await execute(step, host: host) }
+      for (index, step) in fallback.enumerated() { try await fallbackStep(step, index: index, host: host) }
       if accept != .null { try await waitFor(host.describe(accept), timeout: 15) { host.evaluate(accept) } }
     }
+  }
+
+  private func fallbackStep(_ value: ExplainerStep, index: Int, host: ExplainerHost) async throws {
+    var step = value
+    if let script {
+      if step.id == nil {
+        let parent = script.steps[stepIndex].id ?? "\(script.id).step-\(stepIndex)"
+        step.options["id"] = .string("\(parent).show-\(index)")
+      }
+      try await beforeStep?(script, step, stepIndex)
+      try await execute(step, host: host)
+      if step.hold > 0 { try await sleep(step.hold) }
+      try await afterStep?(script, step, stepIndex)
+    } else { try await execute(step, host: host) }
   }
 
   private func movePointer(to anchor: String, approach: Double, leading: Bool = false) async throws {

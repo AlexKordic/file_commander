@@ -23,25 +23,44 @@
         "left": "{home}",
         "right": "{home}/backup",
         "focus": "left"
+      },
+      "id": "archives.a-cdcdfde8d2-1",
+      "presentation": {
+        "id": "archives.introduction",
+        "title": "Archives",
+        "narration": "Browse a zip, copy files out, extract a compressed tar, open any file as an archive, open an encrypted one, and create a zip.",
+        "trailing_hold": 0.35,
+        "lead_in": 0.12
       }
     },
     {
-      "chapter": "Files"
+      "chapter": "Files",
+      "id": "archives.a-ded5fddc77-1"
     },
     {
       "caption": "Archives open like folders",
-      "sub": "Open on a .zip file browses it, read-only"
+      "sub": "Open on a .zip file browses it, read-only",
+      "id": "archives.a-6cd210e4da-1",
+      "presentation": {
+        "id": "archives.archives-open-like-folders",
+        "title": "Archives open like folders",
+        "narration": "Archives open like folders. Open on a .zip file browses it, read-only.",
+        "trailing_hold": 0.35,
+        "lead_in": 0.12
+      }
     },
     {
       "cursor": {
         "side": "left",
         "name": "website-2025.zip"
-      }
+      },
+      "id": "archives.a-e2ce5a085f-1"
     },
     {
       "keys": [
         "@enter_dir"
-      ]
+      ],
+      "id": "archives.a-3547fcf013-1"
     },
     {
       "wait": {
@@ -50,48 +69,65 @@
           "contains": "app.js"
         }
       },
-      "timeout": 20
+      "timeout": 20,
+      "id": "archives.a-22fd0a0f1f-1"
     },
     {
       "highlight": "pane.left.path",
-      "hold": 1600
+      "hold": 1600,
+      "id": "archives.a-ea00e06ac8-1"
     },
     {
-      "unhighlight": true
+      "unhighlight": true,
+      "id": "archives.a-c572606fa8-1"
     },
     {
       "caption": "Copy files out",
-      "sub": "Copy works as anywhere else"
+      "sub": "Copy works as anywhere else",
+      "id": "archives.a-07b5098ae9-1",
+      "presentation": {
+        "id": "archives.copy-files-out",
+        "title": "Copy files out",
+        "narration": "Copy files out. Copy works as anywhere else.",
+        "trailing_hold": 0.35,
+        "lead_in": 0.12
+      }
     },
     {
       "keys": [
         "@select_all"
-      ]
+      ],
+      "id": "archives.a-2e5eec1398-1"
     },
     {
       "keys": [
         "@copy"
-      ]
+      ],
+      "id": "archives.a-76288993ef-1"
     },
     {
       "wait": {
         "sheet": "copy"
-      }
+      },
+      "id": "archives.a-ffb688e0c0-1"
     },
     {
       "wait": {
         "anchor": "sheet.copy.start"
-      }
+      },
+      "id": "archives.a-8febfbdaf6-1"
     },
     {
       "click": "sheet.copy.start",
-      "as_job": "out"
+      "as_job": "out",
+      "id": "archives.a-01aa78d25e-1"
     },
     {
       "wait": {
         "sheet": null
       },
-      "timeout": 30
+      "timeout": 30,
+      "id": "archives.a-c11a2e6caa-1"
     },
     {
       "wait": {
@@ -100,36 +136,51 @@
           "contains": "index.html"
         }
       },
-      "timeout": 20
+      "timeout": 20,
+      "id": "archives.a-c7d5d6ba09-1"
     },
     {
       "caption": "Read-only",
-      "sub": "Changing files inside an archive is refused; copy them out first"
+      "sub": "Changing files inside an archive is refused; copy them out first",
+      "id": "archives.a-d9dded08c9-1",
+      "presentation": {
+        "id": "archives.read-only",
+        "title": "Read-only",
+        "narration": "Read-only. Changing files inside an archive is refused; copy them out first.",
+        "trailing_hold": 0.35,
+        "lead_in": 0.12
+      }
     },
     {
       "keys": [
         "@mkdir"
-      ]
+      ],
+      "id": "archives.a-701bb26de0-1"
     },
     {
       "wait": {
         "errors_at_least": 1
-      }
+      },
+      "id": "archives.a-5ca0b98da8-1"
     },
     {
       "highlight": "errors.lines",
-      "hold": 2000
+      "hold": 2000,
+      "id": "archives.a-ec99710fa4-1"
     },
     {
-      "unhighlight": true
+      "unhighlight": true,
+      "id": "archives.a-c572606fa8-2"
     },
     {
-      "click": "errors.clear"
+      "click": "errors.clear",
+      "id": "archives.a-0551aed163-1"
     },
     {
       "keys": [
         "@leave_dir"
-      ]
+      ],
+      "id": "archives.a-1c3562a1da-1"
     },
     {
       "wait": {
@@ -137,65 +188,86 @@
           "side": "left",
           "ends_with": "/home"
         }
-      }
+      },
+      "id": "archives.a-c439cbe446-1"
     },
     {
       "caption": "Compressed tars ask first",
-      "sub": "Listing a .tar.gz reads all of it, so Enter offers to extract it in one pass"
+      "sub": "Listing a .tar.gz reads all of it, so Enter offers to extract it in one pass",
+      "id": "archives.a-25a90437bc-1",
+      "presentation": {
+        "id": "archives.compressed-tars-ask-first",
+        "title": "Compressed tars ask first",
+        "narration": "Compressed tars ask first. Listing a .tar.gz reads all of it, so Enter offers to extract it in one pass.",
+        "trailing_hold": 0.35,
+        "lead_in": 0.12
+      }
     },
     {
       "navigate": {
         "side": "left",
         "to": "{home}/downloads"
-      }
+      },
+      "id": "archives.a-b739d2a6f0-1"
     },
     {
       "cursor": {
         "side": "left",
         "name": "logs-2026.tar.gz"
-      }
+      },
+      "id": "archives.a-9ece6c7cf0-1"
     },
     {
       "keys": [
         "@enter_dir"
-      ]
+      ],
+      "id": "archives.a-3547fcf013-2"
     },
     {
       "wait": {
         "sheet": "extract"
-      }
+      },
+      "id": "archives.a-09e8784910-1"
     },
     {
       "wait": {
         "anchor": "sheet.extract.extract"
-      }
+      },
+      "id": "archives.a-daf5ec6318-1"
     },
     {
       "highlight": "sheet.extract.destination",
-      "hold": 1400
+      "hold": 1400,
+      "id": "archives.a-3619fedba2-1"
     },
     {
-      "pause": 1400
+      "pause": 1400,
+      "id": "archives.a-33aa6d95be-1"
     },
     {
       "highlight": "sheet.extract.folder",
-      "hold": 1400
+      "hold": 1400,
+      "id": "archives.a-c3e10d9940-1"
     },
     {
-      "pause": 1400
+      "pause": 1400,
+      "id": "archives.a-33aa6d95be-2"
     },
     {
-      "unhighlight": true
+      "unhighlight": true,
+      "id": "archives.a-c572606fa8-3"
     },
     {
       "click": "sheet.extract.extract",
-      "as_job": "logs"
+      "as_job": "logs",
+      "id": "archives.a-2a7c5df57f-1"
     },
     {
       "wait": {
         "sheet": null
       },
-      "timeout": 20
+      "timeout": 20,
+      "id": "archives.a-1616003a31-1"
     },
     {
       "wait": {
@@ -204,7 +276,8 @@
           "state": "finished"
         }
       },
-      "timeout": 40
+      "timeout": 40,
+      "id": "archives.a-cf1d14cc38-1"
     },
     {
       "wait": {
@@ -213,22 +286,33 @@
           "contains": "logs-2026"
         }
       },
-      "timeout": 20
+      "timeout": 20,
+      "id": "archives.a-b4d865c89e-1"
     },
     {
       "caption": "Open any file as an archive",
-      "sub": "A .docx is a zip inside; Open as Archive browses it"
+      "sub": "A .docx is a zip inside; Open as Archive browses it",
+      "id": "archives.a-5d94d1729b-1",
+      "presentation": {
+        "id": "archives.open-any-file-as-an-archive",
+        "title": "Open any file as an archive",
+        "narration": "Open any file as an archive. A .docx is a zip inside; Open as Archive browses it.",
+        "trailing_hold": 0.35,
+        "lead_in": 0.12
+      }
     },
     {
       "cursor": {
         "side": "left",
         "name": "report.docx"
-      }
+      },
+      "id": "archives.a-987bbfb379-1"
     },
     {
       "keys": [
         "@open_as_archive"
-      ]
+      ],
+      "id": "archives.a-f7118ad983-1"
     },
     {
       "wait": {
@@ -237,15 +321,18 @@
           "contains": "word"
         }
       },
-      "timeout": 20
+      "timeout": 20,
+      "id": "archives.a-ab71b84e9c-1"
     },
     {
-      "pause": 1400
+      "pause": 1400,
+      "id": "archives.a-33aa6d95be-3"
     },
     {
       "keys": [
         "@leave_dir"
-      ]
+      ],
+      "id": "archives.a-1c3562a1da-2"
     },
     {
       "wait": {
@@ -253,22 +340,33 @@
           "side": "left",
           "ends_with": "/downloads"
         }
-      }
+      },
+      "id": "archives.a-2dbf98a659-1"
     },
     {
       "caption": "Encrypted archives ask for the password",
-      "sub": "When a file's data is read; FC remembers it until you quit"
+      "sub": "When a file's data is read; FC remembers it until you quit",
+      "id": "archives.a-f48dca180b-1",
+      "presentation": {
+        "id": "archives.encrypted-archives-ask-for-the-password",
+        "title": "Encrypted archives ask for the password",
+        "narration": "Encrypted archives ask for the password. When a file's data is read; File Commander remembers it until you quit.",
+        "trailing_hold": 0.35,
+        "lead_in": 0.12
+      }
     },
     {
       "cursor": {
         "side": "left",
         "name": "private.zip"
-      }
+      },
+      "id": "archives.a-6a2c254750-1"
     },
     {
       "keys": [
         "@enter_dir"
-      ]
+      ],
+      "id": "archives.a-3547fcf013-3"
     },
     {
       "wait": {
@@ -277,51 +375,61 @@
           "contains": "backup.sh"
         }
       },
-      "timeout": 20
+      "timeout": 20,
+      "id": "archives.a-f91f256ae2-1"
     },
     {
       "cursor": {
         "side": "left",
         "name": "backup.sh"
-      }
+      },
+      "id": "archives.a-5311216489-1"
     },
     {
       "keys": [
         "@copy"
-      ]
+      ],
+      "id": "archives.a-76288993ef-2"
     },
     {
       "wait": {
         "sheet": "copy"
-      }
+      },
+      "id": "archives.a-ffb688e0c0-2"
     },
     {
       "wait": {
         "anchor": "sheet.copy.start"
-      }
+      },
+      "id": "archives.a-8febfbdaf6-2"
     },
     {
       "click": "sheet.copy.start",
-      "as_job": "secret"
+      "as_job": "secret",
+      "id": "archives.a-2d39c9cb3c-1"
     },
     {
       "wait": {
         "anchor": "sheet.askpass.secret"
       },
-      "timeout": 20
+      "timeout": 20,
+      "id": "archives.a-96d1bcbd36-1"
     },
     {
       "wait": {
         "text_focus": true
-      }
+      },
+      "id": "archives.a-0be37b237d-1"
     },
     {
-      "type": "tutorial"
+      "type": "tutorial",
+      "id": "archives.a-182cc5fb0a-1"
     },
     {
       "keys": [
         "Enter"
-      ]
+      ],
+      "id": "archives.a-332a45bb8d-1"
     },
     {
       "wait": {
@@ -330,7 +438,8 @@
           "state": "finished"
         }
       },
-      "timeout": 30
+      "timeout": 30,
+      "id": "archives.a-c37d554890-1"
     },
     {
       "wait": {
@@ -339,12 +448,14 @@
           "contains": "backup.sh"
         }
       },
-      "timeout": 20
+      "timeout": 20,
+      "id": "archives.a-c799bb0879-1"
     },
     {
       "keys": [
         "@leave_dir"
-      ]
+      ],
+      "id": "archives.a-1c3562a1da-3"
     },
     {
       "wait": {
@@ -352,93 +463,120 @@
           "side": "left",
           "ends_with": "/downloads"
         }
-      }
+      },
+      "id": "archives.a-2dbf98a659-2"
     },
     {
       "caption": "Make an archive",
-      "sub": "Copy to a destination named .zip, .7z or .tar.gz, and FC creates that archive"
+      "sub": "Copy to a destination named .zip, .7z or .tar.gz, and FC creates that archive",
+      "id": "archives.a-097be6203c-1",
+      "presentation": {
+        "id": "archives.make-an-archive",
+        "title": "Make an archive",
+        "narration": "Make an archive. Copy to a destination named .zip, .7z or .tar.gz, and File Commander creates that archive.",
+        "trailing_hold": 0.35,
+        "lead_in": 0.12
+      }
     },
     {
       "navigate": {
         "side": "left",
         "to": "{home}/photos/2026"
-      }
+      },
+      "id": "archives.a-26091b09f1-1"
     },
     {
       "keys": [
         "@glob_select"
-      ]
+      ],
+      "id": "archives.a-d9874f6ca6-1"
     },
     {
       "wait": {
         "glob": true
-      }
+      },
+      "id": "archives.a-1efa89e6ff-1"
     },
     {
       "wait": {
         "text_focus": true
-      }
+      },
+      "id": "archives.a-0be37b237d-2"
     },
     {
-      "type": "*.jpg"
+      "type": "*.jpg",
+      "id": "archives.a-af89ee575e-1"
     },
     {
       "keys": [
         "Enter"
-      ]
+      ],
+      "id": "archives.a-332a45bb8d-2"
     },
     {
       "wait": {
         "glob": false
-      }
+      },
+      "id": "archives.a-ccea205bb8-1"
     },
     {
       "keys": [
         "@copy"
-      ]
+      ],
+      "id": "archives.a-76288993ef-3"
     },
     {
       "wait": {
         "sheet": "copy"
-      }
+      },
+      "id": "archives.a-ffb688e0c0-3"
     },
     {
       "wait": {
         "text_focus": true
-      }
+      },
+      "id": "archives.a-0be37b237d-3"
     },
     {
       "keys": [
         "Cmd+A"
-      ]
+      ],
+      "id": "archives.a-a0667a4b25-1"
     },
     {
-      "type": "{home}/backup/photos.zip"
+      "type": "{home}/backup/photos.zip",
+      "id": "archives.a-6f19b4baf9-1"
     },
     {
       "wait": {
         "anchor": "sheet.copy.archive"
-      }
+      },
+      "id": "archives.a-6a0d9d1cca-1"
     },
     {
       "highlight": "sheet.copy.archive",
-      "hold": 1600
+      "hold": 1600,
+      "id": "archives.a-bb5799de43-1"
     },
     {
-      "pause": 1600
+      "pause": 1600,
+      "id": "archives.a-4b7635c5c1-1"
     },
     {
-      "unhighlight": true
+      "unhighlight": true,
+      "id": "archives.a-c572606fa8-4"
     },
     {
       "click": "sheet.copy.start",
-      "as_job": "archive"
+      "as_job": "archive",
+      "id": "archives.a-a1538a6e67-1"
     },
     {
       "wait": {
         "sheet": null
       },
-      "timeout": 20
+      "timeout": 20,
+      "id": "archives.a-1616003a31-2"
     },
     {
       "wait": {
@@ -447,7 +585,8 @@
           "state": "finished"
         }
       },
-      "timeout": 40
+      "timeout": 40,
+      "id": "archives.a-51f1d0c4d4-1"
     },
     {
       "wait": {
@@ -455,25 +594,37 @@
           "side": "right",
           "contains": "photos.zip"
         }
-      }
+      },
+      "id": "archives.a-12f2fac4a4-1"
     },
     {
       "caption": "And it opens like a folder",
-      "sub": ""
+      "sub": "",
+      "id": "archives.a-a63c575ff0-1",
+      "presentation": {
+        "id": "archives.and-it-opens-like-a-folder",
+        "title": "And it opens like a folder",
+        "narration": "And it opens like a folder.",
+        "trailing_hold": 0.35,
+        "lead_in": 0.12
+      }
     },
     {
-      "focus": "right"
+      "focus": "right",
+      "id": "archives.a-95ef89dd41-1"
     },
     {
       "cursor": {
         "side": "right",
         "name": "photos.zip"
-      }
+      },
+      "id": "archives.a-54396e5eb9-1"
     },
     {
       "keys": [
         "@enter_dir"
-      ]
+      ],
+      "id": "archives.a-3547fcf013-4"
     },
     {
       "wait": {
@@ -482,18 +633,22 @@
           "contains": "beach.jpg"
         }
       },
-      "timeout": 20
+      "timeout": 20,
+      "id": "archives.a-3c08ab935c-1"
     },
     {
-      "pause": 1200
+      "pause": 1200,
+      "id": "archives.a-538d34278b-1"
     },
     {
       "keys": [
         "@leave_dir"
-      ]
+      ],
+      "id": "archives.a-1c3562a1da-4"
     },
     {
-      "uncaption": true
+      "uncaption": true,
+      "id": "archives.a-4df2c52c18-1"
     }
   ]
 }

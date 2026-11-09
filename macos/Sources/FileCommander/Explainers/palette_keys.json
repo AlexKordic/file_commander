@@ -1,7 +1,7 @@
 {
   "id": "palette_keys",
   "title": "Commands and keys",
-  "order": 24,
+  "order": 25,
   "duration": 55,
   "chapter": "yours",
   "summary": "Find any command in the palette, rebind its key, and pick a key preset.",
@@ -19,120 +19,183 @@
         "left": "{home}",
         "right": "{home}/camera",
         "focus": "left"
+      },
+      "id": "palette_keys.a-f5d2afef79-1",
+      "presentation": {
+        "id": "palette_keys.introduction",
+        "title": "Commands and keys",
+        "narration": "Find any command in the palette, rebind its key, and pick a key preset.",
+        "trailing_hold": 0.35,
+        "lead_in": 0.12
       }
     },
     {
-      "chapter": "Make It Yours"
+      "chapter": "Make It Yours",
+      "id": "palette_keys.a-17d61eebdc-1"
     },
     {
       "caption": "Every command, one search away",
-      "sub": "The command palette finds commands by any part of their name"
+      "sub": "The command palette finds commands by any part of their name",
+      "id": "palette_keys.a-6970046ddc-1",
+      "presentation": {
+        "id": "palette_keys.every-command-one-search-away",
+        "title": "Every command, one search away",
+        "narration": "Every command, one search away. The command palette finds commands by any part of their name.",
+        "trailing_hold": 0.35,
+        "lead_in": 0.12
+      }
     },
     {
       "keys": [
         "@command_palette"
-      ]
+      ],
+      "id": "palette_keys.a-309dca4049-1"
     },
     {
       "wait": {
         "palette": "commands"
-      }
+      },
+      "id": "palette_keys.a-5d189c2759-1"
     },
     {
       "wait": {
         "text_focus": true
-      }
+      },
+      "id": "palette_keys.a-0be37b237d-1"
     },
     {
-      "type": "ssh"
+      "type": "ssh",
+      "id": "palette_keys.a-86bd621554-1"
     },
     {
       "wait": {
         "anchor": "palette.row[command=connect_ssh]"
-      }
+      },
+      "id": "palette_keys.a-066b833e7b-1"
     },
     {
       "highlight": "palette.row[command=connect_ssh]",
-      "hold": 1800
+      "hold": 1800,
+      "id": "palette_keys.a-e829865985-1"
     },
     {
       "caption": "Change its key",
-      "sub": "Select a command, press ⌃K, then the new key"
+      "sub": "Select a command, press ⌃K, then the new key",
+      "id": "palette_keys.a-a44a0e9d05-1",
+      "presentation": {
+        "id": "palette_keys.change-its-key",
+        "title": "Change its key",
+        "narration": "Change its key. Select a command, press Control K, then the new key.",
+        "trailing_hold": 0.35,
+        "lead_in": 0.12
+      }
     },
     {
       "keys": [
         "Ctrl+K"
-      ]
+      ],
+      "id": "palette_keys.a-ff45f6ba7f-1"
     },
     {
-      "pause": 700
+      "pause": 700,
+      "id": "palette_keys.a-d528edc5cd-1"
     },
     {
       "keys": [
         "Ctrl+Opt+S"
-      ]
+      ],
+      "id": "palette_keys.a-49e9df6172-1"
     },
     {
       "wait": {
         "hud": "Connect to Server"
-      }
+      },
+      "id": "palette_keys.a-a07e289507-1"
     },
     {
-      "unhighlight": true
+      "unhighlight": true,
+      "id": "palette_keys.a-c572606fa8-1"
     },
     {
       "keys": [
         "Esc"
-      ]
+      ],
+      "id": "palette_keys.a-5087da4e90-1"
     },
     {
       "wait": {
         "palette": null
-      }
+      },
+      "id": "palette_keys.a-8ee3d35a92-1"
     },
     {
       "caption": "The new key works",
-      "sub": ""
+      "sub": "",
+      "id": "palette_keys.a-185d27c136-1",
+      "presentation": {
+        "id": "palette_keys.the-new-key-works",
+        "title": "The new key works",
+        "narration": "The new key works.",
+        "trailing_hold": 0.35,
+        "lead_in": 0.12
+      }
     },
     {
       "keys": [
         "Ctrl+Opt+S"
-      ]
+      ],
+      "id": "palette_keys.a-49e9df6172-2"
     },
     {
       "wait": {
         "sheet": "ssh"
-      }
+      },
+      "id": "palette_keys.a-92f1bea30b-1"
     },
     {
-      "pause": 900
+      "pause": 900,
+      "id": "palette_keys.a-aec4a9cde4-1"
     },
     {
       "keys": [
         "Esc"
-      ]
+      ],
+      "id": "palette_keys.a-5087da4e90-2"
     },
     {
       "wait": {
         "sheet": null
-      }
+      },
+      "id": "palette_keys.a-0f1fbb49b0-1"
     },
     {
       "caption": "Two presets",
-      "sub": "Commander keeps the terminal keys; Mac uses Finder’s shortcuts. Settings › Keys lists every key"
+      "sub": "Commander keeps the terminal keys; Mac uses Finder’s shortcuts. Settings › Keys lists every key",
+      "id": "palette_keys.a-d3f662e9c6-1",
+      "presentation": {
+        "id": "palette_keys.two-presets",
+        "title": "Two presets",
+        "narration": "Two presets. Commander keeps the terminal keys; Mac uses Finder’s shortcuts. Settings › Keys lists every key.",
+        "trailing_hold": 0.35,
+        "lead_in": 0.12
+      }
     },
     {
       "open_window": "settings",
-      "note": "keys"
+      "note": "keys",
+      "id": "palette_keys.a-b8b6c3ae7f-1"
     },
     {
-      "pause": 2600
+      "pause": 2600,
+      "id": "palette_keys.a-51c4a2cfab-1"
     },
     {
-      "close_window": "settings"
+      "close_window": "settings",
+      "id": "palette_keys.a-6821e08217-1"
     },
     {
-      "uncaption": true
+      "uncaption": true,
+      "id": "palette_keys.a-4df2c52c18-1"
     }
   ]
 }

@@ -20,44 +20,75 @@
         "left": "{home}/photos/2026",
         "right": "{home}",
         "focus": "left"
+      },
+      "id": "bookmarks.a-46f2b47193-1",
+      "presentation": {
+        "id": "bookmarks.introduction",
+        "title": "Bookmarks",
+        "narration": "Bookmark folders, servers and archives, and open them from the sidebar.",
+        "trailing_hold": 0.35,
+        "lead_in": 0.12
       }
     },
     {
-      "chapter": "Places"
+      "chapter": "Places",
+      "id": "bookmarks.a-bb1daaca13-1"
     },
     {
       "caption": "Bookmark a folder",
-      "sub": "Bookmark This Folder adds the focused pane’s folder to the sidebar"
+      "sub": "Bookmark This Folder adds the focused pane’s folder to the sidebar",
+      "id": "bookmarks.a-cf87d22c09-1",
+      "presentation": {
+        "id": "bookmarks.bookmark-a-folder",
+        "title": "Bookmark a folder",
+        "narration": "Bookmark a folder. Bookmark This Folder adds the focused pane’s folder to the sidebar.",
+        "trailing_hold": 0.35,
+        "lead_in": 0.12
+      }
     },
     {
       "keys": [
         "@add_bookmark"
-      ]
+      ],
+      "id": "bookmarks.a-99863e04b6-1"
     },
     {
       "wait": {
         "bookmark": "2026"
-      }
+      },
+      "id": "bookmarks.a-44d9bbabce-1"
     },
     {
       "highlight": "sidebar.bookmarks",
-      "hold": 1800
+      "hold": 1800,
+      "id": "bookmarks.a-250646b43e-1"
     },
     {
-      "unhighlight": true
+      "unhighlight": true,
+      "id": "bookmarks.a-c572606fa8-1"
     },
     {
       "caption": "Open a bookmark",
-      "sub": "Click it to open it in the focused pane"
+      "sub": "Click it to open it in the focused pane",
+      "id": "bookmarks.a-d639f29360-1",
+      "presentation": {
+        "id": "bookmarks.open-a-bookmark",
+        "title": "Open a bookmark",
+        "narration": "Open a bookmark. Click it to open it in the focused pane.",
+        "trailing_hold": 0.35,
+        "lead_in": 0.12
+      }
     },
     {
       "navigate": {
         "side": "left",
         "to": "{home}"
-      }
+      },
+      "id": "bookmarks.a-265647993b-1"
     },
     {
-      "click": "sidebar.bookmark[name=2026]"
+      "click": "sidebar.bookmark[name=2026]",
+      "id": "bookmarks.a-a4f4f4ac9f-1"
     },
     {
       "wait": {
@@ -65,25 +96,38 @@
           "side": "left",
           "ends_with": "/2026"
         }
-      }
+      },
+      "id": "bookmarks.a-94a8a59012-1"
     },
     {
       "caption": "Servers and archives too",
-      "sub": "Right-click a bookmark to open it in either pane or a new tab, or to remove it"
+      "sub": "Right-click a bookmark to open it in either pane or a new tab, or to remove it",
+      "id": "bookmarks.a-f389c17aa0-1",
+      "presentation": {
+        "id": "bookmarks.servers-and-archives-too",
+        "title": "Servers and archives too",
+        "narration": "Servers and archives too. Right-click a bookmark to open it in either pane or a new tab, or to remove it.",
+        "trailing_hold": 0.35,
+        "lead_in": 0.12
+      }
     },
     {
-      "pause": 2200
+      "pause": 2200,
+      "id": "bookmarks.a-1255e084a1-1"
     },
     {
-      "remove_bookmark": "2026"
+      "remove_bookmark": "2026",
+      "id": "bookmarks.a-e9e2e4c1a0-1"
     },
     {
       "wait": {
         "no_bookmark": "2026"
-      }
+      },
+      "id": "bookmarks.a-fd141b0988-1"
     },
     {
-      "uncaption": true
+      "uncaption": true,
+      "id": "bookmarks.a-4df2c52c18-1"
     }
   ]
 }

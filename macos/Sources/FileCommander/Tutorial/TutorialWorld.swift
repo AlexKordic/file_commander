@@ -92,6 +92,25 @@ struct TutorialWorld {
     for (name, body) in site { try text(home.appendingPathComponent("projects/website/\(name)"), body, day: 22) }
     try text(home.appendingPathComponent("projects/notes/ideas.md"), "# Ideas\n\n- Print the harbour photos\n- Finish the coastline track\n", day: 18)
     try text(home.appendingPathComponent("projects/notes/todo.md"), "# To do\n\n- [ ] Back up the music folder\n- [ ] Publish the website\n", day: 19)
+    try text(home.appendingPathComponent("projects/notes/compose.md"), """
+    # Field Notes
+
+    Write **clear ideas** with *room to breathe*. This page follows the available pane width.
+
+    ## A view from the harbour
+
+    ![Harbour at dawn](../../camera/harbour-at-dawn.jpg)
+
+    ## The next small steps
+
+    | Task | Status |
+    | --- | --- |
+    | Back up the photos | Ready |
+    | Write the travel notes | Draft |
+
+    Edit this document directly in Compose, or return to the Markdown source.
+
+    """, day: 22)
     try text(home.appendingPathComponent("projects/tools/backup.sh"), "#!/bin/sh\n# Copies the camera roll to the backup disk.\ncp -R ../../camera ../../backup/\n", day: 21)
     chmod(home.appendingPathComponent("projects/tools/backup.sh").path, 0o755)
     try text(home.appendingPathComponent("projects/tools/copy-jpg.lua"), TutorialWorld.copyScript(home: home.path), day: 21)

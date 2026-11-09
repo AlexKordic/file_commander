@@ -130,6 +130,9 @@ final class AppController {
 
   private init() {}
 
+  var isTutorialRecording: Bool { CommandLine.arguments.contains("--record-session") }
+  var presentedHomeDirectory: String { isTutorialRecording ? tutorial.world.home.path : NSHomeDirectory() }
+
   // MARK: Lifecycle
 
   func start(arguments: [String]) {
@@ -144,7 +147,7 @@ final class AppController {
         index += 1
       } else if arg == "--resume-explainer" {
         resumeExplainer = true
-      } else if ["--export-explainer", "--run-explainer", "--out", "--appearance", "--speed", "--trace"].contains(arg) {
+      } else if ["--export-explainer", "--run-explainer", "--out", "--appearance", "--speed", "--trace", "--voice", "--record-session", "--record-take", "--tutorial-world"].contains(arg) {
         index += 1  // Handled by the exporter.
       } else if arg.hasPrefix("-") {
         // AppKit and Xcode pass their own -NS... options.
@@ -156,6 +159,11 @@ final class AppController {
     }
     if paths.count > 0 { options.left = paths[0] }
     if paths.count > 1 { options.right = paths[1] }
+    if !resumeExplainer, let flag = arguments.firstIndex(of: "--record-session"), flag + 1 < arguments.count,
+       let capture = try? TutorialCaptureConfiguration.read(URL(fileURLWithPath: arguments[flag + 1])),
+       let initial = capture.initialPath {
+      options.left = initial; options.right = initial
+    }
     options.toolDirectory = Bundle.main.executableURL?.deletingLastPathComponent().path ?? ""
     askpass.start(app: self)
     if let error = engine.start(options) {
@@ -186,7 +194,10 @@ final class AppController {
     engine.setEditorSwitchKey(editorSwitchKey)
     engine.setEditorSceneAttach(!preferences.terminalEditor)
     keyRouter = KeyRouter(app: self)
-    if resumeExplainer {
+    if arguments.contains("--record-session") {
+      // The recording adapter owns resume and suppresses the welcome sheet in
+      // this disposable profile. It starts once the main window is ready.
+    } else if resumeExplainer {
       tutorial.resumeAfterRelaunch()
     } else if !preferences.welcomeShown && !arguments.contains("--run-explainer") && !arguments.contains("--export-explainer") {
       sheet = .welcome

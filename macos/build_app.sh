@@ -47,14 +47,29 @@ say "building the Swift package ($configuration)"
 swift build -c "$configuration" --package-path macos --product FileCommander
 swift build -c "$configuration" --package-path macos --product fc-relaunch
 swift build -c "$configuration" --package-path macos --product fc-askpass
+swift build -c "$configuration" --package-path packages/ExplainerKit --scratch-path build-macos/tutorial-kit --product tutorial-capture
 bin="$(swift build -c "$configuration" --package-path macos --show-bin-path)"
+capture_bin="$(swift build -c "$configuration" --package-path packages/ExplainerKit --scratch-path build-macos/tutorial-kit --show-bin-path)"
 
 app="build-macos/File Commander.app"
 say "assembling $app"
 rm -rf "$app"
 mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
 cp "$bin/FileCommander" "$bin/fc-relaunch" "$bin/fc-askpass" "$app/Contents/MacOS/"
-cp -R "$bin"/*.bundle "$app/Contents/Resources/"
+cp "$capture_bin/tutorial-capture" "$app/Contents/MacOS/"
+for resource in FileCommander_FileCommander ExplainerKit_ExplainerKit SwiftProtobuf_SwiftProtobuf; do
+  [[ -d "$bin/$resource.bundle" ]] || { echo "build_app: missing resource bundle $resource" >&2; exit 1; }
+  cp -R "$bin/$resource.bundle" "$app/Contents/Resources/"
+done
+# Python source may have been imported by developer tooling. Bytecode caches
+# are unnecessary in a signed bundle; entry points disable cache writes.
+python3 - "$app/Contents/Resources" <<'PY'
+from pathlib import Path
+import shutil
+import sys
+for cache in Path(sys.argv[1]).rglob('__pycache__'):
+    shutil.rmtree(cache)
+PY
 cp -R licenses "$app/Contents/Resources/"
 cp LICENSE THIRD_PARTY_NOTICES.md dependencies.json "$app/Contents/Resources/"
 cp build-macos/third_party/7zip/_o/7z.so "$app/Contents/MacOS/7z.so"
