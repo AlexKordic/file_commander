@@ -352,18 +352,17 @@ disconnects its window before Restart Editor Backend and reconnects after.
 
 ### Experimental rich Compose
 
-The native development path can request rich Compose with
-`FC_NATIVE_RICH_COMPOSE=1`. It requires a matching development backend and
-consumer; the packaged Fresh pin has not been advanced for this experiment.
-Grid Compose remains the default. Terminal clients keep their cell layout.
-Measured native table cells have a separate development switch:
-`FC_NATIVE_MEASURED_TABLES=1`. It takes effect only alongside
-`FC_NATIVE_RICH_COMPOSE=1`; a rich client without it keeps editable table
-source. The two switches are captured when the native editor is created.
-Neither switch changes terminal Markdown formatting or forces native columns.
+The native app enables rich Compose and measured table cells by default. Its
+packaged Fresh pin provides the matching scene and Compose capabilities.
+Terminal clients keep their cell layout. For compatibility troubleshooting,
+`FC_NATIVE_RICH_COMPOSE=0` selects grid Compose, and
+`FC_NATIVE_MEASURED_TABLES=0` keeps editable table source in rich Compose.
+The overrides are captured when the native editor is created. Neither changes
+terminal Markdown formatting or forces native columns; native prose uses the
+available pane width unless the user explicitly limits reading width.
 
-The production native controller has an opt-in backend contract. From the FC
-checkout, with the matching Fresh development binary built with `web`, run:
+The production native controller also has real-backend tests. From the FC
+checkout, with the matching Fresh binary built with `web`, run:
 
 ```sh
 FC_COMPOSE_TEST_FRESH="$PWD/../editor-fresh/target/debug/fresh" \
@@ -390,7 +389,7 @@ two commits are queued, preserve all original carets, undo each phrase/batch
 separately and follow Fresh's CRLF normalization. These tests are not full
 system input-method, SSH or interactive qualification.
 
-The experimental client hello opts into source-preserving Compose projections.
+The rich client hello opts into source-preserving Compose projections.
 The server hello advertises `compose_region_probes`. Native rich Compose
 requires that capability before accepting any scene. An older running backend
 is disconnected with an explanation directing the user to Restart editor

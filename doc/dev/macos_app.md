@@ -100,9 +100,12 @@ fc_core              unchanged                     locations, plans, jobs, journ
 
 ### Xcode and signing
 
-Open `macos/FileCommander.xcodeproj`, select the **FileCommander** target, and
-choose your **Team** in **Signing & Capabilities**. The shared **FileCommander**
-scheme builds and runs the complete app. Use **Product › Archive** for the
+Copy `macos/Xcode/Signing.local.xcconfig.example` to
+`macos/Xcode/Signing.local.xcconfig` and set your team ID there. The local file
+is ignored by Git; keep certificate hashes and provisioning choices there too.
+The app's bundle ID is `me.h264.filecommander`.
+Open `macos/FileCommander.xcodeproj`; the shared **FileCommander** scheme
+builds and runs the complete app. Use **Product › Archive** for the
 Release configuration. For public releases, use Organizer's Developer ID
 distribution workflow to sign and submit the app for notarization.
 
@@ -158,6 +161,9 @@ signature, copies the full bundle to a temporary directory on the destination
 volume, verifies that copy, then atomically replaces the installed bundle.
 Build, copy or verification failures leave the installed app intact. It never
 merges new files into an old bundle. `--open --install` opens the installed copy.
+Replacing a certificate-signed installation requires the same signing team;
+an ad hoc build cannot replace it. The standalone installer also accepts
+`--expected-team` to enforce a team for a first install without storing it in Git.
 
 `macos/tools/sign_app.sh` signs the bundle, inside out (helpers and resource
 bundles, then the app). It uses `FC_CODESIGN_IDENTITY` when that is set (`-`
@@ -209,8 +215,8 @@ waiting input, delayed caret reveal, and editable source fallback on failure.
 Typography checks cover profile persistence and font fallback, retaining the
 source reading anchor when fonts or spacing change, and invalidating obsolete
 navigation measurements.
-The tests create their own editor view and enable experimental rich Compose
-only for that instance. They do not attach to an existing Fresh session or
+The tests create their own editor view, including a real-backend check of rich
+Compose defaults without environment flags. They do not attach to an existing Fresh session or
 open the installed app. To run the affected editor checks:
 
 ```sh
@@ -244,8 +250,8 @@ candidate windows, VoiceOver or live SSH; use the isolated
 [interactive qualification workflow](testing.md#interactive-compose-qualification)
 for those checks.
 
-The development mode `FC_NATIVE_RICH_COMPOSE=1` exposes **Settings › Editor ›
-Markdown Compose**. `ComposePreferences` stores body/code font families, body
+**Settings › Editor › Markdown Compose** is available by default.
+`ComposePreferences` stores body/code font families, body
 size, six heading scales, line and paragraph spacing, list/quote indentation,
 and page width under `compose` in `app_settings.json`. Missing fields retain
 defaults; numerical values are bounded and missing fonts fall back to system
@@ -258,10 +264,9 @@ maximum in points; existing explicitly saved positive limits are preserved. The
 app's zoom scales native Compose fonts and spacing as well.
 
 Terminal Markdown's fixed column measure does not govern native wrapping.
-Parsed tables currently retain editable source instead of terminal-padded or
-truncated cell replacements. The shared measured table renderer and navigation
-are experimental; the native editor still requests table source pending the
-remaining integration and qualification gates described below.
+Parsed tables use measured native cells by default, with editing and navigation
+mapped to the Markdown source. `FC_NATIVE_MEASURED_TABLES=0` requests editable
+table source for compatibility troubleshooting.
 Code blocks use parser-owned content ranges and measured native frames;
 character-sized terminal frames do not enter the native projection.
 
@@ -270,8 +275,8 @@ and styled fonts together. Drawing, hit testing, selection and navigation use
 those fragments. Link colors, quote text/rules and code backgrounds follow
 Fresh's theme; underline and strikethrough are drawn from Fresh's semantic
 flags. The same rendering path produces the checked bitmap previews. These
-controls remain gated with rich Compose until interactive and release
-qualification is complete.
+controls are available with rich Compose. Interactive input-method, VoiceOver
+and live SSH qualification remains separate from the automatic editor gate.
 
 `ComposeImageController` revalidates visible images in the background and checks
 them when the editor is shown again. It retains the decoded image until a

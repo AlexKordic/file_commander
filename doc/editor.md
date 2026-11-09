@@ -44,16 +44,18 @@ choose **Markdown: Toggle Compose/Preview**. Run the command again to return to
 the source view. Compose edits the same Markdown buffer: saving, undo, editor
 tabs and `F10` switching work as usual.
 
-The macOS app also has an opt-in development version of Compose with
-proportional prose, larger headings and inline PNG/JPEG images. Prose wraps to
+The macOS app uses rich Compose by default, with proportional prose, larger
+headings, editable measured tables and inline PNG/JPEG images. Prose wraps to
 the available window width. Click rendered text to edit it in place; Markdown
 syntax is revealed where needed for editing. Images resolve on the document's
 filesystem, including an SSH host, and unavailable images show a placeholder.
 The saved file remains Markdown.
 
-Rich typography requires matching FC and Fresh development builds and is off
-by default. See the [experimental rich Compose integration](dev/fresh_integration.md#experimental-rich-compose)
-for its flags, supported behavior and qualification requirements.
+The app bundles the matching Fresh backend. For compatibility troubleshooting,
+`FC_NATIVE_RICH_COMPOSE=0` selects grid Compose, and
+`FC_NATIVE_MEASURED_TABLES=0` keeps tables as editable source in rich Compose.
+See the [rich Compose integration](dev/fresh_integration.md#experimental-rich-compose)
+for supported behavior and qualification requirements.
 
 ## One editor per profile
 
