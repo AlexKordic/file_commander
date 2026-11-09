@@ -29,8 +29,9 @@ Optional tools:
 | bubblewrap (`bwrap`), Linux only | Isolating the `fc.package` relocation test. macOS uses the built-in `sandbox-exec`. |
 | OpenSSH | SSH locations at run time only. The remote host needs Python 3. |
 
-The [headless core build](#headless-core-build) needs only the compiler,
-CMake, Ninja and the Boost download. Its SSH tests run a Python 3 fixture.
+The [headless core build](#headless-core-build) needs the compiler, CMake,
+Ninja, Make and Python. It uses the bundled 7-Zip sources and the Boost
+download. Its SSH tests run a Python 3 fixture.
 
 ## Quick build
 
@@ -122,7 +123,9 @@ ctest --preset core
 
 This builds the UI-free `fc_core` library and the tests that link only
 against it. There is no `fc` executable. The configure step doesn't validate
-dependency checkouts and doesn't need them; it only downloads Boost. Use it for
+FTXUI, LuaJIT or Fresh checkouts. If 7-Zip sources aren't configured, CMake
+verifies and extracts the bundled source archive into the build directory;
+Boost is the only source download. Use it for
 work on file operations, planning, traversal, jobs, settings and remote
 filesystems, or on machines without Rust.
 

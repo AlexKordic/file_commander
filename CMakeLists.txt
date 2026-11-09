@@ -26,6 +26,26 @@ set(FC_SEVENZIP_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../7zip2604" CACHE PATH 
 set(FC_FTXUI_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../alex_ftxui" CACHE PATH "Path to local FTXUI source checkout")
 set(FC_LUAJIT_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../luajit" CACHE PATH "Path to local LuaJIT source checkout")
 
+# The headless build needs 7-Zip's interface headers too. Keep a fresh core
+# checkout self-contained by using the same pinned archive as the bootstrapper.
+if(FC_CORE_ONLY AND NOT EXISTS "${FC_SEVENZIP_SOURCE_DIR}/CPP/7zip/Archive/IArchive.h")
+  file(READ "${CMAKE_CURRENT_SOURCE_DIR}/dependencies.json" _fc_dependencies)
+  string(JSON _fc_7zip_archive GET "${_fc_dependencies}" sevenzip archive)
+  string(JSON _fc_7zip_expected GET "${_fc_dependencies}" sevenzip archive_sha256)
+  set(_fc_7zip_archive "${CMAKE_CURRENT_SOURCE_DIR}/${_fc_7zip_archive}")
+  file(SHA256 "${_fc_7zip_archive}" _fc_7zip_actual)
+  if(NOT "${_fc_7zip_actual}" STREQUAL "${_fc_7zip_expected}")
+    message(FATAL_ERROR "Bundled 7-Zip source archive fingerprint mismatch")
+  endif()
+  set(_fc_core_7zip "${CMAKE_CURRENT_BINARY_DIR}/_deps/fc-sevenzip-src")
+  if(NOT EXISTS "${_fc_core_7zip}/CPP/7zip/Archive/IArchive.h")
+    file(MAKE_DIRECTORY "${_fc_core_7zip}")
+    file(ARCHIVE_EXTRACT INPUT "${_fc_7zip_archive}" DESTINATION "${_fc_core_7zip}")
+  endif()
+  set(FC_SEVENZIP_SOURCE_DIR "${_fc_core_7zip}" CACHE PATH "Path to the pinned 7-Zip source" FORCE)
+  message(STATUS "Using bundled pinned 7-Zip sources for the headless build")
+endif()
+
 include(FetchContent)
 include(ExternalProject)
 
