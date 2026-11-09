@@ -99,7 +99,7 @@ def private_environment(root, inherited):
         env[key] = str(root / name)
     for key in ("DYLD_INSERT_LIBRARIES",):
         env.pop(key, None)
-    env.update(FC_NATIVE_RICH_COMPOSE="1", FC_NATIVE_MEASURED_TABLES="1", FC_EDITOR_SWITCH_KEY="f10")
+    env["FC_EDITOR_SWITCH_KEY"] = "f10"
     env["FC_FRESH_BIN"] = str(root / "Compose Check.app/Contents/MacOS/fresh")
     return env
 

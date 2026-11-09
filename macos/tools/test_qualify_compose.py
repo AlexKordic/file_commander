@@ -103,7 +103,8 @@ class QualificationTests(unittest.TestCase):
         self.assertEqual(env["PATH"], "/usr/bin")
         for key in ("FC_SSH_BIN", "FC_LEGACY_CHECKPOINT", "FC_OTHER", "DYLD_INSERT_LIBRARIES"):
             self.assertNotIn(key, env)
-        self.assertEqual(env["FC_NATIVE_RICH_COMPOSE"], "1")
+        self.assertNotIn("FC_NATIVE_RICH_COMPOSE", env)
+        self.assertNotIn("FC_NATIVE_MEASURED_TABLES", env)
 
     def test_remote_binary_fixture_refuses_overwrite_and_wrong_marker_cleanup(self):
         created = self.remote_command("create", self.archive())
