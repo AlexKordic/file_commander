@@ -1308,13 +1308,16 @@ final class ComposeInputTests: XCTestCase {
   }
 
   @MainActor
-  func testMeasuredTableCapabilityRequiresBothDevelopmentSwitches() async throws {
+  func testRichComposeAndMeasuredTablesAreDefaultWithExplicitCompatibilityOverrides() async throws {
     _ = NSApplication.shared; NSApp.setActivationPolicy(.prohibited)
     for (environment, rich, tables) in [
-      ([:], false, false),
-      (["FC_NATIVE_MEASURED_TABLES": "1"], false, false),
-      (["FC_NATIVE_RICH_COMPOSE": "1"], true, false),
+      ([:], true, true),
+      (["FC_NATIVE_MEASURED_TABLES": "1"], true, true),
+      (["FC_NATIVE_RICH_COMPOSE": "1"], true, true),
       (["FC_NATIVE_RICH_COMPOSE": "1", "FC_NATIVE_MEASURED_TABLES": "1"], true, true),
+      (["FC_NATIVE_RICH_COMPOSE": "0"], false, false),
+      (["FC_NATIVE_RICH_COMPOSE": "0", "FC_NATIVE_MEASURED_TABLES": "1"], false, false),
+      (["FC_NATIVE_MEASURED_TABLES": "0"], true, false),
     ] {
       let peer = try ScenePeer(pane: pane("Capability check\n"))
       defer { peer.close() }

@@ -142,7 +142,7 @@ struct EditorSettings: View {
         Text("Runs Fresh's terminal interface in a terminal view instead. File Commander uses it anyway for a Fresh without the native editor's channel, such as an older version set in fresh_binary_path.")
           .font(.callout).foregroundStyle(.secondary)
       }
-      if ProcessInfo.processInfo.environment["FC_NATIVE_RICH_COMPOSE"] == "1" {
+      if ProcessInfo.processInfo.environment["FC_NATIVE_RICH_COMPOSE"] != "0" {
         ComposeSettings()
       }
       Section("Diagnostics") {

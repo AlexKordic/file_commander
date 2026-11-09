@@ -192,8 +192,8 @@ final class NativeEditor: NSObject, CellGridDelegate {
     self.composeInputLimits = composeInputLimits
     self.decodeComposeImage = decodeComposeImage
     self.prepareComposePreview = prepareComposePreview
-    richCompose = environment["FC_NATIVE_RICH_COMPOSE"] == "1"
-    measuredTables = richCompose && environment["FC_NATIVE_MEASURED_TABLES"] == "1"
+    richCompose = environment["FC_NATIVE_RICH_COMPOSE"] != "0"
+    measuredTables = richCompose && environment["FC_NATIVE_MEASURED_TABLES"] != "0"
     super.init()
     composeDocument.onChange = { [weak self] in self?.updateCompleteFlow() }
     composeFlow.onChange = { [weak self] in

@@ -134,6 +134,20 @@ private final class ComposeBackend {
 
 final class ComposeBackendTests: XCTestCase {
   @MainActor
+  func testNormalLaunchUsesRichComposeAndMeasuredTablesWithoutEnvironmentFlags() async throws {
+    let backend = try backend(); defer { backend.captureDiagnostics("default-compose"); backend.stop() }
+    _ = NSApplication.shared; NSApp.setActivationPolicy(.prohibited)
+    let editor = NativeEditor(pasteboard: BackendPasteboard(), environment: [:]); defer { editor.detachAll() }
+    let file = backend.root.appendingPathComponent("default-compose.md")
+    try Data("# Default native Compose\n\n| Name | Value |\n| --- | --- |\n| café | 東京 |\n".utf8).write(to: file)
+    try await attach(backend, file: file, editor: editor)
+    let grid = try XCTUnwrap(editor.grid), pane = try XCTUnwrap(grid.focusedCompose)
+    XCTAssertNotNil(grid.composePreviewController)
+    XCTAssertFalse(pane.layout.text.tables.isEmpty)
+    XCTAssertGreaterThan(pane.layout.text.fragments[0].rect.height, grid.cellHeight)
+  }
+
+  @MainActor
   func testScrollbarSeeksAcrossCroppedUnicodeSourceWithoutEditingTheFile() async throws {
     let backend = try backend(); defer { backend.captureDiagnostics("scrollbar"); backend.stop() }
     let editor = editor(BackendPasteboard()); defer { editor.detachAll() }
