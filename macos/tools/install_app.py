@@ -96,6 +96,8 @@ def install(app, directory, expected_team=None):
         staged = Path(temporary) / APP_NAME
         subprocess.run(['/usr/bin/ditto', str(app), str(staged)], check=True)
         verify_signature(staged)
+        if signature_team(staged) != source_team:
+            raise ValueError('The staged app signing team changed during preparation; retry installation.')
         # Recheck after copying: a user may have opened or replaced the app
         # while the staged copy was being prepared.
         check_not_running()

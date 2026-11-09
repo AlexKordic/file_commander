@@ -91,6 +91,15 @@ class InstallTests(unittest.TestCase):
             installer.install(self.source, self.directory, expected_team='TESTTEAM01')
         self.unchanged()
 
+    def test_signing_team_changed_during_copy_preserves_install(self):
+        def team(app):
+            return 'TESTTEAM01' if app in (self.source, self.old) else 'TESTTEAM02'
+        with mock.patch.object(installer, 'signature_team', side_effect=team), \
+             mock.patch.object(installer.subprocess, 'run', side_effect=self.no_app_running), \
+             self.assertRaisesRegex(ValueError, 'staged app signing team changed'):
+            installer.install(self.source, self.directory, expected_team='TESTTEAM01')
+        self.unchanged()
+
     def test_invalid_source_signature_preserves_install(self):
         (self.source / 'Contents/Resources/new.txt').write_text('tampered')
         with self.assertRaises(subprocess.CalledProcessError):
