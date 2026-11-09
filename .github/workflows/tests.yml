@@ -32,7 +32,7 @@ jobs:
         run: |
           cmake -S . -B build-ci -G Ninja -DCMAKE_BUILD_TYPE=Release -DFC_TEST_DEPENDENCY_REBUILDS=ON \
             -DFC_FTXUI_SOURCE_DIR="$PWD/build-ci-deps/ftxui" -DFC_LUAJIT_SOURCE_DIR="$PWD/build-ci-deps/luajit" \
-            -DFC_FRESH_SOURCE_DIR="$PWD/build-ci-deps/fresh" -DFC_LZMA_SOURCE_DIR="$PWD/build-ci-deps/lzma"
+            -DFC_FRESH_SOURCE_DIR="$PWD/build-ci-deps/fresh" -DFC_SEVENZIP_SOURCE_DIR="$PWD/build-ci-deps/7zip"
           cmake --build build-ci -j6
       - name: Fast contracts
         run: python3 tools/run_test_lane.py fast --build build-ci --expect-os '${{ matrix.system }}' --expect-arch '${{ matrix.machine }}'
