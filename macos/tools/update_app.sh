@@ -68,6 +68,7 @@ if [[ -n "$fresh" ]]; then
   say "installed $fresh"
 fi
 
+python3 macos/tools/bundle_dylibs.py "$app"
 signed="$(macos/tools/sign_app.sh "$app")"
 say "$signed"
 say "done: $app ($configuration)"

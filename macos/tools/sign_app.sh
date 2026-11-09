@@ -35,7 +35,7 @@ sign() {
 }
 
 # Inside out: the helpers and resource bundles, then the app itself.
-for code in "$app"/Contents/MacOS/* "$app"/Contents/Resources/*.bundle; do
+for code in "$app"/Contents/Frameworks/* "$app"/Contents/MacOS/* "$app"/Contents/Resources/*.bundle; do
   [[ -e "$code" && "$code" != "$app/Contents/MacOS/FileCommander" ]] || continue
   sign "$code"
 done

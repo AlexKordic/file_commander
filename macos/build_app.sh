@@ -55,6 +55,8 @@ rm -rf "$app"
 mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
 cp "$bin/FileCommander" "$bin/fc-relaunch" "$bin/fc-askpass" "$app/Contents/MacOS/"
 cp -R "$bin"/*.bundle "$app/Contents/Resources/"
+cp -R licenses "$app/Contents/Resources/"
+cp LICENSE THIRD_PARTY_NOTICES.md dependencies.json "$app/Contents/Resources/"
 cp build-macos/third_party/7zip/_o/7z.so "$app/Contents/MacOS/7z.so"
 # The terminal interface, for fc run (Lua scripts) and for people who want it.
 cp build-macos/fc "$app/Contents/MacOS/fc"
@@ -92,6 +94,7 @@ if [[ ! -f build-macos/AppIcon.icns || macos/tools/make_icon.swift -nt build-mac
   iconutil -c icns build-macos/AppIcon.iconset -o build-macos/AppIcon.icns
 fi
 cp build-macos/AppIcon.icns "$app/Contents/Resources/AppIcon.icns"
+python3 macos/tools/bundle_dylibs.py "$app"
 signed="$(macos/tools/sign_app.sh "$app")"
 say "$signed"
 say "done: $app"

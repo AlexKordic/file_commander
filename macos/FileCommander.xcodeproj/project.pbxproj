@@ -80,6 +80,7 @@
 				"$(TARGET_BUILD_DIR)/$(EXECUTABLE_FOLDER_PATH)/fc-relaunch",
 				"$(TARGET_BUILD_DIR)/$(EXECUTABLE_FOLDER_PATH)/fc-askpass",
 				"$(TARGET_BUILD_DIR)/$(UNLOCALIZED_RESOURCES_FOLDER_PATH)",
+				"$(TARGET_BUILD_DIR)/$(WRAPPER_NAME)/Contents/Frameworks",
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/bash;

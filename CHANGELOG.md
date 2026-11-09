@@ -10,6 +10,8 @@
 - The macOS bundle consistently uses `me.h264.filecommander`; personal signing
   settings belong in an ignored local Xcode configuration. Installation refuses
   to replace a certificate-signed app with an ad hoc or differently signed app.
+- Fixed signed Release editor startup by bundling non-system native libraries,
+  relocating their load paths and signing them with the app's identity.
 
 - Two-panel terminal file management with panel tabs, filtering, selection,
   background operations, archive browsing and Lua automation.

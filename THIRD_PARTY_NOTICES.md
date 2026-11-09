@@ -14,6 +14,14 @@ notices in third-party source must be retained.
 | SwiftTerm (macOS app only) | 1.11.2, pinned in `macos/Package.swift`; [upstream](https://github.com/migueldeicaza/SwiftTerm) | MIT, copyright Miguel de Icaza, the xterm.js authors and others | [MIT](licenses/swiftterm/LICENSE) |
 | SwiftProtobuf (macOS app only) | 1.38.1, pinned in `macos/Package.swift`; [upstream](https://github.com/apple/swift-protobuf) | Apache-2.0 with the Runtime Library Exception, copyright Apple Inc. and the Swift project authors | [Apache-2.0](licenses/swift-protobuf/LICENSE.txt) |
 
+When Fresh links a non-system native library, the macOS packager copies that
+library into `Contents/Frameworks`, relocates its load paths and signs it with
+the app. This includes liblzma from XZ Utils on Homebrew builds; its upstream
+`COPYING` identifies liblzma as BSD Zero Clause licensed. Available license
+texts accompany each copied library under
+`Contents/Resources/licenses/native-libraries`, and `native-libraries.json`
+lists the copied libraries. System frameworks and libraries remain external.
+
 FC starts Fresh as a separate executable and communicates with it through its
 command-line/session interface. It does not link Fresh code into `fc`. FC's MIT
 license does not license `fresh`, its remote agent, or its dependencies under MIT.

@@ -20,15 +20,19 @@ FC_CODESIGN_IDENTITY=- "$repo/macos/build_app.sh" ${args[@]+"${args[@]}"}
 source_app="$repo/build-macos/File Commander.app"
 executables="$TARGET_BUILD_DIR/$EXECUTABLE_FOLDER_PATH"
 resources="$TARGET_BUILD_DIR/$UNLOCALIZED_RESOURCES_FOLDER_PATH"
+frameworks="$TARGET_BUILD_DIR/$WRAPPER_NAME/Contents/Frameworks"
 [[ "$EXECUTABLE_FOLDER_PATH" == "$WRAPPER_NAME/Contents/MacOS" &&
    "$UNLOCALIZED_RESOURCES_FOLDER_PATH" == "$WRAPPER_NAME/Contents/Resources" &&
    "$TARGET_BUILD_DIR/$WRAPPER_NAME" != "$source_app" ]] || {
   echo 'error: Expected a separate macOS app product directory.' >&2; exit 1;
 }
-rm -rf "$executables" "$resources"
+rm -rf "$executables" "$resources" "$frameworks"
 mkdir -p "$executables" "$resources" "$DERIVED_FILE_DIR"
 /usr/bin/ditto "$source_app/Contents/MacOS" "$executables"
 /usr/bin/ditto "$source_app/Contents/Resources" "$resources"
+if [[ -d "$source_app/Contents/Frameworks" ]]; then
+  /usr/bin/ditto "$source_app/Contents/Frameworks" "$frameworks"
+fi
 
 python3 - "$source_app/Contents/Info.plist" "$DERIVED_FILE_DIR/FC-Info.plist" <<'PY'
 import plistlib
@@ -48,7 +52,7 @@ if [[ "${CODE_SIGNING_ALLOWED:-YES}" != NO ]]; then
   if [[ "${ENABLE_HARDENED_RUNTIME:-NO}" == YES ]]; then flags+=(--options runtime); fi
   # Xcode signs the enclosing app after this phase. All embedded executables
   # and resource bundles must already have the same signing identity.
-  for code in "$executables"/* "$resources"/*.bundle; do
+  for code in "$frameworks"/* "$executables"/* "$resources"/*.bundle; do
     [[ -e "$code" && "$code" != "$executables/FileCommander" ]] || continue
     extra=()
     case "${code##*/}" in

@@ -124,7 +124,10 @@ archive for the Xcode-signed result.
 
 Debug builds use the Swift package's debug configuration. Release builds enable
 hardened runtime, including the JIT exceptions needed by the `fc` and `fresh`
-helpers. The project builds for the current Mac's architecture. CMake, Ninja,
+helpers. The project builds for the current Mac's architecture. The bundle's
+minimum macOS version is raised when an included native library requires a
+newer system than the project's macOS 14 target. Use dependencies built for
+the oldest supported system when producing a distributable app. CMake, Ninja,
 Rust and the pinned dependency checkouts are required as for the script build
 below. User-specific Xcode workspace files are ignored by Git.
 
@@ -151,6 +154,8 @@ The script configures the `macos-app` CMake preset once (deployment target macOS
 | `Contents/MacOS/fc`, `fresh`, `7z.so` | CMake (`build-macos/`, Fresh with its `web` feature); found next to the app as for `fc`, and `7z.so` loaded by the engine |
 | `Contents/Resources/FileCommander_FileCommander.bundle` | explainers and themes |
 | `Contents/Resources/AppIcon.icns` | drawn by `macos/tools/make_icon.swift` |
+| `Contents/Frameworks` | Non-system native dylibs used by the executables, including Homebrew liblzma when Fresh links it; relocated into the app and signed with the same identity. |
+| `Contents/Resources/licenses`, `LICENSE`, `THIRD_PARTY_NOTICES.md` | FC and dependency license copies, including notices supplied with bundled native libraries. |
 
 `--install` updates an existing copy in `~/Applications` or `/Applications`
 (preferring the user copy when both exist); a first install goes to
@@ -197,6 +202,7 @@ needs no Metal toolchain.
 | Test | What it checks |
 | --- | --- |
 | `python3 test/test_macos_install.py` | Disposable signed apps: first install, replacement, failure preservation, running-app checks, and build failures with stale outputs. Never installs into your Applications folders. |
+| `python3 test/test_macos_bundle.py` | Real dylibs: transitive relocation, execution after original libraries are removed, source/mapping preservation, collisions, missing dependencies and correct minimum macOS metadata. |
 | `fc.model.panes`, `fc.model.commands` | `PaneModel` and `AppModel`: listing, filter, glob, cursor, sort, tutorial tabs, the command catalog, palette ranking, dialog requests, settings |
 | `fc.model.rate` | A raised transfer limit applies within a running file |
 | `fc.model.engine` | The facade end to end: start, rows, glob, jobs, profile lock |
