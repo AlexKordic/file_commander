@@ -25,7 +25,7 @@ recovery. FC never closes a tab or writes a file on the editor's behalf.
 ## Pinned revision
 
 FC builds Fresh from revision `ea1d2d3c4210483c55ec9d2ab3d616ed5605b1bb` on
-the `fc-editor-workflow` branch of the FC fork. Its upstream base is
+the `fc_main` branch of the FC fork. Its upstream base is
 `b10f9084f5eae571e9b8dac1a0f3694384bcb53d`, which is Fresh 0.5.2 plus 40
 upstream commits; FC's integration commits sit on top. The pinned Rust
 toolchain is 1.95 (`rust-toolchain.toml` in the Fresh checkout).
@@ -1954,7 +1954,7 @@ downgrade path.
 
 ## Upgrading the Fresh pin
 
-1. Commit the Fresh change on `fc-editor-workflow`, regenerate the bundle and
+1. Commit the Fresh change on `fc_main`, regenerate the bundle and
    update `dependencies.json` as described in
    [dependencies/README.md](../../dependencies/README.md). Update the revision
    named at the top of this page.

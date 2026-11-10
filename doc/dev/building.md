@@ -366,7 +366,7 @@ On Linux, `sha256sum` works in place of `shasum -a 256`.
 | --- | --- | --- |
 | [File Commander](https://github.com/AlexKordic/file_commander) | `main` | FC source, MIT license, documentation, dependency manifest and bootstrap |
 | [FTXUI fork](https://github.com/AlexKordic/FTXUI/tree/fc-integration) | `fc-integration` | Modified FTXUI history containing FC's pinned revision |
-| [Fresh fork](https://github.com/AlexKordic/fresh/tree/fc-editor-workflow) | `fc-editor-workflow` | Modified Fresh history containing FC's pinned revision |
+| [Fresh fork](https://github.com/AlexKordic/fresh/tree/fc_main) | `fc_main` | Modified Fresh history containing FC's pinned revision |
 
 The forks keep their upstream history and licenses. The upstream projects are
 [ArthurSonzogni/FTXUI](https://github.com/ArthurSonzogni/FTXUI) and

@@ -17,7 +17,10 @@ with tempfile.TemporaryDirectory(prefix="fc-fresh-bundle-") as directory:
     git("fetch", "--quiet", "--depth=1", str(Path(sys.argv[1]).resolve()), spec["base_revision"])
     git("checkout", "--quiet", "--detach", "FETCH_HEAD")
     git("bundle", "verify", str(bundle))
-    git("fetch", "--quiet", str(bundle), "refs/heads/fc-editor-workflow")
+    # The pin must be the tip of the fork's one long-lived branch, never a side branch.
+    head = "refs/heads/" + spec["branch"]
+    assert git("bundle", "list-heads", str(bundle)).split("\n")[:-1] == [f"{spec['revision']} {head}"]
+    git("fetch", "--quiet", str(bundle), head)
     git("checkout", "--quiet", "--detach", spec["revision"])
     assert git("rev-parse", "HEAD").strip() == spec["revision"]
     assert not git("status", "--porcelain").strip()

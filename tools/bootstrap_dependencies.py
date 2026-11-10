@@ -60,7 +60,7 @@ def main():
         subprocess.run(['git', 'clone', '--no-checkout', source, str(target)], check=True, timeout=600)
         if bundle:
             subprocess.run(['git', '-C', str(target), 'bundle', 'verify', str(bundle)], check=True, timeout=60)
-            subprocess.run(['git', '-C', str(target), 'fetch', str(bundle), 'refs/heads/fc-editor-workflow'], check=True, timeout=60)
+            subprocess.run(['git', '-C', str(target), 'fetch', str(bundle), 'refs/heads/' + spec['branch']], check=True, timeout=60)
         subprocess.run(['git', '-C', str(target), 'checkout', '--detach', spec['revision']], check=True, timeout=60)
     sevenzip = root / '7zip'
     provision_sevenzip(repo, manifest['sevenzip'], sevenzip, args.sevenzip_source)

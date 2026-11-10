@@ -22,8 +22,10 @@
       "source": "https://github.com/sinelaw/fresh.git",
       "default_path": "../editor-fresh",
       "base_revision": "b10f9084f5eae571e9b8dac1a0f3694384bcb53d",
+      "branch": "fc_main",
+      "fork": "https://github.com/AlexKordic/fresh.git",
       "bundle": "dependencies/fresh-fc.bundle",
-      "bundle_sha256": "a8012ce321a77953e9cccf0aa361aff38f57e19c12af12f2d4035b8f82dcc46d"
+      "bundle_sha256": "23d70cb4d81f45ef6eb1f96e29160eb3123bb9ef54e483b5edaeb19d06c20c9a"
     }
   },
   "sevenzip": {

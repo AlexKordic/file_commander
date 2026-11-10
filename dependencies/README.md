@@ -16,7 +16,7 @@ are in [doc/dev/building.md](../doc/dev/building.md) and licenses in
 | Boost.Filesystem | Modified subtree `boost/filesystem` in the FC repository | The same FC commit |
 | FTXUI (FC fork) | `https://github.com/AlexKordic/FTXUI.git`, branch `fc-integration` | `ff94e7a1008d41e11ce040702654eed6aff1e52c` |
 | LuaJIT | `https://github.com/LuaJIT/LuaJIT.git` | `233ad24035944ece5367157e824e8357df3417d9` |
-| Fresh (FC fork) | `https://github.com/sinelaw/fresh.git` plus `dependencies/fresh-fc.bundle`; also branch `fc-editor-workflow` of `https://github.com/AlexKordic/fresh` | `ea1d2d3c4210483c55ec9d2ab3d616ed5605b1bb` on upstream base `b10f9084f5eae571e9b8dac1a0f3694384bcb53d`; bundle SHA-256 `a8012ce321a77953e9cccf0aa361aff38f57e19c12af12f2d4035b8f82dcc46d` |
+| Fresh (FC fork) | `https://github.com/sinelaw/fresh.git` plus `dependencies/fresh-fc.bundle`; also branch `fc_main` of `https://github.com/AlexKordic/fresh` | `ea1d2d3c4210483c55ec9d2ab3d616ed5605b1bb` on upstream base `b10f9084f5eae571e9b8dac1a0f3694384bcb53d`; bundle SHA-256 `23d70cb4d81f45ef6eb1f96e29160eb3123bb9ef54e483b5edaeb19d06c20c9a` |
 | 7-Zip | `dependencies/7zip-26.04-src.tar.xz` in the FC repository, as published at `https://www.7-zip.org/a/7z2604-src.tar.xz` and in the `26.04` release of `https://github.com/ip7z/7zip` | 26.04; archive SHA-256 `9691944c0fe0d01bb49373a704fb983fd33bc98b1738695179dfbf99ac1734f6`; source fingerprint `8fc7a9e48cdd4fe7fa24adefb3f0b7c99633139801f38aa51e6fe2cd3a5ec099` over 1111 files |
 
 FTXUI and Fresh carry FC changes; LuaJIT and Boost come from their public
@@ -27,7 +27,7 @@ upstream sources, and FC's Boost.Filesystem changes are listed in
 
 `tools/bootstrap_dependencies.py --root build-deps` creates `build-deps/ftxui`, `build-deps/luajit`, `build-deps/fresh` and `build-deps/7zip`. For each Git input it clones the declared source and checks
 out the exact revision. For Fresh it first verifies the bundle's SHA-256, runs
-`git bundle verify`, and fetches the bundle's `fc-editor-workflow` branch.
+`git bundle verify`, and fetches the bundle's `fc_main` branch.
 Then it validates everything with `tools/check_dependencies.py`.
 
 - `--fresh-url` or `FC_FRESH_MIRROR` replaces the upstream Fresh URL with a
@@ -51,10 +51,10 @@ pinned revision is FC's fork of it:
   upstream commits. It includes the upstream fix that makes daemon sessions run
   the shared editor tick, so recovery saves happen in the background.
 - **Pinned revision** (`revision`): `ea1d2d3c4210483c55ec9d2ab3d616ed5605b1bb`,
-  the base plus FC's commits on the `fc-editor-workflow` branch.
+  the base plus FC's commits on the `fc_main` branch.
 - **Bundle** (`fresh-fc.bundle`): a Git bundle holding exactly the commits from
   the base to the pinned revision, with the branch head
-  `refs/heads/fc-editor-workflow`. It needs a clone that already contains the
+  `refs/heads/fc_main`. It needs a clone that already contains the
   base.
 
 Build with the pinned checkout's toolchain (Rust 1.95, from its
@@ -133,31 +133,29 @@ Set `FRESH` to the checkout: `build-deps/fresh` in the bootstrap layout, or
 
 ```sh
 FRESH=build-deps/fresh
-git -C "$FRESH" fetch "$PWD/dependencies/fresh-fc.bundle" refs/heads/fc-editor-workflow
+git -C "$FRESH" fetch "$PWD/dependencies/fresh-fc.bundle" refs/heads/fc_main
 git -C "$FRESH" checkout --detach FETCH_HEAD
 git -C "$FRESH" rev-parse HEAD   # must print git.fresh.revision from dependencies.json
 ```
 
 ### Change Fresh
 
-1. In the Fresh checkout, put the `fc-editor-workflow` branch at the pinned
-   revision (a bootstrap checkout has a detached HEAD; use
-   `git switch -c fc-editor-workflow`) and commit the fix there.
+`fc_main` is the fork's one long-lived branch, and `dependencies.json` may pin only its tip. Feature branches are short-lived: nothing is pinned from them, and they are deleted once `fc_main` has their commits.
+
+1. In the Fresh checkout, put the `fc_main` branch at the pinned revision (a bootstrap checkout has a detached HEAD; use `git switch -c fc_main`). Commit the fix there, or on a feature branch that you then bring in with `git merge --ff-only`. `fc_main` only moves forward, except when it is rebased onto newer upstream Fresh.
 2. Regenerate the bundle from the upstream base through that branch:
 
    ```sh
    git -C "$FRESH" bundle create "$PWD/dependencies/fresh-fc.bundle" \
-       b10f9084f5eae571e9b8dac1a0f3694384bcb53d..fc-editor-workflow
+       b10f9084f5eae571e9b8dac1a0f3694384bcb53d..fc_main
    ```
 
    Use the new base instead if you rebased onto newer upstream Fresh.
 3. In `dependencies.json`, update `git.fresh.revision`,
    `git.fresh.bundle_sha256` (from `shasum -a 256` or `sha256sum`) and, after a
    rebase, `git.fresh.base_revision`.
-4. Push the branch to `fc-editor-workflow` in the Fresh fork.
-5. Run `test/test_fresh_bundle.py <fresh checkout>` (CTest
-   `fc.harness.fresh_bundle`). It proves that the pinned revision can be
-   rebuilt from the base and the bundle alone.
+4. Run `test/test_fresh_bundle.py <fresh checkout>` (CTest `fc.harness.fresh_bundle`). It proves that the pinned revision can be rebuilt from the base and the bundle alone, and that the bundle's only head is `fc_main` at the pinned revision.
+5. Push `fc_main` to the Fresh fork (`git.fresh.fork`), then run `tools/check_fresh_published.py`. It fails unless the fork's `fc_main` is at the pinned revision; it needs network access, so it is a release step and not part of the build.
 
 ### License and source reconstruction
 
@@ -173,12 +171,12 @@ BUNDLE=/path/to/share/file-commander/fresh-fc.bundle
 git clone --no-checkout https://github.com/sinelaw/fresh.git fresh
 git -C fresh cat-file -e "$BASE^{commit}"       # the clone must contain the base
 git -C fresh bundle verify "$BUNDLE"
-git -C fresh fetch "$BUNDLE" refs/heads/fc-editor-workflow
+git -C fresh fetch "$BUNDLE" refs/heads/fc_main
 git -C fresh checkout --detach "$REV"
 ```
 
 If these values differ from the packaged `dependencies.json`, the manifest
-wins. The same history is published on the `fc-editor-workflow` branch of
+wins. The same history is published on the `fc_main` branch of
 `https://github.com/AlexKordic/fresh`.
 
 The bundle is additional Git history, not a complete standalone source archive.
