@@ -1,0 +1,203 @@
+/* House style components on the tokens (style.md). Pages add only their own layout; reference/style.html shows every component in this file. */
+* { box-sizing: border-box; }
+
+/* The page itself scrolls unless a page sizes itself to the window: phone browsers cover part of 100vh with their toolbars, and the bottom of the window must stay reachable. */
+html, body {
+  margin: 0;
+  background: var(--window);
+  color: var(--ink);
+  font: 13px/1.38 var(--font);
+  -webkit-font-smoothing: antialiased;
+}
+
+button, input, select, textarea { font: inherit; color: inherit; }
+button { cursor: default; }
+:focus-visible { outline: 3px solid var(--focus-ring); outline-offset: 1px; border-radius: var(--radius-row); }
+h1, h2, h3, h4, p { margin: 0; }
+
+/* Unified toolbar */
+.toolbar {
+  position: relative;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 12px;
+  border-bottom: 1px solid var(--hairline);
+  background: var(--toolbar);
+  backdrop-filter: blur(24px) saturate(180%);
+}
+
+.toolbar-title { min-width: 0; margin-left: 4px; }
+.toolbar-title h1 { font-size: 13px; font-weight: 700; letter-spacing: -0.01em; }
+.toolbar-title p { overflow: hidden; color: var(--ink-2); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.toolbar-center { display: flex; flex: 1; align-items: center; justify-content: center; gap: 10px; min-width: 0; }
+.toolbar-trailing { display: flex; align-items: center; gap: 6px; }
+
+.tool {
+  display: inline-grid;
+  place-items: center;
+  width: 32px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--ink-2);
+}
+.tool:hover { background: var(--control); color: var(--ink); }
+.tool:active { background: var(--control-hover); }
+.tool[aria-pressed="false"] { color: var(--ink-4); }
+.tool svg { width: 19px; height: 19px; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+.tool-pair { display: flex; gap: 2px; }
+
+.segmented {
+  display: inline-flex;
+  padding: 2px;
+  border-radius: var(--radius-field);
+  background: var(--control);
+}
+.segmented button {
+  min-width: 52px;
+  height: 24px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: var(--radius-row);
+  background: transparent;
+  color: var(--ink);
+  font-size: 12px;
+  font-weight: 500;
+}
+.segmented button:hover:not(.active) { background: var(--segment-hover); }
+.segmented button.active { background: var(--raised); box-shadow: var(--shadow-segment); }
+.segmented button:disabled { color: var(--ink-4); }
+/* A segment may carry a 16 px line icon instead of its word, which then stays as the accessible name. */
+.segmented button svg { width: 16px; height: 16px; vertical-align: -3px; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+
+.status { display: inline-flex; align-items: center; gap: 6px; margin-right: 6px; color: var(--ink-2); font-size: 11px; white-space: nowrap; }
+.status-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--ink-4); }
+.status[data-state="connected"] .status-dot { background: var(--good); }
+.status[data-state="disconnected"] .status-dot,
+.status[data-state="reconnecting"] .status-dot { background: var(--warning); }
+.status[data-state="error"] .status-dot { background: var(--critical); }
+
+/* Badges: a soft fill with the darker text of its status; pages add the variants they need. Neutral marks a kind of setting, such as Preview or Restart. */
+.badge { flex: none; padding: 0 6px; border-radius: var(--radius-small); font-size: 10px; font-weight: 600; line-height: 16px; }
+.badge.neutral { background: var(--control); color: var(--ink-2); }
+
+/* Key cap: a keyboard key drawn as a small raised cap, for key bindings and shortcut lists. pressed lights it with the accent while the key is held, listening waits for the next key, and empty is a dashed place for a key not yet bound. */
+.keycap { display: inline-flex; flex: none; align-items: center; justify-content: center; min-width: 26px; height: 22px; padding: 0 7px; border: 1px solid var(--hairline-strong); border-radius: var(--radius-small); background: var(--raised); box-shadow: var(--shadow-segment); color: var(--ink); font-size: 11px; font-weight: 600; line-height: 1; white-space: nowrap; }
+.keycap:hover { background: var(--control-hover); }
+.keycap.pressed { border-color: var(--accent); background: var(--accent); color: var(--ink-on-accent); }
+.keycap.listening { border-style: dashed; border-color: var(--accent); background: var(--window); color: var(--ink-3); }
+.keycap.empty { border-style: dashed; background: none; box-shadow: none; color: var(--ink-3); }
+
+/* Inspector: the whole pane scrolls, so long selections and session details stay readable. */
+.inspector {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  overflow-y: auto;
+  contain: size;
+  border-left: 1px solid var(--hairline);
+  background: var(--inspector);
+  scrollbar-width: thin;
+  scrollbar-color: var(--scrollbar) transparent;
+}
+.inspector-section { flex: none; padding: 14px 16px 12px; border-bottom: 1px solid var(--hairline); }
+.inspector-section:last-child { border-bottom: 0; }
+.inspector-section h4 { margin-bottom: 8px; color: var(--ink-2); font-size: 12px; font-weight: 600; }
+.inspector-section h4 .count { color: var(--ink-3); font-weight: 400; }
+.placeholder { color: var(--ink-3); font-size: 12px; }
+
+.properties { display: grid; grid-template-columns: minmax(88px, 40%) minmax(0, 1fr); gap: 4px 10px; margin: 0; font-size: 12px; }
+.properties dt { color: var(--ink-2); text-align: right; }
+.properties dd { min-width: 0; margin: 0; overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
+.properties .mono { font-family: var(--mono); font-size: 11px; }
+
+/* A heading or label with badges beside it. */
+.label-row { display: flex; align-items: center; gap: 6px; }
+
+/* Text buttons: the quiet control fill, with the accent for the one primary action. Icons are solid 15 px glyphs. */
+.button { display: inline-flex; flex: none; align-items: center; justify-content: center; gap: 6px; height: 28px; padding: 0 12px; border: 0; border-radius: var(--radius-control); background: var(--control); color: var(--ink); font-size: 13px; font-weight: 500; white-space: nowrap; }
+.button:hover { background: var(--control-hover); }
+.button:disabled { background: var(--control); color: var(--ink-4); }
+.button.primary { background: var(--accent); color: var(--ink-on-accent); }
+.button.primary:active { filter: brightness(0.92); }
+.button.primary:disabled { background: var(--control); color: var(--ink-4); filter: none; }
+.button svg { width: 15px; height: 15px; fill: currentColor; }
+
+/* Switch: a checkbox drawn as a toggle; it keeps the checkbox's state, label, focus and keyboard behavior. */
+.switch { position: relative; flex: none; width: 32px; height: 18px; margin: 0; border-radius: 9px; background: var(--control-hover); appearance: none; }
+.switch::before { content: ""; position: absolute; top: 2px; left: 2px; width: 14px; height: 14px; border-radius: 50%; background: var(--raised); box-shadow: var(--shadow-segment); }
+.switch:checked { background: var(--accent); }
+.switch:checked::before { left: 16px; }
+.switch:disabled { background: var(--control); }
+.switch:checked:disabled { background: var(--accent-disabled); }
+.switch:focus-visible { outline-offset: 2px; border-radius: 9px; }
+
+/* Progress: a determinate bar beside the words that say what is in progress; the done part takes the accent, as in macOS. Always give it a value: an indeterminate bar animates. */
+.progress { display: block; width: 100%; height: 4px; margin: 0; border: 0; border-radius: 2px; background: var(--control); appearance: none; overflow: hidden; }
+.progress::-webkit-progress-bar { border-radius: 2px; background: var(--control); }
+.progress::-webkit-progress-value { border-radius: 2px; background: var(--accent); }
+.progress::-moz-progress-bar { border-radius: 2px; background: var(--accent); }
+
+/* Field: select, text and number inputs on the search-field recipe. A select sits in .select, which draws its chevron. */
+.field { height: 28px; min-width: 0; padding: 0 8px; border: 0; border-radius: var(--radius-field); background: var(--field); color: var(--ink); font-size: 13px; outline: none; }
+.field:focus { background: var(--raised); box-shadow: 0 0 0 3px var(--focus-ring-field), var(--shadow-field); }
+.field:disabled { color: var(--ink-4); }
+input.field[type="number"] { width: 84px; text-align: right; font-variant-numeric: tabular-nums; }
+textarea.field { width: 100%; height: auto; padding: 8px; font-family: var(--mono); font-size: 11px; resize: vertical; }
+.select { position: relative; display: inline-flex; min-width: 0; max-width: 100%; }
+.select select { max-width: 100%; padding-right: 26px; overflow: hidden; text-overflow: ellipsis; appearance: none; }
+.select::after { content: ""; position: absolute; top: 50%; right: 11px; width: 5px; height: 5px; margin-top: -4px; border-right: 1.5px solid var(--ink-2); border-bottom: 1.5px solid var(--ink-2); transform: rotate(45deg); pointer-events: none; }
+/* iOS zooms into focused fields whose text is smaller than 16 px. */
+@media (pointer: coarse) { .field { font-size: 16px; } }
+
+/* Setting: a label, with an optional note under it, and its control at the end of the row, as in macOS settings. */
+.setting { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 2px 12px; min-height: 32px; padding: 2px 0; font-size: 12px; }
+.setting-control { display: inline-flex; align-items: center; gap: 6px; color: var(--ink-3); font-size: 11px; }
+/* A unit after a field keeps a fixed width, so fields line up whatever their units. */
+.setting-control > span { min-width: 36px; }
+.setting-note { grid-column: 1 / -1; color: var(--ink-3); font-size: 11px; }
+
+/* Menu: a popover list under its tool button; the highlighted item takes the accent, as in macOS menus. */
+.menu { position: absolute; z-index: 30; min-width: 220px; padding: 5px; border: 0.5px solid var(--hairline-strong); border-radius: var(--radius-popover); background: var(--popover); box-shadow: var(--shadow-popover); backdrop-filter: blur(20px) saturate(180%); }
+.menu[hidden] { display: none; }
+.menu-item { display: flex; align-items: center; gap: 8px; width: 100%; height: 26px; padding: 0 10px; border: 0; border-radius: var(--radius-small); background: transparent; color: var(--ink); font-size: 13px; text-align: left; text-decoration: none; white-space: nowrap; }
+.menu-item:hover, .menu-item:focus-visible { outline: none; background: var(--accent); color: var(--ink-on-accent); }
+.menu-item:hover .badge, .menu-item:focus-visible .badge { background: var(--on-accent-fill); color: var(--ink-on-accent); }
+.menu-item[aria-disabled="true"], .menu-item[aria-disabled="true"]:hover { background: transparent; color: var(--ink-4); }
+.menu-separator { height: 1px; margin: 5px 4px; border: 0; background: var(--hairline); }
+
+/* Pane header: a title and a close button above an inspector pane's sections. */
+.pane-header { display: flex; flex: none; align-items: center; justify-content: space-between; gap: 8px; min-height: 44px; padding: 6px 8px 6px 16px; border-bottom: 1px solid var(--hairline); }
+.pane-header h3 { font-size: 13px; font-weight: 600; }
+
+/* Disclosure: a collapsed group inside a section, opened from a quiet summary row. */
+.disclosure { margin-top: 6px; }
+.disclosure > summary { display: flex; align-items: center; gap: 7px; min-height: 26px; color: var(--ink-2); font-size: 12px; font-weight: 600; list-style: none; cursor: default; }
+.disclosure > summary::-webkit-details-marker { display: none; }
+.disclosure > summary::before { content: ""; flex: none; width: 5px; height: 5px; margin: 0 1px; border-right: 1.5px solid currentColor; border-bottom: 1.5px solid currentColor; transform: rotate(-45deg); }
+.disclosure[open] > summary::before { transform: rotate(45deg); }
+.disclosure[open] > summary { margin-bottom: 4px; }
+
+/* Table: compact rows of tabular values between hairlines; a wide table scrolls inside .table-scroll. */
+.table { width: 100%; border-collapse: collapse; font-size: 12px; font-variant-numeric: tabular-nums; }
+.table caption { padding: 0 0 6px; color: var(--ink-2); font-weight: 600; text-align: left; }
+.table th { padding: 4px 8px 4px 0; color: var(--ink-2); font-weight: 500; text-align: left; white-space: nowrap; }
+.table td { padding: 4px 8px 4px 0; border-top: 1px solid var(--hairline); vertical-align: top; }
+.table-scroll { overflow-x: auto; }
+
+/* Poster grid: a library's box art in 2:3 frames, each with its title and a status under it. The grid is a listbox: the selected poster takes the accent ring while the grid has focus and the inactive selection ring while it does not. A frame without an image shows the title on the control fill. */
+.poster-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(144px, 1fr)); gap: 20px 16px; margin: 0; padding: 5px; list-style: none; }
+.poster { display: flex; flex-direction: column; gap: 3px; min-width: 0; outline: none; }
+.poster-art { position: relative; display: grid; place-items: center; aspect-ratio: 2 / 3; margin-bottom: 5px; padding: 12px; overflow: hidden; border-radius: var(--radius-control); background: var(--control); color: var(--ink-2); font-size: 13px; font-weight: 600; text-align: center; overflow-wrap: anywhere; }
+.poster-art::after { content: ""; position: absolute; inset: 0; border-radius: inherit; box-shadow: var(--shadow-inset); pointer-events: none; }
+.poster-art img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+.poster-title { overflow: hidden; font-size: 12px; font-weight: 500; text-overflow: ellipsis; white-space: nowrap; }
+.poster .status { margin-right: 0; }
+.poster[aria-selected="true"] .poster-art { box-shadow: 0 0 0 2px var(--window), 0 0 0 5px var(--selection-inactive); }
+.poster-grid:focus-within .poster[aria-selected="true"] .poster-art { box-shadow: 0 0 0 2px var(--window), 0 0 0 5px var(--accent); }
+.poster:focus-visible:not([aria-selected="true"]) .poster-art { box-shadow: 0 0 0 2px var(--window), 0 0 0 5px var(--focus-ring); }
