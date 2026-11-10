@@ -1,0 +1,114 @@
+/* Tutorial player: page layout and the pieces only this page has (screen, caption, timeline, transport and step list). Colors, fonts, shadows and radii come from the tokens as var(--token). */
+
+/* Screen: the video sits on the window surface inside a hairline, as box art does. --ratio is the movie's width over its height, set by the script. */
+.screen { position: relative; display: grid; place-items: center; padding: 2px var(--edge) 0 var(--inset); }
+.frame {
+  --ratio: 1;
+  position: relative;
+  /* When the page scrolls, the video leaves room for its caption and controls in a short window. */
+  width: min(100%, calc(max(240px, 100vh - 250px) * var(--ratio)));
+  width: min(100%, calc(max(240px, 100dvh - 250px) * var(--ratio)));
+  aspect-ratio: var(--ratio);
+  overflow: hidden;
+  border-radius: var(--radius-popover);
+  background: var(--window);
+}
+.frame::after { content: ""; position: absolute; inset: 0; border-radius: inherit; box-shadow: var(--shadow-inset); pointer-events: none; }
+.frame video { display: block; width: 100%; height: 100%; object-fit: contain; background: var(--window); }
+.stage-message a { color: var(--accent); }
+
+/* Fit: in a window tall enough for it, the page takes exactly the window and the video scales into what the caption and controls leave. Otherwise the page scrolls. */
+@media (min-width: 640.02px) and (min-height: 560px) {
+  .window { height: 100vh; height: 100dvh; min-height: 0; }
+  .screen { flex: 1; min-height: 0; container-type: size; }
+  .frame { width: min(100cqw, calc(100cqh * var(--ratio))); }
+}
+
+/* Caption: the narration of the current step. Two lines are kept so the controls stay put when the text changes. */
+.caption { display: grid; align-content: start; justify-content: center; min-height: calc(13px * 1.38 * 2 + 18px); padding: 9px var(--edge) 9px var(--inset); text-align: center; }
+.caption p { max-width: 760px; }
+.caption b { font-weight: 600; }
+
+/* Timeline: the whole tutorial as one bar, cut at every lesson, with the chapters named under it. */
+.timeline { position: relative; margin: 0 var(--edge) 0 var(--inset); padding: 9px 0 3px; touch-action: none; user-select: none; -webkit-user-select: none; }
+.timeline-track { position: relative; height: 4px; border-radius: 2px; background: var(--control); }
+.timeline-done { position: absolute; top: 0; bottom: 0; left: 0; border-radius: 2px; background: var(--accent); }
+.timeline-marks i { position: absolute; top: 0; bottom: 0; width: 2px; margin-left: -1px; background: var(--window); }
+.timeline-marks i.chapter { top: -4px; bottom: -4px; width: 3px; margin-left: -1.5px; }
+.timeline-marks i.chapter::after { content: ""; position: absolute; top: 0; bottom: 0; left: 1px; width: 1px; background: var(--ink-4); }
+.timeline-knob { position: absolute; top: 50%; width: 12px; height: 12px; margin: -6px 0 0 -6px; border-radius: 50%; background: var(--raised); box-shadow: var(--shadow-segment); opacity: 0; }
+.timeline:hover .timeline-knob, .timeline:focus-visible .timeline-knob, .timeline.scrubbing .timeline-knob { opacity: 1; }
+.timeline-chapters { display: flex; margin-top: 7px; color: var(--ink-3); font-size: 11px; }
+.timeline-chapters span { flex: 1 1 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.timeline-chapters span.current { color: var(--ink); }
+.timeline-tip {
+  position: absolute;
+  bottom: calc(100% - 4px);
+  z-index: 6;
+  max-width: min(340px, 100%);
+  padding: 5px 10px;
+  overflow: hidden;
+  border: 0.5px solid var(--hairline-strong);
+  border-radius: var(--radius-popover);
+  background: var(--popover);
+  box-shadow: var(--shadow-popover);
+  backdrop-filter: blur(20px) saturate(180%);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  pointer-events: none;
+}
+.timeline-tip[hidden] { display: none; }
+.timeline-tip time { margin-right: 7px; color: var(--ink-2); font-variant-numeric: tabular-nums; }
+/* A finger has no hover: the knob stays, and the bar is easier to hit. */
+@media (pointer: coarse) {
+  .timeline { padding: 14px 0 6px; }
+  .timeline-knob { opacity: 1; }
+}
+
+/* Transport: step keys and the one primary action on the left, pace, speed and full screen on the right. */
+.transport { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; padding: 6px var(--edge) 6px var(--inset); }
+.transport-keys { display: flex; align-items: center; gap: 4px; }
+/* Play, Pause and Continue share one width, so the keys beside the button do not move. */
+.transport-keys .button { min-width: 100px; margin: 0 2px; }
+.pace { display: inline-flex; align-items: center; gap: 8px; margin-left: auto; font-size: 12px; white-space: nowrap; }
+a.tool { cursor: default; }
+/* The first step has no previous one and the last no next. */
+.tool:disabled, .tool:disabled:hover { background: transparent; color: var(--ink-4); }
+
+/* Steps: the lesson's narration as a list. The title keeps one line and the text wraps under it. */
+.steps-section { display: flex; flex: 1 1 auto; flex-direction: column; min-height: 180px; }
+.step-list button { grid-template-columns: 34px minmax(0, 1fr); align-items: baseline; gap: 1px 8px; padding: 6px 8px; }
+.step-list time { text-align: right; }
+.step-list .label { font-weight: 600; }
+.step-list .step-text { grid-column: 2; color: var(--ink-2); font-size: 11px; }
+
+/* Full screen shows the stage alone: the video with its caption and controls. */
+.stage:fullscreen { padding: 16px 0 10px; background: var(--window); }
+.stage:fullscreen .screen { flex: 1; min-height: 0; container-type: size; }
+.stage:fullscreen .frame { width: min(100cqw, calc(100cqh * var(--ratio))); }
+.stage:fullscreen .notice { display: none; }
+
+/* Toolbar folding: the chapter segments go below 900 px; the chapters stay as groups in the lesson list and as names under the timeline. */
+@media (max-width: 899.98px) {
+  .toolbar-center .segmented { display: none; }
+  .caption { min-height: calc(13px * 1.38 * 3 + 18px); }
+}
+
+/* Phones: the video runs edge to edge, and key hints have no keyboard to use them. */
+@media (max-width: 640px) {
+  .screen { padding: 0; }
+  .frame { border-radius: 0; }
+  .frame::after { box-shadow: none; }
+  .caption, .transport { padding-left: 16px; padding-right: 16px; }
+  .timeline { margin: 0 16px; }
+  .timeline-chapters { display: none; }
+  .steps-section { min-height: 0; }
+  /* Once opened, the steps of the lesson come right under the video, ahead of the long lesson list. */
+  .panes > .sidebar { order: 3; }
+  /* Choosing a lesson scrolls the video back into view, under the toolbar that stays. */
+  .stage { scroll-margin-top: 52px; }
+}
+@media (max-width: 640px), (pointer: coarse) {
+  .hint { display: none; }
+}

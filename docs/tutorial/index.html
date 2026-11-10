@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="light">
+<title>File Commander tutorial</title>
+<meta name="description" content="A recorded tour of File Commander in short lessons. Jump to any chapter, lesson or step, or play it one step at a time.">
+<link rel="icon" href="data:,">
+<!-- The house style kit, copied unchanged into style/ (its VERSION is beside it); tokens always load first. -->
+<link rel="stylesheet" href="style/tokens.css">
+<link rel="stylesheet" href="style/components.css">
+<link rel="stylesheet" href="style/app.css">
+<link rel="stylesheet" href="page.css">
+<script defer src="timeline.js"></script>
+<script defer src="page.js"></script>
+</head>
+<body>
+<div class="window" id="window">
+  <header class="toolbar">
+    <button class="tool" id="toggle-sidebar" type="button" title="Show or hide the lesson list" aria-label="Show or hide the lesson list" aria-pressed="true"><svg viewBox="0 0 20 20" aria-hidden="true"><rect x="2.5" y="4" width="15" height="12" rx="2.5"/><path d="M7.5 4v12M4.5 7h1.2M4.5 9.5h1.2M4.5 12h1.2"/></svg></button>
+    <div class="toolbar-title"><h1 id="title">File Commander tutorial</h1><p id="summary">Recorded lessons</p></div>
+    <div class="toolbar-center"><div class="segmented" id="chapters" role="group" aria-label="Chapters"></div></div>
+    <div class="toolbar-trailing">
+      <button class="tool" id="copy-link" type="button" title="Copy a link to this step" aria-label="Copy a link to this step"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M8.6 11.4a3 3 0 0 0 4.2 0l2.6-2.6a3 3 0 0 0-4.2-4.2l-1 1"/><path d="M11.4 8.6a3 3 0 0 0-4.2 0l-2.6 2.6a3 3 0 0 0 4.2 4.2l1-1"/></svg></button>
+      <a class="tool" id="download" href="tutorial.mp4" download="file-commander-tutorial.mp4" title="Download the video" aria-label="Download the video"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 3.5v9M6.5 9l3.5 3.5L13.5 9"/><path d="M3.5 12.5V15A1.5 1.5 0 0 0 5 16.5h10a1.5 1.5 0 0 0 1.5-1.5v-2.5"/></svg></a>
+      <button class="tool" id="toggle-inspector" type="button" title="Show or hide the steps" aria-label="Show or hide the steps" aria-pressed="true"><svg viewBox="0 0 20 20" aria-hidden="true"><rect x="2.5" y="4" width="15" height="12" rx="2.5"/><path d="M12.5 4v12M14.3 7h1.2M14.3 9.5h1.2M14.3 12h1.2"/></svg></button>
+    </div>
+  </header>
+  <div class="panes">
+    <aside class="sidebar" aria-label="Lessons">
+      <div class="search"><svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="8.5" cy="8.5" r="5"/><path d="M12.2 12.2 16 16"/></svg><input id="search" type="search" placeholder="Search" aria-label="Search lessons and steps" autocomplete="off" spellcheck="false"></div>
+      <div class="source-list" id="lessons" role="list" aria-label="Lessons"></div>
+      <footer class="sidebar-footer" id="lesson-count"></footer>
+    </aside>
+    <main class="content">
+      <div class="content-header">
+        <div class="page-heading"><h2 id="lesson-title">File Commander tutorial</h2><p id="lesson-summary">Choose a lesson, or press Play.</p></div>
+        <div class="readout" id="readout"><b id="clock">0:00</b><span id="length"></span><br><span id="where"></span></div>
+      </div>
+      <div class="stage" id="stage">
+        <div class="screen">
+          <div class="frame" id="frame">
+            <video id="video" src="tutorial.mp4" poster="poster.jpg" preload="metadata" playsinline aria-label="File Commander tutorial video"><track kind="captions" srclang="en" label="English" src="captions.vtt"></video>
+            <div class="notice" id="notice" role="status" hidden><span class="notice-text" id="notice-text"></span><button class="tool" id="dismiss" type="button" title="Dismiss" aria-label="Dismiss"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M6 6l8 8M14 6l-8 8"/></svg></button></div>
+          </div>
+          <div class="stage-message" id="problem" hidden><h3 id="problem-title">The video did not load</h3><p id="problem-text"></p></div>
+          <noscript><div class="stage-message"><h3>This page needs JavaScript</h3><p>The lesson list and the step controls are scripts. The video itself is <a href="tutorial.mp4">tutorial.mp4</a>.</p></div></noscript>
+        </div>
+        <div class="caption" aria-live="polite" aria-atomic="true"><p id="caption"></p></div>
+        <div class="timeline" id="timeline" role="slider" tabindex="0" aria-label="Position in the tutorial" aria-valuemin="0" aria-valuemax="0" aria-valuenow="0">
+          <div class="timeline-track" id="track"><div class="timeline-done" id="done"></div><div class="timeline-marks" id="marks"></div><div class="timeline-knob" id="knob"></div></div>
+          <div class="timeline-chapters" id="chapter-labels" aria-hidden="true"></div>
+          <div class="timeline-tip" id="tip" hidden><time id="tip-time"></time><span id="tip-text"></span></div>
+        </div>
+        <div class="transport" role="group" aria-label="Playback">
+          <div class="transport-keys">
+            <button class="tool" id="previous" type="button" title="Previous step (←)" aria-label="Previous step"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M14.5 5v10L7 10zM5.5 5v10"/></svg></button>
+            <button class="button primary" id="play" type="button"><svg viewBox="0 0 16 16" aria-hidden="true"><path id="play-glyph" d="M5 3.2v9.6l7.6-4.8z"/></svg><span id="play-label">Play</span></button>
+            <button class="tool" id="next" type="button" title="Next step (→)" aria-label="Next step"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M5.5 5v10l7.5-5zM14.5 5v10"/></svg></button>
+            <button class="tool" id="replay" type="button" title="Replay this step (R)" aria-label="Replay this step"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M15.5 10a5.5 5.5 0 1 1-1.7-3.98"/><path d="M14.4 3.2v3.3h-3.3"/></svg></button>
+          </div>
+          <label class="pace" title="Stop at the end of every step, so there is time to read it"><span>Pause after each step</span><input class="switch" id="pace" type="checkbox"></label>
+          <label class="select" title="Playback speed"><select class="field" id="speed" aria-label="Playback speed"><option value="0.5">0.5×</option><option value="0.75">0.75×</option><option value="1" selected>1×</option><option value="1.25">1.25×</option><option value="1.5">1.5×</option><option value="2">2×</option></select></label>
+          <button class="tool" id="fullscreen" type="button" title="Full screen (F)" aria-label="Full screen"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3.5 7.5v-4h4M12.5 3.5h4v4M16.5 12.5v4h-4M7.5 16.5h-4v-4"/></svg></button>
+        </div>
+      </div>
+      <footer class="hint">Space to play or pause · ← → for steps · Shift ← → for lessons · R to replay a step · F for full screen · / to search</footer>
+    </main>
+    <aside class="inspector" aria-label="Steps and recording">
+      <section class="inspector-section steps-section"><h4>Steps in this lesson <span class="count" id="step-count"></span></h4><ol class="event-list step-list" id="steps" aria-label="Steps in this lesson"></ol></section>
+      <section class="inspector-section"><h4>Recording</h4><dl class="properties" id="recording"></dl></section>
+    </aside>
+  </div>
+</div>
+</body>
+</html>
