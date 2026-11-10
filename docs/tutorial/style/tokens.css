@@ -1,0 +1,92 @@
+/* House style tokens: the only place colors, fonts, shadows and corner radii are written out. Light only: no dark variants. style.md gives each token its role and reference/style.html shows them; server code that sends colors with its data reads them from this file instead of writing them out. */
+:root {
+  color-scheme: light;
+
+  /* Type */
+  --font: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", system-ui, sans-serif;
+  --mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, monospace;
+
+  /* Ink: text and icons, strongest first */
+  --ink: #1d1d1f;
+  --ink-2: #6e6e73;
+  --ink-3: #86868b;
+  --ink-4: #aeaeb2;
+  --ink-on-accent: #ffffff;
+  --ink-on-accent-2: rgba(255, 255, 255, 0.82);
+
+  /* Surfaces */
+  --window: #ffffff;
+  --sidebar: #f2f2f5;
+  --toolbar: rgba(248, 248, 250, 0.92);
+  --inspector: #fafafc;
+  --raised: #ffffff;
+  --veil: rgba(255, 255, 255, 0.86);
+  --popover: rgba(255, 255, 255, 0.94);
+
+  /* Lines and fills: black at low alpha over a surface, white over the accent */
+  --hairline: rgba(0, 0, 0, 0.1);
+  --hairline-strong: rgba(0, 0, 0, 0.12);
+  --scrollbar: rgba(0, 0, 0, 0.22);
+  --field: rgba(0, 0, 0, 0.065);
+  --control: rgba(0, 0, 0, 0.055);
+  --control-hover: rgba(0, 0, 0, 0.085);
+  --row-hover: rgba(0, 0, 0, 0.045);
+  --segment-hover: rgba(0, 0, 0, 0.04);
+  --selection-inactive: rgba(0, 0, 0, 0.1);
+  --on-accent-hover: rgba(255, 255, 255, 0.2);
+  --on-accent-fill: rgba(255, 255, 255, 0.22);
+
+  /* Accent: selection, focus and actions */
+  --accent: #007aff;
+  --accent-soft: rgba(0, 122, 255, 0.1);
+  --focus-ring: rgba(0, 122, 255, 0.4);
+  --focus-ring-field: rgba(0, 122, 255, 0.35);
+  --focus-ring-edit: rgba(0, 122, 255, 0.55);
+  --accent-disabled: rgba(0, 122, 255, 0.4);
+
+  /* Interface status: the mark color fills dots and tints the soft fill; text takes the darker shade */
+  --good: #28cd41;
+  --warning: #ff9f0a;
+  --warning-soft: rgba(255, 159, 10, 0.16);
+  --warning-text: #c27c00;
+  --critical: #ff3b30;
+  --critical-soft: rgba(255, 59, 48, 0.12);
+  --critical-text: #d70015;
+
+  /* Shadows */
+  --shadow-segment: 0 1px 2px rgba(0, 0, 0, 0.14), 0 0 0 0.5px rgba(0, 0, 0, 0.06);
+  --shadow-field: 0 0 0 0.5px rgba(0, 0, 0, 0.15);
+  --shadow-inset: inset 0 0 0 0.5px rgba(0, 0, 0, 0.14);
+  --shadow-popover: 0 8px 28px rgba(0, 0, 0, 0.12), 0 1px 3px rgba(0, 0, 0, 0.08);
+
+  /* Corner radii */
+  --radius-small: 4px;
+  --radius-row: 6px;
+  --radius-control: 7px;
+  --radius-field: 8px;
+  --radius-popover: 9px;
+
+  /* Chart series in their fixed order; a series keeps its color when others are hidden */
+  --series-1: #007aff;
+  --series-2: #ff9500;
+  --series-3: #30b0c7;
+  --series-4: #af52de;
+  --series-5: #6370cb;
+  --series-6: #9b6b43;
+  --series-7: #379581;
+  --series-8: #da6b46;
+  --series-9: #28a745;
+
+  /* Chart severity for event marks and capture skips, apart from interface status */
+  --severity-warning: #fab219;
+  --severity-serious: #ec835a;
+  --severity-critical: #d03b3b;
+
+  /* Chart mark for frames the browser never rendered, apart from the series and severity colors */
+  --chart-browser-drop: #6e2aa8;
+
+  /* Chart event hues for informational marks: pictures, feedback from the viewer and network, and the player's input; everything else informational stays ink */
+  --chart-event-picture: #2a5cda;
+  --chart-event-feedback: #1d96bf;
+  --chart-event-input: #853d51;
+}

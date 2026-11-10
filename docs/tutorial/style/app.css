@@ -1,0 +1,308 @@
+/* House style app window: a 52 px toolbar over a source list, the content and an inspector, plus the pieces that live in them. Load after css/tokens.css and css/components.css; rename nothing a page does not need, and keep page-only layout in the page's own stylesheet. reference/style.html shows every class in this file. */
+
+/* Page layout: the leading inset and the trailing edge of content headers. */
+:root {
+  --inset: 20px;
+  --edge: 24px;
+}
+
+/* Window: the toolbar row, then the panes. A window that fills the screen sizes itself; a page that scrolls drops the grid rows. */
+.window {
+  --sidebar-width: 268px;
+  --inspector-width: 312px;
+  display: grid;
+  grid-template-rows: 52px minmax(0, 1fr);
+  min-height: 100vh;
+}
+.window.no-sidebar { --sidebar-width: 0px; }
+.window.no-inspector { --inspector-width: 0px; }
+.panes {
+  display: grid;
+  grid-template-columns: var(--sidebar-width) minmax(0, 1fr) var(--inspector-width);
+  min-height: 0;
+}
+.panes > .sidebar { grid-column: 1; }
+.panes > .content { grid-column: 2; }
+.panes > .inspector { grid-column: 3; }
+/* A hidden pane also drops its border, which would otherwise stick 1 px out of its empty column and let the page scroll sideways. */
+.window.no-sidebar .sidebar, .window.no-inspector .inspector { visibility: hidden; border: 0; }
+
+/* Source list. Size containment keeps a long list from stretching the page; it scrolls inside the pane. */
+.sidebar {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  contain: size;
+  border-right: 1px solid var(--hairline);
+  background: var(--sidebar);
+}
+
+.search { position: relative; margin: 12px 12px 6px; }
+.search svg { position: absolute; left: 8px; top: 6px; width: 16px; height: 16px; fill: none; stroke: var(--ink-3); stroke-width: 1.6; stroke-linecap: round; }
+.search input {
+  width: 100%;
+  height: 28px;
+  padding: 0 8px 0 29px;
+  border: 0;
+  border-radius: var(--radius-field);
+  background: var(--field);
+  outline: none;
+}
+.search input::placeholder { color: var(--ink-3); }
+.search input:focus { background: var(--raised); box-shadow: 0 0 0 3px var(--focus-ring-field), var(--shadow-field); }
+/* iOS zooms into focused inputs whose text is smaller than 16 px. */
+@media (pointer: coarse) { .search input { font-size: 16px; } }
+
+.source-list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 2px 8px 12px;
+  outline: none;
+  scrollbar-width: thin;
+  scrollbar-color: var(--scrollbar) transparent;
+}
+
+.group-label {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  padding: 10px 10px 4px;
+  background: var(--sidebar);
+  color: var(--ink-3);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+/* Card: name and time, then badges and meta beside an inline action, and an optional location line. Every card has the same height. */
+.source {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 1px 8px;
+  margin: 1px 0;
+  padding: 6px 10px 7px;
+  border-radius: var(--radius-control);
+}
+.source:hover { background: var(--row-hover); }
+/* The open button stretches over the whole card; the inline action sits above it. */
+.source-open { display: block; min-width: 0; padding: 0; border: 0; background: none; text-align: left; }
+.source-open::after { content: ""; position: absolute; inset: 0; border-radius: var(--radius-control); }
+.source-open:focus-visible { outline: none; }
+.source-open:focus-visible::after { box-shadow: 0 0 0 3px var(--focus-ring); }
+/* Names are identifiers until someone names them: mono for an ID, the text font for a given name. */
+.source-name { display: block; overflow: hidden; font-family: var(--mono); font-size: 12px; font-weight: 500; text-overflow: ellipsis; white-space: nowrap; }
+.source-name.named { font-family: var(--font); font-weight: 600; }
+.source-time { color: var(--ink-2); font-size: 11px; font-variant-numeric: tabular-nums; text-align: right; }
+.source-sub { grid-column: 1; display: flex; align-items: center; gap: 6px; overflow: hidden; color: var(--ink-2); font-size: 11px; white-space: nowrap; }
+.source-sub.where { grid-column: 1 / -1; }
+.source-sub .meta, .source-sub .location { overflow: hidden; text-overflow: ellipsis; }
+/* No taller than the line beside it, so cards keep their height. */
+.source-action {
+  position: relative;
+  z-index: 1;
+  grid-column: 2;
+  grid-row: 2;
+  justify-self: end;
+  height: 15px;
+  margin-right: -5px;
+  padding: 0 5px;
+  border: 0;
+  border-radius: var(--radius-small);
+  background: transparent;
+  color: var(--accent);
+  font-size: 11px;
+  line-height: 15px;
+}
+.source-action:hover { background: var(--control); }
+/* Renaming edits the name in place. */
+.source-name-input {
+  display: block;
+  width: calc(100% + 8px);
+  height: calc(12px * 1.38);
+  margin: 0 -4px;
+  padding: 0 4px;
+  border: 0;
+  border-radius: var(--radius-small);
+  background: var(--raised);
+  color: var(--ink);
+  box-shadow: 0 0 0 2px var(--focus-ring-edit);
+  font-size: 12px;
+  font-weight: 500;
+  line-height: calc(12px * 1.38);
+  outline: none;
+}
+@media (pointer: coarse) { .source-name-input { font-size: 16px; } }
+.source-problem { position: relative; z-index: 2; grid-column: 1 / -1; padding: 4px 0; }
+.source-error { margin: 0 0 6px; color: var(--critical-text); font-size: 12px; white-space: normal; overflow-wrap: anywhere; }
+.source-problem button { padding: 3px 8px; margin-right: 6px; border: 0; border-radius: var(--radius-small); background: var(--control); color: inherit; }
+.source-problem button:hover { background: var(--control-hover); }
+
+/* The current card takes the accent while the list has focus and the inactive selection while it does not, as in macOS. */
+.source.current { background: var(--accent); color: var(--ink-on-accent); }
+.source.current .source-time, .source.current .source-sub { color: var(--ink-on-accent-2); }
+.source.current .source-action { color: var(--ink-on-accent); }
+.source.current .source-action:hover { background: var(--on-accent-hover); }
+.sidebar:not(:focus-within) .source.current { background: var(--selection-inactive); color: var(--ink); }
+.sidebar:not(:focus-within) .source.current .source-time,
+.sidebar:not(:focus-within) .source.current .source-sub { color: var(--ink-2); }
+.sidebar:not(:focus-within) .source.current .source-action { color: var(--accent); }
+.sidebar:not(:focus-within) .source.current .source-action:hover { background: var(--control); }
+.sidebar:focus-within .source.current .badge { background: var(--on-accent-fill); color: var(--ink-on-accent); }
+.sidebar:focus-within .source.current .source-error { color: var(--ink-on-accent); }
+.sidebar:focus-within .source.current .source-problem button { background: var(--on-accent-fill); }
+
+.sidebar-empty { padding: 28px 16px; color: var(--ink-2); font-size: 12px; text-align: center; }
+.sidebar-footer { padding: 7px 14px 9px; border-top: 1px solid var(--hairline); color: var(--ink-3); font-size: 11px; }
+
+/* Status badges: the soft fill of a status with its darker text; a badge always carries a word. */
+.badge.warning { background: var(--warning-soft); color: var(--warning-text); }
+.badge.critical { background: var(--critical-soft); color: var(--critical-text); }
+
+/* Content */
+.content {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  background: var(--window);
+}
+
+.content-header {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 14px var(--edge) 8px var(--inset);
+}
+.page-heading { min-width: 0; }
+.page-heading h2 { overflow: hidden; font-size: 15px; font-weight: 600; letter-spacing: -0.01em; text-overflow: ellipsis; white-space: nowrap; }
+.page-heading h2 .mono { font-family: var(--mono); font-size: 14px; font-weight: 500; }
+.page-heading p { overflow: hidden; color: var(--ink-2); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.readout { flex: none; color: var(--ink-2); font-size: 12px; font-variant-numeric: tabular-nums; text-align: right; }
+.readout b { color: var(--ink); font-weight: 600; }
+
+/* Section header: a title and description on the left, a legend or tools on the right. */
+.section-header {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 12px var(--edge) 8px var(--inset);
+}
+.section-header > div:first-child { flex: none; }
+.section-header h3 { font-size: 13px; font-weight: 600; }
+.section-header p { color: var(--ink-2); font-size: 11px; white-space: nowrap; }
+
+/* Legend: every series in its fixed order and color; an off series keeps its place with an outlined key. --key is set per item from a series token and defaults to ink 2. */
+.legend { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 2px; }
+.legend button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 24px;
+  padding: 0 6px;
+  border: 0;
+  border-radius: var(--radius-row);
+  background: transparent;
+  color: var(--ink);
+  font-size: 12px;
+}
+.legend button:hover { background: var(--control); }
+.legend .key { --key: var(--ink-2); width: 12px; height: 2px; border-radius: 1px; background: var(--key); }
+.legend button[aria-pressed="false"] { color: var(--ink-4); }
+.legend button[aria-pressed="false"] .key { height: 4px; background: transparent; box-shadow: inset 0 0 0 1px var(--ink-4); }
+
+/* Stage: the area that draws data or media; a stage message veils it with a title and a note. */
+.stage { position: relative; display: flex; flex: 1; flex-direction: column; min-height: 0; }
+.stage > canvas { transition: opacity 0.15s ease; }
+.stage.loading > canvas { opacity: 0.45; }
+.stage-message {
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  display: grid;
+  place-content: center;
+  gap: 4px;
+  background: var(--veil);
+  text-align: center;
+}
+.stage-message[hidden] { display: none; }
+.stage-message h3 { font-size: 15px; font-weight: 600; }
+.stage-message p { max-width: 460px; color: var(--ink-2); font-size: 12px; }
+
+/* Notice: a popover strip along the bottom of a stage. Information fades after four seconds; an alert stays until it is dismissed or resolved. */
+.notice { position: absolute; z-index: 5; left: 12px; right: 12px; bottom: 12px; display: flex; align-items: flex-start; gap: 8px; max-height: 112px; overflow: auto; padding: 6px 6px 6px 12px; border: 1px solid var(--hairline); border-radius: var(--radius-control); background: var(--popover); color: var(--ink); font-size: 12px; overflow-wrap: anywhere; }
+.notice[hidden] { display: none; }
+.notice-text { flex: 1; min-width: 0; padding-top: 5px; }
+
+/* Hint: the gestures of a view in one quiet footer line. */
+.hint { padding: 6px var(--inset) 8px; color: var(--ink-3); font-size: 11px; text-align: center; }
+
+/* Inspector extras: a list of timed items that scrolls inside its section, and the title of the selection. */
+.inspector-section.list-section { display: flex; flex-direction: column; max-height: 25vh; }
+.selection-title { font-size: 13px; font-weight: 600; }
+.selection-subtitle { margin-bottom: 8px; color: var(--ink-2); font-size: 11px; font-variant-numeric: tabular-nums; }
+.event-list {
+  flex: 1;
+  min-height: 0;
+  margin: 0 -8px;
+  padding: 0;
+  overflow-y: auto;
+  list-style: none;
+  scrollbar-width: thin;
+  scrollbar-color: var(--scrollbar) transparent;
+}
+.event-list li { border-radius: var(--radius-row); }
+.event-list button {
+  display: grid;
+  grid-template-columns: 62px 12px minmax(0, 1fr);
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 4px 8px;
+  border: 0;
+  border-radius: var(--radius-row);
+  background: transparent;
+  font-size: 12px;
+  text-align: left;
+}
+.event-list button:hover { background: var(--row-hover); }
+.event-list button[aria-current="true"] { background: var(--accent-soft); }
+.event-list time { color: var(--ink-2); font-size: 11px; font-variant-numeric: tabular-nums; }
+.event-list .label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.event-list .more { padding: 6px 8px; color: var(--ink-3); font-size: 11px; }
+
+/* Selectable table: rows hover like list rows, and the current row (aria-current="true") takes the soft accent, as in the inspector list. */
+.table.selectable tbody tr:hover td { background: var(--row-hover); }
+.table.selectable tbody tr[aria-current="true"] td { background: var(--accent-soft); }
+
+/* Below 1180 px the source list narrows and the inspector becomes a toggle; show-inspector opens it, and a wide-window no-inspector choice applies again once the window widens. */
+@media (max-width: 1179.98px) {
+  .window { --sidebar-width: 240px; --inspector-width: 0px; }
+  .window.no-sidebar { --sidebar-width: 0px; }
+  .window:not(.show-inspector) .inspector { visibility: hidden; border: 0; }
+  .window.show-inspector { --inspector-width: 284px; }
+  .window.show-inspector .inspector { visibility: visible; border-left: 1px solid var(--hairline); }
+}
+
+/* Phones: one column; the source list and inspector follow the content and the page scrolls. */
+@media (max-width: 640px) {
+  .window { display: block; min-height: 0; }
+  .window > .toolbar { position: sticky; top: 0; height: 52px; }
+  .window .toolbar-title p { display: none; }
+  .panes { display: flex; flex-direction: column; }
+  .panes > .sidebar, .panes > .inspector { order: 2; height: auto; max-height: none; contain: none; border: 0; border-top: 1px solid var(--hairline); }
+  .window.no-sidebar .sidebar, .window:not(.show-inspector) .inspector { display: none; }
+  .window.show-inspector .inspector { border-left: 0; }
+  .panes > .content { order: 1; min-height: 60vh; }
+  /* Headers wrap: the legend goes under the title and starts at the inset. */
+  .content-header, .section-header { flex-wrap: wrap; align-items: flex-start; gap: 6px 16px; padding-left: 16px; padding-right: 16px; }
+  /* A description longer than the phone ends in an ellipsis instead of widening the page. */
+  .section-header > div:first-child { flex: 1 1 auto; min-width: 0; }
+  .section-header p { overflow: hidden; text-overflow: ellipsis; }
+  .legend { justify-content: flex-start; margin-left: -6px; }
+  .readout { text-align: left; }
+}
