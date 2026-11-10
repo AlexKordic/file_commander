@@ -84,7 +84,7 @@ struct CaptureMain {
             recorder.setOwner(lesson: config.lesson["id"] ?? "lesson", step: event["id"] as? String ?? "step")
           }
           recorder.event(type, fields: event, hostNanoseconds: host.int64Value)
-          if type == "segment_completed" { try await recorder.boundaryImage() }
+          if type == "segment_completed" { await recorder.flushFrames() }
         }
       }
       while true {
@@ -123,7 +123,7 @@ struct CaptureMain {
         }
         try await Task.sleep(for: .milliseconds(25))
       }
-      try await recorder.boundaryImage()
+      await recorder.flushFrames()
       let manifest = try await recorder.stop()
       started = false
       try result(["schema": 1, "status": "complete", "manifest": manifest.path])

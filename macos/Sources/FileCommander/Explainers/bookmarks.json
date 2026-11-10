@@ -59,6 +59,31 @@
       "id": "bookmarks.a-44d9bbabce-1"
     },
     {
+      "caption": "Open the sidebar",
+      "sub": "Show the sidebar to use your bookmarked folders",
+      "id": "bookmarks.a-9395fe8eb8-1",
+      "presentation": {
+        "id": "bookmarks.open-the-sidebar",
+        "title": "Open the sidebar",
+        "narration": "Open the sidebar. Show the sidebar to use your bookmarked folders.",
+        "trailing_hold": 0.35,
+        "lead_in": 0.12
+      }
+    },
+    {
+      "set_preference": {
+        "sidebar": true,
+        "sidebar_sections": []
+      },
+      "id": "bookmarks.a-0578ea8129-1"
+    },
+    {
+      "wait": {
+        "anchor": "sidebar.bookmarks"
+      },
+      "id": "bookmarks.a-a296ee455d-1"
+    },
+    {
       "highlight": "sidebar.bookmarks",
       "hold": 1800,
       "id": "bookmarks.a-250646b43e-1"

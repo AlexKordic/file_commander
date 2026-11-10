@@ -264,19 +264,13 @@ public final class TutorialFrameRecorder: NSObject, SCStreamOutput, SCStreamDele
     }
   }
 
-  /// Persist the most recently presented picture at a semantic boundary even
-  /// when ScreenCaptureKit has correctly coalesced a static screen.
-  public func boundaryImage() async throws {
-    let at = elapsedNanoseconds
-    let owner = state.withLock { self.owner }
-    try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+  /// Finish admitted writes without advancing the image clock. ScreenCaptureKit
+  /// may still deliver an older presentation timestamp after this host-clock
+  /// marker; static holds belong in durations, not synthetic future PNGs.
+  public func flushFrames() async {
+    await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
       writes.async {
-        do {
-          if let image = self.previousImage, at > self.lastPTS {
-            try self.persist(image, at: at, absolute: (self.origin ?? self.anchorHost) + at, source: nil, owner: owner)
-          }
-          continuation.resume()
-        } catch { self.fail(error.localizedDescription); continuation.resume(throwing: error) }
+        continuation.resume()
       }
     }
   }

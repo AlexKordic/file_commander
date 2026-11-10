@@ -41,6 +41,11 @@ final class ThemeStore {
     revision &+= 1
   }
 
+  /// An isolated recording uses the exact resolved theme, including live edits.
+  func registerRecordingTheme(_ theme: Theme) {
+    themes[theme.name] = theme
+  }
+
   /// Applies a live edit without saving it.
   func preview(_ theme: Theme) {
     active = theme.resolved(using: themes)

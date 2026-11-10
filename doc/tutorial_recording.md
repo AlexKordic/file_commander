@@ -9,12 +9,24 @@ padding for H.264.
 
 Choose all lessons, the navigation/copy/editor pilot, or individual lessons. Pick
 an appearance, narration voice/language/rate and an output folder, then start.
+The recording inherits the main window's sidebar visibility and collapsed
+sections before its first frame. The Bookmarks lesson explicitly opens the
+sidebar when it demonstrates bookmarks; other lessons keep your chosen layout.
+It also snapshots the current FC theme, fonts, zoom, Compose typography and Fresh
+theme/editor preferences, including custom theme definitions and plugin visibility.
+Demo typing keeps auto-pairing/indentation off and suppresses welcome/update UI.
+The real editor configuration, sessions and files are never used as fixtures.
 Keep the recording window at its agreed size and position; changing geometry
 invalidates that take with a request to start a new one. Native recording jobs
 take turns so their keyboard focus cannot interfere. Avoid using other app
 windows while a lesson is capturing. Narration preparation and media builds can
 run independently. Recording controls are
 outside the captured demo process. Stop preserves diagnostic output.
+After a stopped recording, **Resume Recording** retries incomplete lessons and
+keeps verified completed captures. Keep the same layout, resolution and lesson
+selection, or choose a new output folder for a new recording.
+If presentation settings changed, Resume retakes the selected lessons with the
+new snapshot so the video does not mix appearances; earlier takes remain saved.
 
 The exporter requires a normal logged-in macOS desktop with Screen Recording
 permission, Python 3.11+, FFmpeg with `libx264`, and `ffprobe` on PATH. Stock voice
@@ -49,6 +61,8 @@ replay media; they do not execute app commands.
 `capture/LESSON/frames/` retains the source PNGs. Names contain elapsed nanoseconds,
 UTC, sequence, lesson and action. The manifests and `events.jsonl` retain exact
 timing and checksums. Pixel-identical frames become measured holds; changed
+frames use the capture clock. Step boundaries retain a hold instead of writing
+a duplicate image ahead of delayed source frames. Changed
 frames are retained up to the chosen rate. A bounded write queue fails the take
 if storage cannot keep up. Any capture/write failure prevents a successful render.
 `render/images.json` maps useful stills to final video time. Source captures and
@@ -78,12 +92,36 @@ Compose. Use a new output directory, or `--resume` to retain verified completed
 takes and retry incomplete ones. Add `--retake find,background_jobs` with `--resume`
 to replace specific completed lessons while preserving the full course order.
 Previous and failed takes are renamed and retained. Keep the same lesson content
-and chosen geometry when resuming. Rebuild
+and chosen geometry when resuming. Host presentation choices can be supplied with
+`--host-options '{"sidebarShown":false}'`; retain those choices when resuming.
+Rebuild
 needs only the completed captures and narration, with the file manager closed.
 `--silent` omits voice; `--import-audio FOLDER` imports a WAV named `ID.wav` for
 each presentation ID. `prepare` can generate narration separately. Speech cache
 keys include text, resolved installed voice, language, engine version, rate,
 normalization and audio format. Real measured clip durations pace each segment.
+
+To encode an additional variable-frame-rate video from existing image timestamps:
+
+```sh
+python3 tools/tutorial_media.py vfr build-tutorial-media/my-recording --vfr-crf 24
+```
+
+This writes `render/tutorial-vfr.mp4`, separate VFR encoder inputs and
+`validation-vfr.json`. It leaves `tutorial.mp4`, both players, existing metadata
+and all captured images unchanged. No app or new capture is needed. Each retained
+image becomes one video frame with its measured display interval; absolute
+timestamps are rounded once to 1/90000-second ticks, with no accumulated interval drift.
+The encoder and MP4 video track both use the same 90 kHz clock.
+The final image holds through the course end. Export verifies every packet's
+timestamp and duration and decodes the complete movie before replacing a prior
+VFR export. `--vfr-crf` accepts 0–51, including fractional values; lower means
+higher quality and generally larger files. The default is 18. CRF controls visual
+quality independently of frame timing, and does not prescribe a bitrate.
+
+When rebuilding the primary export too, use `build ROOT --also-vfr --vfr-crf 24`.
+Without `--vfr-crf`, the additional video's CRF inherits `--quality` (default 18).
+The primary MP4 and player retain their existing 30 fps delivery behavior.
 
 ## Qualification and reuse
 

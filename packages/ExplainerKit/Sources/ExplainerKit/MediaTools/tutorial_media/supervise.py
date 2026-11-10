@@ -89,10 +89,13 @@ def acquire_desktop(root):
 
 
 def record(root, app, capture_binary, catalog, geometry, selected=None, voice=None, rate=180,
-           imported=None, fps=30, silent=False, resume=False, render=True, appearance='system', title='Tutorial', language='en', retake=None):
+           imported=None, fps=30, silent=False, resume=False, render=True, appearance='system', title='Tutorial', language='en', retake=None,
+           host_options=None):
     os.umask(0o077)
     root, catalog = Path(root).resolve(), Path(catalog).resolve()
     root.mkdir(parents=True, exist_ok=True)
+    if host_options is not None and not isinstance(host_options, dict):
+        raise MediaError('Host options must be a JSON object')
     with tempfile.TemporaryFile(dir=root) as probe:
         probe.write(b'Tutorial export write preflight\n')
         probe.flush(); os.fsync(probe.fileno())
@@ -153,8 +156,10 @@ def record(root, app, capture_binary, catalog, geometry, selected=None, voice=No
             manifest = take / 'manifest.json'
             if resume and lesson['id'] not in set(retake or []) and manifest.exists() and read_json(manifest).get('status') == 'complete':
                 load_capture(take)
-                if read_json(take / 'lesson.json') != lesson or read_json(take / 'config.json').get('geometry') != geometry:
-                    raise MediaError(f'{lesson["id"]}: completed take uses different lesson content or geometry; start a new course')
+                previous_config = read_json(take / 'config.json')
+                if (read_json(take / 'lesson.json') != lesson or previous_config.get('geometry') != geometry or
+                        previous_config.get('hostOptions', {}) != (host_options or {})):
+                    raise MediaError(f'{lesson["id"]}: completed take uses different lesson content, geometry, or host options; start a new course')
                 course['takes'].append(dict(manifest=str(manifest.relative_to(root))))
                 write_json(root / 'course.json', course)
                 print(f'Reusing completed take: {lesson["id"]}', flush=True)
@@ -172,6 +177,8 @@ def record(root, app, capture_binary, catalog, geometry, selected=None, voice=No
                                       chapter_title=chapter_titles.get(lesson.get('chapter'), lesson.get('chapter', 'Tutorial'))),
                           geometry=geometry, fps=fps, narration=narration, scriptPath=str(script_path), appearance=appearance,
                           initialPath=str(initial_path))
+            if host_options is not None:
+                config['hostOptions'] = host_options
             config_path = take / 'config.json'; write_json(config_path, config)
             write_json(root / 'progress.json', dict(status='recording', lesson=lesson['id'], completed=len(course['takes']), total=len(lessons)))
             print(f'Recording {lesson["id"]} ({len(course["takes"]) + 1}/{len(lessons)})', flush=True)

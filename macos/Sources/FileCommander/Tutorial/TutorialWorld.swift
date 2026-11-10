@@ -1,4 +1,5 @@
 import AppKit
+import ExplainerKit
 import Foundation
 
 /// The demo files explainers work on, in ~/Library/Application Support/File
@@ -192,21 +193,36 @@ struct TutorialWorld {
     """.write(to: ssh, atomically: true, encoding: .utf8)
     chmod(ssh.path, 0o755)
 
-    // Fresh reads $HOME/.config/fresh: no auto-closing brackets or auto-indent,
-    // so the editor explainer types every character itself.
+    try writeFreshConfiguration(options: [:])
+  }
+
+  func writeFreshConfiguration(options: [String: ExplainerKit.JSONValue]) throws {
+    let fm = FileManager.default
+    // Keep the user's colors, editor presentation and plugin visibility. Only
+    // scripted typing and unsolicited startup UI need deterministic behavior.
     let fresh = profile.appendingPathComponent(".config/fresh")
     try fm.createDirectory(at: fresh, withIntermediateDirectories: true)
-    try """
-    {
-      "check_for_updates": false,
-      "editor": { "auto_close": false, "auto_indent": false, "tab_size": 2 },
-      "plugins": {
-        "orchestrator": { "enabled": true, "settings": { "autoOpenDock": "never" } },
-        "welcome_screen": { "enabled": true, "settings": { "showOnStartup": false } }
-      }
+    var configuration = options["freshConfig"]?.object ?? [:]
+    configuration["check_for_updates"] = .bool(false)
+    var editor = configuration["editor"]?.object ?? [:]
+    editor["auto_close"] = .bool(false); editor["auto_indent"] = .bool(false); editor["tab_size"] = .number(2)
+    configuration["editor"] = .object(editor)
+    var plugins = configuration["plugins"]?.object ?? [:]
+    for (name, setting, value) in [("orchestrator", "autoOpenDock", ExplainerKit.JSONValue.string("never")),
+                                    ("welcome_screen", "showOnStartup", .bool(false))] {
+      var plugin = plugins[name]?.object ?? ["enabled": .bool(true)]
+      plugin["settings"] = .object([setting: value]); plugins[name] = .object(plugin)
     }
-
-    """.write(to: fresh.appendingPathComponent("config.json"), atomically: true, encoding: .utf8)
+    configuration["plugins"] = .object(plugins)
+    try JSONEncoder().encode(configuration).write(to: fresh.appendingPathComponent("config.json"), options: .atomic)
+    for (name, theme) in options["freshThemes"]?.object ?? [:] {
+      guard name == (name as NSString).lastPathComponent, name.hasSuffix(".json"), name != ".json" else {
+        throw CocoaError(.fileWriteInvalidFileName)
+      }
+      let folder = fresh.appendingPathComponent("themes")
+      try fm.createDirectory(at: folder, withIntermediateDirectories: true)
+      try JSONEncoder().encode(theme).write(to: folder.appendingPathComponent(name), options: .atomic)
+    }
   }
 
   /// Removes the demo files. Deleting needs write access to the folders only,

@@ -14,7 +14,9 @@ final class KeyRouter {
   init(app: AppController) {
     self.app = app
     monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
-      MainActor.assumeIsolated { self?.handle(event) ?? event }
+      guard let self else { return event }
+      let shouldPass = MainActor.assumeIsolated { self.handle(event) != nil }
+      return shouldPass ? event : nil
     }
   }
 
@@ -23,6 +25,8 @@ final class KeyRouter {
     if Trace.enabled {
       Trace.write("key \(KeyChord(event: event)?.description ?? "?") window \(event.window?.identifier?.rawValue ?? "-") responder \(event.window?.firstResponder.map { String(describing: type(of: $0)) } ?? "nil") sheet \(event.window?.attachedSheet != nil) palette \(String(describing: app.paletteMode))")
     }
+    // Record delivery before modal routing: rebinding consumes its key here.
+    if app.tutorial.handleKey(event) { return nil }
     if let id = app.rebinding {
       if let chord = KeyChord(event: event) {
         if chord.key == "Esc" && chord.modifiers.isEmpty {
@@ -36,7 +40,6 @@ final class KeyRouter {
       }
       return nil
     }
-    if app.tutorial.handleKey(event) { return nil }
     // The editor in the main window takes its own keys.
     if let window = app.editor.window, event.window === window { return event }
     // In the palette, ⌃K rebinds the highlighted command, as in the terminal interface.
@@ -47,19 +50,19 @@ final class KeyRouter {
     }
     guard let window = event.window, window.attachedSheet == nil, app.paletteMode == nil, let chord = KeyChord(event: event) else { return event }
     if let table = window.firstResponder as? ListingTableView {
-      return dispatch(chord, characters: event.characters, side: table.side) ? nil : event
+      return dispatch(chord, characters: event.characters, side: table.side, event: event) ? nil : event
     }
     // Nothing is being typed into in the main window (the focus is on a button,
     // the toolbar or nowhere): keys belong to the focused pane's list.
     guard window.identifier?.rawValue.hasPrefix("main") == true, !(window.firstResponder is NSText),
           let table = app.listing(app.engine.focusedSide) else { return event }
     window.makeFirstResponder(table)
-    return dispatch(chord, characters: event.characters, side: table.side) ? nil : event
+    return dispatch(chord, characters: event.characters, side: table.side, event: event) ? nil : event
   }
 
   /// Runs what a chord does in a focused listing; false when the table should handle it.
   @discardableResult
-  func dispatch(_ chord: KeyChord, characters: String?, side: Int) -> Bool {
+  func dispatch(_ chord: KeyChord, characters: String?, side: Int, event: NSEvent? = nil) -> Bool {
     guard let app else { return false }
     let engine = app.engine
     if chord.key == "Esc" && chord.modifiers.isEmpty {
@@ -80,7 +83,7 @@ final class KeyRouter {
     if let id = app.keymap.command(for: chord) {
       // Bindings change at once here, before menus catch up; run() ignores the
       // menu's second delivery of the same key press.
-      app.run(id)
+      app.run(id, keyEvent: event)
       return true
     }
     let typing = chord.modifiers.subtracting([.shift]).isEmpty

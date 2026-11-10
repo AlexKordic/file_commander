@@ -51,6 +51,9 @@ Keep generated output outside the source tree.
    recorder, connect its hooks, run the lesson, and call `finish` before cleanup.
    Use `prepareCaptureWindows` to arrange auxiliary windows inside the agreed
    frame before they enter capture. Normal Watch/Guided runs need no capture client.
+   Optional `hostOptions` carries presentation choices (such as sidebar visibility)
+   into each isolated host before its window appears. The CLI accepts the object
+   or a JSON file with `--host-options`; resumed takes must retain those choices.
 4. For intentional relaunch, call `prepareRelaunch` before exit, retain the config
    and lesson progress, then repeat the ready handshake in the replacement
    process. The external helper keeps the clock and inserts a labeled restart
@@ -79,6 +82,17 @@ works from `file://` without adjacent files or network access. Chapter buttons
 play continuously; step buttons play a bounded interval. Previous/Next select
 without playing; replay repeats the current step. Keyboard and native video
 controls remain available.
+
+For an additional video using the retained images' measured intervals, run
+`python3 tools/tutorial_media.py vfr ROOT --vfr-crf 24`. This preserves the existing
+MP4, players, capture images and metadata. It creates `render/tutorial-vfr.mp4`,
+separate encoder inputs and `validation-vfr.json`, checks every presentation
+timestamp and frame duration, and decodes the whole movie. CRF accepts 0–51
+(including fractions); lower means higher visual quality. Absolute timestamps
+round to 1/90000-second ticks without accumulating drift; the encoder and MP4
+track share this time base. The final image holds until
+the course ends. To build both delivery variants together, use
+`build ROOT --also-vfr --vfr-crf 24`; an omitted VFR CRF inherits `--quality`.
 
 For real browser qualification, install Playwright and its browsers outside the
 app, then run:

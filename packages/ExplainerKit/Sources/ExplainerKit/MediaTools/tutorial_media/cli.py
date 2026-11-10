@@ -10,6 +10,7 @@ from .render import build, publication
 from .speech import prepare
 from .supervise import record
 from .qualification import qualify, handoff
+from .vfr import build_vfr, validate_options as validate_vfr_options
 
 
 def main(argv=None):
@@ -31,6 +32,12 @@ def main(argv=None):
     render.add_argument('--quality', type=int, default=18)
     render.add_argument('--threads', type=int, default=4)
     render.add_argument('--title')
+    render.add_argument('--also-vfr', action='store_true', help='Also encode render/tutorial-vfr.mp4 from image timing')
+    render.add_argument('--vfr-crf', type=float, help='Quality of the additional VFR video; default: --quality')
+    vfr = commands.add_parser('vfr', help='Encode only an additional VFR movie; preserve existing movies, players and images')
+    vfr.add_argument('root', type=Path)
+    vfr.add_argument('--vfr-crf', type=float, default=18, help='x264 constant quality, 0–51; lower is higher quality (default: 18)')
+    vfr.add_argument('--threads', type=int, default=4)
     validate = commands.add_parser('validate', help='Validate complete captures and final timing without rendering')
     validate.add_argument('root', type=Path)
     qualification = commands.add_parser('qualify', help='Decode all media and measure early/middle/late audio alignment')
@@ -50,6 +57,7 @@ def main(argv=None):
     capture.add_argument('--rate', type=int, default=180)
     capture.add_argument('--fps', type=int, default=30)
     capture.add_argument('--appearance', choices=('system', 'light', 'dark'), default='system')
+    capture.add_argument('--host-options', help='Host presentation options as a JSON object or a JSON file')
     capture.add_argument('--title', default='Tutorial')
     capture.add_argument('--import-audio', type=Path)
     capture.add_argument('--silent', action='store_true')
@@ -69,7 +77,16 @@ def main(argv=None):
         elif args.command == 'build':
             if not 0 <= args.quality <= 35 or not 1 <= args.threads <= 32:
                 raise MediaError('Quality must be 0–35 and encoder threads 1–32')
+            if args.vfr_crf is not None and not args.also_vfr:
+                raise MediaError('--vfr-crf requires --also-vfr; use the vfr command to preserve existing exports')
+            if args.also_vfr:
+                crf = args.vfr_crf if args.vfr_crf is not None else args.quality
+                validate_vfr_options(crf, args.threads)
             build(args.root, args.quality, args.threads, args.title)
+            if args.also_vfr:
+                build_vfr(args.root, crf, args.threads)
+        elif args.command == 'vfr':
+            build_vfr(args.root, args.vfr_crf, args.threads)
         elif args.command == 'validate':
             timeline = compile_timeline(args.root)
             print(json.dumps({key: timeline[key] for key in ('schema', 'title', 'width', 'height', 'duration_ns')}))
@@ -79,7 +96,9 @@ def main(argv=None):
             record(args.out, args.app, args.capture_bin, args.catalog, geometry,
                    args.lessons.split(',') if args.lessons else None, args.voice, args.rate,
                    args.import_audio, args.fps, args.silent, args.resume, not args.capture_only, args.appearance, args.title, args.language,
-                   args.retake.split(',') if args.retake else None)
+                   args.retake.split(',') if args.retake else None,
+                   (json.loads(args.host_options) if args.host_options.lstrip().startswith('{') else
+                    json.loads(Path(args.host_options).read_text())) if args.host_options else None)
         elif args.command == 'qualify':
             print(json.dumps(qualify(args.root, args.browser_report), indent=2))
         elif args.command == 'handoff':

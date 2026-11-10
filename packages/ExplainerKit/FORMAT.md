@@ -76,6 +76,17 @@ both `pts_ns` and `source_pts_ns`. `render/images.json` maps presentation stills
 to final video timestamps without renaming retained source images. H.264 delivery
 rounds onto its declared frame grid; source nanoseconds remain unchanged.
 
+The optional `render/tutorial-vfr.mp4` export instead preserves the image
+intervals. Absolute nanosecond timestamps are rounded to integer 1/90000-second ticks
+before intervals are calculated. Timestamps that collide at that precision fail
+export. Each retained image maps to exactly one packet, including a final packet
+whose duration extends to the rounded course end. The MP4 video clock is
+`1/90000`, matching the encoder time base; it has no frame-rate conversion filter
+or reordered B-frames. Maximum timestamp rounding is half a tick (about 5.56 µs).
+`validation-vfr.json` records CRF, timing precision, source and movie hashes,
+packet interval checks and complete decode results. VFR files are additional
+artifacts; the primary movie, players, source images and manifests are preserved.
+
 ## External capture session handshake
 
 The supervisor creates a private config with absolute `folder`, `session`,

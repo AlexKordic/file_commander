@@ -19,6 +19,7 @@ from tutorial_media.render import build, html_player, narration_track, probe
 from tutorial_media.speech import pcm_duration, prepare, run
 from tutorial_media.supervise import record, acquire_desktop
 from tutorial_media.qualification import qualify, handoff
+from tutorial_media.vfr import build_vfr, image_timing
 
 
 def png(path, rgb, width=200, height=100):
@@ -157,6 +158,18 @@ class TutorialMediaTests(unittest.TestCase):
         self.assertEqual([frame['pts_ns'] for frame in timeline['frames']], [0, 600_000_000])
         self.assertEqual(timeline['duration_ns'], 2 * NS)
 
+    def test_static_segment_boundaries_need_no_synthetic_future_frame(self):
+        path = self.take / 'events.jsonl'
+        events = [json.loads(row) for row in path.read_text().splitlines()]
+        for event in events:
+            if event['pts_ns'] == 600_000_000:
+                event['pts_ns'] = 450_000_000
+        path.write_text(''.join(json.dumps(event) + '\n' for event in events))
+        timeline = compile_timeline(self.root)
+        self.assertEqual([frame['pts_ns'] for frame in timeline['frames']], [0, 600_000_000])
+        self.assertEqual(timeline['steps'][1]['start_ns'], 450_000_000)
+        self.assertEqual(timeline['duration_ns'], 2 * NS)
+
     def test_incomplete_course_cannot_look_like_a_complete_subset(self):
         course = json.loads((self.root / 'course.json').read_text())
         course.update(status='complete', expected_lessons=['sample', 'missing'])
@@ -194,6 +207,45 @@ class TutorialMediaTests(unittest.TestCase):
                 record(self.root / 'denied', binary, binary, catalog,
                        dict(x=0, y=0, pointsWidth=100, pointsHeight=100, scale=1), silent=True)
             spawn.assert_not_called()
+
+    def test_host_presentation_options_reach_the_child_and_must_match_on_resume(self):
+        from types import SimpleNamespace
+        binary = self.root / 'host'
+        binary.write_text('#!/bin/sh\nexit 0\n'); binary.chmod(0o700)
+        catalog = self.root / 'catalog.json'
+        lesson = dict(id='sample', title='Sample', steps=[
+            dict(id=f'sample.step-{n}.action', caption=f'Step {n}',
+                 presentation=dict(id=f'sample.step-{n}', title=f'Step {n}', narration='Narrated step'))
+            for n in range(2)])
+        write_json(catalog, [lesson])
+        output = self.root / 'recorded'
+        geometry = dict(x=0, y=0, pointsWidth=200, pointsHeight=100, scale=1)
+        options = dict(sidebarShown=False, collapsedSidebarSections=['locations'])
+        observed = []
+
+        def spawn(command, **kwargs):
+            take = output / 'capture/sample'
+            config = json.loads((take / 'config.json').read_text())
+            observed.append(config.get('hostOptions'))
+            shutil.copytree(self.take / 'frames', take / 'frames', dirs_exist_ok=True)
+            shutil.copyfile(self.take / 'manifest.json', take / 'manifest.json')
+            shutil.copyfile(self.take / 'events.jsonl', take / 'events.jsonl')
+            write_json(take / 'session/capture_result.json', dict(schema=1, status='complete'))
+            return SimpleNamespace(poll=lambda: 0, wait=lambda **kwargs: 0)
+
+        with patch('tutorial_media.supervise.executable', return_value='encoder'), \
+             patch('tutorial_media.supervise.subprocess.check_output', return_value='{"capture_permission":true}'), \
+             patch('tutorial_media.supervise.subprocess.Popen', side_effect=spawn) as children:
+            record(output, binary, binary, catalog, geometry, silent=True, render=False, host_options=options)
+            self.assertEqual(observed, [options, options])
+            self.assertFalse(json.loads((output / 'capture/sample/config.json').read_text())['hostOptions']['sidebarShown'])
+            children.reset_mock()
+            record(output, binary, binary, catalog, geometry, silent=True, render=False, resume=True, host_options=options)
+            children.assert_not_called()
+            with self.assertRaisesRegex(MediaError, 'host options'):
+                record(output, binary, binary, catalog, geometry, silent=True, render=False, resume=True,
+                       host_options=dict(options, sidebarShown=True))
+            children.assert_not_called()
 
     def test_asset_escape_is_rejected(self):
         self.change(lambda value: value['frames'][0].update(path='../../../outside.png'))
@@ -270,6 +322,99 @@ class TutorialMediaTests(unittest.TestCase):
         self.change(lambda m: m.update(duration_ns=3 * NS))
         with self.assertRaisesRegex(MediaError, 'Source media changed'):
             qualify(self.root)
+
+    def test_vfr_rounds_absolute_timestamps_without_accumulating_drift(self):
+        timeline = dict(frames=[dict(pts_ns=n * 33_333_333) for n in range(90)], duration_ns=3 * NS)
+        points, durations, end = image_timing(timeline)
+        self.assertEqual(points[:4], [0, 3000, 6000, 9000])
+        self.assertEqual(sum(durations), 270_000)
+        self.assertEqual(end, 270_000)
+        for frame, point in zip(timeline['frames'], points):
+            self.assertLessEqual(abs(frame['pts_ns'] * 90_000 - point * NS), NS // 2)
+        with self.assertRaisesRegex(MediaError, 'distinct at 1/90000-second precision'):
+            image_timing(dict(frames=[dict(pts_ns=0), dict(pts_ns=400)], duration_ns=NS))
+
+    def test_vfr_rejects_invalid_quality_before_writing_outputs(self):
+        for crf in [-1, 52, float('nan'), float('inf'), True]:
+            with self.subTest(crf=crf), self.assertRaisesRegex(MediaError, 'VFR CRF'):
+                build_vfr(self.root, crf=crf)
+        self.assertFalse((self.root / 'render').exists())
+
+    def test_vfr_command_does_not_rebuild_primary_exports(self):
+        from tutorial_media.cli import main
+        with patch('tutorial_media.cli.build') as primary, patch('tutorial_media.cli.build_vfr') as secondary:
+            main(['vfr', str(self.root), '--vfr-crf', '24'])
+            primary.assert_not_called()
+            secondary.assert_called_once_with(self.root, 24, 4)
+
+    def test_build_vfr_quality_is_explicit_or_inherits_primary_quality(self):
+        from tutorial_media.cli import main
+        for arguments, expected in [([], 17), (['--vfr-crf', '24'], 24)]:
+            with self.subTest(arguments=arguments):
+                with patch('tutorial_media.cli.build') as primary, patch('tutorial_media.cli.build_vfr') as secondary:
+                    main(['build', str(self.root), '--quality', '17', '--also-vfr', *arguments])
+                    primary.assert_called_once_with(self.root, 17, 4, None)
+                    secondary.assert_called_once_with(self.root, expected, 4)
+        with patch('tutorial_media.cli.build') as primary, patch('sys.stderr'):
+            with self.assertRaises(SystemExit):
+                main(['build', str(self.root), '--vfr-crf', '24'])
+            primary.assert_not_called()
+
+    def test_vfr_encoder_failure_keeps_previous_export(self):
+        render = self.root / 'render'; render.mkdir()
+        movie = render / 'tutorial-vfr.mp4'; movie.write_bytes(b'previous verified movie')
+        report = self.root / 'validation-vfr.json'; report.write_text('{"status":"previous"}')
+        with patch('tutorial_media.vfr.executable', return_value='ffmpeg'), \
+                patch('tutorial_media.vfr.run', side_effect=MediaError('Encoder failed')):
+            with self.assertRaisesRegex(MediaError, 'Encoder failed'):
+                build_vfr(self.root, crf=24)
+        self.assertEqual(movie.read_bytes(), b'previous verified movie')
+        self.assertEqual(report.read_text(), '{"status":"previous"}')
+        self.assertEqual(list(render.glob('.vfr-*')), [])
+
+    @unittest.skipUnless(shutil.which('ffmpeg') and shutil.which('ffprobe'), 'FFmpeg is the integration dependency')
+    def test_vfr_keeps_image_timing_last_hold_and_existing_files(self):
+        frames = []
+        for n, at in enumerate([0, 12_345_499, 33_333_501, 600_000_501]):
+            path = f'frames/irregular-{n}.png'
+            png(self.take / path, (230, 20 + n, 20) if n < 3 else (20, 20, 230))
+            frames.append(dict(pts_ns=at, sequence=n, path=path, sha256=digest(self.take / path)))
+        self.change(lambda value: value.update(frames=frames))
+        build(self.root, threads=1)
+        before = {p.relative_to(self.root): digest(p) for p in self.root.rglob('*') if p.is_file()}
+        result = build_vfr(self.root, crf=24.5, threads=1)
+        self.assertTrue(result['all_packets_decoded'])
+        self.assertEqual(result['crf'], 24.5)
+        self.assertEqual(result['frames'], 4)
+        self.assertEqual(result['video_duration_ticks'], 180_000)
+        self.assertEqual(result['time_base'], '1/90000')
+        for path, fingerprint in before.items():
+            self.assertEqual(digest(self.root / path), fingerprint, str(path))
+        movie = self.root / 'render/tutorial-vfr.mp4'
+        evidence = json.loads(run([shutil.which('ffprobe'), '-v', 'error', '-select_streams', 'v:0',
+                                  '-show_frames', '-show_entries', 'frame=pts,duration',
+                                  '-of', 'json', str(movie)]).stdout)['frames']
+        self.assertEqual([f['pts'] for f in evidence], [0, 1111, 3000, 54000])
+        self.assertEqual([f['duration'] for f in evidence], [1111, 1889, 51000, 126000])
+        import subprocess
+        # A sparse hold has no new picture at 1.8s. Check the final decoded
+        # picture's content together with its measured 1.4s packet hold.
+        pixels = subprocess.check_output([shutil.which('ffmpeg'), '-v', 'error', '-i', str(movie),
+                                          '-frames:v', '1', '-vf', 'select=eq(n\\,3),scale=1:1',
+                                          '-fps_mode:v', 'passthrough', '-f', 'rawvideo', '-pix_fmt', 'rgb24', '-'])
+        self.assertEqual(len(pixels), 3)
+        self.assertGreater(pixels[2], pixels[0] + 100)
+
+    @unittest.skipUnless(shutil.which('ffmpeg') and shutil.which('ffprobe'), 'FFmpeg is the integration dependency')
+    def test_vfr_one_image_holds_for_the_whole_course(self):
+        self.change(lambda value: value.update(frames=value['frames'][:1]))
+        result = build_vfr(self.root, crf=24, threads=1)
+        self.assertEqual(result['frames'], 1)
+        self.assertEqual(result['max_frame_duration_ticks'], 180_000)
+        self.assertEqual(result['video_duration_ticks'], 180_000)
+        self.assertFalse((self.root / 'render/tutorial.mp4').exists())
+        self.assertFalse((self.root / 'standalone.html').exists())
+        self.assertFalse((self.root / 'validation.json').exists())
 
     @unittest.skipUnless(shutil.which('ffmpeg'), 'FFmpeg normalizes imported audio')
     def test_imported_speech_cache_and_text_invalidation(self):

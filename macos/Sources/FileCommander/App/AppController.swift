@@ -147,7 +147,7 @@ final class AppController {
         index += 1
       } else if arg == "--resume-explainer" {
         resumeExplainer = true
-      } else if ["--export-explainer", "--run-explainer", "--out", "--appearance", "--speed", "--trace", "--voice", "--record-session", "--record-take", "--tutorial-world"].contains(arg) {
+      } else if ["--export-explainer", "--run-explainer", "--out", "--appearance", "--speed", "--trace", "--voice", "--record-session", "--record-take", "--tutorial-world", "--geometry"].contains(arg) {
         index += 1  // Handled by the exporter.
       } else if arg.hasPrefix("-") {
         // AppKit and Xcode pass their own -NS... options.
@@ -159,9 +159,11 @@ final class AppController {
     }
     if paths.count > 0 { options.left = paths[0] }
     if paths.count > 1 { options.right = paths[1] }
-    if !resumeExplainer, let flag = arguments.firstIndex(of: "--record-session"), flag + 1 < arguments.count,
-       let capture = try? TutorialCaptureConfiguration.read(URL(fileURLWithPath: arguments[flag + 1])),
-       let initial = capture.initialPath {
+    let capture: TutorialCaptureConfiguration?
+    if let flag = arguments.firstIndex(of: "--record-session"), flag + 1 < arguments.count {
+      capture = try? TutorialCaptureConfiguration.read(URL(fileURLWithPath: arguments[flag + 1]))
+    } else { capture = nil }
+    if !resumeExplainer, let initial = capture?.initialPath {
       options.left = initial; options.right = initial
     }
     options.toolDirectory = Bundle.main.executableURL?.deletingLastPathComponent().path ?? ""
@@ -173,10 +175,30 @@ final class AppController {
     let profile = URL(fileURLWithPath: engine.profileDirectory)
     preferencesURL = profile.appendingPathComponent("app_settings.json")
     preferences = AppPreferences.load(from: preferencesURL!)
+    let presentation = capture?.hostOptions?["appPresentation"].flatMap {
+      try? TutorialPresentation.decode(TutorialAppPresentation.self, from: $0)
+    }
+    if !resumeExplainer, let options = capture?.hostOptions {
+      if let shown = options["sidebarShown"]?.bool { preferences.sidebarShown = shown }
+      if let sections = options["collapsedSidebarSections"]?.array {
+        preferences.collapsedSidebarSections = sections.compactMap(\.string)
+      }
+      if let presentation {
+        preferences.theme = presentation.theme.name
+        preferences.zoom = presentation.zoom
+        preferences.paneSplit = presentation.paneSplit
+        preferences.optionAsAlt = presentation.optionAsAlt
+        preferences.compose = presentation.compose
+      }
+    }
     sidebarVisible = preferences.sidebarShown ? .all : .detailOnly
     applyTelemetry()
     theme.zoom = preferences.zoom
     theme.load(profile: profile, activeName: preferences.theme)
+    if let presentation {
+      theme.registerRecordingTheme(presentation.theme)
+      theme.activate(preferences.theme)
+    }
     applyAppearance()
     engine.onDialog = { [weak self] in self?.handle($0) }
     engine.onNotice = { [weak self] in self?.flash($0) }
@@ -239,14 +261,17 @@ final class AppController {
 
   /// Runs a command the way a key, a menu item, the palette or an explainer does.
   @discardableResult
-  func run(_ id: String) -> Bool {
+  func run(_ id: String, keyEvent: NSEvent? = nil) -> Bool {
+    // A local event monitor may run before NSApp.currentEvent advances.
+    // Deduplicate the actual key being routed, rather than a previous event.
+    let triggeringEvent = keyEvent ?? NSApp.currentEvent
     Trace.write("run \(id) sheet \(sheet?.id ?? "-") palette \(String(describing: paletteMode))")
     // A menu shortcut while the palette is open or a key is being captured: those keys are theirs.
-    if NSApp.currentEvent?.type == .keyDown, paletteMode != nil || rebinding != nil { return false }
+    if triggeringEvent?.type == .keyDown, paletteMode != nil || rebinding != nil { return false }
     // Keys typed into the editor are the editor's, even when a menu has the same shortcut.
-    if let event = NSApp.currentEvent, event.type == .keyDown, let window = editor.window, event.window === window { return false }
+    if let event = triggeringEvent, event.type == .keyDown, let window = editor.window, event.window === window { return false }
     // One key press runs a command once, even when both the key router and a menu see it.
-    if let event = NSApp.currentEvent, event.type == .keyDown {
+    if let event = triggeringEvent, event.type == .keyDown {
       if lastKeyRun?.time == event.timestamp && lastKeyRun?.id == id { return true }
       lastKeyRun = (event.timestamp, id)
     }

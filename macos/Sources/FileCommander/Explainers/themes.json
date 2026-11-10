@@ -114,6 +114,12 @@
       }
     },
     {
+      "remember": {
+        "font_size": "listing.name"
+      },
+      "id": "themes.a-7b5caf9803-1"
+    },
+    {
       "click": "settings.appearance.font.bigger",
       "id": "themes.a-51ceecddea-1"
     },
@@ -129,10 +135,10 @@
       "wait": {
         "font_size": {
           "element": "listing.name",
-          "is": 16
+          "increased_by": 3
         }
       },
-      "id": "themes.a-2447a9e9fe-1"
+      "id": "themes.a-b78976c1eb-1"
     },
     {
       "highlight": "settings.appearance.preview",

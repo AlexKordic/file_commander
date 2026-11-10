@@ -1,4 +1,5 @@
 import AppKit
+import ExplainerKit
 import Foundation
 
 /// Compatibility entry point for existing --export-explainer invocations.
@@ -23,6 +24,15 @@ extension TutorialCoordinator {
         recording.voice = option("--voice") ?? "Samantha"
         recording.narration = !arguments.contains("--silent")
         recording.output = appearances.count == 1 ? out : out.appendingPathComponent(appearance)
+        if let path = option("--geometry") {
+          do {
+            let geometry = try JSONDecoder().decode(TutorialFrameRecorder.Geometry.self, from: Data(contentsOf: URL(fileURLWithPath: path)))
+            mainWindow?.setFrame(geometry.frame, display: true)
+          } catch {
+            FileHandle.standardError.write(Data("Invalid recording geometry: \(error.localizedDescription)\n".utf8))
+            app.stop(); exit(2)
+          }
+        }
         recording.start()
         while recording.running { try? await Task.sleep(for: .milliseconds(100)) }
         guard recording.completed else {

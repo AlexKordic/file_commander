@@ -31,6 +31,7 @@ final class TutorialRecordingController {
   @ObservationIgnored private var observers: [NSObjectProtocol] = []
   @ObservationIgnored private var process: Process?
   @ObservationIgnored private var poll: Task<Void, Never>?
+  var canResume: Bool { output.map { FileManager.default.fileExists(atPath: $0.appendingPathComponent("course.json").path) } ?? false }
 
   init(app: AppController, tutorial: TutorialCoordinator) { self.app = app; self.tutorial = tutorial }
 
@@ -98,6 +99,14 @@ final class TutorialRecordingController {
         .write(to: catalog, options: .atomic)
       let geometryFile = output.appendingPathComponent("geometry.json")
       try JSONEncoder().encode(geometry).write(to: geometryFile, options: .atomic)
+      let hostOptionsFile = output.appendingPathComponent("host-options.json")
+      let previousOptions = (try? Data(contentsOf: hostOptionsFile)).flatMap { try? JSONDecoder().decode([String: JSONValue].self, from: $0) }
+      let hostOptions = try TutorialPresentation.capture(app: app)
+      let presentationChanged = canResume && previousOptions != hostOptions
+      let selectedScripts = tutorial.catalog.scripts.filter { selected.contains($0.id) }
+      let retakes = canResume ? TutorialPresentation.retakes(root: output, scripts: selectedScripts,
+        options: hostOptions, geometry: geometry, presentationChanged: presentationChanged) : []
+      try JSONEncoder().encode(hostOptions).write(to: hostOptionsFile, options: .atomic)
       let log = output.appendingPathComponent("recording.log")
       FileManager.default.createFile(atPath: log.path, contents: nil)
       let handle = try FileHandle(forWritingTo: log)
@@ -105,8 +114,11 @@ final class TutorialRecordingController {
       process.executableURL = URL(fileURLWithPath: python)
       process.arguments = [tools.path, "record", "--app", Bundle.main.bundleURL.path, "--capture-bin", capture.path,
                            "--catalog", catalog.path, "--out", output.path, "--geometry", geometryFile.path,
+                           "--host-options", hostOptionsFile.path,
                            "--lessons", tutorial.catalog.scripts.filter { selected.contains($0.id) }.map(\.id).joined(separator: ","),
                            "--appearance", appearance, "--title", "File Commander tutorial"]
+      if canResume { process.arguments!.append("--resume") }
+      if !retakes.isEmpty { process.arguments! += ["--retake", retakes.joined(separator: ",")] }
       if narration {
         process.arguments! += ["--language", language, "--rate", String(speechRate)]
         if !voice.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { process.arguments! += ["--voice", voice] }
@@ -171,6 +183,8 @@ private struct TutorialRecordingView: View {
           }
         }
       }
+      Text(controller.app.preferences.sidebarShown ? "The recording starts with the sidebar shown." : "The recording starts with the sidebar hidden.")
+        .font(.caption).foregroundStyle(.secondary)
       HStack {
         Button("All Lessons") { controller.selected = Set(controller.tutorial.catalog.scripts.map(\.id)) }
         Button("Pilot Lessons") { controller.selected = ["navigate", "copy", "editor_basics"] }
@@ -210,7 +224,7 @@ private struct TutorialRecordingView: View {
         if controller.completed { Button("Open Player", action: controller.openPlayer) }
         Spacer()
         if controller.running { ProgressView().controlSize(.small); Button("Stop", action: controller.stop) }
-        else { Button("Start Recording", action: controller.start).buttonStyle(.borderedProminent).disabled(controller.selected.isEmpty) }
+        else { Button(controller.canResume ? "Resume Recording" : "Start Recording", action: controller.start).buttonStyle(.borderedProminent).disabled(controller.selected.isEmpty) }
       }
     }.padding(20).frame(minWidth: 600, minHeight: 620)
   }

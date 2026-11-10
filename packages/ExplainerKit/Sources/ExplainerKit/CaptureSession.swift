@@ -16,13 +16,17 @@ public struct TutorialCaptureConfiguration: Codable, Sendable {
   public var scriptPath: String?
   public var appearance: String?
   public var initialPath: String?
+  /// Presentation choices owned by the host adapter, never a copied user profile.
+  public var hostOptions: [String: JSONValue]?
   public init(folder: String, session: String, lesson: [String: String], geometry: TutorialFrameRecorder.Geometry,
-              fps: Int = 30, narration: String? = nil, scriptPath: String? = nil, appearance: String? = nil, initialPath: String? = nil) {
+              fps: Int = 30, narration: String? = nil, scriptPath: String? = nil, appearance: String? = nil, initialPath: String? = nil,
+              hostOptions: [String: JSONValue]? = nil) {
     self.folder = folder; self.session = session; self.lesson = lesson
     self.geometry = geometry; self.fps = fps; self.narration = narration
     self.scriptPath = scriptPath
     self.appearance = appearance
     self.initialPath = initialPath
+    self.hostOptions = hostOptions
   }
   public static func read(_ url: URL) throws -> Self {
     let value = try JSONDecoder().decode(Self.self, from: Data(contentsOf: url))

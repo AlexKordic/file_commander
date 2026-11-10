@@ -2,6 +2,22 @@ import AppKit
 import Testing
 @testable import ExplainerKit
 
+@Test func captureOptionsKeepAnExplicitlyHiddenSidebarAndDecodeOlderSessions() throws {
+  let geometry = TutorialFrameRecorder.Geometry(frame: CGRect(x: 3, y: 401, width: 901, height: 632), scale: 2)
+  let options: [String: JSONValue] = ["sidebarShown": .bool(false), "collapsedSidebarSections": .array([.string("locations")])]
+  let configured = TutorialCaptureConfiguration(folder: "/capture", session: "/session", lesson: ["id": "select"],
+                                               geometry: geometry, hostOptions: options)
+  let data = try JSONEncoder().encode(configured)
+  let roundtrip = try JSONDecoder().decode(TutorialCaptureConfiguration.self, from: data)
+  #expect(roundtrip.hostOptions?["sidebarShown"]?.bool == false)
+  #expect(roundtrip.hostOptions?["collapsedSidebarSections"]?.strings == ["locations"])
+  var older = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
+  older.removeValue(forKey: "hostOptions")
+  let legacy = try JSONDecoder().decode(TutorialCaptureConfiguration.self, from: JSONSerialization.data(withJSONObject: older))
+  #expect(legacy.hostOptions == nil)
+  #expect(legacy.geometry == geometry)
+}
+
 @Test func recordingGeometryUsesSelectedWindowPixelsAndPadsOddEdges() {
   let geometry = TutorialFrameRecorder.Geometry(frame: CGRect(x: 100, y: 50, width: 1000, height: 625), scale: 2)
   #expect(geometry.width == 2000)

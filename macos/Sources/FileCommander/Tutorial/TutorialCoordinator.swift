@@ -15,6 +15,7 @@ final class TutorialCoordinator: ExplainerHost {
   let annotations = AnnotationWindowController()
   let world: TutorialWorld
   private var recordingClient: TutorialCaptureClient?
+  private var recordingOptions: [String: JSONValue] = [:]
   lazy var recording = TutorialRecordingController(app: app, tutorial: self)
   weak var mainWindow: NSWindow?
   private(set) lazy var catalog: ExplainerCatalog = TutorialCoordinator.loadCatalog()
@@ -42,6 +43,7 @@ final class TutorialCoordinator: ExplainerHost {
   private let scrollInjector = ScrollInjector()
   private let textBench = TextViewBench()
   private var rememberedTabs = [0, 0]
+  private var rememberedFontSizes: [String: Double] = [:]
   private var lastEditorTrace = ""
 
   init(app: AppController) {
@@ -334,6 +336,7 @@ final class TutorialCoordinator: ExplainerHost {
     // Each editor explainer starts with a new Fresh session, without old unsaved buffers.
     if script.needs("editor") { stopTutorialEditor(removeHome: true) }
     try world.build()
+    if script.needs("editor") { try world.writeFreshConfiguration(options: recordingOptions) }
     Engine.setEndpointCommand(host: TutorialWorld.demoHost, command: world.demoSSH.path)
     if script.needs("editor") {
       let path = world.bin.path + ":" + (ProcessInfo.processInfo.environment["PATH"] ?? "/usr/bin:/bin")
@@ -423,7 +426,7 @@ final class TutorialCoordinator: ExplainerHost {
     if chord.hasPrefix("@") {
       let id = String(chord.dropFirst())
       if let bound = app.keymap.chord(for: id) {
-        post(bound, characters: nil)
+        try await post(bound, characters: nil)
       } else if !app.run(id) {
         throw ExplainerFailure(script: runner.script?.id ?? "", step: runner.stepIndex, message: "Command \(id) is not available")
       }
@@ -431,7 +434,7 @@ final class TutorialCoordinator: ExplainerHost {
       return
     }
     guard let parsed = KeyChord(chord) else { throw ExplainerFailure(script: runner.script?.id ?? "", step: runner.stepIndex, message: "Bad key \(chord)") }
-    post(parsed, characters: nil)
+    try await post(parsed, characters: nil)
     try await Task.sleep(for: .milliseconds(60))
   }
 
@@ -439,13 +442,19 @@ final class TutorialCoordinator: ExplainerHost {
     guard let c = character.first else { return }
     await settleKeyWindow()
     let shifted = c.isUppercase || "~!@#$%^&*()_+{}|:\"<>?".contains(c)
-    post(KeyChord(modifiers: shifted ? [.shift] : [], key: String(c)), characters: character)
+    try await post(KeyChord(modifiers: shifted ? [.shift] : [], key: String(c)), characters: character)
   }
 
   /// Posts a key event to the key window, so it goes through menus, the key
   /// router and text fields exactly as a real key press does.
-  private func post(_ chord: KeyChord, characters: String?) {
-    if !NSApp.isActive { NSApp.activate(ignoringOtherApps: true) }
+  private func post(_ chord: KeyChord, characters: String?) async throws {
+    if !NSApp.isActive {
+      NSApp.activate(ignoringOtherApps: true)
+      for _ in 0..<120 where !NSApp.isActive { try await Task.sleep(for: .milliseconds(25)) }
+      guard NSApp.isActive else {
+        throw ExplainerFailure(script: runner.script?.id ?? "", step: runner.stepIndex, message: "The tutorial window could not receive keyboard focus")
+      }
+    }
     let window = NSApp.keyWindow ?? mainWindow
     let (code, chars, plain) = KeyboardMap.event(for: chord, characters: characters)
     var flags: NSEvent.ModifierFlags = []
@@ -459,11 +468,15 @@ final class TutorialCoordinator: ExplainerHost {
     syntheticCounter += 1
     let timestamp = 1_000_000 + syntheticCounter
     synthetic.insert(timestamp)
+    defer { synthetic.remove(timestamp) }
     for type in [NSEvent.EventType.keyDown, .keyUp] {
       if let event = NSEvent.keyEvent(with: type, location: .zero, modifierFlags: flags, timestamp: timestamp, windowNumber: window?.windowNumber ?? 0,
                                       context: nil, characters: chars, charactersIgnoringModifiers: plain, isARepeat: false, keyCode: code) {
         NSApp.postEvent(event, atStart: false)
       }
+    }
+    try await runner.waitFor("delivery of the tutorial key \(chord.symbols)", timeout: 3) {
+      !self.synthetic.contains(timestamp)
     }
   }
 
@@ -534,6 +547,8 @@ final class TutorialCoordinator: ExplainerHost {
           app.theme.zoom = app.preferences.zoom
         case "terminal_editor": app.preferences.terminalEditor = value.bool ?? false
         case "editor_telemetry": app.preferences.editorTelemetry = value.bool ?? false
+        case "sidebar": app.setSidebarShown(value.bool ?? false)
+        case "sidebar_sections": app.preferences.collapsedSidebarSections = value.strings
         default: break
         }
       }
@@ -651,6 +666,7 @@ final class TutorialCoordinator: ExplainerHost {
       await scrollInjector.play(gesture, into: view, record: target)
     case "remember":
       rememberedTabs = [app.engine.left.tabs.count, app.engine.right.tabs.count]
+      if let element = v["font_size"]?.string { rememberedFontSizes[element] = app.theme.active.font(element).size }
     case "run_script":
       app.runScript(world.expand(v.string ?? ""))
     default:
@@ -868,7 +884,11 @@ final class TutorialCoordinator: ExplainerHost {
       return FileManager.default.fileExists(atPath: path) == (value["exists"] != nil)
     case "theme": return app.theme.active.name == value.string
     case "font_size":
-      return app.theme.active.font(value["element"]?.string ?? "listing.name").size == value["is"]?.number
+      let element = value["element"]?.string ?? "listing.name"
+      if let delta = value["increased_by"]?.number, let initial = rememberedFontSizes[element] {
+        return app.theme.active.font(element).size == initial + delta
+      }
+      return app.theme.active.font(element).size == value["is"]?.number
     default:
       return false
     }
@@ -1142,6 +1162,7 @@ extension TutorialCoordinator {
       do {
         let config = try TutorialCaptureConfiguration.read(url)
         configuration = config
+        recordingOptions = config.hostOptions ?? [:]
         if let appearance = config.appearance.flatMap(AppPreferences.Appearance.init(rawValue:)) {
           app.preferences.appearance = appearance
           app.applyAppearance()
@@ -1180,8 +1201,6 @@ extension TutorialCoordinator {
           snapshot = takeSnapshot()
           try await prepare(script)
         }
-        app.preferences.collapsedSidebarSections = []
-        if !app.editorShown { app.sidebarVisible = .all }
         annotations.show(over: window, runner: runner, style: overlayStyle, controlsView: AnyView(EmptyView()))
         let client = try TutorialCaptureClient(configuration: config)
         client.prepareCaptureWindows = { [weak self, weak window] in
